@@ -41,56 +41,81 @@ Vector search is like having every page of a library cut into paragraphs and fin
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph BUILD["Graph construction"]
-        direction TB
-        SRC["Structured sources<br/>(databases, ERP, LIMS, EHR)"] --> MAP["Schema mapping"]
-        TXT["Unstructured text<br/>(reports, papers, notes)"] --> EXT["LLM / NER entity and<br/>relation extraction"]
-        MAP --> ER["Entity resolution<br/>and linking"]
-        EXT --> ER
-        ER --> VAL["Validate against ontology,<br/>attach provenance"]
-        VAL --> KG[("Knowledge graph")]
-        TXT --> VEC[("Vector index of text chunks,<br/>linked to graph entities")]
-    end
-    subgraph QUERY["Question answering"]
-        direction TB
-        Q["Question"] --> NER2["Find entities in question"]
-        NER2 --> PLAN{"Question type"}
-        PLAN -->|"precise / aggregate"| CYPHER["Text-to-Cypher,<br/>validate, execute"]
-        PLAN -->|"exploratory"| EXPAND["Expand entity neighborhood<br/>+ fetch linked chunks"]:::accent
-        CYPHER --> CTX["Graph results + supporting text"]
-        EXPAND --> CTX
-        CTX --> LLM["LLM answer with citations<br/>and graph paths"]
-    end
-    KG --> CYPHER
-    KG --> EXPAND
-    VEC --> EXPAND
-```
+The figures on this page follow one question from the RAG track: "Which team owns the service that failed in last week's incident?" The engineering documents of Brightpost, the fictional shop used across the RAG pages, hold the answer, but in two places: the incident notes name the failed service (INC-311 hit checkout-api), and the service catalogue names its owner (the Payments team). Step through how a graph is built from those documents and then walked for this question.
 
-How a question flows:
+<AnimatedDiagram
+  spec="animated/rag/kg-build-and-query"
+  stepper
+  caption="The graph is built once from documents; each question starts at a node it names and follows edges, not similarity."
+/>
 
-1. Identify entities in the question and link them to graph nodes.
-2. For precise or aggregate questions, generate a graph query from the schema, validate it, and run it.
-3. For open questions, expand the neighborhood of the linked entities and pull the text chunks attached to those nodes.
-4. Give the LLM the subgraph, the supporting text and provenance, and ask for an answer that cites both.
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="Documents are collected">
+    Incident notes, postmortems and the service catalogue are the sources. Structured sources (a service registry, an HR system) can be mapped straight onto the schema; free text needs extraction. The text says "INC-311 hit checkout-api" in one file and "checkout-api is owned by Payments" in another, and nothing joins them yet.
+  </StepCard>
+  <StepCard n={2} title="An LLM extracts entities and relations">
+    An LLM reads each chunk with the ontology in its prompt and returns typed triples, such as (INC-311, AFFECTED, checkout-api). Giving it the ontology keeps the output to known types instead of free-form labels. The same service now appears under several spellings.
+  </StepCard>
+  <StepCard n={3} title="Duplicates merge into one node per entity">
+    Entity resolution maps "checkout", "checkout-api" and "Checkout API" to one node, using ids, fuzzy matching and embeddings. Without it, the incident points at one node and the owner at another, and no walk can join them. The merged facts are still unchecked.
+  </StepCard>
+  <StepCard n={4} title="Facts are checked against the ontology and stored">
+    Each triple is checked against the ontology's rules (an Incident may only be AFFECTED a Service) and stored with its source chunk and confidence. Each node keeps links to the chunks that mention it, which the vector index also holds. The graph is ready; nothing has been asked yet.
+  </StepCard>
+  <StepCard n={5} title="Entities in the question are linked to nodes">
+    Entity linking finds "last week's incident" and maps it to the node INC-311, by name or by date. This is the start of the walk. A question about many entities ("how many incidents last quarter?") goes to text-to-Cypher instead: the model writes a graph query from the schema, and the query is validated before it runs.
+  </StepCard>
+  <StepCard n={6} title="The walk follows edges from the incident">
+    From INC-311 the walk follows AFFECTED to checkout-api, then OWNED_BY to the Payments team: three nodes, two edges. Each edge is a stored fact, so the walk cannot drift to a similar-sounding service. The answer is a node, not yet a sentence.
+  </StepCard>
+  <StepCard n={7} title="The path and its chunks become the context">
+    The path and the chunks each fact came from go into the prompt. The chunks give detail (what failed, when) and something to cite. The model has not run yet.
+  </StepCard>
+  <StepCard n={8} title="The model answers and cites the path">
+    The LLM writes "The Payments team owns checkout-api, which failed in INC-311", citing the postmortem and the catalogue entry. Showing the path lets a reader check every hop.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Skip entity resolution and the incident note's "checkout" and the catalogue's "checkout-api" become two nodes. The walk from INC-311 reaches "checkout", which has no OWNED_BY edge, and the system answers "unknown" even though both facts are in the graph. Fix: resolve entities before storing, and measure resolution accuracy on a labelled sample.
+</Callout>
 
 ## Deep dive
 
 ### A minimal ontology pattern
 
-```mermaid
-flowchart LR
-    ENT1["Entity type A"] -->|"RELATION_1"| ENT2["Entity type B"]
-    ENT2 -->|"RELATION_2"| ENT3["Entity type C"]
-    ENT1 -->|"MENTIONED_IN"| DOC["Document chunk"]
-    ENT3 -->|"MENTIONED_IN"| DOC
-    DOC -->|"FROM_SOURCE"| SRC["Source + date + confidence"]:::accent
-```
+An ontology is a short list of entity types and the relations allowed between them. Here is the one behind the incident question.
+
+<AnimatedDiagram
+  spec="animated/rag/kg-ontology"
+  caption="Types and relations are the schema; the MENTIONED_IN links to chunks are what let the graph and the vector index work together."
+/>
+
+**How to read it.** The violet boxes are entity types, each with its key properties underneath; the arrows are the only relations the extractor may produce, named in capitals as graph databases usually do. AFFECTED and OWNED_BY carry the facts the walk follows. MENTIONED_IN ties each entity to the chunks that talk about it, and FROM_SOURCE gives every chunk a URL, a date and a confidence, so any answer can be traced to a document.
+
 
 Linking entities to the text chunks that mention them is what lets a graph and a vector index work together: the graph finds the right entities, and the chunks supply detail and citations.
 
 ### When to use a graph
+
+The multi-hop question shows the difference in one picture. Watch what each method returns.
+
+<AnimatedDiagram
+  spec="animated/rag/vector-vs-graph"
+  stepper
+  caption="Each chunk is similar to the question, but the answer lies in the link between two facts; only the graph walk follows it."
+/>
+
+**How to read it.** Step 1 is the question; answering it needs two facts joined (which service failed, who owns that service). Step 2 runs vector search: the three nearest chunks all mention the incident or the service, but none names the owner, and nothing connects one chunk to another. Step 3 walks the graph instead: link INC-311, follow AFFECTED to checkout-api, follow OWNED_BY to the Payments team.
+
+**The numbers.** The chunk scores (0.81, 0.78, 0.74) are illustrative. The walk reads 3 nodes and 2 edges, one hop per fact the question needs; a question that joins three facts needs three edges, and vector search falls further behind with each one.
+
+<Callout tone="red" title="What breaks">
+  The graph only knows what was extracted. If the service catalogue was never ingested, the walk stops at checkout-api with no OWNED_BY edge, and a model given only that path may still invent an owner. Fix: tell the model to say when the path ends early, fall back to the chunks linked to the last node, and alert on services with no owner edge.
+</Callout>
+
 
 | Question style | Vector RAG | Knowledge graph |
 | --- | --- | --- |
@@ -139,10 +164,12 @@ Linking entities to the text chunks that mention them is what lets a graph and a
 
 ## Further reading
 
-- [From Local to Global: A Graph RAG Approach (Edge et al., 2024)](https://arxiv.org/abs/2404.16130)
+- [From Local to Global: A Graph RAG Approach to Query-Focused Summarization (Edge et al., 2024)](https://arxiv.org/abs/2404.16130): an LLM extracts an entity graph, summarises clusters of related entities, and answers corpus-wide questions from those summaries.
+- [Knowledge Graphs (Hogan et al., 2020)](https://arxiv.org/abs/2003.02320): a survey of graph data models, query languages, schema and identity, and how graphs are built, refined and checked for quality.
 - [Unifying Large Language Models and Knowledge Graphs: A Roadmap (Pan et al., 2023)](https://arxiv.org/abs/2306.08302)
 - [Systematic integration of biomedical knowledge, Hetionet (Himmelstein et al., 2017)](https://doi.org/10.7554/eLife.26726)
 - [Building a knowledge graph to enable precision medicine, PrimeKG (Chandak et al., 2023)](https://doi.org/10.1038/s41597-023-01960-3)
+- On this site: [GraphRAG](/ai-system-design/genai-system-design/graphrag) for community summaries and [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) for the vector pipeline the graph complements.
 
 <InterviewQuestions>
   <InterviewQuestion question="What is a knowledge graph, and how is it different from a relational database?" category="Concepts" level="Junior">

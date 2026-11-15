@@ -2,41 +2,201 @@
 title: "GraphRAG"
 description: "Using a knowledge graph built from documents to answer multi-hop and whole-corpus questions that vector search misses."
 icon: network
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Using a knowledge graph built from documents to answer multi-hop and whole-corpus questions that vector search misses.
+Vector RAG answers questions whose answer sits in a few chunks. Some questions are about the whole corpus instead: "what are the main themes?", "what do most complaints have in common?". GraphRAG builds a knowledge graph from the documents with an LLM, groups it into communities, writes a summary of each, and answers corpus-wide questions from those summaries.
 
 ## TL;DR
 
+- **GraphRAG** (Edge et al., 2024, Microsoft) uses an LLM to extract **entities and relations** from every chunk, finds **communities** of closely linked entities, and writes a **summary per community** ahead of time.
+- **Local search** starts at the entities a question names and gathers their neighbours, linked chunks and community summary. **Global search** map-reduces over all community summaries to answer whole-corpus questions.
+- In the paper, global search beat vector RAG on **comprehensiveness (72–83% win rate)** and **diversity (62–82%)** for corpus-wide questions over about 1 million tokens of podcast transcripts and 1.7 million tokens of news.
+- The price is **indexing**: an LLM reads every token at least once and writes every summary. Plain vector RAG embeds each chunk once.
+- Use it when users ask global or relationship questions over a slow-changing corpus. For "what does article X say?", vector RAG is cheaper and as good.
+
 ## The idea in plain English
+
+Imagine 6,000 support tickets on a table. Vector search is a librarian who pulls the five tickets that sound most like your question. Ask "why do customers get locked out?" and you get five lockout tickets: true, but not a picture of the whole pile. GraphRAG first has an analyst read every ticket, sort them into piles by topic, and write a one-page brief on each pile. A question about the whole table is then answered by reading the briefs, not by sampling five tickets.
 
 ## Core concepts
 
+The running example on this page is Brightpost's support tickets for one quarter: **6,000 tickets** of about 500 tokens each, 3 million tokens in all (illustrative). The help-centre articles used on the other RAG pages say how things should work; the tickets say what actually goes wrong.
+
 ### Why vector RAG misses global questions
+
+Vector search returns the top k chunks most similar to the question (top 5 on these pages). That works when the answer lives in those chunks. "What are the most common reasons customers get locked out?" has no single chunk that answers it. The answer is a count and a ranking across thousands of tickets. The top 5 lockout tickets are a sample of 5 out of 6,000, and the model writes its answer from that sample. Edge et al. call this query-focused summarisation: the task is to summarise the corpus with a question in mind, and retrieval of a few chunks cannot see the whole corpus.
+
+The [vector-vs-graph figure on Knowledge Graph Systems](/ai-system-design/genai-system-design/knowledge-graph-systems) shows the other gap, multi-hop questions, where the answer is a link between two facts in different documents.
 
 ### Building the graph: entities, relations and communities
 
+Indexing runs four passes before any question arrives. Step through them on the tickets.
+
+<AnimatedDiagram
+  spec="animated/rag/graphrag-index"
+  stepper
+  caption="Two LLM passes make the index: one reads every chunk, one summarises every community; the summaries are what global questions read."
+/>
+
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="Tickets become chunks">
+    The text is split into chunks, as in any RAG system. The paper used 600-token chunks with a 100-token overlap, so a
+    ticket of about 500 tokens fits in one. Nothing links one ticket to another yet.
+  </StepCard>
+  <StepCard n={2} title="An LLM extracts entities and relations">
+    An LLM reads each chunk and returns entities (New phone, Two-factor, Account lock), relations between them, and a
+    short description of each. The same entity mentioned in 200 tickets becomes one node; a relation seen many times
+    becomes a heavier edge. Smaller chunks find more: on a HotPotQA sample, GPT-4 extracted almost twice as many entity
+    references from 600-token chunks as from 2,400-token ones. The graph now joins tickets, but it has 9 nodes here and
+    thousands in a real corpus, too many to read.
+  </StepCard>
+  <StepCard n={3} title="Community detection groups the graph">
+    The Leiden algorithm splits the graph into communities: groups of entities with many links inside and few outside.
+    It runs recursively, so each community splits into smaller ones, giving levels from C0 (a few broad communities) to
+    C3 (many narrow ones). Here three communities emerge: phones and two-factor, sign-in attempts, security holds. The
+    groups have no text yet that a model could read.
+  </StepCard>
+  <StepCard n={4} title="An LLM writes one summary per community">
+    For each community an LLM writes a report from its entities, relations and claims, bottom up, so higher levels build
+    on lower ones. These summaries are the index that global search reads. They are written once, at indexing time,
+    which is where most of the cost goes.
+  </StepCard>
+</StepCards>
+
+**The numbers.** Illustrative, for the tickets: 6,000 chunks give 6,000 extraction calls; the paper also runs "gleaning" passes that ask the model whether it missed entities, so one extra pass each makes 12,000 calls that read about 6 million tokens. Vector RAG over the same tickets runs the 3 million tokens once through an embedding model. The paper reports one measured figure: indexing the 1-million-token podcast set took 281 minutes with GPT-4 Turbo.
+
+<Callout tone="red" title="What breaks">
+  Extraction is a model's reading, not a fact. If one ticket says "2FA", another "two-factor" and a third
+  "authenticator", the graph gets three nodes and three weak communities instead of one strong one. Fix: give the
+  extractor a short list of entity types and canonical names, and merge near-duplicate entities before community
+  detection, as in [entity resolution](/ai-system-design/genai-system-design/knowledge-graph-systems).
+</Callout>
+
 ### Local search versus global search
 
+A question that names something starts from that thing. A question about the whole corpus starts from all the summaries.
+
+<AnimatedDiagram
+  spec="animated/rag/graphrag-local-vs-global"
+  stepper
+  caption="Local search starts from the entities a question names; global search reads every community summary, so it can answer questions no single chunk or entity holds."
+/>
+
+**How to read it.** Step 1, local search: "backup codes" matches the entity Backup code; the search walks one hop out and collects related entities, the tickets that mention it and its community's summary, then ranks them to fit one context window. Step 2, global search: the community summaries at the chosen level are shuffled into batches that fill a context window (8,000 tokens in the paper), and each batch goes to the model with the question (the map step; the figure draws one summary per call). Each call returns a partial answer and a helpfulness score from 0 to 100. Answers scored 0 are dropped; the rest are sorted by score and packed into one context for the final answer (the reduce step). The scores in the figure are illustrative.
+
+**The numbers.** In the paper, root-level summaries (C0) needed over 97% fewer context tokens than map-reducing over the source text: 26,657 against 1,014,611 tokens for the podcast set. Across the conditions the paper compared (lower levels and source-text summarisation), C0 needed 9 to 43 times fewer tokens per query, and it still won 72% of comparisons with vector RAG on comprehensiveness.
+
 ## Architecture
+
+A GraphRAG system has an offline indexer and an online query router.
+
+- **Indexer:** chunker → extraction LLM → entity merge → graph store → community detection → summary LLM. Its outputs are tables of entities, relations, communities, community reports and the source chunks, plus embeddings of entity descriptions so a question can find its entities.
+- **Router:** decides per question. Questions that name entities go to local search; whole-corpus questions go to global search; plain lookups ("what does the reset article say?") go to ordinary vector search. Microsoft's open-source library exposes these as `local`, `global`, `basic` and a fourth mode, DRIFT, that starts global and then follows up locally.
+- **Generator:** the same LLM call as in [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with graph context instead of, or as well as, chunks. Citations point at the community reports and through them at the source chunks.
+
+The graph, the summaries and the chunk index are three stores with one lifecycle: rebuilding one without the others leaves summaries that describe a graph that no longer exists.
 
 ## Deep dive
 
 ### Indexing cost and incremental updates
 
+The cost is in LLM tokens, and it scales with the corpus, not the traffic. Every chunk is read at least once by a large model, every community gets a written report, and changing the extraction prompt means doing it again. Three levers bring the bill down: a cheaper model for extraction, larger chunks (fewer calls, lower recall, as the paper's chunk-size test shows), and indexing only the part of the corpus that global questions need.
+
+Updates are the harder problem. A new ticket adds entities and edges, which can move community boundaries, which makes some summaries stale. Microsoft's library has an `update` command that updates an existing index; check what it recomputes against your own corpus before relying on it. A practical pattern is to append new chunks to the vector index at once, and re-run extraction, communities and summaries on a schedule (nightly or weekly). Global answers are then a day or a week behind, which is fine for "common reasons" and wrong for "what broke this morning".
+
+Microsoft Research's LazyGraphRAG (2024) moves the work the other way: it extracts concepts with cheap noun-phrase extraction instead of an LLM and writes no summaries at indexing time, so indexing costs the same as vector RAG (0.1% of full GraphRAG, by their account) and the LLM work happens at query time.
+
 ### Hybrid graph and vector retrieval
+
+GraphRAG is not graph instead of vectors. Local search finds its starting entities by embedding similarity between the question and the entity descriptions, then uses the graph to decide what else belongs in the context, then adds the raw chunks for detail. The common production shape is a router in front of three paths: vector search for single-passage lookups, local graph search for entity questions, global search for corpus-wide ones. [Hybrid Search and Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) covers the vector side.
 
 ### When GraphRAG is worth it
 
+Worth it when users ask questions about themes, patterns or connections across many documents; the corpus changes slowly enough that a weekly rebuild is fine; and you can afford an LLM pass over every token. Analysts reading incident reports, research notes or customer feedback fit. Not worth it for help-centre lookups, for corpora that change by the minute, or before you have checked that your users ask global questions at all: log a month of questions and count.
+
 ## Trade-offs
+
+| Decision                      | Option A                              | Option B                              | Guidance                                                       |
+| ----------------------------- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------- |
+| GraphRAG vs vector RAG        | Answers whole-corpus questions        | Cheap to index, fresh in minutes      | GraphRAG only for the global or multi-hop share of questions   |
+| Community level               | Root level (C0): few summaries, cheap | Low level (C3): detailed, more tokens | Start at a high level; go lower if answers are too vague       |
+| Extraction model              | Large model: more entities found      | Small model: cheaper                  | Measure entity recall on a labelled sample before downgrading  |
+| Rebuild schedule              | Frequent: fresh summaries             | Infrequent: cheap                     | Match it to how fast the answers to global questions change    |
+| Full GraphRAG vs LazyGraphRAG | Summaries ready before questions      | No indexing LLM cost                  | Lazy when the corpus changes often or most questions are local |
 
 ## Real-world examples
 
+- Microsoft Research published GraphRAG (Edge et al., 2024) and an open-source library with local, global, DRIFT and basic search.
+- The paper's evaluation used two corpora of about 1 million and 1.7 million tokens and compared answers head to head with an LLM judge on comprehensiveness, diversity, empowerment and directness; vector RAG won on directness, its intended control.
+- Graph databases and RAG frameworks now ship GraphRAG-style pipelines that extract entities with an LLM and store them next to vector embeddings.
+
 ## Common pitfalls
+
+- Building a graph before checking that users ask global or multi-hop questions.
+- Skipping entity merging, so one concept is spread over several weak communities.
+- Letting summaries drift out of date while the vector index stays fresh, so the two disagree.
+- Sending every question to global search, which costs a map call per summary for questions one chunk could answer.
+- Reporting the paper's win rates as if they were accuracy: they are head-to-head preferences on summarisation questions.
 
 ## How to answer in an interview
 
+1. Separate question types: single-passage lookups, multi-hop, and whole-corpus questions. Say which ones vector RAG handles.
+2. Describe indexing: chunk, extract entities and relations with an LLM, merge duplicates, detect communities (Leiden), summarise each.
+3. Describe querying: local search from named entities, global map-reduce over summaries, a router choosing per question.
+4. Put a number on indexing cost (LLM tokens per corpus token) and a plan for updates.
+5. Say how you would evaluate it: a set of global questions, judged against vector RAG on coverage, with cost per query tracked.
+
+**What interviewers listen for:** a clear reason to pay for the graph, and a router that keeps cheap questions on the cheap path.
+
+**Red flags:** "GraphRAG is better RAG" with no question types, no indexing cost, and no update plan.
+
 ## Further reading
+
+- [From Local to Global: A GraphRAG Approach to Query-Focused Summarization (Edge et al., 2024)](https://arxiv.org/abs/2404.16130): the indexing pipeline, Leiden communities, map-reduce global answers, and the evaluation numbers used on this page.
+- [GraphRAG documentation: Local Search and Global Search (Microsoft)](https://microsoft.github.io/graphrag/)
+- [LazyGraphRAG: setting a new standard for quality and cost (Microsoft Research, 2024)](https://www.microsoft.com/en-us/research/blog/lazygraphrag-setting-a-new-standard-for-quality-and-cost/)
+- On this site: [Knowledge Graph Systems](/ai-system-design/genai-system-design/knowledge-graph-systems) for ontologies and entity resolution, [Advanced RAG](/ai-system-design/genai-system-design/advanced-rag) for the vector pipeline, and [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag) for multi-step retrieval.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is GraphRAG, and which questions does it answer better than vector RAG?" category="Concepts" level="Mid">
+    GraphRAG builds a knowledge graph from the corpus with an LLM, groups related entities into communities, and writes
+    a summary of each community before any question arrives. Vector RAG retrieves a few chunks similar to the question,
+    which works when the answer sits in those chunks. GraphRAG does better on whole-corpus questions such as "what are
+    the main reasons customers get locked out?", where the answer is spread across thousands of documents, and on
+    questions about connections between entities. For a lookup answered by one passage it adds cost without adding
+    quality.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain local search and global search in GraphRAG." category="Architecture" level="Mid">
+    Local search starts from the entities a question names. It finds them by comparing the question with entity
+    descriptions, then gathers their neighbouring entities and relations, the chunks that mention them and their
+    community summaries, ranks all of it and fits it into one context window. Global search is for questions about the
+    whole corpus. It sends each community summary at a chosen level to the model with the question, gets back partial
+    answers with a helpfulness score, drops the useless ones, and combines the best into one final answer: a map-reduce
+    over summaries.
+  </InterviewQuestion>
+  <InterviewQuestion question="GraphRAG indexing is expensive. Where does the cost come from and how would you reduce it?" category="Trade-offs" level="Senior">
+    The cost is LLM tokens at indexing time: a large model reads every chunk to extract entities and relations, often
+    with extra passes to catch missed entities, and then writes a report for every community. It grows with the size of
+    the corpus and repeats whenever the prompt or model changes. I would reduce it by using a smaller model for
+    extraction after checking its entity recall on a labelled sample, using larger chunks to cut the number of calls,
+    indexing only the documents that global questions need, and rebuilding on a schedule instead of on every change. If
+    most questions are local, an approach like LazyGraphRAG that skips index-time summaries may be the better trade.
+  </InterviewQuestion>
+  <InterviewQuestion question="New support tickets arrive every hour. How do you keep a GraphRAG index fresh?" category="Architecture" level="Senior">
+    I would split freshness by path. New tickets go into the vector index within minutes so lookups and local search see
+    them. Extraction, community detection and summaries run as a batch on a schedule, because a new ticket can change
+    community boundaries and rewriting summaries is the expensive part. Each summary records the index version it came
+    from, so answers can say how current they are, and I would alert when the summaries fall more than one cycle behind.
+    Questions about the last few hours are routed to vector search over recent tickets instead of global search.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you evaluate a GraphRAG system against a vector RAG baseline?" category="Evaluation" level="Senior">
+    I would build a question set with both types: local questions with known answers, scored for correctness and
+    citation accuracy, and global questions about the whole corpus. For global questions there is no single right
+    answer, so I would compare the two systems head to head on coverage and diversity of points with an LLM judge, as
+    the GraphRAG paper did, and check the judge against human ratings on a sample. I would also track indexing cost,
+    tokens per query and latency, and break results down by question type so the router only sends questions to the
+    graph where it wins.
+  </InterviewQuestion>
+</InterviewQuestions>

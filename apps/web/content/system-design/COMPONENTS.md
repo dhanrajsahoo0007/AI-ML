@@ -762,6 +762,19 @@ Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the defaul
 (`--dg-<tone>`, `--dg-<tone>-soft`) that switch automatically in dark mode. Suggested: clients and edge `neutral` or
 `blue`, app/compute `teal`, data stores `violet`, caches and queues `orange`, failure `red`, new or healthy `green`.
 
+Layout specs (shapes and groups) and architecture specs (nodes, zones and edges) may also use two diagram-only tones,
+`pink` and `lime` (type `LayoutTone`), and a third, stronger value per tone, the pastel block fill `--dg-<tone>-fill`
+(layout shape `fill: "pastel"`, architecture card node `fill: "pastel"`). Sequence lanes keep the seven tones. Pink and
+lime are not section tones. Two figure families have a fixed legend in code:
+
+- Transformer: `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts` (embeddings `pink`, attention
+  `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
+- RAG: `RAG_TONE` in `src/components/diagrams/presets/rag.ts` (documents and chunks `blue`, embeddings and vectors
+  `pink`, vector index and stores `violet`, keyword index and filters `teal`, the question `orange`, ranking `lime`,
+  the LLM and the answer `green`, failure `red`, user and orchestration `neutral`). At most four tones plus neutral in
+  one figure; red only where something breaks. Case-study architectures keep the zone table in
+  `CASE-STUDY-FORMAT.md`.
+
 Zone `kind`:
 
 - omitted: a dotted group with a title tab ("Clients", "Storage")
@@ -779,7 +792,9 @@ below; its box is about 76 wide and reaches 62 below the centre. `icon` is a [gl
 name from `src/lib/icons.ts`.
 
 Node fields: `id`, `label`, `sub?` (second line), `icon?`, `tone?`, `accent?` (solid fill, for the component the
-diagram is about), `variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
+diagram is about), `fill?: "paper" | "soft" | "pastel"` (card background: `"paper"` is the default outline card,
+`"soft"` the pale tint, `"pastel"` a coloured block with ink text; ignored with `accent`, not allowed on glyph nodes),
+`variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
 from `src/lib/cloud-catalog.ts` or `{ label, id? }`; adds the Generic/AWS/Google Cloud/Azure toggle, which the tag's
 `cloud` prop can start on a provider, and feeds `<CloudMapping>`), `x`, `y`, `w?`, `h?`.
 
@@ -920,18 +935,35 @@ export default spec;
 
 ### Kind 3: layout (`LayoutSpec`)
 
-A static drawing for data structures (B-tree pages, hash buckets, rings, log segments), revealed step by step. No
-packets unless an arrow sets `packet: true`.
+A static drawing for data structures (B-tree pages, hash buckets, rings, log segments) and paper-style figures (the
+Transformer), revealed step by step. No packets unless an arrow sets `packet: true`.
 
-Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`.
+Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`, `"path"`.
 
 - `box`, `cell`, `text`: `x`,`y` is the **top-left** corner; text is centred in its `w`×`h` box.
 - `circle`: `x`,`y` is the **centre** and `w` is the diameter.
+- `path`: `x`,`y` are ignored (set them to 0); the line runs through `points`.
 - Default sizes: box 120×48, cell 40×40, circle 40, text 80×20.
 
 Shape fields: `id`, `type`, `x`, `y`, `w?`, `h?`, `label?`, `sub?` (second line on a box or cell), `tone?`, `step?`
 (default 1), `highlight?: true` (a pulsing ring in the shape's tone and a solid fill, for the element the paragraph is
 about).
+
+Paper-figure fields (all optional; a spec that sets none of them renders exactly as before):
+
+| Field    | On                      | Meaning                                                                                                                                                                         |
+| -------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`  | box, cell, circle, text | `"\n"` splits it into up to 3 centred lines: `"Multi-Head\nAttention"`. The stepper announces it on one line.                                                                   |
+| `fill`   | box, cell, circle       | `"paper"` (box default), `"soft"` (cell and circle default) or `"pastel"`, a coloured block with ink text (`--dg-<tone>-fill`). `highlight` still wins with its solid fill.     |
+| `symbol` | circle                  | `"plus"` (⊕ adder), `"times"` (⊗) or `"sine"` (the positional-encoding wave), drawn in the tone. The symbol replaces the label in the drawing; the label is still announced.    |
+| `weight` | cell                    | 0–1: fill in the tone's stroke colour at this strength over paper, for attention weights and heatmaps. Labels stay ink; the strength is capped per theme so they stay readable. |
+| `weight` | path                    | 0–1: stroke width 1–4 and opacity 0.25–1, for attention arcs.                                                                                                                   |
+| `head`   | arrow, path             | Arrowhead at the end. Arrows default to `true` (`head: false` is a plain line: brackets, residual taps); paths default to `false`.                                              |
+| `points` | path                    | `[x, y][]`, at least two. Compute them in the spec (`Math.sin` for a wave).                                                                                                     |
+| `smooth` | path                    | A smooth curve through every point instead of straight segments.                                                                                                                |
+| `dashed` | arrow, path             | Dashed line.                                                                                                                                                                    |
+
+Paths and arrows are drawn under every other shape. Lines never make a group appear.
 
 Arrow fields:
 
@@ -940,8 +972,21 @@ Arrow fields:
   other end.
 - `via?: [x, y][]`, `label?` (a pill at the midpoint), `dashed?`, `packet?`, `tone?`, `step?`.
 
-`groups?` are dotted zones drawn like architecture zones, with the same fields and tones. A group appears once any
-shape inside it does.
+`groups?` are dotted zones drawn like architecture zones, with the same fields and tones (plus `pink` and `lime`). A
+group appears once any box, cell, circle or text inside it does.
+
+Transformer figures build their shapes with the helpers in `src/components/diagrams/presets/transformer.ts`
+(`block`, `vector`, `matrix`, `residual`, `architectureShapes`, `miniMap`) instead of writing coordinates and tones by
+hand, so every figure keeps the same legend and proportions. `assets/diagrams/animated/transformer/architecture.ts` is
+the reference spec.
+
+RAG figures (`assets/diagrams/animated/rag/`) build theirs with `src/components/diagrams/presets/rag.ts`: the legend
+`RAG_TONE`, the running example (the Brightpost help centre: `CORPUS`, `QUESTIONS`, `RESULTS`, `METRICS`, `TOP_K`,
+`PROMPT`, `LATENCY_MS` and the Wave 2 constants, each with its working in a comment) and builders `docStrip` (a
+document as token cells with chunk marks), `chunkRow`, `scatter` (a 2-D embedding space with a top-k ring),
+`rankList` (ranked results with scores and a top-k cut), `funnel` (stage widths proportional to candidate counts)
+and `stageStrip` (the six-stage locator). A number that appears in two figures must come from one constant there.
+`assets/diagrams/animated/rag/pipeline.ts` is the reference architecture spec.
 
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
@@ -1017,6 +1062,7 @@ Architecture:
   the same room. A default 116-wide node with an icon fits about 11 label characters, so set `w: 150` for "Session
   registry" (16 characters).
 - Card height is at least 36.
+- `fill` only on card nodes, and not together with `accent`.
 
 Sequence:
 
@@ -1028,9 +1074,13 @@ Sequence:
 Layout:
 
 - Arrow `from`/`to` name existing shapes; an arrow without `from`/`to` needs a `w` or `h`.
-- Every non-arrow shape lies inside the canvas.
-- Box and cell shapes do not overlap each other (text and circles may overlap anything).
-- Box and cell labels fit: length × 6.2 ≤ shape width − 8.
+- A path has at least two `points`.
+- Every non-arrow shape lies inside the canvas (a path: every point).
+- Box and cell shapes do not overlap each other (text, circles and paths may overlap anything).
+- Box and cell labels fit: the longest line's length × 6.2 ≤ shape width − 8.
+- A label has at most 3 lines. A box or cell with two or more lines is at least 15 × lines + 6 tall (+14 with a
+  `sub`): a 44-tall box holds two lines.
+- `weight` is between 0 and 1; `symbol` only on circles; `fill` only on boxes, cells and circles.
 
 Before committing, check the diagram in the browser at desktop width, at 375 px, in dark mode and with reduced motion
 (packets are hidden, rings and dashes stop moving).
@@ -1128,6 +1178,13 @@ label underneath (data stores, logs), or the default `"card"` for a boxed node w
 | `model`         | Small neural net: two, three and two dots in layers, each layer joined to the next  |
 | `policy`        | Page with three check-list rows and a filled shield over the bottom corner          |
 | `pipeline`      | Three stage boxes in a row joined by small arrows, the first filled with a check    |
+| `chunk`         | A page cut into three strips, the middle strip filled and shifted out               |
+| `vector`        | A row of six cells in brackets, shaded at different strengths (an embedding)        |
+| `embedder`      | Text page into a filled funnel, out comes a column of shaded cells (text → vector)  |
+| `vector-index`  | Points in a rounded frame, a dashed nearest-neighbour ring round a query cross      |
+| `reranker`      | Three list rows with a curved arrow lifting the bottom one to the top               |
+| `prompt`        | A framed stack: instruction band, a context block with lines, a filled question bar |
+| `graph`         | Six nodes joined by edges, the centre node filled (a knowledge graph)               |
 
 ---
 

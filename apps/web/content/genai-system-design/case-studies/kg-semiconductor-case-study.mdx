@@ -33,32 +33,44 @@ A chip passes through hundreds of steps on many machines. When a lot fails, find
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph SOURCES["Fab data sources"]
-        MES["Manufacturing execution<br/>(lot history, routes)"]
-        EQP["Equipment data<br/>(sensors, alarms, maintenance)"]
-        MET["Metrology and inspection<br/>(defects, measurements)"]
-        TEST["Electrical test and yield"]
-        DOCS["Excursion reports, FMEA,<br/>maintenance notes"]
-    end
-    MES --> ETL["Ingest + entity resolution<br/>(tool, chamber, parameter names)"]
-    EQP --> ETL
-    MET --> ETL
-    TEST --> ETL
-    DOCS --> EXT["LLM extraction of cause-effect<br/>relations + chunk embeddings"]
-    ETL --> KG[("Manufacturing knowledge graph")]
-    EXT --> KG
-    EXT --> VEC[("Vector index of past reports")]
-    KG --> CA["Commonality and change analysis<br/>(bad vs good lots)"]:::accent
-    ENG["Engineer question"] --> AGENT["LLM assistant<br/>(text-to-Cypher, retrieval, summaries)"]
-    AGENT --> KG
-    AGENT --> CA
-    AGENT --> VEC
-    AGENT --> ANS["Ranked suspects + evidence paths<br/>+ similar past incidents"]
-```
+Build the system one gap at a time: each step adds the part the step before it could not do. Step through it, then read the cards.
 
-An excursion investigation:
+<AnimatedDiagram
+  spec="animated/rag/kg-semi-architecture"
+  stepper
+  caption="The statistics run in code; the LLM turns the engineer's question into queries and explains the evidence."
+/>
+
+**How to read it**, one card per step. Zones follow the site's case-study colours: fab systems and the engineer grey, the ingest workers orange, stores violet, the investigation path green.
+
+<StepCards>
+  <StepCard n={1} title="Lot history becomes a graph">
+    The manufacturing execution system (MES) records every lot's route: which step ran on which tool and chamber, and when. An ingest job turns each record into nodes and timestamped edges in the knowledge graph. A graph fits because the core question, "which path did the bad lots share?", is a traversal, not a text search. The gap: the graph knows where lots went, not what the tools were doing or how the wafers came out.
+  </StepCard>
+  <StepCard n={2} title="Equipment, metrology and test data join it">
+    Sensor and fault logs, inspection results and electrical test results join the same graph. Each system names tools and parameters its own way, so ingest resolves every name to one node per tool and chamber, using master data and mapping tables. The gap: the facts are connected, but nothing compares the bad lots with the good ones yet.
+  </StepCard>
+  <StepCard n={3} title="Code compares failing lots with passing lots">
+    The commonality stage, the solid card, takes a time window, splits the lots into failing and passing, and counts how often each tool, chamber, recipe version and material batch appears in each group, with a significance test. It also lists what changed just before the excursion: recipe edits, maintenance events, new material lots. This runs in code because the result must be correct and reproducible, which an LLM's arithmetic is not. The gap: engineers must write graph queries to use it.
+  </StepCard>
+  <StepCard n={4} title="Engineers ask in plain language">
+    The engineer asks, "What do lots with the edge-ring defect signature this week have in common?" The LLM assistant writes a Cypher query (the query language of graph databases such as Neo4j) from the graph schema. The harness checks the query before it runs: read-only, known labels only, a row limit. Then the assistant calls the commonality test. The gap: the statistics say which chamber is suspicious, not why; that knowledge sits in old reports.
+  </StepCard>
+  <StepCard n={5} title="Past reports add known causes">
+    Excursion reports, FMEA (failure mode and effects analysis) tables and maintenance notes go through LLM extraction. Cause-and-effect statements such as "chamber seasoning issues cause particle defects" become KNOWN_CAUSE relations in the graph, and the text is chunked and embedded into the report index. The gap: the assistant does not search the reports yet.
+  </StepCard>
+  <StepCard n={6} title="Suspects come back with evidence">
+    The assistant searches the report index for past excursions with a similar defect signature, then returns ranked suspects. Each suspect carries its graph path, its statistics and links to the source records and reports. The dashed arrow is the point of the design: the engineer confirms or rejects each suspect, and the system never declares a root cause on its own.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative counts). The page's example question asks for chambers that processed more than 80% of this week's failing lots but under 20% of the passing ones. With 10 failing and 40 passing lots, a chamber that ran 9 failing lots (9 / 10 = 90%) and 6 passing lots (6 / 40 = 15%) is a suspect; a chamber that ran 6 failing (60%) and 24 passing (24 / 40 = 60%) is ordinary.
+
+<Callout tone="red" title="What breaks">
+  Skip name resolution and one chamber becomes two nodes, say "ETCH-04 ch B" from the MES and "E04B" from the sensor logs. The 9 failing lots that ran on it split 5 and 4 across the two nodes, so each node shows 50% or 40% of failing lots, both under the 80% threshold, and the real suspect never appears. Fix: resolve tool and chamber names before loading, keep the mapping tables with the engineers who own them, and alert on any tool that appears in only one source system.
+</Callout>
+
+An excursion investigation, end to end:
 
 1. Test data flags a set of low-yield lots.
 2. The engineer asks: "What do lots with the edge-ring defect signature this week have in common?"
@@ -71,19 +83,14 @@ An excursion investigation:
 
 ### Ontology sketch
 
-```mermaid
-flowchart LR
-    LOT["Lot"] -->|"CONTAINS"| WAF["Wafer"]
-    LOT -->|"PROCESSED_AT (time)"| STEP["Process step"]
-    STEP -->|"ON_TOOL"| TOOL["Tool / chamber"]
-    STEP -->|"USES_RECIPE (version)"| REC["Recipe"]
-    STEP -->|"USES_MATERIAL"| MAT["Material batch"]
-    TOOL -->|"HAD_EVENT (time)"| MAINT["Maintenance / alarm"]
-    WAF -->|"HAS_DEFECT"| DEF["Defect type / signature"]
-    WAF -->|"HAS_RESULT"| YLD["Test / yield result"]
-    DEF -->|"KNOWN_CAUSE (from FMEA)"| CAUSE["Failure mechanism"]:::accent
-    CAUSE -->|"ASSOCIATED_WITH"| TOOL
-```
+An ontology is the list of entity types and the relations allowed between them. This one is sized for the commonality question.
+
+<AnimatedDiagram
+  spec="animated/rag/kg-semi-ontology"
+  caption="A lot's journey runs along the middle row; the failure mechanism, extracted from documents, links a defect back to a tool."
+/>
+
+**How to read it.** Read the middle row from left to right: a lot is PROCESSED_AT a process step, and the step runs ON_TOOL a tool or chamber. "(t)" marks relations that carry a timestamp and "(v)" the recipe version; these let the analysis ask what changed just before an excursion. Everything below the lot is the outcome: its wafers, their test results and their defect types. The violet types come from fab systems; the blue failure mechanism comes from FMEA tables and reports, and its ASSOCIATED_WITH edge turns a defect signature into a short list of tools to check.
 
 ### Example graph question
 

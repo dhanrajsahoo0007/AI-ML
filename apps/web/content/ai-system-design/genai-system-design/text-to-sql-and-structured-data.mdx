@@ -2,43 +2,178 @@
 title: "Text-to-SQL & Structured Data"
 description: "Answering questions over databases and tables: schema linking, SQL generation, validation and safe execution."
 icon: table
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Answering questions over databases and tables: schema linking, SQL generation, validation and safe execution.
+Some questions are about records, not documents. "How many orders were refunded last week?" has no answer in any help article; it has to be counted. Vector search cannot count, sum or filter by date. Text-to-SQL lets an LLM write the query, lets the database compute the answer, and puts guards around both so a wrong or unsafe query never runs.
 
 ## TL;DR
 
+- **Text-to-SQL** turns a question into a SQL query; the database does the arithmetic. Use it for counts, sums, rankings and filters over records.
+- **Schema linking** puts only the tables and columns the question needs into the prompt, with descriptions and example values. It decides accuracy more than the choice of model.
+- **Validate before running**: parse the SQL, allow only SELECT on allowed tables, add a LIMIT, scope rows to the user, and dry-run it to catch wrong columns.
+- A **semantic layer** defines each metric once ("refunded orders"), so the model picks a definition instead of inventing one.
+- **Execute safely** on a read replica with a read-only role and a timeout, and **show the SQL** with the answer. Accuracy is far from solved: on BIRD the best model at release reached 40.08% execution accuracy against 92.96% for people.
+
 ## The idea in plain English
+
+You ask a data analyst how many orders were refunded last week. They do not search the wiki. They look up which tables hold refunds, write a query, check it will not lock the production database, run it on a copy, and send you the number with the query underneath so you can check their reasoning. Text-to-SQL gives an assistant the same routine, and the checks matter as much as the query.
 
 ## Core concepts
 
+The running example moves from Brightpost's help centre (see [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)) to its orders database: 40 tables (illustrative) and the operations team's question "How many orders were refunded last week?".
+
 ### Schema linking and context selection
+
+The model can only write correct SQL for tables it can see, and it cannot see 40 tables at once without drowning in them. Schema linking is retrieval over the schema: embed a description of every table and column, find the ones nearest the question, and put only those in the prompt. Each table entry should carry its columns with types, a one-line description of each column, a few example values (so the model knows `status` holds `'refunded'`, not `'REFUND'`), and its foreign keys, so joins are right. Add two or three past question-and-SQL pairs that are similar to the new question; they teach the house style faster than any instruction.
+
+**The numbers** (illustrative): 40 tables × 12 columns × about 25 tokens per described column = 12,000 tokens for the whole schema. The two tables this question needs, `refunds` and `orders`, cost about 600 tokens.
 
 ### Generating and validating SQL
 
+The prompt names the SQL dialect, gives the linked schema and examples, and asks for one read-only statement. For the refunds question a good answer is:
+
+```sql
+SELECT COUNT(DISTINCT r.order_id) AS refunded_orders
+FROM refunds r
+WHERE r.created_at >= date_trunc('week', now()) - interval '1 week'
+  AND r.created_at <  date_trunc('week', now());
+```
+
+Validation happens before execution. Parse the SQL into a syntax tree, not a string, then check it: one statement, a SELECT, only tables on the allow-list, a LIMIT on any query that returns rows, and the filter that limits rows to what this user may see. Then dry-run it with `EXPLAIN`, which catches unknown columns and bad joins without reading data. When a check fails, send the error back to the model once or twice; a model that sees "column refund_date does not exist" often fixes the query on the next try.
+
 ### Semantic layers and metric definitions
+
+The hardest failures run without error. `SELECT COUNT(*) FROM refunds` counts refund rows, not refunded orders: an order refunded in two parts is counted twice, and the answer comes out at 341 instead of 312 (illustrative). No validator can see that, because the SQL is valid. A semantic layer fixes it upstream: metrics, dimensions and joins are defined once, by the people who own the data, and the model chooses "refunded orders by week" instead of writing the aggregation itself. Snowflake's Cortex Analyst works this way: a semantic model (YAML, or a semantic view) adds the business context the schema lacks, and the service generates SQL from it. The cost is coverage: a question outside the defined metrics needs free-form SQL or a new definition.
 
 ### Safe execution: read-only roles, limits and sandboxes
 
+Treat the generated SQL as untrusted input, because it is: the model can be wrong, and text in the database or the question can steer it (see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)). The validator is one layer; the database must enforce the rest on its own.
+
+- Run on a **read replica**, so a slow query cannot hurt the production primary.
+- Connect as a **read-only role** with SELECT on the allowed tables or views only; hide columns such as card numbers and emails behind views.
+- Use **row-level security** so the database itself returns only the user's rows, whatever the query says.
+- Set a **statement timeout** (5 seconds here, illustrative) and a row limit, so one runaway join cannot exhaust the replica.
+
 ## Architecture
+
+Put the pieces in order and the flow has one rule: the model proposes, the guards decide.
+
+<AnimatedDiagram
+  spec="animated/rag/text-to-sql-flow"
+  stepper
+  caption="The model only proposes SQL; a validator decides whether it runs, and the answer shows the query so a person can check it."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Find the tables the question needs">
+    The question is matched against the schema catalog, which holds a description of every table and column. Schema lookup returns 2 of the 40 tables, `refunds` and `orders`, with their columns, example values and the join between them. The gap: nothing has written a query yet.
+  </StepCard>
+  <StepCard n={2} title="The LLM writes one SELECT">
+    The LLM gets the question, the two tables and a few similar past queries, and writes one SELECT in the database's dialect. It counts distinct order ids, because one order can have several refund rows. The gap: nobody has checked the query.
+  </StepCard>
+  <StepCard n={3} title="A validator checks the SQL before it runs">
+    The validator parses the SQL and runs four checks: read-only, allowed tables only, a LIMIT, and the filter that keeps the user to their own rows. It also dry-runs the query with EXPLAIN. Checking costs milliseconds; running a bad query can cost the database.
+  </StepCard>
+  <StepCard n={4} title="Wrong or unsafe SQL is rejected">
+    A query that writes, reads a table outside the allow-list, or names a column that does not exist is rejected. The error message goes back to the LLM for one retry; a second failure ends with "I could not answer that" instead of a guess.
+  </StepCard>
+  <StepCard n={5} title="Approved SQL runs on a read replica">
+    The query runs on a read replica as a read-only role with a 5-second timeout. Even if the validator missed something, the role cannot write and the timeout stops a runaway join.
+  </StepCard>
+  <StepCard n={6} title="The answer shows the SQL it ran">
+    The rows come back and the LLM writes the answer: 312 orders were refunded last week. The SQL is shown under the answer, so an analyst can see which definition of "last week" and "refunded" was used.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative): schema lookup about 30 ms, SQL generation about 1 second, validation and EXPLAIN under 50 ms, the query itself under 5 seconds by construction. One retry doubles the generation time, so cap retries at one or two.
+
+<Callout tone="red" title="What breaks">
+  A validator that searches the text for words like DELETE rejects a valid query on a `deleted_at` column and misses writes hidden in functions. Fix: parse the SQL into a syntax tree and check node types, and let the read-only role and row-level security enforce the rules in the database itself.
+</Callout>
 
 ## Deep dive
 
 ### Handling ambiguous questions
 
+"Last week" can mean the previous calendar week or the last seven days. "Refunded" can mean fully refunded or any refund. "Orders" can mean all orders or one region's. Three tactics, in order. Define defaults in the semantic layer, so the same words always mean the same thing. State the assumption in the answer ("calendar week, Monday to Sunday; any refund"), next to the SQL. Ask one clarifying question only when the readings would give materially different numbers and no default exists; [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting) covers when to ask.
+
 ### Evaluating text-to-SQL
+
+Compare results, not query text: two different queries can return the same correct rows. **Execution accuracy** runs the generated and the reference query on the same database and checks that the results match. Two public benchmarks set the bar. Spider (Yu et al., 2018) has 10,181 questions and 5,693 unique queries over 200 databases in 138 domains, with different databases in training and test, so a model must handle schemas it has never seen. BIRD (Li et al., 2023) has 12,751 question-SQL pairs over 95 databases totalling 33.4 GB in 37 domains, with dirty values and questions that need outside knowledge; at release the best model reached 40.08% execution accuracy against 92.96% for people. For your own system, build a golden set of real questions with reference SQL and expected results on a fixed snapshot, and track accuracy per table, rejection and retry rates, and latency (see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
 
 ### Combining structured and unstructured retrieval
 
+Most assistants need both. Documents explain; databases count. A router reads each question and sends it to the source that holds the answer.
+
+<AnimatedDiagram
+  spec="animated/rag/structured-vs-unstructured-router"
+  stepper
+  caption="Documents explain, databases count; the router decides which one a question needs, and a mixed question needs both."
+/>
+
+**How to read it.** Step 1: "What does error E1234 mean?" is about a document, so it goes to help-centre search, where BM25 finds the exact code. Step 2: "How many orders were refunded last week?" is about records, so it goes to the text-to-SQL path above. Step 3: "How many customers hit error E1234 last week, and how do they fix it?" needs both: SQL counts the customers, the help centre explains the fix, and one LLM call writes one answer from the rows and the passages, citing each. The router is the one from [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting), with a "both" label added.
+
+<Callout tone="red" title="What breaks">
+  A mixed question sent down one route gets half an answer: the count with no fix, or the fix with no count. Fix: give the router a "both" label, run the two routes in parallel, and evaluate mixed questions as their own group.
+</Callout>
+
 ## Trade-offs
+
+| Approach | Strength | Cost | Use when |
+| --- | --- | --- | --- |
+| Free-form text-to-SQL | Answers questions nobody planned for | Silent wrong numbers; needs strong guards | Analysts who can read the SQL |
+| Semantic layer | Consistent metric definitions | Covers only defined metrics | Business users, dashboards, finance numbers |
+| Parameterised tools (`refund_count(start, end)`) | Safe and fast; easy to test | One tool per question shape | Customer-facing assistants, a few common questions |
+| Export tables into the vector index | No new path | Cannot count, sum or filter | Small reference tables only |
 
 ## Real-world examples
 
+- Snowflake Cortex Analyst answers questions over Snowflake data from a semantic model or semantic view; the generated SQL runs in the customer's warehouse and is returned with the result.
+- Spider's split by database made "works on a schema it has never seen" the standard test for text-to-SQL research.
+- BIRD's authors added dirty values, outside-knowledge questions and an efficiency analysis, closer to real company databases than earlier benchmarks.
+
 ## Common pitfalls
+
+- Putting the whole schema in the prompt, so the model picks a similar-looking wrong table.
+- Column names with no descriptions or example values, so the model guesses codes and units.
+- Running generated SQL on the production primary, or as a role that can write.
+- Checking safety with string matching instead of a parser and database permissions.
+- Showing a number without the SQL, so nobody can catch a wrong definition.
 
 ## How to answer in an interview
 
+1. Separate the questions: documents go to RAG, records go to SQL, and some need both.
+2. Describe schema linking: a described catalog, retrieval of the relevant tables, example values and past queries.
+3. Put validation between the model and the database: parse, read-only, allow-list, LIMIT, row scoping, EXPLAIN, one retry.
+4. Enforce safety in the database as well: read replica, read-only role, row-level security, timeouts.
+5. Add a semantic layer for important metrics, show the SQL with every answer, and evaluate by execution accuracy on a golden set.
+
+**What interviewers listen for:** treating generated SQL as untrusted, and knowing that the worst errors are valid queries with wrong definitions.
+
+**Red flags:** letting the model run any SQL it writes, or measuring accuracy by comparing query text.
+
 ## Further reading
+
+- [Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task (Yu et al., 2018)](https://arxiv.org/abs/1809.08887)
+- [Can LLM Already Serve as A Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs, BIRD (Li et al., 2023)](https://arxiv.org/abs/2305.03111)
+- [Cortex Analyst (Snowflake documentation)](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst)
+- [Row Security Policies (PostgreSQL documentation)](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+- [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting) and [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you let business users ask questions of a company database in plain English?" category="Architecture" level="Senior">
+    I would build a guarded text-to-SQL path. A schema catalog describes every table and column with example values and joins; schema linking retrieves the few tables a question needs, plus similar past question-and-SQL pairs. The LLM writes one SELECT, and a validator parses it, allows only read-only statements on allow-listed tables, adds a LIMIT and the user's row filter, and dry-runs it with EXPLAIN; failures go back to the model once. The query runs on a read replica as a read-only role with row-level security and a timeout. The answer shows the SQL and states its assumptions. For key business metrics I would add a semantic layer so the model picks defined metrics instead of writing aggregations, and I would measure execution accuracy on a golden set of real questions.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is schema linking, and why does it matter for large databases?" category="Concepts" level="Mid">
+    Schema linking finds which tables and columns a question refers to and puts only those in the prompt. A large schema does not fit, and even when it does, many similar names make the model pick the wrong table or column. Retrieving the relevant tables by their descriptions, with column descriptions, example values and foreign keys, gives the model what it needs to write correct joins and filters, and cuts prompt size from thousands of tokens to hundreds. Most text-to-SQL errors in practice trace back to wrong or missing schema context, not to SQL syntax.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make LLM-generated SQL safe to execute?" category="Safety" level="Mid">
+    Treat it as untrusted input and use layers. Before execution, parse it into a syntax tree and allow only a single SELECT on allow-listed tables, require a LIMIT, add the row filter for the user, and dry-run it with EXPLAIN. In the database, connect as a read-only role with access only to allowed tables or views, use row-level security so the database enforces row scope, hide sensitive columns behind views, and run on a read replica with a statement timeout. String matching for words like DELETE is not enough, because it both blocks valid queries and misses unsafe ones.
+  </InterviewQuestion>
+  <InterviewQuestion question="A text-to-SQL assistant returns a confident but wrong number. How do you find the cause and prevent it?" category="Failure modes" level="Senior">
+    First look at the SQL it ran, which is why I always log and show it. The usual causes are a wrong definition (counting refund rows instead of distinct refunded orders), a wrong time window ("last week" as seven days instead of a calendar week), a wrong join that duplicates rows, or a wrong table with a similar name. Validators cannot catch these because the SQL is valid. Prevention: a semantic layer that defines the important metrics once, column descriptions and example values in the schema catalog, answers that state their assumptions, and a golden set with expected results that runs on every prompt or model change.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you evaluate a text-to-SQL system?" category="Evaluation" level="Mid">
+    By execution accuracy: run the generated query and a reference query on the same database snapshot and compare the results, because different SQL can return the same correct answer. Public benchmarks such as Spider and BIRD test generalisation to unseen schemas and messy data, but the real test is a golden set built from your users' questions, with reference SQL and expected results. I would also track accuracy per table or metric, the rejection and retry rates from the validator, how often the system declines to answer, and latency, and re-run the set whenever the schema, prompt or model changes.
+  </InterviewQuestion>
+</InterviewQuestions>

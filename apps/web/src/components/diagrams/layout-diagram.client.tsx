@@ -11,9 +11,18 @@ import {
   Zone,
   usePlayback,
 } from "./diagram-shared.client";
-import { markerUrl, phaseOpacity, soft, stroke } from "./diagram-style";
-import { boundsCentre, pathD, pointAt, routeBetween, shapeBounds, type Bounds, type Point } from "./geometry";
-import type { LayoutShape, LayoutSpec } from "./types";
+import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke } from "./diagram-style";
+import {
+  boundsCentre,
+  pathD,
+  pointAt,
+  routeBetween,
+  shapeBounds,
+  smoothPathD,
+  type Bounds,
+  type Point,
+} from "./geometry";
+import type { LayoutShape, LayoutSpec, LayoutTone } from "./types";
 
 interface LayoutDiagramProps {
   spec: LayoutSpec;
@@ -28,9 +37,9 @@ interface LayoutDiagramProps {
   idBase?: string;
 }
 
-// Static drawing for data structures (B-tree pages, hash rings, log segments): boxes, cells, circles, text and
-// arrows that appear step by step, with a pulsing ring on the shapes marked `highlight`. No packets unless an
-// arrow asks for one. Loaded lazily by ./diagram.tsx.
+// Static drawing for data structures (B-tree pages, hash rings, log segments) and paper-style figures (the
+// Transformer): boxes, cells, circles, text, arrows and paths that appear step by step, with a pulsing ring on the
+// shapes marked `highlight`. No packets unless an arrow asks for one. Loaded lazily by ./diagram.tsx.
 export function LayoutDiagram({
   spec,
   alt,
@@ -44,7 +53,13 @@ export function LayoutDiagram({
   const { current, uid } = playback;
   const view = layoutView(spec, current);
   const byId = new Map(view.shapes.map((v) => [v.shape.id, v.shape]));
-  const added = view.shapes.flatMap((v) => (v.phase === "new" && v.shape.label ? [v.shape.label] : []));
+  const added = view.shapes.flatMap((v) =>
+    v.phase === "new" && v.shape.label ? [v.shape.label.replace(/\n/g, " ")] : []
+  );
+  // Arrow markers for the layout-only tones, added only when the spec uses them so other diagrams keep their defs.
+  const extra = LAYOUT_ONLY_TONES.filter(
+    (t) => spec.shapes.some((s) => s.tone === t) || (spec.groups ?? []).some((g) => g.tone === t)
+  );
 
   return (
     <DiagramFigure
@@ -59,22 +74,37 @@ export function LayoutDiagram({
       height={spec.height}
       minWidth={minWidth}
     >
-      <Defs uid={uid} />
+      <Defs uid={uid} tones={extra.length ? [...TONES, ...extra] : undefined} />
       {view.groups.map(({ zone, phase }) => (
         <Zone key={zone.id} zone={zone} phase={phase} />
       ))}
       {view.shapes
-        .filter((v) => v.shape.type === "arrow")
-        .map((v) => (
-          <Arrow key={v.shape.id} shape={v.shape} phase={v.phase} byId={byId} uid={uid} />
-        ))}
+        .filter((v) => isLine(v.shape))
+        .map((v) =>
+          v.shape.type === "path" ? (
+            <PathLine key={v.shape.id} shape={v.shape} phase={v.phase} uid={uid} />
+          ) : (
+            <Arrow key={v.shape.id} shape={v.shape} phase={v.phase} byId={byId} uid={uid} />
+          )
+        )}
       {view.shapes
-        .filter((v) => v.shape.type !== "arrow")
+        .filter((v) => !isLine(v.shape))
         .map((v) => (
           <Shape key={v.shape.id} shape={v.shape} phase={v.phase} />
         ))}
     </DiagramFigure>
   );
+}
+
+const isLine = (s: LayoutShape) => s.type === "arrow" || s.type === "path";
+
+/** Line height of multi-line labels. */
+const LINE_H = 15;
+
+function fillOf(shape: LayoutShape, tone: LayoutTone) {
+  if (shape.highlight) return stroke(tone);
+  const fill = shape.fill ?? (shape.type === "box" ? "paper" : "soft");
+  return fill === "paper" ? "var(--paper)" : fill === "pastel" ? pastel(tone) : soft(tone);
 }
 
 function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
@@ -84,6 +114,14 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
   const w = b.x2 - b.x1;
   const h = b.y2 - b.y1;
   const rx = shape.type === "cell" ? 4 : 10;
+  const weighted = shape.type === "cell" && shape.weight !== undefined && !shape.highlight;
+  // A weighted cell keeps ink text: its opacity is capped per theme (--dg-weight-scale) so ink stays readable.
+  const onDark = shape.highlight && shape.type !== "text";
+  const pastelFill = !shape.highlight && shape.fill === "pastel";
+  const lines = shape.label && !shape.symbol ? shape.label.split("\n") : [];
+  // Multi-line labels stay centred: the block moves up by half its extra height, the sub line down by as much.
+  const shift = ((lines.length - 1) * LINE_H) / 2;
+  const labelY = (shape.sub ? cy - 3 : cy + 4.5) - shift;
   return (
     <g
       opacity={phaseOpacity(phase)}
@@ -98,10 +136,22 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
           cx={cx}
           cy={cy}
           r={w / 2}
-          style={{ fill: shape.highlight ? stroke(tone) : soft(tone), stroke: stroke(tone) }}
+          style={{ fill: fillOf(shape, tone), stroke: stroke(tone) }}
           strokeWidth={1.5}
         />
       )}
+      {shape.type === "circle" && shape.symbol && (
+        <path
+          d={symbolD(shape.symbol, cx, cy, w / 2)}
+          fill="none"
+          style={{ stroke: shape.highlight ? "var(--paper)" : stroke(tone) }}
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          data-symbol={shape.symbol}
+        />
+      )}
+      {weighted && <rect x={b.x1} y={b.y1} width={w} height={h} rx={rx} style={{ fill: "var(--paper)" }} />}
       {(shape.type === "box" || shape.type === "cell") && (
         <rect
           x={b.x1}
@@ -110,42 +160,84 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
           height={h}
           rx={rx}
           style={{
-            fill: shape.highlight ? stroke(tone) : shape.type === "cell" ? soft(tone) : "var(--paper)",
+            fill: weighted ? stroke(tone) : fillOf(shape, tone),
             stroke: stroke(tone),
+            fillOpacity: weighted ? `calc(${shape.weight} * var(--dg-weight-scale, 0.8))` : undefined,
           }}
           strokeWidth={1.5}
+          data-weight={weighted ? shape.weight : undefined}
         />
       )}
-      {shape.label && (
+      {lines.length > 0 && (
         <text
           x={cx}
-          y={shape.sub ? cy - 3 : cy + 4.5}
+          y={labelY}
           textAnchor="middle"
           fontSize={shape.type === "text" ? 12.5 : 13}
           fontWeight={shape.type === "text" ? 500 : 600}
           style={{
-            fill:
-              shape.highlight && shape.type !== "text"
-                ? "var(--paper)"
-                : shape.type === "text"
-                  ? stroke(tone)
-                  : "var(--ink)",
+            fill: onDark ? "var(--paper)" : shape.type === "text" ? stroke(tone) : "var(--ink)",
           }}
         >
-          {shape.label}
+          {lines.length === 1
+            ? lines[0]
+            : lines.map((line, i) => (
+                <tspan key={i} x={cx} y={labelY + i * LINE_H}>
+                  {line}
+                </tspan>
+              ))}
         </text>
       )}
       {shape.sub && (
         <text
           x={cx}
-          y={cy + 13}
+          y={cy + 13 + shift}
           textAnchor="middle"
           fontSize={11}
-          style={{ fill: shape.highlight && shape.type !== "text" ? "var(--paper)" : "var(--muted-foreground)" }}
+          style={{ fill: onDark ? "var(--paper)" : pastelFill ? "var(--ink)" : "var(--muted-foreground)" }}
         >
           {shape.sub}
         </text>
       )}
+    </g>
+  );
+}
+
+/** The drawing inside a circle of radius r centred on (cx, cy). */
+function symbolD(symbol: NonNullable<LayoutShape["symbol"]>, cx: number, cy: number, r: number) {
+  const s = r * 0.55;
+  if (symbol === "plus") return `M${cx - s} ${cy} H${cx + s} M${cx} ${cy - s} V${cy + s}`;
+  if (symbol === "times") {
+    const d = s * Math.SQRT1_2;
+    return `M${cx - d} ${cy - d} L${cx + d} ${cy + d} M${cx - d} ${cy + d} L${cx + d} ${cy - d}`;
+  }
+  // One period of a sine wave across the circle.
+  const n = 24;
+  const pts: Point[] = Array.from({ length: n + 1 }, (_, i) => [
+    cx - s * 1.15 + (2.3 * s * i) / n,
+    cy - s * 0.7 * Math.sin((2 * Math.PI * i) / n),
+  ]);
+  return pathD(pts);
+}
+
+/** A free line through `points`: brackets, braces, attention arcs, curves sampled from a formula. */
+function PathLine({ shape, phase, uid }: { shape: LayoutShape; phase: Phase; uid: string }) {
+  const tone = shape.tone ?? "neutral";
+  const points = shape.points ?? [];
+  const weight = shape.weight;
+  return (
+    <g opacity={phaseOpacity(phase, 0.5)} data-shape={shape.id} data-phase={phase}>
+      <path
+        d={shape.smooth ? smoothPathD(points) : pathD(points)}
+        fill="none"
+        style={{ stroke: stroke(tone) }}
+        strokeWidth={weight === undefined ? (phase === "new" ? 2.2 : 1.6) : 1 + 3 * weight}
+        strokeOpacity={weight === undefined ? undefined : 0.25 + 0.75 * weight}
+        strokeDasharray={shape.dashed ? "6 5" : undefined}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        markerEnd={shape.head ? markerUrl(uid, tone) : undefined}
+      />
     </g>
   );
 }
@@ -187,7 +279,7 @@ function Arrow({
         strokeWidth={phase === "new" ? 2.2 : 1.6}
         strokeDasharray={shape.dashed ? "6 5" : undefined}
         strokeLinejoin="round"
-        markerEnd={markerUrl(uid, tone)}
+        markerEnd={shape.head === false ? undefined : markerUrl(uid, tone)}
       />
       {shape.packet && phase !== "old" && <Packet d={d} tone={tone} begin={0} dur={2} />}
       {shape.label && <LabelPill x={lx} y={ly} text={shape.label} tone={tone} />}
