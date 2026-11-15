@@ -235,8 +235,22 @@ import s229 from "../../../assets/diagrams/animated/fundamentals/websockets";
 import s230 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
 import s231 from "../../../assets/diagrams/animated/messenger/architecture";
 import s232 from "../../../assets/diagrams/animated/messenger/aws";
-import s233 from "../../../assets/diagrams/animated/transformer/architecture";
-import s234 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s233 from "../../../assets/diagrams/animated/transformer/add-and-norm";
+import s234 from "../../../assets/diagrams/animated/transformer/architecture";
+import s235 from "../../../assets/diagrams/animated/transformer/causal-mask";
+import s236 from "../../../assets/diagrams/animated/transformer/cross-attention";
+import s237 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
+import s238 from "../../../assets/diagrams/animated/transformer/feed-forward";
+import s239 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
+import s240 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
+import s241 from "../../../assets/diagrams/animated/transformer/multi-head";
+import s242 from "../../../assets/diagrams/animated/transformer/output-head";
+import s243 from "../../../assets/diagrams/animated/transformer/path-length";
+import s244 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
+import s245 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
+import s246 from "../../../assets/diagrams/animated/transformer/three-families";
+import s247 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s248 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -472,6 +486,20 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/fundamentals/websockets-scaling": s230,
   "diagrams/animated/messenger/architecture": s231,
   "diagrams/animated/messenger/aws": s232,
-  "diagrams/animated/transformer/architecture": s233,
-  "diagrams/animated/uber-eats/architecture": s234,
+  "diagrams/animated/transformer/add-and-norm": s233,
+  "diagrams/animated/transformer/architecture": s234,
+  "diagrams/animated/transformer/causal-mask": s235,
+  "diagrams/animated/transformer/cross-attention": s236,
+  "diagrams/animated/transformer/decoder-only-block": s237,
+  "diagrams/animated/transformer/feed-forward": s238,
+  "diagrams/animated/transformer/input-embedding-sum": s239,
+  "diagrams/animated/transformer/kv-cache-generation": s240,
+  "diagrams/animated/transformer/multi-head": s241,
+  "diagrams/animated/transformer/output-head": s242,
+  "diagrams/animated/transformer/path-length": s243,
+  "diagrams/animated/transformer/scaled-dot-product": s244,
+  "diagrams/animated/transformer/tensor-shapes": s245,
+  "diagrams/animated/transformer/three-families": s246,
+  "diagrams/animated/transformer/training-vs-inference": s247,
+  "diagrams/animated/uber-eats/architecture": s248,
 };
