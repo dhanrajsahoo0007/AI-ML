@@ -3,22 +3,345 @@ title: Long-Term Vector Memory
 description: Persist and recall unstructured knowledge with embeddings, vector indexes, and hybrid retrieval patterns that scale while staying filterable and observable.
 ---
 
-Long-term vector memory stores text or multimodal segments as dense vectors so semantically similar queries retrieve relevant past content, documentation, or user-specific notes. Managed services such as Pinecone, open-source engines like Qdrant and Weaviate, or Postgres with pgvector each differ in operational model, filtering expressiveness, replication story, and cost curve. Architecture choices include whether vectors live beside operational OLTP data, in a dedicated search tier, or replicated for regional latency.
+Long-term vector memory stores what an agent learned about a user as vectors, so that a new message can find the past facts that matter to it. Interviewers use it to test whether you can run retrieval per user: keep one customer's memories away from another's, decide what to embed, avoid duplicates, forget what is stale and delete on request. [Agent Memory](/ai-system-design/genai-system-design/agent-memory) covers the policies (what to remember, how to score it, how to resolve conflicts); this page is about the storage underneath.
 
-Indexing strategies dominate recall-latency trade-offs. HNSW graphs offer strong query performance at the cost of higher memory footprint and sometimes slower index builds. IVF variants partition the space into clusters to reduce search scope, which helps very large corpora when parameters are tuned to your data distribution. Metadata filtering (tenant id, document acl, time range, language) should be pushed into the index where supported so you do not over-fetch vectors that fail security or freshness rules after the fact.
+## TL;DR
 
-Hybrid search combines dense similarity with lexical signals such as BM25, which helps on rare strings, SKUs, and exact identifiers that embeddings blur. Common patterns include running parallel dense and sparse retrievals then fusing scores, or using lexical prefiltering to shrink the candidate set. Memory retrieval for agents often adds reranking with a cross-encoder or a small LLM to reorder the top k before injection into the prompt, trading compute for precision.
+- Each memory is a short fact, its **embedding** (a vector of numbers that places similar meanings close together) and **metadata**: the user, the type, the dates, the source and the embedding model.
+- Recall embeds the new message with the **same model**, filters to **this user only**, and returns the nearest few memories with their similarity scores.
+- The user filter is a security boundary. Use a **namespace per user or tenant**, or a filter that runs **inside** the search. Filtering after the search returns too few results and invites leaks.
+- **Embed the extracted fact**, not the raw conversation. One fact per memory makes updates, dedupe and deletion possible.
+- **Dedupe on write**: search for near neighbours before adding, and let a rule or a model decide add, update or drop.
+- **Decay**: a recency term such as 0.995 per hour fades memories that are never used. Each recall resets it.
+- **Deletion** must remove the record, the vector and every copy (summaries, caches, backups), and be provable.
 
-Operational concerns include embedding model versioning (re-embed when the encoder changes), staleness and deletion semantics, and monitoring hit quality with human labels or proxy metrics. Without those, vector memory becomes a slow drift problem where retrieved context is plausible but wrong.
+## The idea in plain English
+
+A shop assistant who knows you keeps a card file. Each card holds one note: "refund approved for the cracked kettle", "prefers email". When you walk in and say "has my refund gone through?", the assistant pulls your cards, not everyone's, and reads the few that fit what you said.
+
+Vector memory is that card file for an agent. The "fits what you said" part is similarity between vectors. The "your cards, not everyone's" part is a filter. Most of the engineering is in the filter, the cards and the clear-out, not in the similarity search.
+
+## Core concepts
+
+Every figure on this page follows Brightpost, the shop from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures). On 12 Nov a support agent approved a £42 refund for customer 1847's cracked kettle, order 4471. On 19 Nov the customer writes again: "Has my kettle refund gone through? Text me from now on, not email."
+
+1. **Memory record.** One fact in plain text ("4471: £42 refund approved"), its vector, and metadata: `customer_id`, type (semantic for facts and preferences, episodic for events), source, dates, status and the embedding model's name and version.
+2. **Embedding.** An embedding model turns text into a fixed-length vector; Brightpost's has 1,536 numbers. Similar meanings land close together, measured by cosine similarity. See [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space).
+3. **Namespace or filter.** The boundary that keeps a search inside one user's memories: a separate partition per user or tenant, or a metadata filter applied during the search.
+4. **Top-k recall.** The search returns the k nearest memories (here k = 3), with scores. A scorer may then re-rank them by recency and importance before they enter the prompt.
+5. **Write path.** After a conversation, a memory writer extracts facts, compares each with its nearest stored memories and adds, updates or drops it.
+6. **Lifecycle.** Memories are superseded, decay, get archived and get deleted. Each state change must reach the vector index as well as the record.
+
+### Where the vectors live
+
+Managed services such as Pinecone, open-source engines such as Qdrant and Weaviate, and Postgres with the pgvector extension can all hold memory vectors. They differ in operational model, how expressive their filters are, how they replicate and how cost grows with size. The placement choices are the same for each:
+
+- **Beside the operational data.** pgvector keeps the memory row, its vector and the customer's account in one database, one transaction and one backup. A delete removes the row and its vector together.
+- **In a dedicated search tier.** A vector database scales search on its own and offers namespaces, but every write and delete now spans two systems.
+- **Replicated per region.** For low-latency recall near the user, and to keep personal data in its region. Deletions must reach every replica.
+
+Per-user memory is small. At 1,536 numbers × 4 bytes = 6,144 bytes per vector, a customer with 200 memories (illustrative) holds 200 × 6,144 = 1.2 MB of raw vectors. The scale problem is the number of users, not the size of any one search.
+
+### Indexes: HNSW and IVF
+
+An approximate nearest-neighbour (ANN) index finds close vectors without comparing against all of them. The indexes themselves are covered on [Vector Databases](/ai-system-design/genai-system-design/vector-databases#hnsw-search-layer-by-layer); what matters for memory is:
+
+- **HNSW** (a layered graph of neighbours) gives strong query performance and takes inserts one at a time, at the cost of more memory and sometimes slower index builds. pgvector's documentation says it has a better speed-recall trade-off than IVFFlat, but slower builds and more memory.
+- **IVF** partitions the space into clusters and searches only the nearest few. It helps very large corpora when its parameters are tuned to the data, builds faster and uses less memory, but needs data to train its clusters.
+- **No index at all** is often right for one user's memories. Filter to the customer's 200 rows first, then compare against all of them: 200 × 1,536 = 307,200 multiply-adds is exact and fast.
+
+### Hybrid search and reranking
+
+Dense similarity blurs rare strings: an order number, a SKU, an exact name. **Hybrid search** adds lexical signals such as BM25, either by running dense and sparse retrieval in parallel and fusing the scores, or by using lexical prefiltering to shrink the candidate set. "Order 4471" matches the refund memory exactly, even if its embedding sits near every other refund. For agents, recall often adds a **reranking** step, a cross-encoder or a small LLM that reorders the top k before they enter the prompt, trading compute for precision. Details are on [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking).
+
+## Architecture
+
+Here is one memory's life: written on 12 Nov, recalled on 19 Nov for the same customer and no one else.
+
+<AnimatedDiagram
+  spec="animated/agents/vector-memory"
+  stepper
+  minWidth={620}
+  caption="One model embeds both the memory and the message, and the customer filter runs inside the search. The nearest vector overall belongs to someone else. Cosines are illustrative; the positions are a 2-D sketch."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Write: a fact becomes a vector with its owner">
+    After the refund chat, the memory writer extracts "4471: £42 refund approved". The embedding model turns it into
+    1,536 numbers. The store saves the vector with the text and `customer_id` 1847. The owner is set by the chat service
+    from the signed-in session, never by the model.
+  </StepCard>
+  <StepCard n={2} title="The store holds every customer's memories">
+    Customer 1847's memories (pink) sit among everyone else's (grey). In a shared index nothing but metadata separates
+    them. Customer 2210 also had a kettle refund, so that memory lands very close to 1847's.
+  </StepCard>
+  <StepCard n={3} title="Read: today's message is embedded with the same model">
+    The new message goes through the same model, at the same version, so it lands in the same space. A different model
+    would put it somewhere meaningless.
+  </StepCard>
+  <StepCard n={4} title="The filter limits the search to customer 1847">
+    The filter `customer_id = 1847` is applied inside the search, so the index only walks 1847's points. 2210's memory
+    is the nearest point overall (0.86) and is skipped. Without the filter it would be recalled first, and the agent
+    would talk about a stranger's refund.
+  </StepCard>
+  <StepCard n={5} title="The 3 nearest come back with their scores">
+    The refund (0.82), the cracked kettle (0.74) and "prefers email" (0.61) come back. Gift wrap (0.20) does not. The
+    scores travel with the memories, so a scorer can re-rank them and a floor can drop weak matches.
+  </StepCard>
+</StepCards>
+
+Here is the record stored in step 1, in this page's own schema (not a standard). The `last_used` field drives decay; `embedding_model` tells you which vectors to rebuild when the model changes:
+
+```json
+{
+  "id": "mem_0112",
+  "customer_id": "1847",
+  "type": "episodic",
+  "text": "4471: £42 refund approved",
+  "source": "chat, 12 Nov",
+  "status": "active",
+  "importance": 7,
+  "last_used": "12 Nov",
+  "embedding_model": "brightpost-embed-v2",
+  "embedding": [0.12, -0.4, "…", 0.07]
+}
+```
+
+## Deep dive
+
+### Namespaces and filters per user
+
+There are three ways to keep a search inside one customer's memories. [Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy#tenant-isolation-per-tenant-indexes-versus-a-shared-index) compares them for documents; for memory the trade-offs shift because each user's slice is tiny.
+
+- **A namespace per user or tenant.** Pinecone recommends one namespace per tenant on a serverless index. Each namespace is stored separately, so a query cannot reach another tenant's data, and deleting a tenant is one `delete_namespace` call. Cost follows namespace size: Pinecone's guide gives 1 read unit per GB searched, so filtering inside one 100 GB namespace costs 100 units where a 1 GB tenant namespace costs 1.
+- **One collection with a tenant field.** Qdrant recommends one collection for many small tenants, with a `group_id` payload filter on every query. Marking that field's index `is_tenant: true` stores each tenant's vectors together, so one tenant's search reads them in one pass.
+- **A table with a `customer_id` column.** In pgvector, a `WHERE customer_id = '1847'` with a B-tree index lets Postgres fetch the customer's rows and compare exactly, which suits a few hundred memories.
+
+<Callout tone="red" title="What breaks">
+  Post-filtering with a selective filter. With an approximate index, pgvector applies `WHERE` after the index scan. Its
+  documentation's example: at 10 % selectivity and the default `hnsw.ef_search` of 40, only about 4 rows match. One
+  customer among 100,000 is a selectivity of 0.001 %, so 40 × 0.00001 = 0.0004 rows: recall returns nothing and the
+  agent "forgets" everyone. Fix: filter inside the search (a namespace, a filtered index, or pgvector's iterative index
+  scans, added in 0.8.0), or skip the ANN index and search the customer's rows exactly.
+</Callout>
+
+Two rules apply whichever you pick. The filter value comes from the authenticated session, never from the model or the request body; a tool that takes `customer_id` as an argument lets a tricked model read anyone's memories. And memory reads go through one retrieval service that adds the filter, so no code path can forget it.
+
+### What to embed
+
+What you embed decides what can be found, merged and deleted.
+
+- **Embed the extracted fact, not the transcript.** "prefers email" is 2 words and one fact. A 40-turn chat embedded whole becomes one vector that is near everything and precisely about nothing, and you cannot delete one fact from it.
+- **One fact per record.** "Prefers email; kettle refunded" as one memory cannot be half-updated when the customer switches to texts.
+- **Write the fact so it stands alone.** "4471: £42 refund approved" still makes sense next week. "Yes, that one was approved" does not.
+- **Keep exact fields as metadata, not only text.** The order number, dates and type go in fields you can filter and sort on. Similarity should never be the only way to find "order 4471".
+- **Record the embedding model and version.** Vectors from two models cannot be compared. When the model changes, re-embed every memory from its stored text before switching reads; see [Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection#changing-embedding-models-and-re-indexing).
+
+### Dedupe on write
+
+Without a check, a customer who mentions their refund in three chats gets three refund memories, and all three fill the top 3. The write path searches the customer's memories for the nearest neighbours of each new fact, then decides: add, update (supersede the old one), or drop. The decision and its examples ("prefers text" replaces "prefers email"; a repeated refund is dropped) are on [Agent Memory: the write policy](/ai-system-design/genai-system-design/agent-memory#the-write-policy).
+
+The vector store's job is the first half: the neighbour search must use the same customer filter and include superseded memories, so the writer can see what was replaced. A cosine threshold alone should not decide. "Chased refund 4471" and "4471: £42 refund approved" sit close together and are two different events.
+
+### Decay and forgetting
+
+Old memories should not compete equally with fresh ones. Generative Agents (Park et al., 2023) gives every memory a recency term, 0.995 raised to the hours since it was last retrieved, and adds it to importance and relevance. The full score is worked through on [Agent Memory](/ai-system-design/genai-system-design/agent-memory#which-memories-to-recall); here is the decay alone, for three of customer 1847's memories.
+
+<AnimatedDiagram
+  spec="animated/agents/memory-decay"
+  stepper
+  minWidth={620}
+  caption="Recency is a clock that every recall resets. A memory nobody uses fades to almost nothing in a month, and one that keeps being useful stays fresh. Decay factor from Generative Agents (Park et al., 2023); dates illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Recency starts at 1 and falls every hour">
+    "Prefers email" was last used on 20 Oct. It keeps 0.89 of its recency after a day, 0.43 after a week and 0.03 after
+    30 days.
+  </StepCard>
+  <StepCard n={2} title="Each memory decays from its own last use">
+    On 19 Nov the refund memory (last used 12 Nov) is at 0.43 and the gift-wrap question (17 Nov) at 0.79. These are the
+    raw recency values in the Agent Memory scoring table.
+  </StepCard>
+  <StepCard n={3} title="A recall resets the clock">
+    The refund is recalled on 19 Nov, so its recency goes back to 1 and a week later it is at 0.43 again. Gift wrap is
+    not recalled and falls to 0.34. "Prefers email" is superseded that day and is no longer searched.
+  </StepCard>
+</StepCards>
+
+**The numbers.** 0.995^24 = 0.89, about 11 % lost a day. 0.995^168 = 0.43 and 0.995^720 = 0.03. Half-life: ln 0.5 / ln 0.995 = 138 hours, about 5.8 days. Gift wrap on 26 Nov: 0.995^(48 + 168) = 0.995^216 = 0.34.
+
+Decay changes the ranking; it does not delete anything. Forgetting is a separate, explicit policy, and it usually depends on type and importance: archive episodic memories unused for 90 days and rated below 4, keep a stated preference until the customer changes it (both thresholds illustrative). Archiving moves the record out of the searchable index, so it stops costing search time and stops being recalled.
+
+<Callout tone="red" title="What breaks">
+  Updating `last_used` on every candidate the search returns, not on the memories that reached the prompt. Every memory
+  that is often near a query stays fresh, used or not, and decay stops working. Reset the clock only for memories the
+  agent actually received.
+</Callout>
+
+### Deletion and privacy
+
+Memory is personal data. When customer 1847 asks to be forgotten, GDPR Article 17 requires erasure "without undue delay" (where it applies), and the customer will not accept "we hid it".
+
+- **Delete the vector as well as the row.** A record marked deleted whose vector stays in the index can still be recalled by any path that skips the status check.
+- **Expect index deletes to be lazy.** Graph indexes often mark deleted points and clean them up later. pgvector notes that dead rows can reduce the number of results an HNSW query returns and that vacuuming HNSW indexes can take a while. Plan the vacuum or compaction, and track when the data is gone, not only when the call returned.
+- **Find every copy.** Conversation summaries, semantic caches, evaluation datasets, logs with memory text and backups all hold copies. Record where each memory was copied, or keep copies short-lived.
+- **Make per-user deletion cheap by design.** A namespace per user or tenant turns "delete everything about 1847" into one call. In a shared index it is a delete by filter, which must be verified.
+- **Let users see and edit.** A memory page that lists what is stored, with delete buttons, catches wrong memories before they cause harm.
+- **Do not store what you should not.** Run the writer's output through the same PII rules as any other store; never embed card numbers or passwords.
+
+<Callout tone="red" title="What breaks">
+  Deleting the source but keeping derived memories. The customer deletes a chat, but "prefers email" and the refund
+  memory were extracted from it and live on. Link each memory to its source chat, and delete or re-derive memories when
+  their source is deleted.
+</Callout>
+
+### Watching recall quality
+
+Without measurement, vector memory becomes a slow drift problem: retrieved memories stay plausible but are wrong or out of date. Log the recalled memory ids and their scores with every answer. Sample conversations for human labels ("was the right memory recalled? was a stale one used?") and track proxy metrics: the share of recalls with no memory above the floor, how often a superseded memory is returned, and how often users correct the agent. Re-run a fixed set of multi-session test cases after every change to the embedding model, the filter or the scorer.
+
+### Worked example: the customer returns
+
+This follows the [architecture figure](#architecture) on 19 Nov, when customer 1847 writes "Has my kettle refund gone through? Text me from now on, not email."
+
+| Step | What happens                                                                               | Result                                                                        |
+| ---- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| 1    | The chat service takes `customer_id` 1847 from the signed-in session, not from the message | Filter value fixed before any model call                                      |
+| 2    | The message is embedded with `brightpost-embed-v2`, the model named on the stored records  | 1,536 numbers                                                                 |
+| 3    | The search runs with `customer_id = 1847` and `status = active` inside it                  | 2210's memory (0.86) never seen                                               |
+| 4    | The 3 nearest return with cosines                                                          | refund 0.82, cracked kettle 0.74, prefers email 0.61; gift wrap 0.20 left out |
+| 5    | The scorer re-ranks by recency, importance and relevance; the memories enter the prompt    | About 3 × 20 = 60 tokens (illustrative)                                       |
+| 6    | The recalled memories' `last_used` is set to 19 Nov                                        | Their recency resets to 1                                                     |
+| 7    | After the reply, the writer adds "prefers text" and supersedes "prefers email"             | Next visit recalls "prefers text"                                             |
+
+Step 3 in pgvector, with `<=>` as cosine distance (1 − distance = similarity):
+
+```sql
+SELECT id, text, 1 - (embedding <=> $1) AS cosine
+FROM memories
+WHERE customer_id = '1847' AND status = 'active'
+ORDER BY embedding <=> $1
+LIMIT 3;
+```
+
+Three things to take from it:
+
+- **The filter came first.** The nearest memory in the whole store belonged to someone else. Only the filter kept it out.
+- **The scores are kept.** A floor such as "drop anything below 0.5 cosine" (illustrative) stops recall from padding the prompt with gift wrap when nothing relevant exists.
+- **Reads write.** Updating `last_used` in step 6 is a write on every recall, so the read path needs write access to the memory store, and that write should not slow the reply.
+
+## Trade-offs
+
+| Decision                                           | Option A                                    | Option B                                        | Guidance                                                                  |
+| -------------------------------------------------- | ------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------- |
+| Vectors beside OLTP data vs a search tier          | One transaction, one delete, one backup     | Independent scaling, namespaces                 | pgvector until search load or size needs its own tier                     |
+| Namespace per tenant vs shared index with a filter | Physical isolation, one-call deletion       | Fewer partitions, cross-tenant queries          | Namespace per tenant; a mandatory filter per user inside it               |
+| HNSW vs IVF                                        | Fast queries, incremental inserts, more RAM | Faster builds, less memory, needs training data | HNSW for live memory writes; exact search for one user's few hundred rows |
+| Dense only vs hybrid                               | Simpler, one index                          | Catches order numbers and names                 | Hybrid when memories hold identifiers                                     |
+| Rerank vs top-k as is                              | Better precision                            | Lower latency and cost                          | Rerank when recall feeds actions, not only replies                        |
+| Decay vs no decay                                  | Fresh memories win                          | Old facts stay as strong                        | Decay episodes; pin stated preferences until changed                      |
+
+## Real-world examples
+
+- Generative Agents (Park et al., 2023) ranks memories by recency (0.995 per hour since last retrieval), importance and relevance, summed with equal weights.
+- Mem0 (Chhikara et al., 2025) compares each new fact with the most similar stored memories and has a model choose ADD, UPDATE, DELETE or NOOP.
+- LangGraph stores long-term memories as JSON documents under a namespace tuple such as `(user_id, context)` and a key, with optional semantic search configured by an embedding function and its dimensions (docs checked November 2026). Its docs contrast writing memories "in the hot path" against writing them in the background.
+- Pinecone's multitenancy guide recommends a namespace per tenant and describes deleting one as "almost instant" (checked November 2026).
+- pgvector 0.8.0 added iterative index scans (`hnsw.iterative_scan`), which keep scanning until enough rows pass the filter; the current release is 0.8.7 as of November 2026.
+
+## Common pitfalls
+
+- Embedding whole transcripts instead of extracted facts.
+- Filtering after the search, or taking the user id from the model.
+- Mixing vectors from two embedding models in one index.
+- Writing every mention as a new memory, so duplicates fill the top k.
+- Updating `last_used` for every candidate, which turns decay off.
+- Deleting the record but not the vector, the summaries or the backups.
+- Returning the top k with no similarity floor, so irrelevant memories pad the prompt.
+
+## How to answer in an interview
+
+1. Define the record: fact text, vector, owner, type, dates, source, status, model version.
+2. Draw the write path (extract, embed, dedupe, store) and the read path (embed, filter, search, re-rank, inject).
+3. Make the user boundary explicit: namespace or in-search filter, value from the session.
+4. Pick an index for the scale, and say why per-user search can be exact.
+5. Cover lifecycle: supersede, decay, archive, delete everywhere, re-embed on model change.
+
+**What interviewers listen for:** isolation by construction, and a deletion story that covers derived copies.
+
+**Red flags:** "put the chat history in a vector DB", or a filter that runs after the search.
+
+## Further reading
+
+- [Generative Agents: Interactive Simulacra of Human Behavior (Park et al., 2023)](https://arxiv.org/abs/2304.03442)
+- [Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory (Chhikara et al., 2025)](https://arxiv.org/abs/2504.19413)
+- [pgvector README: HNSW, IVFFlat, filtering and iterative index scans](https://github.com/pgvector/pgvector)
+- [Pinecone: Implement multitenancy](https://docs.pinecone.io/guides/index-data/implement-multitenancy)
+- [Qdrant: Multitenancy (multiple partitions)](https://qdrant.tech/documentation/guides/multiple-partitions/)
+- [LangGraph: Memory overview](https://docs.langchain.com/oss/python/langgraph/memory)
+- [GDPR Article 17: Right to erasure](https://gdpr-info.eu/art-17-gdpr/)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you architect multi-tenant vector storage with access control?" category="Architecture">
-    Partition logically by tenant with mandatory metadata filters on every query, enforce ACLs at ingest so vectors inherit document-level permissions, and avoid cross-tenant shared namespaces without strong namespacing keys. Prefer databases that combine vector search with relational filters atomically. Audit query paths to ensure user-supplied filters cannot widen scope, and replicate indexes per region if latency requirements demand it.
+  <InterviewQuestion
+    question="How would you architect multi-tenant vector storage with access control?"
+    category="Architecture"
+    level="Senior"
+  >
+    Partition logically by tenant with mandatory metadata filters on every query, enforce ACLs at ingest so vectors
+    inherit document-level permissions, and avoid cross-tenant shared namespaces without strong namespacing keys. Prefer
+    databases that combine vector search with relational filters atomically. Audit query paths to ensure user-supplied
+    filters cannot widen scope, and replicate indexes per region if latency requirements demand it.
   </InterviewQuestion>
-  <InterviewQuestion question="When would you pick HNSW versus IVF for a billion-scale corpus?" category="Performance">
-    HNSW is attractive when you need low latency queries and can afford RAM for graph structures, and when incremental inserts are frequent. IVF shines when you can afford offline clustering and want to bound search to a small number of partitions, especially on hardware where memory is tighter. The decision should be validated with representative QPS, recall at k targets, and build-time constraints on your pipeline.
+  <InterviewQuestion
+    question="When would you pick HNSW versus IVF for a billion-scale corpus?"
+    category="Performance"
+    level="Senior"
+  >
+    HNSW is attractive when you need low latency queries and can afford RAM for graph structures, and when incremental
+    inserts are frequent. IVF shines when you can afford offline clustering and want to bound search to a small number
+    of partitions, especially on hardware where memory is tighter. The decision should be validated with representative
+    QPS, recall at k targets, and build-time constraints on your pipeline.
   </InterviewQuestion>
-  <InterviewQuestion question="Describe a production retrieval pattern from query to ranked chunks in the prompt." category="Implementation">
-    Embed the query with the same model version used at ingest, apply metadata filters for tenant and freshness, retrieve a larger candidate set with ANN search, then rerank top candidates with a cross-encoder or lightweight model. Deduplicate near-duplicate chunks, respect a token budget when stitching snippets, and log retrieval ids with the final answer for debugging and feedback loops.
+  <InterviewQuestion
+    question="Describe a production retrieval pattern from query to ranked chunks in the prompt."
+    category="Implementation"
+    level="Mid"
+  >
+    Embed the query with the same model version used at ingest, apply metadata filters for tenant and freshness,
+    retrieve a larger candidate set with ANN search, then rerank top candidates with a cross-encoder or lightweight
+    model. Deduplicate near-duplicate chunks, respect a token budget when stitching snippets, and log retrieval ids with
+    the final answer for debugging and feedback loops.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What do you embed when you store an agent memory, and why not the raw conversation?"
+    category="Concepts"
+    level="Mid"
+  >
+    Embed one extracted fact per record, written so it stands alone, such as "4471: £42 refund approved". A whole
+    transcript becomes one vector that is near many queries and precise about none, and you cannot update or delete one
+    fact inside it. Keep exact fields such as order numbers, dates and type as metadata so they can be filtered, and
+    store the embedding model version so the memories can be re-embedded when the model changes.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your memory recall returns nothing for most users after you add a user filter. Why?"
+    category="Failure modes"
+    level="Senior"
+  >
+    The filter is probably applied after an approximate search. The index returns its nearest few dozen candidates from
+    all users, and almost none belong to this user: pgvector's documentation shows about 4 matching rows at 10 %
+    selectivity with ef_search 40, and one user in 100,000 leaves almost none. Filter inside the search instead, with a
+    namespace or partition per tenant, a filter-aware index or iterative scans, or search the user's few hundred rows
+    exactly after a B-tree filter.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A customer asks you to delete everything the assistant remembers about them. What has to happen?"
+    category="Failure modes"
+    level="Senior"
+  >
+    Delete the memory records and their vectors, not only a status flag, and confirm the index has physically dropped
+    them after its vacuum or compaction. Then find derived copies: memories extracted from their chats, summaries,
+    semantic caches, logs and evaluation sets, and let backups expire on a known schedule. A namespace per user or
+    tenant makes the main delete one call. Log the request and its completion, so you can show the erasure happened
+    without undue delay.
   </InterviewQuestion>
 </InterviewQuestions>
