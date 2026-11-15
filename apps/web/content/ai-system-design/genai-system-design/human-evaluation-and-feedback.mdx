@@ -2,43 +2,248 @@
 title: "Human Evaluation & Feedback Collection"
 description: "Collect human judgments and user feedback, from expert review to thumbs, corrections and ratings, and feed them back into the system."
 icon: thumbs-up
+updated: 2026-11-15
 ---
 
-## Human Feedback Collection
+Every automatic metric and every model judge is checked against people, so the people's labels have to be good. Interviewers ask about human evaluation and feedback to see whether you can build those labels, measure whether they are reliable, and turn a customer's click into something the system learns from.
 
-Human feedback remains the gold standard for subtle quality, safety, and brand alignment. The feedback UI should minimize cognitive load: clear instructions, keyboard shortcuts, side-by-side layouts for preferences, and visible timers or quotas to prevent rater burnout. For free-text critique, constrain dimensions with rubrics and exemplars so comments are actionable for model or prompt updates rather than vague dissatisfaction.
+## TL;DR
 
-Annotation tools need workflow features: queue management, adjudication for disagreements, versioning of tasks when prompts change, and audit trails for compliance. Inter-annotator agreement metrics such as Cohen kappa or Fleiss kappa quantify rubric clarity; low agreement usually indicates ambiguous guidelines or underspecified edge cases before it indicates lazy raters. Aggregation rules might be majority vote, adjudicator override, or Bayesian models that weight rater reliability learned from gold items sprinkled into production batches.
+- **Human evaluation** is the gold standard for subtle quality, safety and brand fit. A good workflow is a **sample, two annotators who label alone, a comparison, and an adjudicator** for the disagreements.
+- Measure **inter-annotator agreement** before trusting the labels. On Brightpost's 200 tickets, 89 % agreement is **Cohen's κ = 0.75** (illustrative counts). Low κ usually means an **unclear rubric**, not lazy raters.
+- **Explicit feedback** (thumbs, written reasons, corrections) is clear but rare, about **5,900 signals a day** on 200,000 requests in our illustration. **Implicit feedback** (retries, copies, hand-offs to a person) is about **13 times** as common and noisier.
+- A **thumbs-down** is a count until someone adds its **trace, a redaction step and a label**. Then it becomes a **test case** in the golden set that blocks the next release repeating the mistake.
+- Watch **selection bias**: the people who click are not the people who stay silent. Sample, and stratify, instead of listening only to the loudest.
 
-Active learning prioritizes labeling examples where the model is uncertain, diverse in embedding space, or likely failure modes from error detection. It improves data efficiency but can skew the dataset toward hard negatives if not balanced with random sampling to preserve calibration. Preference collection at scale pairs responses from two policies and records which humans prefer, feeding reward modeling or direct preference optimization pipelines.
+## The idea in plain English
 
-Trade-offs include cost, latency of human loops versus shipping velocity, and selection bias when only power users leave feedback. Instrument silent signals and stratified sampling to avoid optimizing only for vocal minorities.
+A newspaper keeps a corrections desk. Readers write in (explicit feedback), but most readers who spot a mistake just stop trusting the paper and say nothing (implicit feedback). Two sub-editors check each claim alone, and if they disagree a senior editor decides. Each decision goes in the style book, so the next error of that kind is caught before print. An LLM product needs the same desk: readers' complaints, quiet signals, a checking process that measures its own reliability, and a style book that grows. That style book is the golden set.
 
-## User Feedback Collection
+## Core concepts
 
-Explicit feedback such as thumbs up and down, star ratings, or structured corrections gives the clearest training signal when volume and bias are managed. Thumbs are cheap to collect but ambiguous: a downvote may reflect model error, policy disagreement, or user frustration unrelated to quality. Richer corrections, where users rewrite an answer or highlight a wrong span, are gold for supervised fine-tuning but require careful UX to avoid exhausting contributors. Ratings on dimensions such as helpfulness versus safety help disentangle failure modes that binary labels collapse.
+The running example is Brightpost's support assistant. Its **golden set** is 200 tickets with reference answers, and people have labelled each answer pass or fail against a written rubric (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)).
 
-Implicit behavioral signals scale where explicit labels do not. Copy events, dwell time, follow-up reformulations, abandonment mid-session, and regenerate clicks all hint at dissatisfaction or exploration. These proxies correlate with quality but are noisy and context-dependent; a user who copies text may be delighted or may be archiving a bad answer for escalation. Instrumentation should log minimal identifiers, session correlation keys, and model version hashes so analysts can join feedback to prompts without retaining more raw content than policy allows.
+1. **Annotation.** A person reads an output and labels it against a rubric: pass or fail, a score, or "which of A and B is better".
+2. **Rubric.** Each score level has concrete behaviours, anchor examples for borderline cases, and separate dimensions (factuality, tone, safety). A rubric that gives two reasonable people two answers is a bug in the rubric.
+3. **Inter-annotator agreement (IAA).** How often independent annotators agree, corrected for chance. **Cohen's kappa** is for two raters, **Fleiss' kappa** for more, and Krippendorff's alpha handles missing labels.
+4. **Adjudication.** A senior reviewer settles items the annotators label differently. The result is the final label, and the pattern of disagreements shows where the rubric is unclear.
+5. **Aggregation.** How several labels become one: majority vote, adjudicator override, or a model that weights each rater by their reliability on **gold items** (items with known answers hidden among the real ones).
+6. **Explicit feedback.** A signal the user gives on purpose: thumbs, stars, a written reason, a correction.
+7. **Implicit feedback.** A signal in what the user does: a retry or rephrase, a copy, dwell time, abandoning the session, asking for a person.
+8. **Preference data.** Pairs of responses with the one people prefer. It feeds reward models and direct preference optimisation (see [Reinforcement & Preference Learning](/ai-system-design/genai-system-design/reinforcement-preference-learning)).
+9. **Active learning.** Choosing which items to label next: those where the model is uncertain, those spread across embedding space, and likely failures.
 
-A durable feedback store feeds analytics dashboards, human review queues, and automated retraining or preference learning datasets. The architecture typically lands events in an append-only log or warehouse, deduplicates spam, and applies consent filters before export to labeling tools. Privacy considerations dominate: inform users what is logged, minimize retention of prompts containing personal data, support deletion requests that propagate to derived datasets, and segregate environments so staging feedback never poisons production training corpora.
+## Architecture
+
+A human-evaluation workflow has five stages. The point of two annotators is not twice the labels; it is a way to **measure** whether a label can be trusted.
+
+<AnimatedDiagram
+  spec="animated/eval/human-eval-workflow"
+  stepper
+  caption="Two people label alone, a comparison finds the disagreements, and an adjudicator settles only those; agreement is measured before the labels are trusted. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Two annotators label the same tickets alone">
+    A sample of 200 real tickets goes to both annotators. Neither sees the other's label, or the comparison measures nothing. Hide the model's own confidence and version too.
+  </StepCard>
+  <StepCard n={2} title="Their labels are compared">
+    In the illustration they agree on 178 tickets and differ on 22. Agreed labels need no more work.
+  </StepCard>
+  <StepCard n={3} title="Agreement is measured">
+    89 % agreement and κ = 0.75. This number is a property of the rubric and the annotators, so record it with the dataset.
+  </StepCard>
+  <StepCard n={4} title="Agreed labels go in">
+    The 178 labels where both said the same thing go straight into the golden set.
+  </StepCard>
+  <StepCard n={5} title="An adjudicator settles the rest">
+    A senior reviewer reads the 22 and decides. The final labels are 60 fail and 140 pass, and the reasons feed back into the rubric.
+  </StepCard>
+</StepCards>
+
+The tool around this needs queue management, adjudication, **versioned tasks** (when the prompt or rubric changes, old labels must not mix with new ones) and an **audit trail** for compliance. The interface should lower effort: clear instructions, keyboard shortcuts, side-by-side layouts for preferences, and visible timers or quotas so raters do not burn out. For free-text critique, constrain the dimensions with the rubric and examples, so comments can drive a prompt or model change instead of a vague "bad".
+
+## Deep dive
+
+### Measuring agreement
+
+Agreement is the diagonal of a table of the two annotators' labels. **Kappa** removes the agreement luck would give, so it does not flatter a set that is mostly passes.
+
+<AnimatedDiagram
+  spec="animated/eval/human-agreement"
+  stepper
+  caption="Agreement and kappa say whether the rubric is clear before the labels are trusted; the 22 disagreements are the only tickets an adjudicator reads. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Where the two annotators agree">
+    Both said fail on 52 tickets and both said pass on 126. Agreement is (52 + 126) ÷ 200 = **89 %**.
+  </StepCard>
+  <StepCard n={2} title="Agreement beyond chance">
+    Chance agreement is (62 × 64 + 138 × 136) ÷ 200² = 0.568, so κ = (0.89 − 0.568) ÷ (1 − 0.568) = **0.75**. One review argues that below 0.60 agreement is inadequate and 0.60 to 0.79 is moderate (McHugh, 2012). The 22 differing tickets are where the rubric is unclear.
+  </StepCard>
+  <StepCard n={3} title="The adjudicator settles the rest">
+    The adjudicator makes 8 of the 22 fail and 14 pass. Final labels: 52 + 8 = 60 fail and 126 + 14 = 140 pass. These are the human labels the [LLM-as-Judge](/ai-system-design/genai-system-design/llm-as-judge-evaluation) page checks a model judge against.
+  </StepCard>
+</StepCards>
+
+**What to do with a low kappa.** Do not blame the raters first. Read the disagreements, find the rule they read two ways, rewrite it with an example, and relabel a fresh batch. Add **control items** with known labels to detect drift, rotate raters across items to separate hard items from hard raters, and track per-rater statistics for coaching, not punishment. The effort is small: in our illustration 2 raters × 200 tickets × 3 minutes is 20 hours, and 22 adjudications at 5 minutes each add under 2 hours.
+
+### Explicit and implicit feedback
+
+Explicit signals are the clearest, but a **thumbs-down is ambiguous**: it can mean a wrong answer, a policy the customer dislikes, or a bad day. A **correction**, where a person rewrites the answer or marks the wrong span, is worth far more and costs the contributor more. Ratings on separate dimensions (helpfulness against safety) keep failure modes from collapsing into one bit. Implicit signals scale where explicit ones do not, and each is noisy.
+
+<AnimatedDiagram
+  spec="animated/eval/feedback-signals"
+  stepper
+  caption="The clearest signals are the rarest; the bar for a written reason is almost invisible, while copy events are common and ambiguous. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Explicit signals: rare and clear">
+    On 200,000 requests a day, assume 2 % leave a thumbs, 0.2 % a written reason and 0.75 % an edit by a support agent on a drafted reply: 4,000 + 400 + 1,500 = 5,900 signals. The edit is the best label, because it is the fix itself.
+  </StepCard>
+  <StepCard n={2} title="Implicit signals: common and noisy">
+    A retry or rephrase on 4 % (8,000), a copy on 30 % (60,000) and a hand-off to a person on 5 % (10,000). A hand-off is strong evidence the assistant could not finish. A copy may mean delight, or filing a bad answer for a complaint.
+  </StepCard>
+  <StepCard n={3} title="How much of each">
+    Explicit totals 5,900 and implicit 78,000, so there are about 13 times as many implicit signals. Treat them as **triggers for review**, not as labels.
+  </StepCard>
+</StepCards>
+
+Log the minimum that lets you join a signal to its request: a session key, the trace id and the model and prompt versions. Do not keep more of the raw text than your policy allows.
+
+### Sampling, active learning and preference data
+
+Human time is the scarce resource, so spend it on the items that teach most. **Active learning** picks items where the model is uncertain, that are diverse in embedding space, or that error detection flags as likely failures. It saves labels, but it skews the set toward hard cases, so mix in a **random sample** to keep the rates honest. Stratify by topic and language, and sample from silent users too, or you will tune the assistant for the vocal minority.
+
+Preference collection pairs two responses and records which people prefer. At scale, deduplicate with embeddings so batches are diverse, cap contributions per user session against spam, focus on regions where policies disagree, and keep the raw preferences with metadata so you can reweight later. Chatbot Arena shows the approach at scale: crowdsourced pairwise votes, over 240,000 of them at the time of its 2024 paper, which the authors report agree well with expert raters.
+
+### Worked example: a thumbs-down becomes a test case
+
+A customer asks about order 4471, the cracked £42 kettle. The assistant answers "your refund is on its way", but a refund over £30 needs a person's approval, so the promise was wrong. She clicks thumbs-down.
+
+<AnimatedDiagram
+  spec="animated/eval/feedback-to-dataset"
+  stepper
+  caption="A thumbs-down on its own is only a count; with its trace, a redaction step and a reviewer it becomes a labelled ticket that fails the next release that repeats the mistake."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The thumbs-down is logged with its trace">
+    The click lands in the feedback log with the trace id, model version and prompt version. Without the trace, the click cannot be tied to what the model saw.
+  </StepCard>
+  <StepCard n={2} title="Triage removes personal data and duplicates">
+    A daily job redacts emails and card numbers, applies consent filters and groups near-duplicates, so a hundred identical complaints become one case with a count.
+  </StepCard>
+  <StepCard n={3} title="A reviewer reads the case">
+    With a budget of 20 cases a day, the reviewer reads the trace, names the failure (refund over the limit, no approval) and writes what the assistant should have done.
+  </StepCard>
+  <StepCard n={4} title="The labelled case joins the golden set">
+    The set grows from 200 to 201 tickets. It is marked eval-only, so it never enters the 5,000-ticket fine-tuning set (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) on leakage).
+  </StepCard>
+  <StepCard n={5} title="The gate runs it on every change">
+    The next prompt edit runs all 201 tickets. If the new version promises a refund over £30 again, the gate fails and blocks the release (see [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)).
+  </StepCard>
+</StepCards>
+
+The case is stored as data, not as a note. This is our own schema for the golden set, not a standard:
+
+```json
+{
+  "id": "gs-0201",
+  "source": "thumbs-down, trace 7f3a",
+  "ticket": "My kettle arrived cracked. Order 4471. Can I get my money back?",
+  "bad_answer": "Your refund is on its way.",
+  "failure_mode": "refund over £30 promised without approval",
+  "expected": "Ask a support agent to approve £42; tell the customer a person will confirm",
+  "check": { "must_not_call": "create_refund", "before": "approval" },
+  "labelled_by": "reviewer-2",
+  "split": "eval-only"
+}
+```
+
+The same trace can also give a **preference pair**: the bad answer against the reviewer's corrected one. That pair goes to the training side (see [Reinforcement & Preference Learning](/ai-system-design/genai-system-design/reinforcement-preference-learning)). Keep the two uses apart: the test case judges the system, the pair teaches it, and a case used for both can no longer be trusted as a test.
+
+<Callout tone="red" title="What breaks">
+  Imagine a release adds a more cautious refund message and thumbs-downs double the next day. The team reads it as a quality drop and rolls back. The cause was a new button that made thumbs easier to reach, so more people clicked. Read feedback as a **rate per request over a stable sample** and check it against the golden set before acting on a spike.
+</Callout>
+
+### Privacy and consent
+
+Feedback is data about people. Tell users what you log. Keep prompts that contain personal data for as short a time as the purpose allows. Make deletion requests reach derived datasets, not only the raw log. Keep staging feedback out of production training sets. Filter by consent before anything is exported to a labelling tool, and give derived datasets their own access controls. Cross-user joins can identify someone if a session key leaks.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Expert annotators | High quality; catch subtle and safety issues | Slow and costly | Golden sets, safety review, rubric design |
+| Crowd annotators | Cheap and fast at scale | Noisier; needs gold items and aggregation | Preferences, broad quality at volume |
+| Two annotators plus adjudication | Measures reliability; cleaner labels | Double the labelling effort | Any set that gates a release |
+| Explicit feedback (thumbs) | Clear direction; cheap to collect | Rare, biased to vocal users, no reason | Trend dashboards; a trigger for review |
+| Implicit feedback | Covers most requests; no user effort | Noisy, context-dependent, privacy-sensitive | Trigger sampling; never the only label |
+| Active learning | Fewer labels for the same gain | Skews toward hard cases | Large pools with a small label budget |
+
+## Real-world examples
+
+- **InstructGPT (Ouyang et al., 2022).** About 40 contractors wrote demonstrations and ranked 4 to 9 model responses per prompt. Training labellers agreed with each other on 72.6 ± 1.5 % of comparisons and held-out labellers on 77.3 ± 1.3 %, which shows how much human preference data disagrees with itself.
+- **Chatbot Arena (Chiang et al., 2024).** A public site where users compare two anonymous models and vote, with over 240,000 votes at the time of the paper and reported agreement with expert raters.
+- **Anthropic helpful and harmless assistant (Bai et al., 2022).** An iterated online mode of training in which preference models and policies were refreshed weekly with fresh human feedback.
+- **Brightpost's own loop.** The thumbs-down to test-case path above, feeding an adjudicated golden set that gates every prompt change.
+
+## Common pitfalls
+
+- **Skipping agreement.** Labels from one person, or from two whose agreement was never measured, are opinions. Measure κ on a pilot batch.
+- **Blaming raters for low agreement.** Ambiguous rubrics cause most disagreement. Read the disagreements first.
+- **Annotators who see each other's labels, or the model's score.** It makes agreement look high and measures influence.
+- **Treating implicit signals as labels.** A copy is not a thumbs-up. Use them to choose what a person reviews.
+- **Listening to power users only.** Stratify, and include a random sample of quiet users.
+- **No trace behind the feedback.** A click that cannot be joined to a prompt and a model version cannot become a test case.
+- **Mixing eval and training data.** A case used to train cannot also judge.
+
+## How to answer in an interview
+
+1. Separate the two sources: curated human labels (a few, high quality) and user feedback (many, noisy).
+2. Describe the labelling workflow: rubric, two independent annotators, adjudication, versioned tasks.
+3. Show you measure reliability: agreement and kappa, control items, what a low score means.
+4. Rank the feedback signals by clarity and volume, and say which you use as a trigger and which as a label.
+5. Close the loop: trace, redaction, review, golden set, gate, with eval and training data kept apart.
+
+**What interviewers listen for:** kappa and a pilot batch, a rubric with anchor examples, adjudication, selection bias, and privacy built in.
+
+**Red flags:** "we collect thumbs and retrain on them", no agreement measure, and one annotator per item.
+
+## Further reading
+
+- [Training language models to follow instructions with human feedback (Ouyang et al., 2022)](https://arxiv.org/abs/2203.02155)
+- [Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback (Bai et al., 2022)](https://arxiv.org/abs/2204.05862)
+- [Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference (Chiang et al., 2024)](https://arxiv.org/abs/2403.04132)
+- [A Coefficient of Agreement for Nominal Scales (Cohen, 1960)](https://doi.org/10.1177/001316446002000104) · [Interrater reliability: the kappa statistic (McHugh, 2012)](https://pmc.ncbi.nlm.nih.gov/articles/PMC3900052/)
+- Related pages: [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [Online & Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline) · [Reinforcement & Preference Learning](/ai-system-design/genai-system-design/reinforcement-preference-learning)
 
 <InterviewQuestions>
-  <InterviewQuestion question="What makes a rubric effective for collecting comparable human judgments on LLM outputs?" category="Design">
-    It defines each score level with concrete behaviors, includes anchor examples for borderline cases, separates dimensions such as factuality and tone, and explains common failure modes specific to your product. Iteratively update the rubric when adjudication patterns show recurring confusion, and train raters with calibration tasks before production labeling.
+  <InterviewQuestion question="What makes a rubric effective for collecting comparable human judgments on LLM outputs?" category="Concepts" level="Junior">
+    It defines each score level with concrete behaviours, includes anchor examples for borderline cases, separates dimensions such as factuality and tone, and names the common failure modes of your product. Update it when adjudication shows a rule that two raters read differently, and train raters with calibration tasks before production labelling. The test of a rubric is agreement: two raters who follow it should usually give the same label.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you measure and improve inter-annotator agreement on a subjective helpfulness task?" category="Methodology">
-    Start with pilot batches, compute kappa or rank correlation, run adjudication sessions to refine definitions, and add negative and positive control items with known labels to detect drift. Track per-rater statistics privately for coaching, not punishment without context, and rotate raters across items to separate item difficulty from rater bias.
+  <InterviewQuestion question="How would you measure and improve inter-annotator agreement on a subjective helpfulness task?" category="Concepts" level="Mid">
+    Start with a pilot batch labelled alone by two annotators, compute Cohen's kappa (or Fleiss' kappa for more raters, or a rank correlation for scores), and read the disagreements to find the ambiguous rule. Rewrite the rubric with an example, relabel a fresh batch and repeat. Add control items with known labels to detect drift, track per-rater statistics for coaching and rotate raters across items to separate hard items from hard raters. Below about 0.60 kappa, fix the rubric before collecting more labels.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you scale preference collection without drowning in redundant near-duplicate examples?" category="Scaling">
-    Use embedding deduplication and clustering to diversify batches, cap contributions per user session to reduce spam, apply active learning to focus on model disagreement regions, and subsample high-volume happy paths. Store raw preferences with metadata for later reweighting, and periodically rebalance toward underrepresented languages or domains.
+  <InterviewQuestion question="How do you scale preference collection without drowning in redundant near-duplicate examples?" category="Scaling" level="Senior">
+    Deduplicate with embeddings and cluster to diversify batches, cap contributions per user session to limit spam, and use active learning to focus on regions where policies disagree. Subsample the high-volume easy cases. Keep a random slice so the dataset does not skew to hard negatives and lose calibration. Store the raw preferences with metadata so you can reweight later, and rebalance toward under-represented languages and topics.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you design a UX that increases high-quality explicit feedback without annoying users?" category="Design">
-    Ask for feedback at natural completion points, default to low-friction options like thumbs with optional free text, and explain briefly how corrections help. Offer progressive disclosure: after a negative signal, invite a structured reason list before freeform input. Close the loop selectively, for example thanking internal testers, without creating pressure that biases ratings upward.
+  <InterviewQuestion question="How would you design a UX that increases high-quality explicit feedback without annoying users?" category="Trade-offs" level="Mid">
+    Ask at natural completion points and default to a low-friction thumbs with optional free text. After a negative signal, offer a short list of reasons before free text, which gives structured data without much effort. Say briefly how feedback helps, and avoid nagging or incentives that bias ratings upward. Expect a few percent of users to respond, so treat explicit feedback as a trigger and a trend, and pair it with implicit signals.
   </InterviewQuestion>
-  <InterviewQuestion question="What architectural components sit between the client and a training pipeline for user feedback?" category="Architecture">
-    An ingestion API or SDK that validates schema and authentication, a streaming bus or batch landing zone, PII scanning and redaction workers, a feature store or warehouse for aggregates, and workflow gates that promote curated slices into labeling or fine-tuning jobs. Each hop should attach model version, prompt template hash, and retrieval corpus identifiers for reproducibility.
+  <InterviewQuestion question="What architectural components sit between the client and a training pipeline for user feedback?" category="Architecture" level="Mid">
+    An ingestion API or SDK that checks schema and authentication, a stream or batch landing zone, PII scanning and redaction workers, a warehouse or feature store for aggregates, and workflow gates that promote curated slices into labelling or fine-tuning jobs. Each hop attaches the model version, prompt template hash and retrieval corpus ids, so any case can be reproduced. Consent filters and deletion propagation sit before any export to a labelling tool.
   </InterviewQuestion>
-  <InterviewQuestion question="What privacy pitfalls appear when using implicit signals for model training?" category="Privacy">
-    Users may not expect silent logging of partial drafts or sensitive queries, and inferred labels can encode surveillance-like inferences. Retention without purpose limitation violates many regulations, and cross-user joins can re-identify individuals if session keys leak. Mitigate with transparent settings, aggressive minimization, differential access controls for derived datasets, and periodic audits that verify consent scopes match actual exports.
+  <InterviewQuestion question="What privacy pitfalls appear when using implicit signals for model training?" category="Failure modes" level="Senior">
+    Users may not expect silent logging of partial drafts or sensitive queries, and an inferred label can encode a surveillance-like inference. Keeping data without a stated purpose conflicts with many regulations, and cross-user joins can re-identify people if a session key leaks. Reduce the risk with clear settings, minimal logging, access controls on derived datasets, redaction before storage and periodic audits that check exports against consent. Prefer implicit signals as triggers for review rather than as training labels.
+  </InterviewQuestion>
+  <InterviewQuestion question="Thumbs-down jumped from 3 % to 6 % of answers after a release. How do you decide whether quality dropped?" category="Failure modes" level="Senior">
+    First check whether the measurement changed: a new button, a moved prompt or a different user mix can double clicks without any change in quality. Compare the rate per request against a stable sample, and break it down by topic and model version. Then read a random sample of the new thumbs-downs with a reviewer, and run the golden set on both versions, because that set is unaffected by who clicks. Roll back only if the labelled evidence shows a regression; otherwise fix the measurement.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a thumbs-down become a trustworthy test case, and why keep it out of training data?" category="Architecture" level="Mid">
+    Log the click with its trace and versions, redact personal data, group duplicates, and have a reviewer name the failure and write the expected behaviour, ideally as a machine-checkable condition. Add it to the golden set marked eval-only and run it on every change. If the same case also trained the model, the test would pass because the model memorised it, so it would no longer measure generalisation. Keep a separate preference pair for training if you want to learn from the same trace.
   </InterviewQuestion>
 </InterviewQuestions>
