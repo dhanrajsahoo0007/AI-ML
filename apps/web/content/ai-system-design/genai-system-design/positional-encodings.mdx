@@ -84,13 +84,12 @@ Rotating two vectors and taking their dot product gives the same result as rotat
 
 ### Extending a context window
 
-```mermaid
-flowchart LR
-    BASE["Model trained at 4K tokens"] --> PI["Rescale RoPE<br/>(interpolation, NTK, YaRN)"]
-    PI --> FT["Short fine-tune on long documents"]
-    FT --> EVAL["Check needle-in-a-haystack<br/>and long-doc QA"]:::accent
-    EVAL --> SERVE["Serve at 32K to 128K tokens"]
-```
+Take a model trained on 4K positions and give it 16K: the positions must either run past what it saw, or be squeezed back into range.
+
+<AnimatedDiagram
+  spec="animated/transformer/context-extension"
+  caption="Extrapolation pushes slow RoPE pairs to angles never seen in training; position interpolation divides every position by 4 to stay in range, and NTK-aware scaling and YaRN squeeze only the slow pairs so local detail survives, before a short long-document fine-tune."
+/>
 
 ## Trade-offs
 

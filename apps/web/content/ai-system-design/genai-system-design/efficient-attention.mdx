@@ -51,18 +51,10 @@ Prefill writes the prompt's keys and values in one pass; every decode step then 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    REQ["Incoming requests"] --> SCHED["Scheduler with continuous batching"]
-    SCHED --> PRE["Prefill: full prompt in parallel<br/>(compute-bound)"]
-    PRE --> KV["Paged KV cache<br/>(blocks per sequence, shared prefixes)"]:::accent
-    KV --> DECODE["Decode loop: one token per step<br/>(memory-bound)"]
-    DECODE --> KV
-    DECODE --> OUT["Streamed tokens"]
-    FA["FlashAttention kernel"] -.-> PRE
-    FA -.-> DECODE
-    GQA["GQA: fewer KV heads"] -.-> KV
-```
+<AnimatedDiagram
+  spec="animated/transformer/serving-stack"
+  caption="Continuous batching keeps the GPU full, prefill writes each prompt's keys and values into fixed-size cache blocks (shared prefixes stored once), and every decode step reads the whole cache to append one token; FlashAttention serves both phases and GQA shrinks every block."
+/>
 
 How these pieces combine in a modern serving stack:
 
@@ -75,21 +67,12 @@ How these pieces combine in a modern serving stack:
 
 ### What FlashAttention avoids
 
-```mermaid
-flowchart LR
-    subgraph NAIVE["Standard attention"]
-        direction TB
-        N1["Compute S = QK^T"] --> N2["Write S to GPU memory (n x n)"]
-        N2 --> N3["Read S, softmax, write P"]
-        N3 --> N4["Read P, multiply by V"]
-    end
-    subgraph FLASH["FlashAttention"]
-        direction TB
-        F1["Load a tile of Q, K, V into on-chip memory"] --> F2["Partial scores + running softmax"]
-        F2 --> F3["Accumulate output tile"]:::accent
-        F3 --> F1
-    end
-```
+Every arrow between the two memory levels is traffic; the heavy ones carry an n × n matrix.
+
+<AnimatedDiagram
+  spec="animated/transformer/flash-attention-io"
+  caption="Standard attention writes the n × n scores and weights to slow HBM and reads them back; FlashAttention keeps each tile in fast on-chip SRAM with a running softmax, so only Q, K, V and O cross: the same exact result with far less memory traffic."
+/>
 
 The arithmetic is the same; what disappears is the round trip of an n-by-n matrix through slow memory. That is why it is described as "IO-aware".
 

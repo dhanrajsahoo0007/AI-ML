@@ -1,0 +1,18 @@
+title: "GPU memory for a 70B model: 16-bit vs 4-bit, plus KV cache"
+alt: >-
+  A to-scale memory chart for self-hosting a 70-billion-parameter dense model with the Llama 3.1 70B shape: 80
+  layers and 8 KV heads of 128 dims. The formula reads: memory is about parameters times bytes per parameter plus
+  the KV cache, plus headroom. A ruler at the top shows three 80 GB GPUs side by side, with dashed lines at each
+  boundary. Three bars follow, each a violet weights part and a teal KV cache part. 16-bit weights with 16 requests of
+  4,096 tokens: 140 GB of weights plus 21.5 GB of KV cache, 161.5 GB, marked in red as needing at least 3 GPUs and 4
+  in practice. 4-bit weights with the same requests: 35 GB plus 21.5 GB, 56.5 GB, marked in green as fitting one GPU.
+  4-bit weights with one 131,072-token request: 35 GB plus 42.9 GB, 77.9 GB, marked in orange as filling one GPU to
+  97%. A footnote gives the KV cache per token, 2 times 80 layers times 8 KV heads times 128 dims times 2 bytes, which
+  is 327,680 bytes or about 0.33 MB, and says tensor parallelism splits the 64 query heads and 8 KV heads evenly, so
+  3 GPUs do not work and 4 are used.
+caption: >-
+  Weights scale with parameters × bytes per parameter and the KV cache with tokens in flight: 4-bit weights fit a
+  70B model on one 80 GB GPU, until one full-length request fills it.
+tags: [llm, self-hosting, gpu, quantization, kv-cache, genai]
+source: original
+created: 2026-11-15

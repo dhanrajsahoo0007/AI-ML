@@ -37,18 +37,13 @@ A hospital does not send every patient to every doctor. A triage nurse (the rout
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    T["Token vector after attention"] --> R["Router: score every expert"]:::accent
-    R --> TOP["Pick top-2 experts"]
-    TOP --> E2["Expert 2 (FFN)"]
-    TOP --> E5["Expert 5 (FFN)"]
-    E1["Expert 1"] -.->|"not used for this token"| X1[" "]
-    E2 --> MIX["Weighted sum by router scores"]
-    E5 --> MIX
-    MIX --> ADD["Add residual, continue to next block"]
-    style X1 fill:none,stroke:none
-```
+Follow one token through an MoE layer. Step through to see the router score every expert and the token visit only two of them.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-routing"
+  stepper
+  caption="The router scores all 8 experts, but only the top 2 run for this token; their outputs are mixed by a softmax over the two winning scores and added to the residual stream."
+/>
 
 For each token in an MoE block:
 
@@ -61,22 +56,23 @@ For each token in an MoE block:
 
 ### Training loop concerns
 
-```mermaid
-flowchart LR
-    B["Batch of tokens"] --> RT["Router assignments"]
-    RT --> CAP{"Expert over capacity?"}
-    CAP -->|"No"| RUN["Run expert"]
-    CAP -->|"Yes"| DROP["Drop or reroute token"]
-    RUN --> LOSS["Task loss + load-balancing loss"]:::accent
-    DROP --> LOSS
-    LOSS --> UPD["Update experts and router"]
-```
+Here 8 tokens are routed to 4 experts that take 2 tokens each.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-capacity"
+  caption="Each expert takes at most 2 tokens here, so the third token routed to Expert 1 is dropped from the layer and kept only by the residual; the load-balancing loss pushes the router toward an even split."
+/>
 
 Common instabilities include router collapse (one expert dominates) and large router logits; fixes include the balancing loss, a router z-loss that keeps logits small, and noise in routing early in training.
 
 ### Total vs active parameters
 
 Mixtral 8x7B has about 47 billion total parameters, since attention layers are shared and only feed-forward layers are duplicated, but only about 13 billion are active per token. It needs memory for 47 billion parameters while costing compute closer to a 13-billion-parameter dense model.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-total-vs-active"
+  caption="Mixtral 8x7B stores about 47B parameters but runs about 13B per token: the shared parts plus 2 of the 8 experts."
+/>
 
 ## Trade-offs
 

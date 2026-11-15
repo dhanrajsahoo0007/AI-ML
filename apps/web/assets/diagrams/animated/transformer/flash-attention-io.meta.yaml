@@ -1,0 +1,23 @@
+title: What FlashAttention avoids
+alt: >-
+  Two panels, "Standard attention" on the left and "FlashAttention" on the right, each split into a top region titled
+  "On-chip SRAM: small, fast" and a bottom region titled "HBM" (GPU memory: large, slow). Every arrow between the two
+  regions is memory traffic. Left: HBM holds Q (blue), K (teal), V (violet) and O as tall thin n × d matrices, and two
+  square n × n matrices, S (orange) and P (green). SRAM holds three operations: S = QKᵀ, P = softmax(S) and O = PV.
+  Thin arrows carry Q and K up to the first operation, V up to the third, and O back down. Four heavy arrows carry the
+  n × n matrices: 1 write S down to HBM, 2 read S back up to the softmax, 3 write P down, 4 read P back up to the last
+  multiply. A red note says S and P each go to HBM and back, 4 transfers. Right: HBM holds only Q, K, V and O, each
+  split into tiles with the top tile shaded, and a note says no n × n matrix is ever stored there. Thin arrows carry a
+  Q tile, a K tile and a V tile up into SRAM and an O tile back down. In SRAM, S = QKᵀ for one score tile feeds an
+  online softmax that keeps a running max and sum, which feeds O += PV for the output tile; a loop arrow labelled
+  "next K, V tile" goes back to the score tile. A green note says only Q, K, V and O cross, one tile at a time. A
+  footnote says the arithmetic is the same with far less memory traffic, that FlashAttention is exact and needs only
+  O(n) extra memory, that the backward pass recomputes S and P tile by tile, and that on an A100 SRAM is about 20 MB
+  at 19 TB/s while HBM is 40 GB at 1.5 TB/s.
+caption: >-
+  Standard attention writes the n × n scores and weights to slow HBM and reads them back; FlashAttention keeps each
+  tile in fast on-chip SRAM with a running softmax, so only Q, K, V and O cross: the same exact result with far less
+  memory traffic.
+tags: [transformer, attention, flashattention, gpu-memory, genai]
+source: original
+created: 2026-11-15
