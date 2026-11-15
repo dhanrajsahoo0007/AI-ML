@@ -2,43 +2,212 @@
 title: "Synthetic Data & Dataset Curation"
 description: "Building a fine-tuning dataset: collecting, generating, filtering, de-duplicating and versioning examples."
 icon: flask
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Building a fine-tuning dataset: collecting, generating, filtering, de-duplicating and versioning examples.
+A fine-tuned model is only as good as the examples it trains on, and most teams have too few good ones. Interviewers ask about synthetic data and curation because a strong answer covers where examples come from, how a pipeline keeps them diverse and clean, and how to stop evaluation tickets leaking into training.
 
 ## TL;DR
 
+- **Data quality beats data volume.** LIMA fine-tuned a 65 B model on only **1,000 curated examples** and still produced strong answers (Zhou et al., 2023), so what you remove matters as much as what you add.
+- **Three sources:** logs of real work, human-written examples, and model-generated (synthetic) examples. Mix them; real data anchors the synthetic part.
+- **Synthetic data needs a pipeline.** Self-Instruct starts from **175 seed tasks**, asks a model for new ones and keeps a new instruction only if its ROUGE-L similarity to every earlier one is **below 0.7** (Wang et al., 2022).
+- **Raw output is noisy.** In the Self-Instruct paper's own review of 200 samples, only **54 %** of examples had instruction, input and output all valid, which is why filtering and a human spot check are not optional.
+- **Leakage ruins evaluation.** Golden-set tickets that reach the seeds or the training data inflate the score; split the golden set off first and check overlap.
+- **Training on your own output, round after round, loses the rare cases.** Recursive training that replaces real data loses the rare cases (Shumailov et al., Nature, 2024); keeping real data in the mix avoids it.
+
 ## The idea in plain English
+
+A cookery school wants a thick recipe book for its students. It has 150 great recipes from its chefs. A junior writes variations by the hundred. Some are copies of one another, some call for a pan nobody owns, a few would make people ill. The head chef does not taste every page. The school removes copies, runs a checklist, has a senior cook read a sample, and keeps the final exam recipes out of the book. That is a synthetic-data pipeline: cheap variation, hard filters, a person on a sample, and an exam kept secret.
 
 ## Core concepts
 
 ### Sources: logs, human labels and synthetic generation
 
+- **Logs.** Resolved support tickets with an agent-approved reply. Real language and real mistakes; the volume is large, but the content is messy and carries personal data. Brightpost's 5,000-ticket set comes from here.
+- **Human labels.** Support leads write or correct examples for the rare and risky cases. Highest quality, slowest, most expensive per example.
+- **Synthetic generation.** A strong model writes new examples from seeds and rules. Cheap, fast, and able to cover cases the logs lack (a refund over £30 in three phrasings), but it inherits the generator's habits and mistakes.
+
+Use logs for the bulk, humans for the cases that matter most and for the golden set, and synthetic data to fill gaps. A model that only ever sees its own kind of text learns little that is new.
+
 ### Generating diverse synthetic examples
+
+The Self-Instruct recipe is the template: start from a small hand-written seed pool (175 tasks in the paper), prompt a model with a few seeds and ask for new instructions and answers, filter, and add the survivors to the pool. The paper generated over 52,000 instructions and 82,439 instances this way and fine-tuned GPT-3 on them, a 33 % absolute improvement on Super-NaturalInstructions and a 5 % absolute gap behind InstructGPT-001 on its expert-written set. Stanford's Alpaca followed the same idea with text-davinci-003: 52,000 instruction-output pairs for under \$500.
+
+The danger is sameness. A generator asked the same thing again and again drifts to its favourite phrasings. Vary the prompt on purpose: name a topic, a customer type, a tone and a difficulty each time.
+
+<AnimatedDiagram
+  spec="animated/finetune/synth-diversity"
+  caption="Same count of tickets, very different coverage. Repeating one prompt piles the output in one place; naming a topic and a customer type each time spreads it. Shape only: the positions are illustrative."
+/>
+
+**How to read it.** Each dot is a generated ticket in a made-up topic space. Tinted dots are the six real seeds; open dots are generated. The space is cut into 16 cells and the figure counts how many hold a generated ticket: 2 for the repeated prompt, 10 when the prompt names topic and customer. Real pipelines measure the same thing with embeddings and clusters.
 
 ### Filtering and quality checks
 
+Filter in order from cheapest to dearest: format (valid JSON, right length, language), business rules (refunds over £30 need approval, so a reply that promises one without approval fails), duplicates, then a judge model for tone and correctness (see [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)). Filters also protect privacy: a ticket with a card number is removed or scrubbed before it reaches a training file (see [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)).
+
+<AnimatedDiagram
+  spec="animated/finetune/curation-funnel"
+  caption="Most raw data does not survive. Counts are illustrative; only the 5,000 at the bottom is Brightpost's own constant."
+/>
+
+**The numbers.** The drops are 40,000 − 11,500 = 28,500; 11,500 − 9,800 = 1,700; 9,800 − 6,900 = 2,900; 6,900 − 5,000 = 1,900. Total dropped 35,000, so 5,000 ÷ 40,000 = **12.5 %** of the raw tickets survive, and 28,500 of the 35,000 leave at the first gate.
+
 ### De-duplication and train/test leakage
 
+Duplicates waste training steps and teach the model to repeat itself. Lee et al. (2021) found that language-model datasets hold many near duplicates and that deduplicated training made models emit memorised text about ten times less often. Use exact hashing first, then near-duplicate methods (n-gram overlap such as ROUGE-L, MinHash or embedding similarity).
+
+The same tools catch **leakage**: examples that also sit in the evaluation set. With synthetic data a leak spreads, because one golden ticket used as a seed becomes dozens of variants.
+
+<AnimatedDiagram
+  spec="animated/finetune/synth-leakage"
+  caption="Red marks the leak: 20 golden tickets used as seeds become about 560 training examples, and the student is then graded on tickets it has seen. Counts are illustrative."
+/>
+
+**The numbers.** Twenty of the 150 seeds were copied from the golden set. The teacher writes 8,000 ÷ 150 = 53.3 candidates per seed, so 1,067 from those 20. The pipeline keeps 52.5 %, which leaves about 560 near copies among the 4,200 kept (13.3 %). On those 20 tickets the student passes 20 of 20; an honest 88 % would be 17.6. The score is inflated by 2.4 ÷ 200 = **1.2 points**, enough to hide a real regression.
+
+<Callout tone="red" title="What breaks">
+  A leak does not fail loudly. The offline score rises, the launch is approved, and live traffic disappoints. The golden set must be split off before the seed pool is chosen, and every candidate must be compared with it.
+</Callout>
+
 ## Architecture
+
+The pipeline has five stages, each one removing something: seed, generate, deduplicate, filter and judge, then a human reads a sample.
+
+<AnimatedDiagram
+  spec="animated/finetune/synth-pipeline"
+  stepper
+  caption="Each stage removes something and says how many. The counts are illustrative; the kept share is arithmetic from them. The last step is a person reading a sample."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Start from real seed tickets">
+    Support leads pick 150 resolved tickets for the rare cases. None come from the golden set.
+  </StepCard>
+  <StepCard n={2} title="A teacher writes many candidates">
+    The prompt shows a few seeds and asks for new tickets, naming a topic, a tone and a customer type each time. 8,000 candidates (illustrative).
+  </StepCard>
+  <StepCard n={3} title="Drop near duplicates">
+    Remove 1,800 that are too close to another candidate or to a golden ticket. 8,000 − 1,800 = 6,200.
+  </StepCard>
+  <StepCard n={4} title="Filter by rule, then by a judge">
+    Reject 2,000 that break the format, the refund rule or the judge's rubric. 6,200 − 2,000 = 4,200 kept, 52.5 % of the candidates.
+  </StepCard>
+  <StepCard n={5} title="A person reads a sample">
+    Someone reads 100 of the 4,200 and finds 3 bad. At 3 % the team fixes the generator prompt and runs again; at 15 % it would stop and look at the seeds.
+  </StepCard>
+</StepCards>
 
 ## Deep dive
 
 ### How much data is enough
 
+Less than most teams expect, if the data is good. LIMA (Zhou et al., 2023) fine-tuned a 65 B model on 1,000 curated prompts and responses and concluded that nearly all of a model's knowledge comes from pretraining. Style, format and policy are quick to learn; new facts are not (see [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms)). A practical rule: start with hundreds of excellent examples, train, read the errors, and add examples for the failing slices. Plot score against dataset size on a fixed golden set, and stop when the curve flattens.
+
 ### Model collapse and synthetic-data bias
+
+Shumailov et al. (Nature, 2024) trained models repeatedly on the output of the previous model and found that the tails of the original distribution disappear, an effect they call model collapse. Rare cases go first, and for Brightpost those are the odd, costly refund cases. Gerstgrasser et al. (2024) show collapse is not inevitable: when each round's synthetic data is added to the original real data instead of replacing it, test error stays bounded in their experiments.
+
+Bias is quieter. A generator that is polite and verbose produces polite, verbose data, and a judge from the same family prefers it. Keep real data in the mix, vary the prompts, use a different model as judge where you can, and check the result on slices.
 
 ### Dataset versioning and data cards
 
+A dataset is code. Version every build with its inputs: the seed list, the generator model and prompt, the filter thresholds and the golden-set hash. Store counts at each stage so a change in the funnel is visible. Write a data card (the "datasheet" of Gebru et al., 2018): motivation, composition, how it was collected, known gaps, and approved uses. When a model misbehaves, you can then name the data it learned from.
+
+```json
+{"id": "syn-04102", "source": "synthetic", "seed": "tkt-1187", "generator": "teacher-v3",
+ "prompt_version": "p7", "topic": "refund_over_limit", "persona": "impatient",
+ "messages": [
+  {"role": "user", "content": "My kettle (order 4471, £42) arrived cracked. Refund me now."},
+  {"role": "assistant", "content": "I'm sorry about the kettle. A refund over £30 needs approval from a support agent, so I have sent your request to one and you will hear back today."}],
+ "checks": {"format": "pass", "refund_rule": "pass", "judge": 4, "dedupe_max_rouge": 0.41}}
+```
+
+This is one record of the training file, as the pipeline might write it (an illustrative layout, not a standard).
+
+### Worked example: Brightpost's rare cases
+
+Brightpost's 5,000 logged tickets contain few refunds over £30 that were escalated correctly. The model is weakest there.
+
+1. **Seed.** Support leads choose 150 resolved tickets on refunds and damaged goods, none in the golden set.
+2. **Generate.** The teacher writes 8,000 variants, naming a topic (kettle, toaster, parcel lost), a customer type (calm, angry, non-native speaker) and an amount above or below £30.
+3. **Deduplicate and filter.** 8,000 − 1,800 = 6,200, then 6,200 − 2,000 = 4,200. A reply that promises a £42 refund with no approval step fails the rule check.
+4. **Spot check.** A lead reads 100 and finds 3 bad. The team changes the prompt and reruns.
+5. **Mix and train.** The 4,200 synthetic examples join the real 5,000 tickets (about 46 % synthetic: 4,200 ÷ 9,200). Real data stays in the mix.
+6. **Leak check.** Every kept example is compared with the 200 golden tickets before training; any with ROUGE-L 0.7 or higher is dropped.
+
+All counts are illustrative. The stages match the figure in the Architecture section.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Logs only | Real language; cheap | Few rare cases; noisy; personal data | Plenty of resolved, clean traffic |
+| Human-written | Highest quality | Slow, costly | Rare, risky cases; the golden set |
+| Synthetic from a strong model | Cheap; fills gaps | Inherits generator bias; leakage and collapse risk; provider terms | Coverage gaps, with real data in the mix |
+| Strict filtering | Clean data; smaller files | Discards useful rare cases if too tight | Always; tune thresholds on a sample |
+| Loose filtering | More data | Bad examples teach bad habits | Early experiments only |
 
 ## Real-world examples
 
+- **Self-Instruct (2022).** 175 seed tasks grew to over 52,000 instructions; GPT-3 tuned on the result gained 33 % absolute on Super-NaturalInstructions.
+- **Alpaca (2023).** 52,000 pairs from text-davinci-003 for under \$500, from the same seed set; released for research use.
+- **LIMA (2023).** 1,000 curated examples were enough to tune a 65 B model to strong answers, arguing for quality over volume.
+- **C4 and other web corpora.** Lee et al. (2021) found one 61-word sentence repeated over 60,000 times in C4, and reported over 4 % overlap between some validation and training sets.
+
 ## Common pitfalls
+
+- Putting a golden-set ticket in the seed pool, the prompts or the judge's examples.
+- Running one generator prompt 8,000 times and calling it a dataset.
+- Trusting a judge from the same model family as the generator.
+- Training on synthetic data alone, round after round.
+- Skipping the human read: raw Self-Instruct data was valid in all fields only 54 % of the time.
+- Keeping no record of the seeds, prompt and thresholds, so the dataset cannot be rebuilt.
 
 ## How to answer in an interview
 
+1. Name the three sources and say what each is best for.
+2. Walk the pipeline: seed, generate with deliberate variety, deduplicate, rule filters and judge, human sample.
+3. Raise leakage yourself: golden set split first, overlap checked, the 1.2-point inflation example.
+4. Mention model collapse and the fix: keep real data, accumulate rather than replace.
+5. Close with versioning, a data card and a check of the provider's terms for generated outputs (see [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models)).
+
+**What interviewers listen for:** quality over volume, diversity measured not assumed, a leak check, and a human in the loop.
+
+**Red flags:** "just generate more data", no held-out set, no dedupe, or trusting synthetic data without a sample read.
+
 ## Further reading
+
+- [Self-Instruct: Aligning Language Models with Self-Generated Instructions (Wang et al., 2022)](https://arxiv.org/abs/2212.10560)
+- [Alpaca: A Strong, Replicable Instruction-Following Model (Stanford CRFM, 2023)](https://crfm.stanford.edu/2023/03/13/alpaca.html)
+- [LIMA: Less Is More for Alignment (Zhou et al., 2023)](https://arxiv.org/abs/2305.11206)
+- [AI models collapse when trained on recursively generated data (Shumailov et al., Nature, 2024)](https://www.nature.com/articles/s41586-024-07566-y)
+- [Is Model Collapse Inevitable? (Gerstgrasser et al., 2024)](https://arxiv.org/abs/2404.01413)
+- [Deduplicating Training Data Makes Language Models Better (Lee et al., 2021)](https://arxiv.org/abs/2107.06499)
+- [Datasheets for Datasets (Gebru et al.)](https://arxiv.org/abs/1803.09010)
+- Related pages: [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why can a small, curated dataset beat a large raw one for fine-tuning?" category="Concepts" level="Junior">
+    Fine-tuning mostly teaches style, format and policy, because the model's knowledge comes from pretraining. LIMA tuned a 65 B model on 1,000 curated examples and got strong answers. A large raw set adds duplicates, errors and off-policy replies that the model copies. Quality, coverage and consistency matter more than count. Check by plotting score against dataset size on a fixed golden set.
+  </InterviewQuestion>
+  <InterviewQuestion question="Describe the Self-Instruct pipeline and its main weakness." category="Architecture" level="Mid">
+    Start from a small pool of hand-written seed tasks (175 in the paper). Prompt a model with a few seeds to write new instructions, then generate inputs and outputs for them. Keep a new instruction only if its ROUGE-L similarity to all existing ones is below 0.7, and add survivors to the pool. The weakness is noise: in the authors' review of 200 samples only 54 % had all fields valid. So add rule filters, a judge and a human sample.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you measure whether synthetic data is diverse?" category="Concepts" level="Mid">
+    Embed the examples and look at coverage: cluster them, count how many topic cells or clusters are occupied, and compare with the real traffic. Track near-duplicate rates and the spread of lengths, intents and difficulty. Repeating one prompt piles examples in one spot, while naming a topic, a persona and a difficulty each time spreads them. Always compare with the slices you care about, such as refunds over a limit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Golden-set tickets leaked into your synthetic seeds. What happens, and how do you prevent it?" category="Failure modes" level="Senior">
+    Each leaked seed becomes many near copies, so the training set contains the test. In our example 20 leaked seeds gave about 560 near copies, and the student scored 20 of 20 on tickets it had seen, a 1.2-point inflation over an honest 88 %. Prevent it by splitting the golden set off before choosing seeds, hashing it, and dropping any candidate whose similarity to a golden ticket passes a threshold. Run the check every build.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is model collapse and how do you avoid it when training on synthetic data?" category="Failure modes" level="Senior">
+    Model collapse is the loss of the original distribution's rare cases when each generation trains on the previous generation's output (Shumailov et al., Nature, 2024). The tails vanish first, then outputs get repetitive. Avoid it by keeping real data in every round, and accumulating synthetic data alongside it rather than replacing it, which kept error bounded in Gerstgrasser et al. Also filter, vary the generators and judges, and watch rare-case slices.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you version a fine-tuning dataset?" category="Architecture" level="Mid">
+    Treat it like code. Record the sources, the seed list, the generator model and prompt version, the filter thresholds, the counts after each stage and the golden-set hash, and give each build an id that the model's training run references. Add a data card describing composition, gaps and approved uses. Then any model can be traced to the exact data it learned from, and a regression can be tied to a data change.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost's model is weak on refunds over £30. Would you add synthetic data, and how much?" category="Trade-offs" level="Senior">
+    Yes, to fill the gap, but with limits. Generate variants from real seeds, filter by the refund rule, and have a lead read a sample. Keep real tickets in the mix (4,200 synthetic with 5,000 real is about 46 % synthetic), hold the golden set apart, and measure the slice before and after. Add data in steps and stop when the slice score flattens. Check the generator's terms if it is a hosted model.
+  </InterviewQuestion>
+</InterviewQuestions>
