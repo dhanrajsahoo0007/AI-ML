@@ -314,27 +314,36 @@ import s308 from "../../../assets/diagrams/animated/transformer/bert-input-embed
 import s309 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
 import s310 from "../../../assets/diagrams/animated/transformer/bpe-merges";
 import s311 from "../../../assets/diagrams/animated/transformer/causal-mask";
-import s312 from "../../../assets/diagrams/animated/transformer/cross-attention";
-import s313 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
-import s314 from "../../../assets/diagrams/animated/transformer/feed-forward";
-import s315 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
-import s316 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
-import s317 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
-import s318 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
-import s319 from "../../../assets/diagrams/animated/transformer/multi-head";
-import s320 from "../../../assets/diagrams/animated/transformer/output-head";
-import s321 from "../../../assets/diagrams/animated/transformer/path-length";
-import s322 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
-import s323 from "../../../assets/diagrams/animated/transformer/pe-waves";
-import s324 from "../../../assets/diagrams/animated/transformer/position-injection";
-import s325 from "../../../assets/diagrams/animated/transformer/rope-rotation";
-import s326 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
-import s327 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
-import s328 from "../../../assets/diagrams/animated/transformer/three-families";
-import s329 from "../../../assets/diagrams/animated/transformer/three-masks";
-import s330 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
-import s331 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
-import s332 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s312 from "../../../assets/diagrams/animated/transformer/compute-estimate";
+import s313 from "../../../assets/diagrams/animated/transformer/context-extension";
+import s314 from "../../../assets/diagrams/animated/transformer/cross-attention";
+import s315 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
+import s316 from "../../../assets/diagrams/animated/transformer/feed-forward";
+import s317 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
+import s318 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
+import s319 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
+import s320 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
+import s321 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
+import s322 from "../../../assets/diagrams/animated/transformer/moe-capacity";
+import s323 from "../../../assets/diagrams/animated/transformer/moe-routing";
+import s324 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
+import s325 from "../../../assets/diagrams/animated/transformer/multi-head";
+import s326 from "../../../assets/diagrams/animated/transformer/output-head";
+import s327 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
+import s328 from "../../../assets/diagrams/animated/transformer/path-length";
+import s329 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
+import s330 from "../../../assets/diagrams/animated/transformer/pe-waves";
+import s331 from "../../../assets/diagrams/animated/transformer/position-injection";
+import s332 from "../../../assets/diagrams/animated/transformer/rope-rotation";
+import s333 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
+import s334 from "../../../assets/diagrams/animated/transformer/serving-stack";
+import s335 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
+import s336 from "../../../assets/diagrams/animated/transformer/three-families";
+import s337 from "../../../assets/diagrams/animated/transformer/three-masks";
+import s338 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
+import s339 from "../../../assets/diagrams/animated/transformer/training-pipeline";
+import s340 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s341 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -649,25 +658,34 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/transformer/bert-pretrain-finetune": s309,
   "diagrams/animated/transformer/bpe-merges": s310,
   "diagrams/animated/transformer/causal-mask": s311,
-  "diagrams/animated/transformer/cross-attention": s312,
-  "diagrams/animated/transformer/decoder-only-block": s313,
-  "diagrams/animated/transformer/feed-forward": s314,
-  "diagrams/animated/transformer/input-embedding-sum": s315,
-  "diagrams/animated/transformer/kv-cache-generation": s316,
-  "diagrams/animated/transformer/kv-cache-growth": s317,
-  "diagrams/animated/transformer/mha-gqa-mqa": s318,
-  "diagrams/animated/transformer/multi-head": s319,
-  "diagrams/animated/transformer/output-head": s320,
-  "diagrams/animated/transformer/path-length": s321,
-  "diagrams/animated/transformer/pe-heatmap": s322,
-  "diagrams/animated/transformer/pe-waves": s323,
-  "diagrams/animated/transformer/position-injection": s324,
-  "diagrams/animated/transformer/rope-rotation": s325,
-  "diagrams/animated/transformer/scaled-dot-product": s326,
-  "diagrams/animated/transformer/tensor-shapes": s327,
-  "diagrams/animated/transformer/three-families": s328,
-  "diagrams/animated/transformer/three-masks": s329,
-  "diagrams/animated/transformer/tokenizer-pipeline": s330,
-  "diagrams/animated/transformer/training-vs-inference": s331,
-  "diagrams/animated/uber-eats/architecture": s332,
+  "diagrams/animated/transformer/compute-estimate": s312,
+  "diagrams/animated/transformer/context-extension": s313,
+  "diagrams/animated/transformer/cross-attention": s314,
+  "diagrams/animated/transformer/decoder-only-block": s315,
+  "diagrams/animated/transformer/feed-forward": s316,
+  "diagrams/animated/transformer/flash-attention-io": s317,
+  "diagrams/animated/transformer/input-embedding-sum": s318,
+  "diagrams/animated/transformer/kv-cache-generation": s319,
+  "diagrams/animated/transformer/kv-cache-growth": s320,
+  "diagrams/animated/transformer/mha-gqa-mqa": s321,
+  "diagrams/animated/transformer/moe-capacity": s322,
+  "diagrams/animated/transformer/moe-routing": s323,
+  "diagrams/animated/transformer/moe-total-vs-active": s324,
+  "diagrams/animated/transformer/multi-head": s325,
+  "diagrams/animated/transformer/output-head": s326,
+  "diagrams/animated/transformer/parallelism-3d": s327,
+  "diagrams/animated/transformer/path-length": s328,
+  "diagrams/animated/transformer/pe-heatmap": s329,
+  "diagrams/animated/transformer/pe-waves": s330,
+  "diagrams/animated/transformer/position-injection": s331,
+  "diagrams/animated/transformer/rope-rotation": s332,
+  "diagrams/animated/transformer/scaled-dot-product": s333,
+  "diagrams/animated/transformer/serving-stack": s334,
+  "diagrams/animated/transformer/tensor-shapes": s335,
+  "diagrams/animated/transformer/three-families": s336,
+  "diagrams/animated/transformer/three-masks": s337,
+  "diagrams/animated/transformer/tokenizer-pipeline": s338,
+  "diagrams/animated/transformer/training-pipeline": s339,
+  "diagrams/animated/transformer/training-vs-inference": s340,
+  "diagrams/animated/uber-eats/architecture": s341,
 };
