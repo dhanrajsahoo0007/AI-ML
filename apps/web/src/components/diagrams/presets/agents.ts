@@ -204,7 +204,7 @@ export const CODING_CONTEXT = {
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** Chance that n steps in a row all succeed when each succeeds with probability p. */
-export const allSucceed = (p: number, n: number) => p ** n;
+const allSucceed = (p: number, n: number) => p ** n;
 
 /** Compounding steps: 0.95^10 = 0.599, 0.95^20 = 0.358, 0.99^20 = 0.818. */
 export const COMPOUNDING = {
@@ -240,7 +240,7 @@ const CHAR_W = 7.2;
 // 1. The loop ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The stations of the agent loop, with their legend tones. */
-export const LOOP_STATIONS = {
+const LOOP_STATIONS = {
   context: { label: "Assemble\ncontext", short: "Context", tone: AGENT_TONE.infra },
   model: { label: "Call the\nmodel", short: "Model", tone: AGENT_TONE.model },
   tool: { label: "Run the\ntool", short: "Tool", tone: AGENT_TONE.action },
@@ -568,7 +568,7 @@ export function traceRowsSize(rows: TraceRow[], opts: TraceOpts = {}) {
 export type ContextKind = "instructions" | "tools" | "task" | "history" | "memory" | "files" | "results" | "free";
 
 /** Legend tone and default label of each context slice. Free space is drawn on paper. */
-export const CONTEXT_KIND: Record<ContextKind, { tone: LayoutTone; label: string }> = {
+const CONTEXT_KIND: Record<ContextKind, { tone: LayoutTone; label: string }> = {
   instructions: { tone: AGENT_TONE.infra, label: "Instructions" },
   tools: { tone: AGENT_TONE.action, label: "Tool definitions" },
   task: { tone: AGENT_TONE.task, label: "Task" },
@@ -910,6 +910,6 @@ export function patternTile(
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** 1200 → "1,200". */
-export function fmt(n: number) {
+function fmt(n: number) {
   return n.toLocaleString("en-GB");
 }

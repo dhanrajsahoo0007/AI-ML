@@ -101,7 +101,7 @@ const spec: DiagramSpec = {
     },
   ],
   edges: [
-    { from: "customer", to: "router", label: "message", packet: true },
+    { from: "customer", to: "router", packet: true },
     { from: "router", to: "chain", label: "simple FAQ", labelAt: 0.55, packet: true, step: 2 },
     { from: "chain", to: "reply", packet: true, step: 2 },
     { from: "router", to: "workflow", label: "known task", labelAt: 0.55, packet: true, step: 3 },

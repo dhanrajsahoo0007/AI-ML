@@ -70,7 +70,7 @@ const spec: DiagramSpec = {
       tone: AGENT_TONE.infra,
       x: COL.mid,
       y: ROW.harness,
-      w: 176,
+      w: 196,
     },
     ...(
       [
