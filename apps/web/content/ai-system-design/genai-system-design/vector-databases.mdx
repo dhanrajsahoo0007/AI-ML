@@ -19,60 +19,162 @@ Every document becomes a point in a space with hundreds of dimensions, placed so
 
 ## Core concepts
 
-1. **Embeddings and dimensions.** Typical text embeddings have a few hundred to a few thousand dimensions. Storage grows with count times dimension times bytes per value.
+Every figure on this page uses the running example from [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals): Brightpost's help centre of 1,200 articles, cut into **3,600 chunks**, each turned into a vector of **1,536 numbers**. The question is "How do I reset my password if I lost my phone?"
+
+1. **Embeddings and dimensions.** Typical text embeddings have a few hundred to a few thousand dimensions. Storage grows with count times dimension times bytes per value. Brightpost's vectors take 3,600 × 1,536 × 4 bytes = 22,118,400 bytes, about **22 MB**, before any index structure.
 
 2. **Similarity metrics.** Cosine similarity, dot product and Euclidean distance. Use whatever the embedding model was trained for; with normalized vectors they rank the same.
 
 3. **Exact (flat) search.** Brute force; perfect recall; fine up to perhaps hundreds of thousands of vectors, especially on GPUs.
 
-4. **HNSW.** A multi-layer proximity graph. Search enters at the sparse top layer, moves greedily toward the query, and descends to denser layers. Parameters such as M (links per node) and efSearch trade memory and latency for recall.
+An approximate nearest-neighbor (ANN) index is a way of not looking at most vectors. Here is how much it skips for one question.
+
+<AnimatedDiagram
+  spec="animated/rag/exact-vs-ann"
+  stepper
+  caption="The index buys a 12-fold cut in work by never looking at most vectors, which is also how it can miss one."
+/>
+
+**How to read it.** Each tile stands for 60 of the 3,600 vectors. Step 1 is exact search: the question is compared with every tile, so the answer is always right and the cost grows with every vector added. Step 2 is an ANN index (IVF, explained below): it compares the question with 60 cell centres, then opens only the 4 nearest cells. The red tile is the price: a true neighbour that sits in a cell the search never opens.
+
+**The numbers.** Exact: 3,600 comparisons × 1,536 multiply-adds = 5,529,600. ANN: 60 centroids + 4 cells × 60 vectors = 300 comparisons × 1,536 = 460,800, which is 3,600 ÷ 300 = **12 times less work**. Exact search grows in step with the collection: 1,000 times the vectors is 1,000 times the work, and that is where an index pays off.
+
+4. **HNSW.** A multi-layer proximity graph. Search enters at the sparse top layer, moves greedily toward the query, and descends to denser layers. Parameters such as M (links per node) and efSearch trade memory and latency for recall. The [Deep dive](#hnsw-search-layer-by-layer) walks through one search.
 
 5. **IVF (inverted file).** Clusters vectors with k-means; at query time only the nearest few clusters (nprobe) are searched.
 
+A cell is the region of space closest to one cluster centre (centroid). The picture shows why the cell borders matter.
+
+<AnimatedDiagram
+  spec="animated/rag/ivf-cells"
+  stepper
+  caption="The question is closest to a vector in a cell it never opens: probing more cells is the fix, and the cost."
+/>
+
+**How to read it.** Step 1 is the build: k-means places the centroids (violet crosses) and files every vector under its nearest one. Step 2 compares the question with every centroid; there are only 60, so this is cheap. Step 3 opens the 4 nearest cells (orange borders) and compares the question with every vector inside them. Step 4 shows the catch: the vector nearest the question sits on the far side of a border, in a fifth cell, so it is never compared. The drawing has 16 cells; the real index has 60.
+
+**The numbers.** The figure uses √N cells: √3,600 = **60 cells** of about 3,600 ÷ 60 = 60 vectors (illustrative; pgvector suggests √rows only above a million rows, and a collection this small does not need IVF at all). With nprobe = 4 the search compares 60 + 4 × 60 = **300 vectors, 8%** of 3,600. nprobe = 5 would open the cell that step 4 missed, for 60 more comparisons.
+
+<Callout tone="red" title="What breaks">
+  A question that lands near a cell border has true neighbours in cells it does not open, so recall drops with no error to show it. Fix: raise nprobe until recall@k against exact search reaches your target, and rebuild the cells (re-run k-means) when the data drifts far from what the centroids were trained on.
+</Callout>
+
 6. **Product quantization (PQ).** Splits each vector into sub-vectors and replaces each with the id of its nearest centroid, compressing vectors many times over at some accuracy cost. IVF-PQ combines both for billion-scale search.
+
+Here is one Brightpost vector going through PQ, byte by byte.
+
+<AnimatedDiagram
+  spec="animated/rag/pq-codes"
+  stepper
+  caption="Each 16-number piece is replaced by one byte that names its nearest centroid, so a vector shrinks 64-fold."
+/>
+
+**How to read it.** Step 1 is one chunk's vector: 1,536 numbers of 4 bytes each. Step 2 cuts it into 96 sub-vectors of 16 numbers. Step 3 zooms in on sub-vector 1: it has its own codebook of 256 centroids learned by k-means, and only the id of the nearest one (37) is kept. With 256 centroids an id fits in one byte. Step 4 does the same for all 96 sub-vectors. Distances are then estimated from these codes with small lookup tables, without rebuilding the original vector.
+
+**The numbers.** 1,536 ÷ 96 = 16 numbers per sub-vector. Per vector, 6,144 bytes become 96 bytes, **64 times smaller**. For the index, 3,600 × 96 = **345,600 bytes, about 0.35 MB**, instead of 22 MB.
+
+<Callout tone="red" title="What breaks">
+  PQ distances are estimates, so the true nearest chunk can rank below a near miss. It also costs memory of its own: 96 codebooks × 256 centroids × 16 numbers × 4 bytes = 1,572,864 bytes, about 1.6 MB, which is more than Brightpost's 0.35 MB of codes. Fix: use PQ only when raw vectors no longer fit in memory (millions of vectors, not thousands), and re-rank the top candidates with their full vectors.
+</Callout>
 
 7. **Disk-based indexes.** Designs such as DiskANN keep most data on SSD to cut memory costs for very large collections.
 
 8. **Filtering.** Restricting results by metadata (tenant, permissions, date). Pre-filtering can break graph search when few vectors match; post-filtering can return too few results. Good engines integrate filters into the search.
 
+Where the filter runs decides how many results come back. Suppose Brightpost's index also holds staff-only chunks, and a customer asks the question.
+
+<AnimatedDiagram
+  spec="animated/rag/filtered-search"
+  stepper
+  caption="Filtering after the search throws away 3 of 5 results; filtering inside the search keeps looking until it has 5."
+/>
+
+**How to read it.** Step 1 sets up the query: the question vector plus a filter, "visible to customers". Step 2 filters after the search: the index returns its 5 nearest chunks, then the filter drops the 3 staff-only ones, including the runbook. Step 3 filters during the search: the walk through the index skips chunks that fail the filter and keeps going until 5 pass. Both articles the answer needs are now in the list.
+
+**The numbers.** After: 5 − 3 = **2 chunks**, so the answer misses the backup-code step. During: **5 chunks**, the same top 5 the RAG pipeline uses. The staff chunks' scores (0.83, 0.81, 0.79) are illustrative.
+
+<Callout tone="red" title="What breaks">
+  Post-filtering returns fewer than k results whenever the filter is selective, and nothing reports it. Pre-filtering (finding the matching ids first, then searching only among them) can cut an HNSW graph into pieces the walk cannot cross. Fix: use an engine that applies filters during the traversal, and switch to exact search over the matching subset when very few vectors match. See [RAG Access Control and Multi-Tenancy](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy).
+</Callout>
+
 9. **Recall at k.** The standard quality metric for ANN: the share of true nearest neighbors found in the top k, measured against exact search.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph WRITE["Write path"]
-        DOC["Documents / items"] --> EMB["Embedding model"]
-        EMB --> UPSERT["Upsert vector + metadata"]
-        UPSERT --> WAL["Write log"] --> IDX[("ANN index segments<br/>+ metadata store")]
-    end
-    subgraph READ["Read path"]
-        Q["Query"] --> QEMB["Embed query"]
-        QEMB --> SEARCH["ANN search with filters<br/>(HNSW / IVF-PQ)"]:::accent
-        SEARCH --> RES["Top-k ids + scores"]
-        RES --> RERANK["Optional re-rank / hybrid fusion"]
-    end
-    IDX --> SEARCH
-```
+A vector database has two paths that meet at one index. Step through them once with Brightpost's chunks and one question.
 
-A query's path:
+<AnimatedDiagram
+  spec="animated/rag/vectordb-write-read"
+  stepper
+  caption="Writes and reads meet at one index; the filter is part of the search, not a step after it."
+/>
 
-1. Embed the query with the same model as the documents.
-2. Search the ANN index, applying metadata filters during the search.
-3. Return the top-k ids, scores and metadata.
-4. Optionally merge with keyword results and re-rank.
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="Chunks are embedded">
+    Each of the 3,600 chunks goes through the embedding model and comes out as 1,536 numbers. This happens once per chunk, and again only when the chunk or the model changes. The vectors exist only in memory so far.
+  </StepCard>
+  <StepCard n={2} title="Each vector is upserted with its metadata">
+    An upsert inserts a record or replaces the one with the same id. Each record holds the chunk id, its vector and its metadata: article, URL, language and who may read it. Storing metadata next to the vector is what makes filtered search possible later. The write is not yet safe from a crash.
+  </StepCard>
+  <StepCard n={3} title="The write log makes it durable">
+    Most vector databases append the write to a log on disk before they touch the index, so a crash cannot lose an acknowledged write. Index building can then happen in batches in the background. The record is stored but not yet searchable.
+  </StepCard>
+  <StepCard n={4} title="The index makes it searchable">
+    The vector joins the ANN index (HNSW, IVF or IVF-PQ), with its metadata stored next to it. Many databases build the index in segments and merge them over time, so a new write can take a moment to appear in search results. Nothing has asked a question yet.
+  </StepCard>
+  <StepCard n={5} title="A question is embedded by the same model">
+    The customer's question becomes a vector of 1,536 numbers, using the same model as the chunks. A vector from a different model would sit in a different space, and every distance would be meaningless. The question vector still needs rules about what this customer may see.
+  </StepCard>
+  <StepCard n={6} title="The filter comes from who is asking">
+    The application turns the user's identity and groups into a metadata filter, here "visible to customers". It comes from the session, never from the question text, so a prompt cannot widen it. The filter and the vector now go to the search together.
+  </StepCard>
+  <StepCard n={7} title="The search walks the index with the filter applied">
+    The ANN search walks the index toward the question vector and skips records that fail the filter as it goes. This is the "filter during search" from concept 8, so it still finds 5 permitted chunks. The result is a list of ids and scores, not yet text.
+  </StepCard>
+  <StepCard n={8} title="The top 5 go back to the RAG pipeline">
+    The database returns the top 5 chunk ids, their scores and metadata; the application fetches the chunk text and builds the prompt. Keyword results can be merged and re-ranked at this point (see [Advanced RAG](/ai-system-design/genai-system-design/advanced-rag)). Measure recall@5 on sample questions to know what the index is missing.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative timings from the running example): embedding the question ≈ 20 ms, the filtered ANN search ≈ 15 ms. The index holds 3,600 vectors, about 22 MB of raw floats.
 
 ## Deep dive
 
 ### HNSW search, layer by layer
 
-```mermaid
-flowchart TB
-    L2["Layer 2: few nodes, long links"] -->|"greedy hop toward query"| L1["Layer 1: more nodes"]
-    L1 -->|"greedy hop"| L0["Layer 0: all nodes, short links"]
-    L0 --> BEAM["Beam search (efSearch candidates)"]:::accent
-    BEAM --> TOP["Top-k nearest neighbors"]
-```
+HNSW (hierarchical navigable small world) is the index most vector databases use by default. Each vector is a point in a graph, linked to its near neighbours, and a few points also appear in sparser layers above. Watch one search go down the layers.
+
+<AnimatedDiagram
+  spec="animated/rag/hnsw-layers"
+  stepper
+  caption="The upper layers get the search near the question in a few long hops; only the bottom layer is searched carefully."
+/>
+
+**How to read it**, step by step:
+
+<StepCards>
+  <StepCard n={1} title="One graph in three layers">
+    Every point is in layer 0. When a point is inserted it draws a random top layer, and each layer up holds about 1 in M of the points below it, so upper layers are sparse and their links are long. Each point keeps up to M links per layer, and 2 × M in layer 0. Nothing is searched yet.
+  </StepCard>
+  <StepCard n={2} title="Enter at the top and hop greedily">
+    The search starts at a fixed entry point in the top layer. It moves to whichever neighbour is closer to the question, and repeats until no neighbour is closer. Long links cross the space in one or two hops, but a sparse layer cannot get very close.
+  </StepCard>
+  <StepCard n={3} title="Drop a layer and hop again">
+    Where it stopped, the search drops to the same point one layer down, which has more neighbours, and hops greedily again. Each layer starts closer than the last. Greedy hops still keep only one candidate, which can stall next to the answer.
+  </StepCard>
+  <StepCard n={4} title="Widen to a beam at layer 0">
+    In layer 0 the search keeps a list of the ef best candidates found so far (efSearch in most libraries) and explores their neighbours, instead of following one path. A bigger ef looks at more points: higher recall, more time. The rings show 8 of the 64 candidates.
+  </StepCard>
+  <StepCard n={5} title="Return the top k">
+    When no unexplored candidate is closer than the worst one in the list, the search stops and returns the k nearest it found, here the top 5. They are very likely, not certainly, the true 5 nearest; recall@k measures how often.
+  </StepCard>
+</StepCards>
+
+**The numbers.** With M = 16 (an illustrative common default), layer 1 holds about 3,600 ÷ 16 = **225 points**, layer 2 about 3,600 ÷ 16² ≈ **14 points**, and layer 3 about 3,600 ÷ 16³ ≈ 0.9 points, so Brightpost's index really would have about three layers. The graph adds memory: in layer 0, up to 32 links × 4-byte ids = 128 bytes per point, 3,600 × 128 = 460,800 bytes, about 0.5 MB next to the 22 MB of vectors. efSearch = 64 is also illustrative; tune it against recall.
+
+The paper (Malkov and Yashunin) calls the search list size ef and the build-time list size efConstruction; it suggests M between 5 and 48, with larger M for high recall and high-dimensional data.
 
 ### Scaling choices
 
@@ -125,6 +227,8 @@ flowchart TB
 - [Efficient and Robust Approximate Nearest Neighbor Search Using HNSW (Malkov and Yashunin, 2016)](https://arxiv.org/abs/1603.09320)
 - [Billion-scale Similarity Search with GPUs, FAISS (Johnson et al., 2017)](https://arxiv.org/abs/1702.08734)
 - [Product Quantization for Nearest Neighbor Search (Jégou et al., 2011)](https://doi.org/10.1109/TPAMI.2010.57)
+- [DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node (Subramanya et al., 2019)](https://papers.nips.cc/paper/2019/hash/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Abstract.html)
+- [ACORN: Performant and Predicate-Agnostic Search Over Vector Embeddings and Structured Data (Patel et al., 2024)](https://arxiv.org/abs/2403.04871)
 - [MTEB: Massive Text Embedding Benchmark (Muennighoff et al., 2022)](https://arxiv.org/abs/2210.07316)
 - [pgvector (GitHub)](https://github.com/pgvector/pgvector)
 
