@@ -238,29 +238,33 @@ import s232 from "../../../assets/diagrams/animated/messenger/aws";
 import s233 from "../../../assets/diagrams/animated/rag/advanced-pipeline";
 import s234 from "../../../assets/diagrams/animated/rag/bi-vs-cross-encoder";
 import s235 from "../../../assets/diagrams/animated/rag/chunk-overlap";
-import s236 from "../../../assets/diagrams/animated/rag/closed-vs-open-book";
-import s237 from "../../../assets/diagrams/animated/rag/corrective-loop";
-import s238 from "../../../assets/diagrams/animated/rag/exact-vs-ann";
-import s239 from "../../../assets/diagrams/animated/rag/failure-map";
-import s240 from "../../../assets/diagrams/animated/rag/filtered-search";
-import s241 from "../../../assets/diagrams/animated/rag/freshness-pipeline";
-import s242 from "../../../assets/diagrams/animated/rag/hnsw-layers";
-import s243 from "../../../assets/diagrams/animated/rag/incremental-reindex";
-import s244 from "../../../assets/diagrams/animated/rag/ivf-cells";
-import s245 from "../../../assets/diagrams/animated/rag/kg-build-and-query";
-import s246 from "../../../assets/diagrams/animated/rag/kg-ontology";
-import s247 from "../../../assets/diagrams/animated/rag/lost-in-the-middle";
-import s248 from "../../../assets/diagrams/animated/rag/pipeline";
-import s249 from "../../../assets/diagrams/animated/rag/pq-codes";
-import s250 from "../../../assets/diagrams/animated/rag/query-rewriting";
-import s251 from "../../../assets/diagrams/animated/rag/rerank-funnel";
-import s252 from "../../../assets/diagrams/animated/rag/retrieval-metrics";
-import s253 from "../../../assets/diagrams/animated/rag/rrf-fusion";
-import s254 from "../../../assets/diagrams/animated/rag/similarity-topk";
-import s255 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
-import s256 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
-import s257 from "../../../assets/diagrams/animated/transformer/architecture";
-import s258 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s236 from "../../../assets/diagrams/animated/rag/chunk-size-tradeoff";
+import s237 from "../../../assets/diagrams/animated/rag/chunking-strategies";
+import s238 from "../../../assets/diagrams/animated/rag/closed-vs-open-book";
+import s239 from "../../../assets/diagrams/animated/rag/contextual-chunk";
+import s240 from "../../../assets/diagrams/animated/rag/corrective-loop";
+import s241 from "../../../assets/diagrams/animated/rag/exact-vs-ann";
+import s242 from "../../../assets/diagrams/animated/rag/failure-map";
+import s243 from "../../../assets/diagrams/animated/rag/filtered-search";
+import s244 from "../../../assets/diagrams/animated/rag/freshness-pipeline";
+import s245 from "../../../assets/diagrams/animated/rag/hnsw-layers";
+import s246 from "../../../assets/diagrams/animated/rag/incremental-reindex";
+import s247 from "../../../assets/diagrams/animated/rag/ivf-cells";
+import s248 from "../../../assets/diagrams/animated/rag/kg-build-and-query";
+import s249 from "../../../assets/diagrams/animated/rag/kg-ontology";
+import s250 from "../../../assets/diagrams/animated/rag/lost-in-the-middle";
+import s251 from "../../../assets/diagrams/animated/rag/parse-layout";
+import s252 from "../../../assets/diagrams/animated/rag/pipeline";
+import s253 from "../../../assets/diagrams/animated/rag/pq-codes";
+import s254 from "../../../assets/diagrams/animated/rag/query-rewriting";
+import s255 from "../../../assets/diagrams/animated/rag/rerank-funnel";
+import s256 from "../../../assets/diagrams/animated/rag/retrieval-metrics";
+import s257 from "../../../assets/diagrams/animated/rag/rrf-fusion";
+import s258 from "../../../assets/diagrams/animated/rag/similarity-topk";
+import s259 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
+import s260 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
+import s261 from "../../../assets/diagrams/animated/transformer/architecture";
+import s262 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -499,27 +503,31 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/rag/advanced-pipeline": s233,
   "diagrams/animated/rag/bi-vs-cross-encoder": s234,
   "diagrams/animated/rag/chunk-overlap": s235,
-  "diagrams/animated/rag/closed-vs-open-book": s236,
-  "diagrams/animated/rag/corrective-loop": s237,
-  "diagrams/animated/rag/exact-vs-ann": s238,
-  "diagrams/animated/rag/failure-map": s239,
-  "diagrams/animated/rag/filtered-search": s240,
-  "diagrams/animated/rag/freshness-pipeline": s241,
-  "diagrams/animated/rag/hnsw-layers": s242,
-  "diagrams/animated/rag/incremental-reindex": s243,
-  "diagrams/animated/rag/ivf-cells": s244,
-  "diagrams/animated/rag/kg-build-and-query": s245,
-  "diagrams/animated/rag/kg-ontology": s246,
-  "diagrams/animated/rag/lost-in-the-middle": s247,
-  "diagrams/animated/rag/pipeline": s248,
-  "diagrams/animated/rag/pq-codes": s249,
-  "diagrams/animated/rag/query-rewriting": s250,
-  "diagrams/animated/rag/rerank-funnel": s251,
-  "diagrams/animated/rag/retrieval-metrics": s252,
-  "diagrams/animated/rag/rrf-fusion": s253,
-  "diagrams/animated/rag/similarity-topk": s254,
-  "diagrams/animated/rag/vector-vs-graph": s255,
-  "diagrams/animated/rag/vectordb-write-read": s256,
-  "diagrams/animated/transformer/architecture": s257,
-  "diagrams/animated/uber-eats/architecture": s258,
+  "diagrams/animated/rag/chunk-size-tradeoff": s236,
+  "diagrams/animated/rag/chunking-strategies": s237,
+  "diagrams/animated/rag/closed-vs-open-book": s238,
+  "diagrams/animated/rag/contextual-chunk": s239,
+  "diagrams/animated/rag/corrective-loop": s240,
+  "diagrams/animated/rag/exact-vs-ann": s241,
+  "diagrams/animated/rag/failure-map": s242,
+  "diagrams/animated/rag/filtered-search": s243,
+  "diagrams/animated/rag/freshness-pipeline": s244,
+  "diagrams/animated/rag/hnsw-layers": s245,
+  "diagrams/animated/rag/incremental-reindex": s246,
+  "diagrams/animated/rag/ivf-cells": s247,
+  "diagrams/animated/rag/kg-build-and-query": s248,
+  "diagrams/animated/rag/kg-ontology": s249,
+  "diagrams/animated/rag/lost-in-the-middle": s250,
+  "diagrams/animated/rag/parse-layout": s251,
+  "diagrams/animated/rag/pipeline": s252,
+  "diagrams/animated/rag/pq-codes": s253,
+  "diagrams/animated/rag/query-rewriting": s254,
+  "diagrams/animated/rag/rerank-funnel": s255,
+  "diagrams/animated/rag/retrieval-metrics": s256,
+  "diagrams/animated/rag/rrf-fusion": s257,
+  "diagrams/animated/rag/similarity-topk": s258,
+  "diagrams/animated/rag/vector-vs-graph": s259,
+  "diagrams/animated/rag/vectordb-write-read": s260,
+  "diagrams/animated/transformer/architecture": s261,
+  "diagrams/animated/uber-eats/architecture": s262,
 };
