@@ -57,6 +57,10 @@ const shapes: LayoutShape[] = [
     })
   ),
 ];
+// Lift the "pinned version" label clear of its line (the curve helper sets it on the line's end).
+shapes.forEach((s) => {
+  if (s.id === "c2-s0-label") s.y = (s.y ?? 0) - 16;
+});
 shapes.forEach((s) => {
   if (!/-s\d+$/.test(s.id) && !/-m\d+$/.test(s.id)) s.quiet = true;
 });

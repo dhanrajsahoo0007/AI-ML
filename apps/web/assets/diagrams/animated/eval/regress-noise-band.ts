@@ -89,17 +89,40 @@ for (let v = 170; v <= 195; v += 5) {
   );
 }
 shapes.push(text("axis-t", X0, AXIS_Y + 30, 700, 18, "cases passed out of 200", 1));
-shapes.push({
-  id: "band",
-  type: "box",
-  x: xOf(BAND.low),
-  y: 110,
-  w: Math.round((xOf(BAND.high) - xOf(BAND.low)) * 10) / 10,
-  h: AXIS_Y - 110,
-  tone: PROD_TONE.check,
-  fill: "soft",
-  step: 2,
-});
+// The band is an outline path and the mean a dashed path: a filled box would draw over the path and hide the mean.
+shapes.push(
+  {
+    id: "band",
+    type: "path",
+    x: 0,
+    y: 0,
+    points: [
+      [xOf(BAND.low), 110],
+      [xOf(BAND.high), 110],
+      [xOf(BAND.high), AXIS_Y],
+      [xOf(BAND.low), AXIS_Y],
+      [xOf(BAND.low), 110],
+    ],
+    tone: PROD_TONE.check,
+    step: 2,
+  },
+  ...(
+    [
+      ["a", 112, 126],
+      ["b", 178, AXIS_Y],
+    ] as const
+  ).map(([k, y0, y1]): LayoutShape => ({
+    id: `mean-${k}`,
+    type: "path",
+    x: 0,
+    y: 0,
+    points: [
+      [xOf(NOISE_MEAN), y0],
+      [xOf(NOISE_MEAN), y1],
+    ],
+    step: 1,
+  }))
+);
 NOISE_RUNS.forEach((v, i) => {
   shapes.push(
     {
@@ -117,18 +140,6 @@ NOISE_RUNS.forEach((v, i) => {
   );
 });
 shapes.push(
-  {
-    id: "mean",
-    type: "path",
-    x: 0,
-    y: 0,
-    points: [
-      [xOf(NOISE_MEAN), 112],
-      [xOf(NOISE_MEAN), AXIS_Y],
-    ],
-    dashed: true,
-    step: 1,
-  },
   text("mean-t", xOf(NOISE_MEAN) - 126, 92, 120, 18, `mean ${NOISE_MEAN} (90 %)`, 1),
   text(
     "band-t",
