@@ -762,11 +762,18 @@ Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the defaul
 (`--dg-<tone>`, `--dg-<tone>-soft`) that switch automatically in dark mode. Suggested: clients and edge `neutral` or
 `blue`, app/compute `teal`, data stores `violet`, caches and queues `orange`, failure `red`, new or healthy `green`.
 
-Layout specs (and their groups) may also use two diagram-only tones, `pink` and `lime` (type `LayoutTone`), and a
-third, stronger value per tone, the pastel block fill `--dg-<tone>-fill` (shape `fill: "pastel"`). They exist for the
-Transformer figures; their fixed colour legend is `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts`
-(embeddings `pink`, attention `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
-Pink and lime are not section tones.
+Layout specs (shapes and groups) and architecture specs (nodes, zones and edges) may also use two diagram-only tones,
+`pink` and `lime` (type `LayoutTone`), and a third, stronger value per tone, the pastel block fill `--dg-<tone>-fill`
+(layout shape `fill: "pastel"`, architecture card node `fill: "pastel"`). Sequence lanes keep the seven tones. Pink and
+lime are not section tones. Two figure families have a fixed legend in code:
+
+- Transformer: `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts` (embeddings `pink`, attention
+  `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
+- RAG: `RAG_TONE` in `src/components/diagrams/presets/rag.ts` (documents and chunks `blue`, embeddings and vectors
+  `pink`, vector index and stores `violet`, keyword index and filters `teal`, the question `orange`, ranking `lime`,
+  the LLM and the answer `green`, failure `red`, user and orchestration `neutral`). At most four tones plus neutral in
+  one figure; red only where something breaks. Case-study architectures keep the zone table in
+  `CASE-STUDY-FORMAT.md`.
 
 Zone `kind`:
 
@@ -785,7 +792,9 @@ below; its box is about 76 wide and reaches 62 below the centre. `icon` is a [gl
 name from `src/lib/icons.ts`.
 
 Node fields: `id`, `label`, `sub?` (second line), `icon?`, `tone?`, `accent?` (solid fill, for the component the
-diagram is about), `variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
+diagram is about), `fill?: "paper" | "soft" | "pastel"` (card background: `"paper"` is the default outline card,
+`"soft"` the pale tint, `"pastel"` a coloured block with ink text; ignored with `accent`, not allowed on glyph nodes),
+`variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
 from `src/lib/cloud-catalog.ts` or `{ label, id? }`; adds the Generic/AWS/Google Cloud/Azure toggle, which the tag's
 `cloud` prop can start on a provider, and feeds `<CloudMapping>`), `x`, `y`, `w?`, `h?`.
 
@@ -971,6 +980,14 @@ Transformer figures build their shapes with the helpers in `src/components/diagr
 hand, so every figure keeps the same legend and proportions. `assets/diagrams/animated/transformer/architecture.ts` is
 the reference spec.
 
+RAG figures (`assets/diagrams/animated/rag/`) build theirs with `src/components/diagrams/presets/rag.ts`: the legend
+`RAG_TONE`, the running example (the Brightpost help centre: `CORPUS`, `QUESTIONS`, `RESULTS`, `METRICS`, `TOP_K`,
+`PROMPT`, `LATENCY_MS` and the Wave 2 constants, each with its working in a comment) and builders `docStrip` (a
+document as token cells with chunk marks), `chunkRow`, `scatter` (a 2-D embedding space with a top-k ring),
+`rankList` (ranked results with scores and a top-k cut), `funnel` (stage widths proportional to candidate counts)
+and `stageStrip` (the six-stage locator). A number that appears in two figures must come from one constant there.
+`assets/diagrams/animated/rag/pipeline.ts` is the reference architecture spec.
+
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
 ```ts
@@ -1045,6 +1062,7 @@ Architecture:
   the same room. A default 116-wide node with an icon fits about 11 label characters, so set `w: 150` for "Session
   registry" (16 characters).
 - Card height is at least 36.
+- `fill` only on card nodes, and not together with `accent`.
 
 Sequence:
 
@@ -1160,6 +1178,13 @@ label underneath (data stores, logs), or the default `"card"` for a boxed node w
 | `model`         | Small neural net: two, three and two dots in layers, each layer joined to the next  |
 | `policy`        | Page with three check-list rows and a filled shield over the bottom corner          |
 | `pipeline`      | Three stage boxes in a row joined by small arrows, the first filled with a check    |
+| `chunk`         | A page cut into three strips, the middle strip filled and shifted out               |
+| `vector`        | A row of six cells in brackets, shaded at different strengths (an embedding)        |
+| `embedder`      | Text page into a filled funnel, out comes a column of shaded cells (text → vector)  |
+| `vector-index`  | Points in a rounded frame, a dashed nearest-neighbour ring round a query cross      |
+| `reranker`      | Three list rows with a curved arrow lifting the bottom one to the top               |
+| `prompt`        | A framed stack: instruction band, a context block with lines, a filled question bar |
+| `graph`         | Six nodes joined by edges, the centre node filled (a knowledge graph)               |
 
 ---
 
