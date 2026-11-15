@@ -3,22 +3,344 @@ title: Chain / Flow Orchestration
 description: Design multi-step LLM workflows with clear execution models, branching, parallelism, and failure semantics using graph-native orchestration patterns.
 ---
 
-Single-shot completion APIs are rarely enough for agents, retrieval-augmented generation, tool use, or human-in-the-loop approvals. Orchestration frameworks such as LangChain and LangGraph help you express a flow as nodes (LLM calls, retrievers, validators, tools) and edges (data dependencies and control flow). The important architectural choice is whether your workload is a directed acyclic graph of deterministic stages or a richer cyclic graph that models re-planning, loops until a quality check passes, or stateful agents that revisit earlier steps with updated context.
+Single-shot completion APIs are rarely enough for agents, retrieval-augmented generation, tool use or human-in-the-loop approvals. Orchestration frameworks such as LangChain and LangGraph let you write a flow as **nodes** (LLM calls, retrievers, validators, tools) and **edges** (data dependencies and control flow). [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) names the patterns: chaining, routing, parallelization and the rest. This page is about how such a graph **runs**: the order nodes execute in, the state they share, where it is saved, and what happens when a node fails halfway.
 
-DAG-style pipelines are easier to reason about: topological execution, clear batching points, and straightforward retries at stage boundaries. Graph or state-machine models add conditional branches (route by intent, model capability, or validation outcome), parallel fan-out for independent subtasks, and merge points where partial results must be reconciled. LangGraph-style approaches make the state object explicit so you can persist checkpoints, implement human interrupts, and resume after failures without replaying expensive upstream work.
+## TL;DR
 
-Error handling should be first-class. Transient provider errors warrant exponential backoff with jitter and idempotent tool calls where possible. Business-level failures (tool returned empty, parser rejected JSON) need compensating paths: alternate models, simplified prompts, or graceful degradation messages. Without this, chains become fragile cascades where one weak link aborts the user experience. Logging each node with inputs, outputs, latency, and token counts makes postmortems feasible when a branch misroutes traffic.
+- The first choice is the **execution model**: a **DAG** (directed acyclic graph) of fixed stages, or a **cyclic graph** that can loop back to re-plan, retry or revise until a check passes.
+- One typed **state object** flows through the graph. Each node reads it and returns an update; **reducers** decide how updates from parallel nodes merge.
+- A **checkpointer** saves the state after every step. That one feature gives you pause for a person, resume after a crash, and replay for debugging.
+- **Retries** belong on nodes, with exponential backoff and jitter. A retry re-runs the whole node, so every side effect needs an **idempotency key** that was saved before the call.
+- **Fan-out** cuts latency only when branches are independent; cap concurrency to stay inside rate limits, and give shared keys a reducer.
+- Graph frameworks cost a learning curve. They pay off when a flow is long-lived, team-owned or safety-critical.
 
-Parallel execution improves latency when subtasks are independent, but you must manage token and rate limits across concurrent LLM calls and avoid race conditions on shared mutable state. State machines help agents by constraining which transitions are legal, embedding guardrails before dangerous tools, and making cyclic behavior (reflect, critique, revise) explicit rather than implicit recursion. The trade-off is engineering overhead: graph frameworks add learning curve and operational complexity compared to a simple script, which is acceptable when flows are long-lived, team-owned, and safety-critical.
+## The idea in plain English
+
+A chain is a recipe card: step 1, step 2, step 3. A flow graph is the kitchen's ticket system. Two cooks can work on one order at once, the pass waits for both plates, a manager signs off expensive dishes, and if a cook drops a pan the ticket says exactly where the order stopped. Nobody restarts the order from the beginning.
+
+The other way to run the same task is to let the model decide every step. Here is the Brightpost refund wired both ways:
+
+<AnimatedDiagram
+  spec="animated/agents/workflow-vs-agent"
+  minWidth={620}
+  caption="Same task, same tools. In a workflow your code fixes the order; in an agent the model chooses it, one turn at a time."
+/>
+
+**How to read it.** On the left, code fixes the order of the four tools. On the right, the model picks one tool per turn and stops when it asks for none. Orchestration is the left-hand side made robust: the same fixed order, plus branches, parallel steps, saved state and retries.
+
+## Core concepts
+
+Every figure follows the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures). Customer 1847 writes: "My kettle arrived cracked. It's order 4471. Can I get my money back?" The tools are `get_order`, `search_help`, `create_refund` and `send_email`, and refunds over £30 wait for a support agent. The kettle cost £42.
+
+Framework facts on this page follow the LangGraph documentation as of November 2026 (LangGraph 1.x). Other frameworks use other names for the same ideas.
+
+### Chains and routes are the simplest graphs
+
+A chain is a graph with one path. Each node runs after the previous one, so the order is a straight line.
+
+<AnimatedDiagram
+  spec="animated/agents/pattern-chaining"
+  minWidth={620}
+  caption="A fixed order of calls, with a check in code between steps."
+/>
+
+**How to read it.** Three model calls in a row, with a check in code after the first. As an execution model this is the easiest case: one node runs at a time, and a failure stops the line at a known stage, so a retry starts from that stage.
+
+A route adds one **conditional edge**: a small function in code reads the state and returns the name of the next node.
+
+<AnimatedDiagram
+  spec="animated/agents/pattern-routing"
+  minWidth={620}
+  caption="One call sorts the request; code picks the path."
+/>
+
+**How to read it.** The ringed call writes a label into the state. The edge after it is not a model; it is a function that maps "refund" to the refund workflow. Keep that function pure (state in, node name out) and it can be tested without calling a model.
+
+### DAG or cyclic graph
+
+A **DAG** has no edge back to an earlier node. It runs in topological order (every node after all the nodes it depends on), so it has clear batching points and clean retries at stage boundaries. ETL-like flows fit: extract, classify, enrich, store.
+
+A **cyclic graph** may return to an earlier node: re-plan after a tool result, revise until a grader passes, ask again after a person edits a draft. Cycles need a termination rule. LangGraph counts **super-steps** (one tick in which every scheduled node runs) and raises `GraphRecursionError` past a recursion limit. Since LangGraph 1.1.4 the default limit is 10,007 super-steps, far more than any refund needs, so set your own.
+
+<Callout tone="red" title="What breaks">
+  A revise loop with no cap. If the grader rejects every draft, the default limit lets the loop run for thousands of steps, each one a model call. Cap the loop in the state (`revisions < 3`) and set `recursion_limit` per run.
+</Callout>
+
+### The state object and reducers
+
+The **state** is one typed object (a `TypedDict`, dataclass or Pydantic model in LangGraph) that every node reads. A node returns only the keys it changes. By default an update **overwrites** the key; a **reducer**, such as `operator.add` on a list, merges instead. Any key that two parallel nodes write needs a reducer, because updates from one super-step arrive in no fixed order.
+
+Keeping state explicit is what makes the rest possible: it can be saved, shown to a reviewer, diffed between runs and replayed.
+
+### Checkpoints and threads
+
+A **checkpointer** saves the state at every super-step boundary under a **thread** id. A checkpoint holds the state's values, the nodes to run next and metadata such as the step number. LangGraph ships an in-memory saver for tests; production uses a database-backed one (Postgres, MongoDB and others). Checkpoints buy three things:
+
+1. **Human interrupts.** A node calls `interrupt()`; the run saves and stops. Hours later, `Command(resume=…)` on the same thread continues it.
+2. **Resume after failure.** A crashed run restarts from its last checkpoint without replaying expensive upstream work.
+3. **Replay.** Load an old checkpoint to see exactly what a node saw when a branch misrouted.
+
+A super-step is **transactional**: if one parallel node raises, none of that step's updates apply. The writes of the nodes that did succeed are kept, so on resume they do not run again.
+
+### Retries and idempotency
+
+Two kinds of failure need two kinds of handling:
+
+- **Transient** errors (a timeout, a 5xx, a rate limit) get a retry with exponential backoff and jitter. LangGraph's `RetryPolicy` defaults to 3 attempts in all, starting at 0.5 s and doubling, with jitter.
+- **Business** failures (a tool returned nothing, the parser rejected the JSON) do not improve on retry. They need a **compensating path**: another model, a simpler prompt, or a clear message that the step could not be done.
+
+A retry re-runs the whole node. If the node moved money, the second run can move it again. The fix is an **idempotency key**: an id the receiving service uses to recognise a repeat and return the first result instead of acting twice. LangGraph's docs add the rule that matters most: the key must already be saved **before** the side effect runs, so build it in an earlier node, not inside the node that retries.
+
+### Fan-out and its limits
+
+**Fan-out** runs independent nodes in the same super-step; a **join** waits for all of them. Total time is the slowest branch, not the sum. When the number of branches is known only at run time (one per document, one per order), LangGraph's `Send` starts one copy of a node per item, and reducers merge their results.
+
+Parallel branches still share limits. Forty branches that each call a model are forty requests against one rate limit and one token budget. Cap them with `max_concurrency`, and never let two branches mutate the same object outside the state.
+
+## Architecture
+
+Here is the refund as one fixed graph. It has the three things a chain lacks: a fan-out with a join, a branch on the amount, and a retry edge. Step through it; the steps match the cards below.
+
+<AnimatedDiagram
+  spec="animated/agents/flow-graph"
+  stepper
+  minWidth={660}
+  caption="Code owns the order: a fan-out and a join, a branch on the amount, a pause saved by the checkpointer, and one retry that reuses the same idempotency key."
+/>
+
+<StepCards>
+  <StepCard n={1} title="classify reads the message">
+    The run starts on thread `th_7c2e` with the message in the state. `classify`, one model call, writes `intent:
+    refund`. Gap: nothing is known about the order.
+  </StepCard>
+  <StepCard n={2} title="Fan out: two nodes run in the same step">
+    `get_order` and `search_help` do not depend on each other, so both run in super-step 2. One returns the kettle at
+    £42; the other returns "Damaged on arrival": full refund. They write different keys, so no reducer is needed.
+  </StepCard>
+  <StepCard n={3} title="join waits for both">
+    `join` runs once, after both branches finish, because its edge lists both nodes. Gap: the state now holds the amount
+    and the rule, but nothing has decided whether a person must approve.
+  </StepCard>
+  <StepCard n={4} title="check routes on the amount">
+    `check` is code. £42 is over £30, so its conditional edge returns `approve`; £30 or less would go straight to
+    `create_refund` (dashed). It also writes the refund's idempotency key into the state, so the key is saved before any
+    money moves.
+  </StepCard>
+  <StepCard n={5} title="approve pauses the run">
+    `approve` calls `interrupt()` with the pending refund. The checkpointer saves the state and the process may stop.
+    Nothing is held in memory while the support agent decides.
+  </StepCard>
+  <StepCard n={6} title="Resume; create_refund times out and retries">
+    The support agent approves at 10:20 and the app resumes the thread. `create_refund` sends the refund with the saved
+    key, gets no reply within an illustrative 10 s, and the retry policy runs it again with the same key. The payments
+    service sees the key and returns refund R-2291 instead of paying twice.
+  </StepCard>
+  <StepCard n={7} title="reply and send_email; the run ends">
+    `reply`, the second model call, writes the answer from the state, `send_email` sends it, and the graph reaches END.
+  </StepCard>
+</StepCards>
+
+Here is the graph in code, trimmed to the parts the figure shows (LangGraph 1.x, Python; the node functions are left out):
+
+```python
+g = StateGraph(RefundState)
+for name, fn in [("classify", classify), ("get_order", get_order), ("search_help", search_help),
+                 ("join", join), ("check", check), ("approve", approve),
+                 ("reply", reply), ("send_email", send_email)]:
+    g.add_node(name, fn)
+g.add_node("create_refund", create_refund, retry_policy=RetryPolicy(max_attempts=3))
+
+g.add_edge(START, "classify")
+g.add_edge("classify", "get_order")
+g.add_edge("classify", "search_help")
+g.add_edge(["get_order", "search_help"], "join")   # runs once, after both
+g.add_edge("join", "check")
+g.add_conditional_edges("check", lambda s: "approve" if s["order"]["amount"] > 30 else "create_refund")
+g.add_edge("approve", "create_refund")
+g.add_edge("create_refund", "reply")
+g.add_edge("reply", "send_email")
+graph = g.compile(checkpointer=checkpointer)        # a Postgres saver in production
+```
+
+Nothing in it is clever, and that is the point: a reviewer can see every path, and the £30 rule is an edge, not a sentence in a prompt.
+
+## Deep dive
+
+### Worked example: one refund through the graph, with one retry
+
+This follows the [flow graph](#architecture) super-step by super-step. "State" is what the node adds; the checkpointer saves the whole state after each row.
+
+| Super-step | Node                          | What happened                                                                                     | State written                                                                     |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1          | `classify`                    | Model call 1                                                                                      | `intent: refund`                                                                  |
+| 2          | `get_order` and `search_help` | Two tool calls at once                                                                            | `order`: kettle, £42, delivered 12 Nov; `rule`: "Damaged on arrival": full refund |
+| 3          | `join`                        | Both inputs present                                                                               | `ready: true`                                                                     |
+| 4          | `check`                       | £42 > £30, route to `approve`                                                                     | `refund_key: th_7c2e:create_refund`                                               |
+| 5          | `approve`                     | `interrupt()`: saved, paused. Approved at 10:20; resumed on the same thread                       | `approved: true`                                                                  |
+| 6          | `create_refund`               | Attempt 1 times out at 10 s; its writes are discarded. Attempt 2, same key, gets the saved result | `refund_id: R-2291`                                                               |
+| 7          | `reply`                       | Model call 2                                                                                      | the reply text                                                                    |
+| 8          | `send_email`                  | Email sent; END                                                                                   | none                                                                              |
+
+The figure shows rows 7 and 8 as its last step. Here is the checkpoint the run sits on during the pause, simplified from LangGraph's state snapshot (`values`, `next` and the thread in `config`):
+
+```json
+{
+  "config": { "configurable": { "thread_id": "th_7c2e" } },
+  "next": ["approve"],
+  "values": {
+    "intent": "refund",
+    "order": { "id": "4471", "item": "kettle", "amount": 42.0, "delivered": "12 Nov" },
+    "rule": "Damaged on arrival: full refund within 30 days",
+    "refund_key": "th_7c2e:create_refund",
+    "approved": null
+  }
+}
+```
+
+And the call `create_refund` sends on both attempts. Only the key makes the second one safe:
+
+```json
+{
+  "order_id": "4471",
+  "amount": 42.0,
+  "idempotency_key": "th_7c2e:create_refund"
+}
+```
+
+**The numbers.** Two model calls and five tool runs (`create_refund` twice), against five model calls for the [agent loop](/ai-system-design/genai-system-design/agent-architectures#architecture). At the illustrative 1.5 s per model call and 0.3 s per tool call, the happy path takes 1.5 + 0.3 + 0.3 + 1.5 + 0.3 = **3.9 s**, against 8.7 s for the agent. The fan-out saved one tool call's 0.3 s; it pays more when the branches are model calls. The timeout adds an illustrative 10 s + about 0.5 s of backoff, so this run took about **14.4 s**, plus the support agent's time.
+
+Three things to take from it:
+
+- **The retry was safe because of row 4, not row 6.** The key was in a checkpoint before any money moved. Had `create_refund` built a fresh key on each attempt, the payments service would have seen two different refunds: £84 out for a £42 kettle.
+- **The pause cost nothing to hold.** Between rows 5 and 6 the run was a database row. A deploy or a crash in that time changes nothing.
+- **A failed step is a row, not a mystery.** Each checkpoint names the node, its inputs and its outputs, so a misrouted refund can be replayed from row 4.
+
+<Callout tone="red" title="What breaks">
+  Side effects before an interrupt. On resume, LangGraph runs the interrupted node again **from its first line**. If
+  `approve` sent the support agent a Slack message before calling `interrupt()`, the agent gets it twice. Put side
+  effects after the interrupt, in their own node, or make them idempotent.
+</Callout>
+
+### Making every node observable
+
+Log one record per node run: thread, super-step, node, attempt, inputs, outputs, latency and tokens. With those six rows a postmortem can answer "which branch did this refund take, and why" from data, not guesswork. Send them to your tracing tool; the checkpoint history holds the same facts.
+
+### Constraining what the graph may do
+
+A graph makes legal transitions explicit. `create_refund` is reachable only through `check`, so the £30 rule cannot be skipped, whatever text the customer pastes. The same idea puts guardrails before dangerous tools and turns reflect-critique-revise into a visible cycle with a cap, rather than hidden recursion. See [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) for the approval step and [Agent Reliability](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery) for retries in agent loops.
+
+## Trade-offs
+
+| Decision                          | Option A                            | Option B                                         | Guidance                                                                                       |
+| --------------------------------- | ----------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| DAG vs cyclic graph               | Predictable, easy to test and batch | Re-plans, revises, loops until a check passes    | DAG for fixed stages; cycles only with a cap and a stop rule                                   |
+| Plain script vs graph framework   | No new concepts, easy to read       | State, checkpoints, interrupts, retries built in | Script for short, single-owner flows; graph for long-lived, team-owned or safety-critical ones |
+| Sequential vs fan-out             | Simple, within rate limits          | Lower latency                                    | Fan out independent steps; cap concurrency                                                     |
+| Retry vs compensating path        | Fixes transient errors              | Handles errors a retry cannot fix                | Retry timeouts and 5xx; fall back on empty or invalid output                                   |
+| In-memory vs durable checkpointer | Fast, nothing to run                | Survives restarts, supports pauses               | In-memory only in tests                                                                        |
+
+## Real-world examples
+
+- LangGraph runs graphs in Pregel-style super-steps with a checkpoint at each boundary, `interrupt()` for people and `RetryPolicy` per node.
+- Temporal retries activities by default (1 s initial interval, ×2 backoff, unlimited attempts) and does not retry whole workflows, so activity code must be safe to repeat.
+- Stripe accepts an `Idempotency-Key` header on POST requests and returns the saved first response for a repeated key; keys may be pruned once they are 24 hours old.
+- Anthropic's "Building effective agents" (2024) recommends workflows with fixed code paths wherever the steps are known.
+
+## Common pitfalls
+
+- Generating the idempotency key inside the node that retries.
+- Side effects before `interrupt()`, which run again on resume.
+- An in-memory checkpointer in production, which loses every paused run on restart.
+- Two parallel nodes writing one key with no reducer.
+- Retrying business failures (empty results, invalid JSON) as if they were timeouts.
+- Unbounded fan-out that hits the provider's rate limit on every run.
+- Cycles with no cap, trusting the framework's very high default limit.
+
+## How to answer in an interview
+
+1. Say whether the flow is a DAG or needs cycles, and why.
+2. Draw the graph: nodes, the conditional edges and where parallel branches join.
+3. Define the state object and say what each node writes.
+4. Place the checkpointer and the human interrupts.
+5. For each side effect, give its retry policy and its idempotency key.
+6. Add limits: loop caps, concurrency caps and per-node tracing.
+
+**What interviewers listen for:** explicit state, failure handling per node, and idempotency before retries.
+
+**Red flags:** "we retry the whole chain", or approvals that live in the prompt.
+
+## Further reading
+
+- [LangGraph: Graph API (state, reducers, super-steps, recursion limit)](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- [LangGraph: Sequences, branches and loops](https://docs.langchain.com/oss/python/langgraph/graph-api-control-flow)
+- [LangGraph: Checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers)
+- [LangGraph: Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [LangGraph: Fault tolerance (retries, timeouts, idempotency)](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/research/building-effective-agents)
+- [Exponential backoff and jitter (Marc Brooker, AWS, 2015)](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
+- [Idempotent requests (Stripe API reference)](https://docs.stripe.com/api/idempotent_requests)
+- [Retry policies (Temporal documentation)](https://docs.temporal.io/encyclopedia/retry-policies)
 
 <InterviewQuestions>
-  <InterviewQuestion question="When would you choose a cyclic graph over a strict DAG for LLM orchestration?" category="Architecture">
-    Choose a cyclic graph when the task needs iteration until a verifier passes, dynamic replanning based on tool feedback, or conversational repair loops. A DAG fits predictable ETL-like flows with fixed stages. Cycles require careful termination conditions, cycle budgets, and state snapshots so you do not run unbounded loops or duplicate side effects on retries.
+  <InterviewQuestion
+    question="When would you choose a cyclic graph over a strict DAG for LLM orchestration?"
+    category="Architecture"
+    level="Mid"
+  >
+    Choose a cyclic graph when the task needs iteration until a verifier passes, dynamic replanning based on tool
+    feedback, or conversational repair loops. A DAG fits predictable ETL-like flows with fixed stages. Cycles require
+    careful termination conditions, cycle budgets, and state snapshots so you do not run unbounded loops or duplicate
+    side effects on retries.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you make multi-step chains reliable in production?" category="Reliability">
-    Use timeouts, retries only for idempotent or safely repeatable steps, structured error types, and per-node fallbacks. Persist checkpoints or minimal state needed to resume, validate outputs before downstream nodes consume them, and circuit-break hot failing tools or models. Emit traces so you can see which hop failed and whether user-visible partial results should be rolled back or annotated.
+  <InterviewQuestion
+    question="How do you make multi-step chains reliable in production?"
+    category="Reliability"
+    level="Mid"
+  >
+    Use timeouts, retries only for idempotent or safely repeatable steps, structured error types, and per-node
+    fallbacks. Persist checkpoints or minimal state needed to resume, validate outputs before downstream nodes consume
+    them, and circuit-break hot failing tools or models. Emit traces so you can see which hop failed and whether
+    user-visible partial results should be rolled back or annotated.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you design conditional branching without unmaintainable nested logic?" category="Design">
-    Encode branch predicates as small pure functions over a typed state object, keep routing tables or policy objects separate from node implementations, and document invariants for each branch. Visual graph definitions or declarative configs help reviewers see all paths. Centralize side effects in named nodes so branches differ by data and control flow, not by copy-pasted LLM calls with tiny edits.
+  <InterviewQuestion
+    question="How do you design conditional branching without unmaintainable nested logic?"
+    category="Design"
+    level="Mid"
+  >
+    Encode branch predicates as small pure functions over a typed state object, keep routing tables or policy objects
+    separate from node implementations, and document invariants for each branch. Visual graph definitions or declarative
+    configs help reviewers see all paths. Centralize side effects in named nodes so branches differ by data and control
+    flow, not by copy-pasted LLM calls with tiny edits.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Would you build the refund flow as a fixed graph or as an agent loop?"
+    category="Concepts"
+    level="Junior"
+  >
+    A fixed graph, because the steps are known: look up the order and the rule, check the amount, get approval if
+    needed, refund, reply. The graph makes two model calls where the agent makes five, and the £30 rule is an edge the
+    model cannot talk its way past. An agent loop earns its cost only when the next step depends on what a tool returns
+    in ways you cannot list in advance.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A node that creates a refund times out and is retried. How do you make sure the customer is not refunded twice?"
+    category="Failure modes"
+    level="Senior"
+  >
+    Treat a timeout as "unknown", not "failed": the first call may have succeeded and only the reply was lost. Build an
+    idempotency key from durable state in an earlier node, so it is checkpointed before any money moves, and send it on
+    every attempt. The payments service then returns the first result for a repeated key. Also put the refund in its own
+    node, after any interrupt, so resuming a paused run does not repeat it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you run independent steps in parallel without breaking rate limits or state?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    Fan out only nodes that do not depend on each other, and join them with a node that waits for all branches. Cap
+    concurrency (LangGraph's `max_concurrency`) below the provider's request and token limits, and back off on 429s.
+    Give any key that several branches write a reducer, since parallel updates arrive in no fixed order. Remember that
+    the super-step is transactional: one failing branch blocks the step's updates, while the successful branches' writes
+    are kept for the resume.
   </InterviewQuestion>
 </InterviewQuestions>
