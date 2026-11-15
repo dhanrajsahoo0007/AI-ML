@@ -35,23 +35,10 @@ An **encoder** is a careful reader: it reads the whole page at once, looking bot
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph ENC["Encoder-only (BERT)"]
-        direction TB
-        E_IN["the [MASK] sat"] --> E_ST["Bidirectional blocks"] --> E_OUT["Predict 'cat'<br/>or classify the [CLS] vector"]
-    end
-    subgraph DEC["Decoder-only (GPT)"]
-        direction TB
-        D_IN["the cat"] --> D_ST["Causal blocks"]:::accent --> D_OUT["Predict next token 'sat'"]
-    end
-    subgraph ED["Encoder-decoder (T5)"]
-        direction TB
-        S_IN["translate: the cat sat"] --> S_ENC["Bidirectional encoder"]
-        S_ENC --> S_DEC["Causal decoder with cross-attention"]
-        S_DEC --> S_OUT["le chat s'est assis"]
-    end
-```
+<AnimatedDiagram
+  spec="animated/transformer/three-families"
+  caption="The families differ in which blocks they keep and in who can see whom: bidirectional, both with cross-attention, or causal only."
+/>
 
 Choosing a family for a task:
 
@@ -61,20 +48,21 @@ Choosing a family for a task:
 
 ## Deep dive
 
+### How BERT packs a sentence pair
+
+BERT reads one sequence that can hold two sentences. A `[CLS]` token comes first and a `[SEP]` token closes each sentence. Every token's input is the sum of three learned embeddings.
+
+<AnimatedDiagram
+  spec="animated/transformer/bert-input-embeddings"
+  caption="BERT adds three learned embeddings per token: what the token is, which sentence it belongs to, and where it sits. Adapted from Devlin et al. (2018), Figure 2."
+/>
+
 ### Attention masks side by side
 
-```mermaid
-flowchart TB
-    subgraph B["Bidirectional mask"]
-        B1["Token 3 sees tokens 1, 2, 3, 4, 5"]
-    end
-    subgraph C["Causal mask"]
-        C1["Token 3 sees tokens 1, 2, 3 only"]
-    end
-    subgraph P["Prefix-LM mask"]
-        P1["Prompt tokens see each other fully;<br/>generated tokens see prompt + earlier outputs"]
-    end
-```
+<AnimatedDiagram
+  spec="animated/transformer/three-masks"
+  caption="The same five tokens under three masks: bidirectional sees everything, causal sees only the past, and prefix-LM reads the prompt both ways, then generates causally."
+/>
 
 The prefix-LM pattern, used by some models, sits between the two: it reads the input bidirectionally like an encoder but generates like a decoder, inside a single stack.
 
