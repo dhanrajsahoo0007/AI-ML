@@ -1,0 +1,18 @@
+title: Autoregressive vs masked-diffusion decoding
+alt: >-
+  Two panels fill the same 8-token answer, "We meet at noon by the old gate", to the prompt "When and where shall we
+  meet?". The left panel, Autoregressive, has one row per forward pass: pass 1 writes "We", pass 2 adds "meet", and
+  so on, one green token per pass, so the last row, pass 8, adds "gate". The right panel, Masked diffusion with 4
+  steps, has one row per denoising step. In each row the model predicts every still-masked position with a
+  confidence; the 2 most confident predictions turn green and stay, and the rest are shown gray and are remasked.
+  Step 1 keeps "We" (0.88) and "gate" (0.79), while low-confidence wrong guesses such as "at" for "by" and "main" for
+  "old" are remasked. Step 2 keeps "meet" (0.81) and "the" (0.62). Step 3 keeps "at" (0.77) and "noon" (0.69). Step 4
+  keeps "by" (0.86) and "old" (0.74), completing the answer after 4 passes. Notes say the diffusion model needs 4
+  passes at 2 tokens each but recomputes all 8 positions every pass, while the autoregressive model needs 8 passes
+  and reuses its KV cache.
+caption: >-
+  The autoregressive model needs one forward pass per token; masked diffusion predicts every masked position at
+  once, keeps the 2 most confident and remasks the rest, so 8 tokens take 4 passes.
+tags: [llm, diffusion, decoding, non-autoregressive, genai]
+source: original
+created: 2026-11-15

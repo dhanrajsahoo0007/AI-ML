@@ -2,43 +2,187 @@
 title: "Diffusion LLMs & Non-Autoregressive Generation"
 description: "Masked text diffusion and parallel denoising models that break the sequential token-by-token bottleneck of autoregressive LLMs."
 icon: sparkles
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Masked text diffusion and parallel denoising models that break the sequential token-by-token bottleneck of autoregressive LLMs.
+Almost every LLM in production writes one token at a time, left to right. Diffusion language models start from a fully masked answer and fill in many tokens per step, in any order. Interviewers ask about them because they test whether you understand why decoding is slow in the first place, and whether you can weigh a new architecture's speed claims against its costs in quality, caching and tooling.
 
 ## TL;DR
 
+- An autoregressive model needs **one forward pass per output token**, so a 1,000-token answer is 1,000 passes in a row, each one bound by memory bandwidth.
+- Non-autoregressive models predict **many tokens per pass**. Predicting them independently causes the **multimodality problem** (pieces of different valid answers mixed together); **iterative refinement** fixes it by remasking low-confidence tokens and predicting again.
+- **Masked diffusion** trains a Transformer without a causal mask to recover tokens hidden at a **random mask ratio t**; the loss is a weighted masked-LM loss on the masked positions only. **LLaDA 8B** (2025) showed this scales to an 8B model that is competitive with LLaMA3 8B on many reported benchmarks.
+- Generation starts from all-`[MASK]` and runs **T denoising steps**; fewer steps means more tokens per pass and more speed, but lower quality.
+- Bidirectional attention gives **infilling and a smaller reversal-curse gap**, but breaks the exact **KV cache**. **Block diffusion** (left to right between blocks, diffusion inside a block) restores caching and variable length.
+- Commercial systems report **over 1,000 tokens per second** (Inception's Mercury Coder, Google's experimental Gemini Diffusion), mostly on code; on hard reasoning and knowledge benchmarks they still lag comparable autoregressive models.
+
 ## The idea in plain English
+
+An autoregressive model writes like a person with a pen who may never go back: one word, then the next, then the next. A diffusion model solves the answer like a crossword. It looks at all the empty squares at once, pencils in the answers it is surest of, and leaves the rest blank. Those filled squares give clues for the hard ones, so on the next pass more answers become obvious. After a few passes the grid is full. The crossword solver writes several words per pass, but every pass means rereading the whole grid, and if it pencils in too many guesses at once, two crossing answers can contradict each other.
 
 ## Core concepts
 
-### The autoregressive decode bottleneck
+1. **The autoregressive decode bottleneck.** An autoregressive (AR) model factorizes text as $p(x) = \prod_i p(x_i \mid x_{<i})$, so generating $N$ tokens takes $N$ forward passes, one after another (see [Decoding & Sampling](/ai-system-design/genai-system-design/decoding-and-sampling)). Each pass reads every weight and the whole KV cache from GPU memory to produce one token per sequence, which makes decoding memory-bandwidth bound rather than compute bound (see [Efficient Attention](/ai-system-design/genai-system-design/efficient-attention)). Batching helps throughput but not the latency of one answer. [Speculative decoding](/ai-system-design/genai-system-design/speculative-decoding) and [multi-token prediction](/ai-system-design/genai-system-design/multi-token-prediction) attack the same wall while keeping the left-to-right order; diffusion drops the order altogether.
 
-### Discrete and masked diffusion for text generation
+2. **Non-autoregressive generation and the multimodality problem.** Gu et al. (2017) built a non-autoregressive translation model that predicts every target token in one pass, each conditioned on the source but not on the other target tokens. It reported an order of magnitude lower latency, at a cost of as little as 2.0 BLEU against its autoregressive teacher. The catch is the multimodality problem: when several outputs are valid, independent per-position choices can mix them. If an answer could be "Paris is the capital" or "The capital is Paris", position 1 might pick "Paris" while position 4 also picks "Paris", giving "Paris is the Paris". Gu et al. eased this by training on a teacher model's outputs (knowledge distillation), which are less varied than human references.
 
-### Parallel token refinement and remasking steps
+3. **Iterative refinement (Mask-Predict).** Ghazvininejad et al. (2019) trained a conditional masked language model and decoded it in a fixed number of passes $T$. Pass 1 predicts every token. Each later pass masks the $n = N \cdot (T - t)/T$ tokens with the lowest probability and predicts them again, conditioned on the rest, so the masked count falls linearly. On WMT'14 English–German, one pass scored 18.05 BLEU with 16.72% of tokens repeated (a symptom of multimodality); 4 passes reached 25.94 BLEU with 1.07% repeats, and 10 passes reached 27.03 against 27.74 for their base Transformer. This mask, predict, remask loop is the decoding loop that modern diffusion LLMs reuse.
 
-### Conditioning, infilling and controllability
+4. **Discrete diffusion for text.** Image diffusion adds Gaussian noise and learns to remove it; text is made of discrete tokens, so the noise has to be discrete too. D3PM (Austin et al., 2021) defines a forward process that corrupts each token with a transition matrix: uniform (swap in a random token), nearest neighbors in embedding space, or an **absorbing state**, where a token turns into `[MASK]` and stays that way. The absorbing-state version links diffusion to masked language models like BERT (see [encoder-decoder families](/ai-system-design/genai-system-design/encoder-decoder-families)): undoing the corruption means predicting masked tokens.
+
+5. **The masked diffusion objective.** MDLM (Sahoo et al., 2024) showed that for absorbing-state diffusion the training loss simplifies to a weighted average of masked-LM losses. LLaDA writes it as: draw $t$ uniformly from $(0, 1]$, mask each token of the clean text $x_0$ independently with probability $t$ to get $x_t$, and minimize
+
+   $$
+   \mathcal{L}(\theta) = -\,\mathbb{E}_{t,\,x_0,\,x_t}\left[\frac{1}{t}\sum_{i=1}^{L} \mathbf{1}[x_t^i = \text{M}]\,\log p_\theta(x_0^i \mid x_t)\right]
+   $$
+
+   Unlike BERT's fixed 15% mask, $t$ changes every example, so the model learns to fill text that is almost complete and text that is almost empty. The $1/t$ weight makes the loss an upper bound on the negative log-likelihood, so diffusion models can report a perplexity bound and be compared with AR models.
+
+Follow one training example through the objective:
+
+<AnimatedDiagram
+  spec="animated/llm/diffusion-training-objective"
+  caption="Masked diffusion training draws a fresh mask ratio t for every example, masks each token with probability t, and scores the model only on the masked positions, weighted by 1/t."
+/>
+
+6. **Score entropy (SEDD).** Lou et al. (2023) took a different route: instead of predicting tokens directly, SEDD learns ratios between the probabilities of neighboring sequences (a discrete version of the score used in continuous diffusion) with a loss called score entropy. They reported 25–75% lower perplexity than earlier language diffusion models, results competitive with GPT-2 at similar sizes, and similar sample quality with 32× fewer network evaluations.
+
+7. **Parallel token refinement and remasking steps.** Generation reverses the masking. Start with the prompt followed by $L$ `[MASK]` tokens. At each of $T$ steps the model predicts every masked position at once; a sampler keeps some predictions and remasks the rest. LLaDA's default, borrowed from MaskGIT, is **low-confidence remasking**: keep the most confident predictions and remask the least confident, so a linear schedule commits about $L/T$ tokens per step. Committed tokens stay fixed in LLaDA's sampler; a wrong low-confidence guess is thrown away before it can mislead the rest.
+
+8. **Bidirectional context.** The mask predictor has no causal mask, so every position attends to every other, including positions to its right. That is why the model can finish a sentence's end before its middle, and why it treats "what comes before X" and "what comes after X" more alike. LLaDA reports a smaller reversal curse: on completing the previous line of a poem it beats GPT-4o (45.6 vs 34.3), although it is weaker at the forward direction (51.8 vs 82.7).
+
+9. **Conditioning, infilling and controllability.** The prompt is conditioning: its tokens are never masked, so every step sees them. Infilling is the same mechanism with fixed tokens on both sides: keep a code prefix and suffix, mask the middle, and denoise. An AR model needs special fill-in-the-middle training to do this. Fixed tokens can be placed anywhere (a required keyword, a closing bracket, a JSON key), which makes some constraints easier to express than with left-to-right grammar masks.
 
 ## Architecture
+
+A diffusion LLM is usually a standard Transformer with the causal mask removed. The difference is the decoding loop around it. Step through the same 8-token answer produced both ways.
+
+<AnimatedDiagram
+  spec="animated/llm/diffusion-ar-vs-parallel"
+  stepper
+  caption="The autoregressive model needs one forward pass per token; masked diffusion predicts every masked position at once, keeps the 2 most confident and remasks the rest, so 8 tokens take 4 passes."
+/>
+
+1. **Lay out the canvas.** Append $L$ `[MASK]` tokens to the prompt. $L$ is a setting chosen before generation (LLaDA's base-model evaluations use 1,024).
+2. **Predict everything.** One forward pass of the bidirectional Transformer gives a distribution over the vocabulary at every masked position.
+3. **Commit and remask.** Pick a token at each masked position (greedy or sampled), score each by its confidence, keep the top $L/T$ and set the rest back to `[MASK]`.
+4. **Repeat** for $T$ steps, with the prompt and all committed tokens visible to every position.
+5. **Finish.** Everything after the first end-of-sequence token is dropped. In **block diffusion**, steps 1–4 run on one block of tokens at a time, left to right (see the KV caching section below).
 
 ## Deep dive
 
 ### Diffusion step count vs. quality and latency
 
+The step count $T$ is the main dial. Latency is roughly $T$ forward passes over the prompt plus all $L$ positions, against $N$ much cheaper cached passes for an AR model. With $T = L$, diffusion commits one token per pass and has no speed advantage; with $T = L/4$, it commits four per pass.
+
+Fewer steps means more tokens chosen in the same pass, independently of each other, and the multimodality problem comes back. Mask-Predict's numbers show the curve: going from 1 to 2 passes raised BLEU from 18.05 to 22.91, while going from 4 to 5 gained only 0.36. The first few passes do most of the work.
+
+For its benchmark results LLaDA sets the number of steps equal to the answer length (for example 512 for GSM8K), so those scores do not show a speed gain. In its sampling-efficiency analysis, LLaDA 8B Base matched LLaMA3 8B Base on GSM8K and Math with 1.5× and 1.8× higher throughput, even though LLaMA3 used a KV cache and LLaDA used no inference optimizations; on HumanEval the two were comparable at the same throughput, and on MBPP LLaDA lagged. Fixed schedules waste passes on easy spans, so newer samplers adapt: Fast-dLLM (Wu et al., 2025) commits every token whose confidence passes a threshold, so easy stretches go fast and hard ones get more passes.
+
 ### KV caching challenges in non-causal bidirectional models
+
+An AR model can cache keys and values because a token's representation depends only on tokens to its left, which never change. In a bidirectional diffusion model every position attends to every other, including masked positions that change at every step, so every token's keys and values change too. Exact caching is impossible: each step recomputes attention over the whole prompt and canvas. The LLaDA paper states that it is incompatible with a KV cache. The memory cost is similar (17.03 GB for LLaDA 8B against 16.32 GB for LLaMA3 8B with a KV cache, at 512 input and 512 output tokens), but the compute per step is much higher.
+
+Two fixes are in use:
+
+- **Block diffusion.** Arriola et al. (2025) generate blocks left to right and run diffusion only inside the current block. Attention is causal between blocks and bidirectional within one, so finished blocks never change and can be cached exactly, like an AR prefix. It also removes the fixed-length limit: generation stops after any block that contains an end-of-sequence token.
+- **Approximate caching.** Fast-dLLM reuses keys and values that barely change between steps and refreshes them once per block. Combined with its confidence-threshold decoding, it reports up to 27.6× higher throughput on LLaDA and Dream with little loss in accuracy.
+
+<AnimatedDiagram
+  spec="animated/llm/diffusion-block-semi-ar"
+  stepper
+  caption="Block diffusion generates blocks left to right and runs diffusion only inside the current block, so finished blocks can be cached like an autoregressive prefix and the output length is not fixed in advance."
+/>
+
+The block length sets the trade-off. A block of 1 token is an AR model; a single block as long as the answer is plain diffusion. LLaDA uses the same order at sampling time without retraining (it calls it semi-autoregressive sampling) and finds it helps its instruction-tuned model, whose fine-tuning data padded short answers with end-of-sequence tokens.
 
 ### Where diffusion LLMs beat or lag autoregressive models
 
+**Where they win:**
+
+- **Latency per answer at low step counts**, especially for code, where outputs are structured and many tokens are predictable. Inception and Google both report over 1,000 tokens per second (see Real-world examples).
+- **Infilling and editing**, because the prefix and suffix are both visible at every step.
+- **Reversal-style tasks**, as in LLaDA's poem results.
+- **Math, in one report:** LLaDA 8B Base scored 70.3 on GSM8K against 48.7 for LLaMA3 8B Base, though the training data differ, so this does not isolate the architecture.
+
+**Where they lag:**
+
+- **Likelihood.** On OpenWebText MDLM's perplexity bound is 23.21 against 17.54 for an AR model trained the same way.
+- **Knowledge and hard reasoning.** Gemini Diffusion trails Gemini 2.0 Flash-Lite on GPQA Diamond (40.4% vs 56.5%) and Global MMLU Lite (69.1% vs 79.0%), as reported by Google.
+- **Serving.** Engines such as vLLM and TensorRT-LLM, along with PagedAttention, speculative decoding and prefix caching, were built for AR models. Diffusion serving needs custom kernels and samplers, and post-training methods such as RLHF and RL for reasoning are less mature for diffusion models.
+- **Length.** Plain masked diffusion must fix $L$ in advance; too short truncates the answer, too long wastes compute on padding.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Autoregressive decoding | Exact KV cache, mature serving stack, best likelihood and reasoning results | One pass per token; latency grows with output length | The default for chat, reasoning and long outputs |
+| AR + speculative decoding | Keeps AR quality exactly; several tokens per target pass | Needs a draft model or extra heads; speedup depends on acceptance rate | Lower latency without changing the model |
+| Full-sequence masked diffusion | Many tokens per pass; bidirectional context; infilling | No exact KV cache; fixed output length; quality drops at low step counts | Infilling, editing, short structured outputs |
+| Block diffusion | Exact cache across blocks; variable length; parallel inside a block | Less parallelism than full diffusion; block size is a new hyperparameter | Diffusion serving at scale, long answers |
+| Many denoising steps | Quality close to the model's best | Little or no speed gain over AR | Benchmarks, quality-critical answers |
+| Few steps / confidence-threshold sampling | Large speedups | Multimodality errors such as repeated or mixed tokens | Latency-critical code completion and edits |
 
 ## Real-world examples
 
+- **LLaDA 8B** (Nie et al., 2025): a masked diffusion model trained from scratch on 2.3 trillion tokens with 0.13 million H800 GPU hours, then fine-tuned on 4.5 million prompt-response pairs. The paper reports MMLU 65.9 vs 65.4 and HumanEval 35.4 vs 34.8 against LLaMA3 8B Base (figures from the October 2025 revision).
+- **Mercury Coder** (Inception Labs, technical report June 2025): diffusion models built on a Transformer, with parameter counts not disclosed. Artificial Analysis measured 1,109 tokens per second for Mercury Coder Mini and 737 for Small on H100 GPUs, as reported; HumanEval scores were 88.0 and 90.0.
+- **Gemini Diffusion** (Google DeepMind, announced May 2025): an experimental demo, not a general release. Google reports 1,479 tokens per second sampling speed (excluding 0.84 s of overhead) and HumanEval 89.6% vs 90.2% for Gemini 2.0 Flash-Lite.
+- **Mask-Predict** (2019) in translation: 27.03 BLEU with 10 refinement passes against 27.74 for a base Transformer on WMT'14 English–German, the clearest early sign that a few parallel passes can approach AR quality.
+
 ## Common pitfalls
+
+- Comparing tokens per second without matching quality, hardware, batch size and step count. A diffusion model run with $T = L$ makes as many passes as an AR model.
+- Assuming one pass of diffusion costs the same as one AR decode step. A diffusion pass reprocesses the whole prompt and canvas without a cache.
+- Forgetting the fixed output length of plain masked diffusion, and the padding or truncation it causes.
+- Committing too many tokens per step and getting repeated or mixed phrases, the multimodality problem in a new form.
+- Treating "bidirectional" as free: it is exactly what breaks the KV cache.
+- Quoting vendor speed numbers as independent measurements. Say "as reported" and name who measured them.
 
 ## How to answer in an interview
 
+1. Explain the bottleneck: AR needs one memory-bound forward pass per token, and batching helps throughput, not single-request latency.
+2. Introduce non-autoregressive generation, name the multimodality problem with a small example, and show how iterative refinement (Mask-Predict) fixes it.
+3. Describe masked diffusion: random mask ratio $t$, a bidirectional Transformer, loss on masked tokens weighted by $1/t$; then the sampling loop with low-confidence remasking over $T$ steps.
+4. Give the costs: no exact KV cache, fixed length, quality falling as $T$ shrinks, and immature serving and post-training. Explain block diffusion as the middle ground.
+5. Ground it with evidence: LLaDA 8B against LLaMA3 8B, Mercury and Gemini Diffusion speeds as reported, and where they still trail.
+
+**What interviewers listen for:** the step-count trade-off stated in passes, why bidirectional attention breaks caching, the multimodality problem, and a balanced view of vendor claims.
+
+**Red flags:** "diffusion LLMs generate everything in one step", "they are strictly faster than autoregressive models", or not knowing that the output length must be chosen up front.
+
 ## Further reading
+
+- [Non-Autoregressive Neural Machine Translation (Gu et al., 2017)](https://arxiv.org/abs/1711.02281)
+- [Structured Denoising Diffusion Models in Discrete State-Spaces (Austin et al., 2021)](https://arxiv.org/abs/2107.03006)
+- [Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution (Lou et al., 2023)](https://arxiv.org/abs/2310.16834)
+- [Simple and Effective Masked Diffusion Language Models (Sahoo et al., 2024)](https://arxiv.org/abs/2406.07524)
+- [Large Language Diffusion Models (Nie et al., 2025)](https://arxiv.org/abs/2502.09992)
+- [Block Diffusion: Interpolating Between Autoregressive and Diffusion Language Models (Arriola et al., 2025)](https://arxiv.org/abs/2503.09573)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is autoregressive decoding slow, and how does a diffusion language model try to fix it?" category="Concepts" level="Junior">
+    An autoregressive model produces one token per forward pass, and each pass has to read all the model weights and the KV cache from memory, so a long answer is a long chain of memory-bound steps that cannot run in parallel. A diffusion language model starts from a sequence of mask tokens and predicts all masked positions in every pass. It keeps the predictions it is most confident about and repeats for a fixed number of steps. If the number of steps is smaller than the number of tokens, the answer needs fewer passes in total.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the multimodality problem in non-autoregressive generation?" category="Failure modes" level="Mid">
+    When several outputs are valid, a model that predicts every position independently can take some tokens from one valid answer and some from another, producing text that is neither. A common symptom is repeated words, because two positions each pick the same likely word. Mask-Predict measured this: with one pass, 16.72% of tokens were repeats on WMT'14 English–German, falling to about 1% after four passes. Fixes include knowledge distillation from an autoregressive teacher, which gives less varied targets, and iterative refinement, where later passes condition on the tokens already chosen.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through the training objective of a masked diffusion language model." category="Concepts" level="Mid">
+    For each training sequence, draw a mask ratio t uniformly between 0 and 1, then replace each token with a mask token independently with probability t. A Transformer without a causal mask sees the partly masked sequence and predicts the original token at every masked position. The loss is the cross-entropy on masked positions only, multiplied by 1/t, which makes it an upper bound on the negative log-likelihood. Because t changes every example, the model learns to fill both nearly complete and nearly empty sequences, which is what sampling needs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose the number of denoising steps when serving a diffusion LLM?" category="Trade-offs" level="Mid">
+    Latency is roughly the number of steps times the cost of one pass over the whole sequence, so fewer steps means faster answers. But fewer steps means more tokens committed in the same pass without seeing each other, which brings back repetition and mixed phrases. Measure quality against steps on your own task and pick the knee of the curve; structured outputs like code usually tolerate fewer steps than open-ended reasoning. Confidence-threshold samplers that commit every token above a threshold adapt the step count per span automatically.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can't a bidirectional diffusion model use a standard KV cache, and what are the workarounds?" category="Architecture" level="Senior">
+    A KV cache works in an autoregressive model because a token's keys and values depend only on earlier tokens, which never change. In a bidirectional diffusion model every position attends to every other, including masked positions that change at every step, so every key and value changes too and each step recomputes attention over the full sequence. Block diffusion makes attention causal between blocks and bidirectional only inside the current block, so finished blocks can be cached exactly and the output length becomes flexible. Approximate caching, as in Fast-dLLM, reuses keys and values that barely change between steps and refreshes them periodically, trading a little accuracy for large speedups.
+  </InterviewQuestion>
+  <InterviewQuestion question="A vendor says its diffusion model generates 1,000 tokens per second versus 60 for a frontier chat model. How do you evaluate the claim?" category="Trade-offs" level="Senior">
+    First check that the comparison is fair: same hardware class, same batch size and concurrency, and whether time to first token and fixed overhead are included. Then check quality at that speed, because the step count can be lowered to buy throughput, and compare against similarly sized speed-optimized models, not only large frontier models. Ask which tasks were measured, since code and short structured outputs suit diffusion better than long reasoning. Finally, compare against autoregressive alternatives such as a smaller model with speculative decoding, run on your own prompts.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose a diffusion LLM over an autoregressive one in a product?" category="Architecture" level="Senior">
+    Consider it where latency matters more than the last points of quality and outputs are short and structured, such as inline code completion, code edits or form filling. It also fits tasks that need infilling or editing in the middle of existing text, since both sides of the gap are visible at every step. Stay with autoregressive models for long answers, multi-step reasoning, knowledge-heavy questions and anywhere you rely on mature serving features such as prefix caching and speculative decoding. If you adopt diffusion, plan for block decoding or approximate caching, a step-count setting per use case, and evaluation of quality at the step count you will actually serve.
+  </InterviewQuestion>
+  <InterviewQuestion question="What did LLaDA show, and what are its limits?" category="Scaling" level="Mid">
+    LLaDA trained an 8B masked diffusion model from scratch on 2.3 trillion tokens and showed that the recipe scales: the base model is competitive with LLaMA3 8B on reported benchmarks such as MMLU, and the instruction-tuned version follows instructions in multi-turn dialogue. It also narrowed the reversal curse, beating GPT-4o on completing the previous line of a poem. Its limits are that generation length is a fixed setting, it runs without a KV cache, its benchmark results use as many steps as answer tokens, and it trails stronger models on forward-direction and other tasks.
+  </InterviewQuestion>
+</InterviewQuestions>
