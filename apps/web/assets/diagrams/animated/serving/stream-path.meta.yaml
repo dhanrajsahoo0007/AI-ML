@@ -1,0 +1,16 @@
+title: Streaming an answer through the gateway and a proxy
+alt: >-
+  A sequence diagram with four lanes: the customer's browser in orange, an edge proxy and the LLM gateway in grey,
+  and the inference engine in teal. Step 1: the browser posts the question with streaming on, the proxy forwards it,
+  and the gateway sends the 2,200-token prompt to the engine, which spends 400 milliseconds queueing and prefilling.
+  Step 2: the first token leaves the engine at 400 milliseconds and travels back hop by hop as a content_block_delta
+  event, and the last event, message_stop, reaches the browser at 1,500 milliseconds. Step 3: the gateway sends events
+  as they come, but the proxy has buffering on and holds them, so the browser receives all 250 tokens at once at 1,500
+  milliseconds. Step 4: the gateway sends the header X-Accel-Buffering: no, the proxy passes each event on as it comes,
+  and the gateway writes a comment line on quiet streams to keep the connection alive.
+caption: >-
+  Every hop must pass each event on as it arrives. One proxy that buffers turns a 400 ms first token back into a
+  1,500 ms wait, and nothing reports an error.
+tags: [serving, streaming, server-sent-events, gateway, genai]
+source: original
+created: 2026-11-15
