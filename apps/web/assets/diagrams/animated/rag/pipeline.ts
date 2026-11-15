@@ -35,7 +35,7 @@ const KB = {
   azure: { id: "azure-ai-search", label: "AI Search" },
 };
 const EMBED = {
-  aws: { id: "aws-bedrock", label: "Titan Embed v2" },
+  aws: { id: "aws-bedrock", label: "Titan Embed" },
   gcp: { id: "gcp-vertex-ai", label: "Gemini Embed" },
   azure: { id: "azure-foundry", label: "Azure OpenAI" },
 };
