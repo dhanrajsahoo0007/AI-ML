@@ -35,32 +35,45 @@ A doctor has two references: the medical textbooks (general knowledge about dise
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph KNOW["Medical knowledge"]
-        VOC["Vocabularies<br/>(UMLS, SNOMED CT, RxNorm, LOINC)"] --> MKG[("Medical knowledge graph")]
-        LIT["Guidelines and literature"] --> MKG
-        LIT --> LVEC[("Guideline passage index")]
-    end
-    subgraph PAT["Patient data"]
-        EHR["EHR via FHIR<br/>(conditions, meds, labs)"] --> NORM["Normalize and code"]
-        NOTES["Clinical notes"] --> CNLP["Clinical NLP<br/>(entities, negation, time)"]
-        NORM --> PG[("Patient timeline graph")]
-        CNLP --> PG
-    end
-    CLIN["Clinician question<br/>(authenticated, role-checked)"] --> ASSIST["Assistant orchestrator"]:::accent
-    ASSIST --> PG
-    ASSIST --> MKG
-    ASSIST --> LVEC
-    MKG --> RULES["Safety rules<br/>(interactions, allergies, dosing)"]
-    PG --> RULES
-    RULES --> ASSIST
-    ASSIST --> LLM["LLM summary with citations"]
-    LLM --> UI["Answer + alerts + sources"]
-    ASSIST -.-> AUDIT["Audit log"]
-```
+The design keeps two graphs apart and joins them through shared codes. Step through how each part arrives and which gap it closes.
 
-A question such as "Is it safe to start this patient on drug X?":
+<AnimatedDiagram
+  spec="animated/rag/kg-health-architecture"
+  stepper
+  caption="Safety checks are rules over the graphs; the LLM only explains what the rules and records say, with citations."
+/>
+
+**How to read it**, one card per step. Zones follow the site's case-study colours: source systems and the clinician grey, the access check blue, ingest orange, stores violet, the request path green; the safety rules are a teal service on that path.
+
+<StepCards>
+  <StepCard n={1} title="The chart becomes a timeline graph">
+    Structured records come from the electronic health record (EHR) through FHIR, the standard API for exchanging health records: conditions, medications, allergies, labs and encounters, each with a date. A normalize stage maps each record to a standard code (RxNorm for drugs, LOINC for lab tests, SNOMED CT for clinical terms) and writes it into the patient graph, one timeline per patient. The gap: much of the story is in free-text notes, which carry no codes.
+  </StepCard>
+  <StepCard n={2} title="Notes add facts, with negation and time">
+    Clinical NLP finds conditions, medications and dosages in the notes and links each mention to a code. It also keeps what the words around a mention say: negation ("no history of"), uncertainty ("possible"), time ("history of" versus current) and who the fact is about. Its facts join the same patient graph. The gap: the patient graph says what this patient takes, not what those drugs do.
+  </StepCard>
+  <StepCard n={3} title="Medical knowledge shares the same codes">
+    Vocabularies and curated drug and guideline sources build the medical graph: drugs, conditions, interactions and contraindications. UMLS maps between SNOMED CT, RxNorm, LOINC and other vocabularies, so every source lands on the same codes. Because both graphs use those codes, a medication in a patient's timeline points straight at its interactions. The gap: nothing checks a prescription against them yet.
+  </StepCard>
+  <StepCard n={4} title="Safety rules run as code">
+    The safety rules are deterministic queries over the graphs: drug-drug interactions, drug-allergy conflicts, dose limits and kidney-function thresholds. Given a drug and a patient's facts, they return the same alerts every time, and every alert can be traced to a rule and a source. An LLM is not used here because it can miss an interaction or answer differently between runs. The gap: no one can ask a question yet.
+  </StepCard>
+  <StepCard n={5} title="A clinician asks, through an access check">
+    The clinician asks, "Is it safe to start this patient on drug X?" The access check confirms identity, role and purpose, so a clinician sees only the patients they treat, and writes every access to the audit log. The assistant, the solid card, pulls the patient's current medications, allergies, conditions and recent labs from the patient graph, and sends drug X with them to the rules, which return alerts. The gap: alerts say what is wrong, not what the guidelines advise.
+  </StepCard>
+  <StepCard n={6} title="Guideline passages are retrieved">
+    The guidelines are also split into passages and indexed. The assistant retrieves the passages about drug X and the patient's conditions, so the answer can quote and cite the source text instead of recalling it from the model's memory. The gap: the clinician still faces raw facts, alerts and passages.
+  </StepCard>
+  <StepCard n={7} title="The LLM explains, with citations">
+    The LLM receives only the facts the question needs, the alerts and the passages. It writes a short summary with the alerts first and a citation on every claim. It explains; it does not decide. The clinician decides, and the decision can be recorded back to the chart.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Hand the whole chart to the LLM and ask whether drug X is safe, and the answer can miss an interaction that the medical graph lists, or change between runs. Fix: the rules decide which alerts exist; the LLM may only explain the alerts it is given, and a final check rejects any answer that drops one.
+</Callout>
+
+A question such as "Is it safe to start this patient on drug X?", end to end:
 
 1. The clinician's identity and role are checked; access is logged.
 2. The assistant pulls the patient's current medications, allergies, conditions and recent labs from the patient graph.
@@ -73,29 +86,29 @@ A question such as "Is it safe to start this patient on drug X?":
 
 ### Linking a note to the graph
 
-```mermaid
-flowchart LR
-    NOTE["Note: 'Pt started on warfarin,<br/>no hx of bleeding'"] --> NER["Find mentions"]
-    NER --> M1["'warfarin' → RxNorm drug"]
-    NER --> M2["'bleeding' → SNOMED finding<br/>(negated)"]
-    M1 --> PGRAPH["Patient TAKES warfarin (date)"]
-    M2 --> NEG["Patient NOT_HAS bleeding history"]:::accent
-    PGRAPH --> CHECK["Interaction check vs new prescriptions"]
-```
+Clinical NLP turns one sentence into facts. Follow the example note from mention to graph.
 
-Handling negation and time is essential: "no history of bleeding" must not become "has bleeding".
+<AnimatedDiagram
+  spec="animated/rag/kg-health-note-linking"
+  caption="The negation cue decides which fact lands in the graph; drop it and the chart says the opposite of the note."
+/>
+
+**How to read it.** The note holds two mentions. "warfarin" links to an RxNorm drug and becomes the fact Patient TAKES warfarin, with a start date, which the interaction check reads for every new prescription. "bleeding" links to a SNOMED CT finding, but the cue "no hx of" (no history of) marks it as negated, so the fact written is Patient NOT_HAS bleeding history, the highlighted box. The red box is the fact a pipeline without negation handling would write.
+
+<Callout tone="red" title="What breaks">
+  Drop the negation and the patient graph gains a bleeding history the note denies; every rule that reads bleeding history now fires on false data. Timing fails the same way: "history of" read as current turns a past condition into an active one. Fix: detect negation, uncertainty, time and subject for every mention, measure each on labelled notes, and store the source sentence with every fact so a clinician can check it.
+</Callout>
 
 ### Medical knowledge graph slice
 
-```mermaid
-flowchart LR
-    DRUG_A["Drug A"] -->|"INTERACTS_WITH (major)"| DRUG_B["Drug B"]
-    DRUG_A -->|"TREATS"| COND["Condition"]
-    DRUG_B -->|"CONTRAINDICATED_IN"| RENAL["Renal impairment"]
-    LAB["Lab: eGFR"] -->|"INDICATES"| RENAL
-    GENE["Gene variant"] -->|"AFFECTS_METABOLISM_OF"| DRUG_A
-    GUIDE["Guideline section"] -->|"RECOMMENDS"| DRUG_A
-```
+This is the kind of subgraph the safety rules read, with generic drugs so the shape is clear.
+
+<AnimatedDiagram
+  spec="animated/rag/kg-health-graph-slice"
+  caption="Two paths end at Drug B, one through an interaction and one through a lab result; each path is one safety rule."
+/>
+
+**How to read it.** Start at the highlighted Drug B, the drug being prescribed; two paths end there. Drug A INTERACTS_WITH Drug B with major severity, so if the patient graph says the patient TAKES Drug A, the interaction rule fires. Drug B is CONTRAINDICATED_IN renal impairment, which a low eGFR result INDICATES (eGFR, estimated glomerular filtration rate, is the usual kidney-function lab test), so if the patient's latest eGFR is below the rule's threshold, the contraindication rule fires. The other edges are context the LLM can explain: the condition Drug A TREATS, a gene variant that AFFECTS_METABOLISM_OF it, and the guideline section that RECOMMENDS it, drawn blue because it is text the passage index also holds.
 
 ## Trade-offs
 
