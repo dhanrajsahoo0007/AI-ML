@@ -1,24 +1,200 @@
 ---
 title: Offline Evaluation Benchmarks
 description: Golden datasets, benchmark suite design, contamination control, and statistical rigor for offline LLM evaluation.
+updated: 2026-11-15
 ---
 
-Offline benchmarks are the controlled laboratory of LLM engineering. A serious suite combines broad capability checks with domain-specific scenarios drawn from real failures, edge cases for tool use and structured output, multilingual slices, and safety probes. Each case should carry metadata: difficulty, expected tools, required citations, or numeric tolerances for regression triage. Golden datasets curated by experts anchor automated metrics, but they rot as the product and user language evolve, so pipelines to mine new negatives from production with human approval loops are essential.
+A benchmark is a fixed exam for models: the same questions, the same scoring, a number at the end. Interviewers ask about benchmarks because the number is easy to quote and easy to misread, and because a good engineer knows what a leaderboard score does not say about their own product.
 
-Automated scoring spans exact match, fuzzy metrics, execution-based checks for code, LLM judges with fixed rubrics, and deterministic validators such as JSON schema conformance. Multi-dimensional evaluation prevents shipping a model that improves summarization while silently breaking JSON mode. Version every asset: prompts, judge prompts, and scoring code live in git with the same discipline as application logic.
+## TL;DR
 
-Test set contamination undermines leaderboard optimism and internal confidence. Hold out truly private sets, deduplicate near-duplicates against training corpora where possible, and segregate sets used for development tuning from those reserved for final gatekeeping. Leakage from web crawl overlap is hard to eliminate entirely; mitigations include dynamic evaluation refreshed from licensed or internal corpora and canary user sessions excluded from training.
+- A **benchmark** is **tasks + a harness + a scoring rule**. Change the prompt wording, the number of worked examples or the answer extraction and the same model gets a different score.
+- **Public benchmarks** (MMLU: 15,908 questions; GPQA: 448, with a 198-question Diamond subset; SWE-bench Verified: 500 tasks) help you **shortlist** models. Your **own golden set** (Brightpost: 200 tickets) tells you what to **ship**.
+- **Contamination** means test items leaked into the training data. A public test set eventually reaches the web crawl; the score then measures memory as well as skill. Detect it with overlap checks, and defend with **private held-out splits**.
+- The public order and your order can **differ**. In the illustrative example below a model that is last of three on a public benchmark is first on Brightpost's tickets, by 9 points.
+- Report **intervals, paired comparisons and per-slice results**, and run a **fast smoke set on every commit** and a **full suite nightly**.
 
-Statistical significance matters when differences are small. Use confidence intervals for win rates across paired comparisons, account for multiple testing when scanning many metrics, and prefer stratified reporting so aggregate lifts do not hide harm to tail demographics. The trade-off is evaluation runtime versus power: larger suites reduce variance but slow CI, so tiered suites with a fast smoke set and a nightly comprehensive job are standard.
+## The idea in plain English
+
+A driving test and a delivery job both involve driving, but passing the first does not tell you whether someone can find a flat in the rain at six o'clock with a parcel on the seat. A public benchmark is the driving test: standard, comparable, and a good first filter. Your golden set is a trial shift on your own round. And if the exam questions were published in last year's revision guide, a high mark may only mean the candidate read the guide, which is contamination.
+
+## Core concepts
+
+The running example is **Brightpost**, an online shop with a support assistant handling **200,000 requests a day**. Its team keeps a **golden set** of **200 real tickets**, each with a reference answer, and uses it to choose between candidate models.
+
+### What a benchmark is made of
+
+A suite has **tasks** (inputs with answer keys, or a checker such as unit tests), a **harness** (the code that formats the prompt, calls the model, extracts the answer and scores it) and a **leaderboard** that ranks models by score. Public examples, with sizes from their papers (checked 15 November 2026):
+
+- **MMLU** (Hendrycks et al., 2020): 15,908 multiple-choice questions across 57 subjects, of which 14,079 are the test set.
+- **GPQA** (Rein et al., 2023): 448 multiple-choice science questions written by experts; the **Diamond** subset is 198 of them. In the paper, domain experts scored 65 % and skilled non-experts with unrestricted web access 34 %, which is what "Google-proof" means here.
+- **SWE-bench Verified**: 500 software tasks that human annotators checked as solvable and fairly tested; OpenAI announced it with the SWE-bench authors on 13 August 2024. A task passes when the project's tests pass.
+- **HELM** (Liang et al.): 42 scenarios, with 7 metrics (accuracy, calibration, robustness, fairness, bias, toxicity, efficiency) measured on its core scenarios. Its repository says it entered maintenance mode on 1 June 2026.
+- **Chatbot Arena** (Chiang et al., 2024): not a fixed test but crowdsourced pairwise votes. A user sees answers from two anonymous models and votes; the ranking is estimated with a Bradley-Terry model. The platform has been renamed since the paper, so check its current name.
+
+### Anatomy: tasks, harness, scores, leaderboard
+
+<AnimatedDiagram
+  spec="animated/eval/bench-anatomy"
+  caption="A leaderboard number is tasks plus harness plus scoring rule; change any of the three and the number moves."
+/>
+
+**How to read it.** Blue is the data, green the model under test, grey the harness that runs them together, lime the scores and violet the stored ranking. The harness has the ring because it is where scores quietly differ: prompt wording, how many worked examples the model sees, sampling settings and how the answer is pulled out of the text. Two reports of "MMLU" are only comparable if they used the same harness settings.
+
+### Scoring methods
+
+Automated scoring spans **exact match**, **fuzzy metrics**, **execution-based checks** for code (run the tests), **LLM judges** with fixed rubrics, and **deterministic validators** such as JSON-schema conformance. Score several dimensions, not one: a model can improve at summarising while silently breaking JSON mode. Version every asset (prompts, judge prompts, scoring code) in git with the same discipline as application code.
+
+### Contamination
+
+**Contamination** is test items appearing in the training data. A public test set gets copied, quoted and discussed, and web-scale training crawls it. The score then rises without the model getting better at the skill.
+
+<AnimatedDiagram
+  spec="animated/eval/bench-contamination"
+  stepper
+  caption="Eleven leaked items out of forty lift the headline by 4.1 points; the clean subset is the score to trust. All numbers are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A public test set">
+    Forty items, shown as blue squares, are published so anyone can reproduce results. Anyone can also copy them.
+  </StepCard>
+  <StepCard n={2} title="Some items are found in the training data">
+    An overlap check against the training corpus flags 11 of the 40 in red. This is the method the GPT-3 paper used: it flagged any test example with a 13-gram (13 consecutive words) overlap with the training set, then compared a "clean" subset against the full set.
+  </StepCard>
+  <StepCard n={3} title="The headline score is inflated">
+    The model gets 10 of the 11 leaked items right and 22 of the 29 clean ones. All 40: (10 + 22) ÷ 40 = 80.0 %. Clean only: 22 ÷ 29 = 75.9 %. Leaked only: 10 ÷ 11 = 90.9 %. The headline is 4.1 points above the clean score, with 11 ÷ 40 = 27.5 % of items leaked.
+  </StepCard>
+  <StepCard n={4} title="Keep a private split and report the clean part">
+    Hold out a split that is never published and is scored by its owner, report the clean subset, and put a canary string in the data. GPQA's authors ask people not to post examples online and embed a canary string so training pipelines can filter the dataset out.
+  </StepCard>
+</StepCards>
+
+### Public against private splits, and detection
+
+A **public split** is open for reproducibility, so it will eventually leak. A **private** (held-out) split is never released and is scored by the maintainer, so it stays clean, at the cost that outsiders cannot inspect it. To detect leakage you have three tools: **overlap checks** (n-grams, as above, or embeddings for paraphrases), a **clean-versus-dirty comparison** of scores, and **canary strings**, which a model that reproduces them has plainly seen. None is complete. Overlap checks miss paraphrases, and you can only run them if you have the training corpus, which you do not have for an API model. That is why a **dynamic evaluation**, refreshed from licensed or internal text after the model's training cutoff, is the strongest defence.
+
+The problem is live for the best-known coding benchmark. In February 2026 OpenAI said it had stopped reporting SWE-bench Verified scores, citing contamination and flawed tests, and recommended SWE-bench Pro instead (see Further reading; check the post for its numbers).
+
+## Architecture
+
+A benchmark practice for a product has two layers: public benchmarks to shortlist, and your own offline suite, in tiers, to decide.
+
+1. **Public benchmarks** narrow many models to a few. Treat the score as a secondary signal, not a verdict.
+2. **A frozen holdout** from your own tickets is never used to tune prompts. It guards against overfitting during iteration.
+3. **A development set** is where prompts and judges are tuned; it will be overfit, so keep it separate.
+4. **A smoke set** of a few dozen cases with deterministic checks runs on every commit in about a minute.
+5. **A nightly suite** runs the full golden set, the safety probes and the multilingual slices, and stores score JSON and diffs as artifacts.
+6. **A production feed** adds new failures, approved by a person, to the development set (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)).
+
+## Deep dive
+
+### Golden datasets and slices
+
+A serious suite combines broad capability checks with domain scenarios drawn from real failures, edge cases for tool use and structured output, multilingual slices and safety probes. Each case carries **metadata**: difficulty, expected tools, required citations, or numeric tolerances, so a regression can be triaged by slice. Expert-curated golden sets anchor automated metrics, but they **rot** as the product and users' language change. Mine new negatives from production, with a human approval step, and refresh on a schedule.
+
+### Statistical rigour
+
+When differences are small, report **confidence intervals** for win rates in paired comparisons (both models on the same cases), correct for **multiple testing** when you scan many metrics (some will move by chance), and report **stratified** results so an aggregate lift does not hide harm to a smaller group. At n = 200 and an accuracy of 0.8, the 95 % interval is 1.96 × sqrt(0.8 × 0.2 ÷ 200) = **±5.5 points**. The trade-off is power against runtime: a larger suite lowers variance but slows CI, which is why suites are tiered (see [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) for gates and noise bands).
+
+### Making CI fast and stable
+
+Cache deterministic fixtures, shard across workers, pin judge models and seeds, and retry only known transient provider faults, with a cap. Fail a build on a statistically meaningful drop against a precomputed baseline, not on a single noisy point.
+
+### Worked example: choosing between three models
+
+Brightpost must pick one of three candidate models. Their public benchmark scores point one way; they run the 200-ticket golden set and see another. These are three hypothetical models with illustrative scores.
+
+<AnimatedDiagram
+  spec="animated/eval/bench-vs-your-task"
+  caption="The model that is last on the public benchmark is first on Brightpost's tickets, by 9 points, more than the interval. All scores are illustrative."
+/>
+
+**How to read it.** Each green bar is one model. The left column is the public benchmark and the right is the golden set, ranked by score. The grey arrows join each model's two bars, and they cross because the order changes. Model C, ringed, rises from third to first.
+
+**The numbers (illustrative).** On the golden set: Model A answers 150 of 200 correctly, 75.0 %; Model B 136, 68.0 %; Model C 168, 84.0 %. The 95 % interval is 1.96 × sqrt(p × (1 − p) ÷ 200): ±6.0 for A, ±6.5 for B and ±5.1 for C. C leads A by 9 points, more than either interval, so the new order is probably real; A against B (7 points) is borderline, so look at the paired flips before trusting that order.
+
+The reason is usually what the benchmark measures. The public test rewards general knowledge and reasoning on exam-style questions; Brightpost's tickets reward following a refund policy, calling the approval tool for order 4471 at £42, and staying within a tone. A model can be better at the first and worse at the second. The team ships C, keeps the public scores in the shortlist note, and adds the failures it found to the golden set.
+
+<Callout tone="red" title="What breaks">
+  A team ships the public leader without running its own set, and the assistant quotes the wrong refund limit on a day with 200,000 requests. Separately, a team tunes prompts against the 200 tickets until they pass, then reports that set as its score: the result is overfit. Keep a frozen holdout that nobody tunes on.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Public benchmark | Comparable across vendors, free to run | Contamination risk; measures general skill, not your task | Shortlisting models |
+| Own golden set | Measures your task and failures | Costs expert time; rots; small, so wide intervals | Choosing and gating releases |
+| Private held-out split | Stays clean; resists gaming | Outsiders cannot inspect it; the owner must be trusted | Final gates and leaderboards |
+| Dynamic or refreshed evaluation | Newer than any training cutoff | Scores shift between refreshes | Contamination-sensitive decisions |
+| LLM-judged suite | Scales to open-ended answers | Judge bias; needs calibration | Quality dimensions with no rule |
+| Smoke set on every commit | Fast feedback | Low power; misses small drops | Pull requests |
+| Full nightly suite | High power, broad coverage | Slow and costly | Release candidates |
+
+## Real-world examples
+
+As of November 2026, from each source's own pages:
+
+- **MMLU** (57 subjects, 15,908 questions) and **GPQA** (448 questions, Diamond 198) are the common public knowledge and hard-science benchmarks; GPQA ships with a canary string.
+- **SWE-bench Verified** (500 human-validated tasks) became a standard coding-agent benchmark; OpenAI later stopped reporting it, citing contamination and flawed tests.
+- **HELM** from Stanford CRFM reports several metrics per scenario instead of one score, and runs public leaderboards.
+- **Chatbot Arena** replaces fixed questions with live, crowdsourced pairwise votes, which resist static contamination, with the bias that voters' own prompts and taste shape the ranking.
+
+## Common pitfalls
+
+- **Quoting a leaderboard number without its harness settings.** Prompt, shots and extraction change it.
+- **Tuning on the set you report.** Keep a frozen holdout.
+- **Assuming a public set is clean.** If it has been online, test for leakage or use a private split.
+- **Reading a 2-point gap on 200 cases as a win.** The interval is ±5.5 points.
+- **One aggregate score.** It hides regressions in a slice or a rare costly case.
+- **A golden set that never changes.** It rots; refresh it from production with human approval.
+
+## How to answer in an interview
+
+1. Define a benchmark as tasks, a harness and a scoring rule, and say that the harness changes the number.
+2. Explain the roles: public benchmarks shortlist, your own golden set decides.
+3. Explain contamination, how to detect it (overlap checks, clean against dirty scores, canaries) and the defence (private or refreshed splits).
+4. Show the Brightpost example: the public order and your order differ, and the interval says which gap is real.
+5. Close with practice: tiered suites, pinned judges, intervals and per-slice reporting.
+
+**What interviewers listen for:** a private holdout, an awareness of contamination, intervals and paired comparison, and treating public scores as secondary.
+
+**Red flags:** "we picked the model at the top of the leaderboard", no frozen holdout, or a single accuracy number with no interval.
+
+## Further reading
+
+- [Measuring Massive Multitask Language Understanding (Hendrycks et al., 2020)](https://arxiv.org/abs/2009.03300)
+- [GPQA: A Graduate-Level Google-Proof Q&A Benchmark (Rein et al., 2023)](https://arxiv.org/abs/2311.12022)
+- [Introducing SWE-bench Verified (OpenAI, 13 August 2024)](https://openai.com/index/introducing-swe-bench-verified/) · [Why we no longer evaluate SWE-bench Verified (OpenAI, February 2026)](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)
+- [Language Models are Few-Shot Learners, section on data contamination (Brown et al., 2020)](https://arxiv.org/abs/2005.14165)
+- [Holistic Evaluation of Language Models (Liang et al., 2022)](https://arxiv.org/abs/2211.09110) · [HELM repository](https://github.com/stanford-crfm/helm)
+- [Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference (Chiang et al., 2024)](https://arxiv.org/abs/2403.04132)
+- Related pages: [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) · [Online & Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you structure a benchmark suite so it catches both capability regressions and safety regressions?" category="Methodology">
+  <InterviewQuestion question="What are the parts of a benchmark, and why can two reports of the same benchmark disagree?" category="Concepts" level="Junior">
+    A benchmark is a set of tasks with answer keys or a checker, a harness that formats the prompt, calls the model, extracts the answer and scores it, and a leaderboard that ranks models. Two reports can disagree because the harness differs: the prompt wording, the number of worked examples, the sampling settings and the way the answer is extracted all move the score. A number is only comparable if the harness settings are reported and the same.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is benchmark contamination, and how do you detect it?" category="Concepts" level="Junior">
+    Contamination is test items appearing in a model's training data, so the score reflects memory as well as skill. You detect it by checking for overlap between the test set and the training corpus, for example n-gram matches as in the GPT-3 paper, and by comparing the score on clean items with the score on leaked ones. Canary strings in the data show whether a model has seen it. For an API model you often lack the training corpus, so you rely on private or newer test sets instead.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you structure a benchmark suite so it catches both capability regressions and safety regressions?" category="Architecture" level="Mid">
     Partition suites by risk and intent: core functional cases with deterministic checks, RAG grounding cases with retrieval fixtures, safety red-team prompts with policy expectations, and performance microbenchmarks for latency-sensitive templates. Run safety and high-risk suites on every release candidate even if smaller, and keep capability breadth in scheduled jobs if full runs are too slow for every commit.
   </InterviewQuestion>
-  <InterviewQuestion question="What design choices reduce the risk of benchmark overfitting during iterative model development?" category="Design">
+  <InterviewQuestion question="What design choices reduce the risk of benchmark overfitting during iterative model development?" category="Trade-offs" level="Mid">
     Maintain a frozen holdout set never used for hyperparameter or prompt iteration, rotate in fresh adversarial examples from production sampling, track performance on external public benchmarks only as a secondary signal, and monitor correlation between offline scores and online outcomes. Discourage cherry-picking cases that always pass and document any changes to the suite with reviewer sign-off.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you implement automated scoring in CI without making pipelines flaky or prohibitively slow?" category="Implementation">
+  <InterviewQuestion question="A model is top of a public leaderboard but third on your 200 golden tickets. Which do you trust?" category="Trade-offs" level="Mid">
+    Trust the golden set for your decision, after checking it is sound. The public benchmark measures general skill on exam-style tasks, while the golden set measures your policy, tools and tone. Check the interval: at 200 cases the 95 % range is about ±5 to 6 points, so a gap of 9 points is probably real and a gap of 2 is not. Check that the golden set was not used to tune the prompt, look at the paired flips and the per-category results, and confirm with a small online test if the stakes are high.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you implement automated scoring in CI without making pipelines flaky or prohibitively slow?" category="Scaling" level="Mid">
     Cache deterministic fixtures, parallelize shards across workers, pin judge models and seeds, retry only on known transient provider faults with caps, and separate quick gating jobs from exhaustive nightly jobs. Store artifacts such as diffs and score JSON for debugging. Fail builds on statistically meaningful drops using precomputed baselines rather than single-point noise.
+  </InterviewQuestion>
+  <InterviewQuestion question="A vendor reports 92 % on a well-known benchmark for its new model. What do you ask before believing it?" category="Failure modes" level="Senior">
+    Ask which split and which harness: the prompt, the number of examples and how answers were extracted. Ask whether the test set was public and whether the vendor checked for overlap with its training data, and whether a private or newer split gives the same ranking. Ask for the score on a clean subset and for an interval. Then run your own task, because even a clean score says little about your policy, tools and tone, and a leaderboard can be saturated or gamed.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design a contamination-resistant evaluation process for a product that changes models every quarter." category="Architecture" level="Senior">
+    Keep a private held-out set built from your own tickets and never publish or paste it into prompts, and add canary strings so you can test a model's recall of it. Refresh a dynamic slice every quarter from tickets created after the candidate's training cutoff, labelled by experts, so it cannot have been trained on. Score every model on the same harness, report clean-subset and full scores with intervals, and compare paired on the same cases. Track the correlation between offline rank and online outcomes, and retire any set whose scores drift upward without a product gain.
   </InterviewQuestion>
 </InterviewQuestions>
