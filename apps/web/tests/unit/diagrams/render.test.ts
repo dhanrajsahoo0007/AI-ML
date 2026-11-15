@@ -103,6 +103,42 @@ describe("SequenceDiagram", () => {
   });
 });
 
+describe("AnimatedDiagram card fills and diagram-only tones", () => {
+  const filled: DiagramSpec = {
+    ...arch,
+    nodes: arch.nodes.map((n) =>
+      n.id === "cache"
+        ? { ...n, tone: "pink", fill: "pastel", sub: "pastel" }
+        : n.id === "db"
+          ? { ...n, tone: "lime", fill: "soft" }
+          : n
+    ),
+    edges: arch.edges.map((e) => (e.to === "cache" ? { ...e, tone: "pink" } : e)),
+  };
+  const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: filled, idBase: "t" }));
+
+  it("fills a card with the pastel or soft token and keeps paper as the default", () => {
+    expect(html).toMatch(
+      /data-node="cache".*?fill:var\(--dg-pink-fill\);stroke:var\(--dg-pink\)" [^>]*data-fill="pastel"/
+    );
+    expect(html).toMatch(/data-node="db".*?fill:var\(--dg-lime-soft\)/);
+    expect(html).toMatch(/data-node="client".*?fill:var\(--paper\)/);
+    expect(attr(html, "data-fill")).toEqual(["pastel", "soft"]);
+  });
+
+  it("writes the sub line in ink on a pastel card", () => {
+    expect(html).toMatch(/style="fill:var\(--ink\)">pastel</);
+  });
+
+  it("adds pink and lime arrow markers only when an edge uses them", () => {
+    expect(html).toContain('-arrow-pink"');
+    expect(html).not.toContain("arrow-lime");
+    const plain = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch, idBase: "t" }));
+    expect(plain).not.toContain("arrow-pink");
+    expect(plain).not.toContain("data-fill");
+  });
+});
+
 describe("LayoutDiagram", () => {
   it("rings highlighted shapes and hides later steps", () => {
     const html = renderToStaticMarkup(createElement(LayoutDiagram, { spec: layout, step: 1 }));

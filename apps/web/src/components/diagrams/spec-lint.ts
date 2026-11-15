@@ -110,6 +110,9 @@ function lintArchitecture(spec: DiagramSpec): string[] {
       if (n.sub && n.sub.length * SUB_CHAR_W > room)
         out.push(`node "${n.id}": sub "${n.sub}" is wider than its ${n.w ?? NODE_W}px box`);
       if ((n.h ?? NODE_H) < 36) out.push(`node "${n.id}": height ${n.h} is too small for a label`);
+      if (n.fill && n.accent) out.push(`node "${n.id}": fill does nothing on an accent node`);
+    } else if (n.fill) {
+      out.push(`node "${n.id}": fill only applies to card nodes, not glyph nodes`);
     }
     out.push(...lintCloudRefs(n));
   }

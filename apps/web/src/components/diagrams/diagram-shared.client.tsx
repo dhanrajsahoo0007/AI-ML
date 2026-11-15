@@ -25,7 +25,7 @@ import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
 import { TONES, phaseOpacity, soft, stroke, textWidth } from "./diagram-style";
-import type { DiagramStep, LayoutGroup, LayoutTone, Tone } from "./types";
+import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
 // play/pause, stepper, caption), zones, the NEW marker and the travelling packet.
@@ -549,7 +549,7 @@ export function IconAt({
   size,
 }: {
   name?: string;
-  tone: Tone;
+  tone: LayoutTone;
   cx: number;
   cy: number;
   size: number;

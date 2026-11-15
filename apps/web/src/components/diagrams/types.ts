@@ -27,7 +27,8 @@ export type ZoneKind = "region" | "vpc" | "subnet";
 export interface DiagramZone {
   id: string;
   title: string;
-  tone: Tone;
+  /** A section tone; architecture zones may also use the diagram-only `pink` and `lime` (see LayoutTone). */
+  tone: LayoutTone;
   kind?: ZoneKind;
   x: number;
   y: number;
@@ -42,9 +43,15 @@ export interface DiagramNode {
   sub?: string;
   /** Glyph from ./glyphs, a key from DIAGRAM_ICONS, or any name from src/lib/icons.ts. */
   icon?: string;
-  tone?: Tone;
+  /** Any diagram tone, including the diagram-only `pink` and `lime` (RAG and Transformer legends). */
+  tone?: LayoutTone;
   /** Solid filled node for the component the diagram is about. */
   accent?: boolean;
+  /**
+   * Card background: "paper" (default, an outline card), "soft" the tone's pale tint, or "pastel" a coloured block
+   * with ink text (`--dg-<tone>-fill`). Ignored when `accent` is set; not allowed on glyph nodes.
+   */
+  fill?: ShapeFill;
   /** "card" (default): boxed node with the icon on the left. "glyph": a large drawing with the label below. */
   variant?: "card" | "glyph";
   /** Build step that introduces this node (default 1). */
@@ -62,7 +69,7 @@ export interface DiagramEdge {
   from: string;
   to: string;
   label?: string;
-  tone?: Tone;
+  tone?: LayoutTone;
   /** Dashed line; with `flow` the dashes march from source to target. */
   dashed?: boolean;
   flow?: boolean;
@@ -157,7 +164,11 @@ export interface SequenceSpec {
 
 // ── Layout diagrams ────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Layout specs may also use two diagram-only tones (the Transformer figures' embedding pink and Add & Norm lime). */
+/**
+ * Diagram specs (layout shapes and groups, architecture nodes, zones and edges) may also use two diagram-only tones:
+ * the Transformer and RAG figures' embedding `pink` and the Add & Norm / ranking `lime`. Sequence lanes and section
+ * tints keep `Tone`.
+ */
 export type LayoutTone = Tone | "pink" | "lime";
 
 export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow" | "path";
@@ -217,8 +228,8 @@ export interface LayoutShape {
   smooth?: boolean;
 }
 
-/** A dotted group behind layout shapes: an architecture zone that may also use the layout-only tones. */
-export type LayoutGroup = Omit<DiagramZone, "tone"> & { tone: LayoutTone };
+/** A dotted group behind layout shapes, drawn like an architecture zone. */
+export type LayoutGroup = DiagramZone;
 
 export interface LayoutSpec {
   kind: "layout";

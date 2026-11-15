@@ -71,6 +71,28 @@ describe("lintSpec: architecture", () => {
     const problems = lintSpec(with_({ nodes: [...base.nodes, { id: "a", label: "Again", x: 250, y: 100 }] }));
     expect(problems).toContain('duplicate node id "a"');
   });
+
+  it("accepts card fills and diagram-only tones, and flags a fill on a glyph or accent node", () => {
+    const clean = with_({
+      zones: [{ id: "z", title: "Embed", tone: "pink", x: 20, y: 40, w: 200, h: 120 }],
+      nodes: [
+        { id: "a", label: "Embed", tone: "pink", fill: "pastel", x: 100, y: 100 },
+        { id: "b", label: "Rerank", tone: "lime", fill: "soft", x: 400, y: 100, step: 2 },
+      ],
+      edges: [{ from: "a", to: "b", tone: "pink" }],
+    });
+    expect(lintSpec(clean)).toEqual([]);
+    const problems = lintSpec(
+      with_({
+        nodes: [
+          { id: "a", label: "Index", variant: "glyph", icon: "database", fill: "pastel", x: 100, y: 100 },
+          { id: "b", label: "Server", accent: true, fill: "soft", x: 400, y: 100, step: 2 },
+        ],
+      })
+    );
+    expect(problems).toContain('node "a": fill only applies to card nodes, not glyph nodes');
+    expect(problems).toContain('node "b": fill does nothing on an accent node');
+  });
 });
 
 describe("lintSpec: sequence", () => {
