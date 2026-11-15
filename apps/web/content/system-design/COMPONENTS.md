@@ -1002,6 +1002,16 @@ on a ring with an exit to "Done"), `miniLoop` (the loop as a small locator row w
 context window as a stacked token bar with free space) and `patternTile` (the five workflow patterns with identical
 node sizes). `assets/diagrams/animated/agents/agent-loop.ts` is the reference architecture spec.
 
+Production figures (Fine-Tuning, Evaluation, Inference & Serving, LLMOps, Safety and Multimodal pages) build theirs
+with `src/components/diagrams/presets/production.ts`: the legend `PROD_TONE` (with `FINETUNE_TONE` and
+`MODALITY_TONE` for the two local rules), the Brightpost running example (`TRAFFIC`, `TOKENS`, `LATENCY`, `DATASETS`,
+`REFUND_CASE`, each with its working in a comment) and seven builders: `lifecycleMap` (the whole track as one picture,
+stages in `LIFECYCLE_STAGES`), `miniLifecycle` (the same map as a small locator with stages ringed), `waterfall` (a
+request as timed spans on a millisecond axis), `meter` (a fill against a limit, red past it), `gate` (a change, its
+checks, promote or block), `confusionGrid` (counts with metrics beside them; `precision`, `recall`, `accuracy`,
+`falsePositiveRate` and `cohensKappa` compute them) and `curve` (a small plot with marked points, "shape only" when
+not computed). Each placeable builder has a size helper. Page-only builders go in `presets/production-<short>.ts`.
+
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
 ```ts
