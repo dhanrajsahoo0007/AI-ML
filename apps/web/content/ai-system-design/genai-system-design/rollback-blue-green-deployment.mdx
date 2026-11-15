@@ -1,22 +1,203 @@
 ---
 title: Rollback & Blue-Green Deployment
 description: Safe promotion and rapid recovery for ML models using blue-green pairs, canaries, shadow traffic, and automated quality gates.
+updated: 2026-11-15
 ---
 
-Blue-green deployment for ML keeps two parallel stacks: blue serves production traffic while green hosts the candidate model, tokenizer changes, prompt template revisions, or feature extraction updates. A router or load balancer flips traffic atomically once health checks and synthetic canaries pass. Unlike stateless microservices, ML rollouts must validate not only error rates but also distribution shift in outputs, latency regressions from larger graphs, and memory footprint changes that only appear under realistic batch sizes.
+A web release fails loudly: errors spike and the dashboard turns red. An LLM release can fail quietly, because every answer is well-formed and fast and a few of them are wrong. Interviewers ask this question to see whether you gate a rollout on answer quality as well as latency, and whether you know what "the previous version" means when it is a model, a prompt, an index and a set of tools. The general release patterns are in [CI/CD & Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies); this page covers what changes for LLMs.
 
-Canary releases send a small percentage of live traffic to the new version while comparing golden metrics: HTTP 5xx rates, timeout ratios, business KPIs such as conversion, and model-specific scores like toxicity classifier pass rates or embedding drift against a reference corpus. Shadow mode duplicates requests to the new stack without returning its responses to users, which avoids user-visible risk but still exercises real inputs if privacy policy allows storing mirrored payloads securely. Shadow traffic must not double-charge paid upstream APIs or write side effects unless you explicitly neutralize those code paths.
+## TL;DR
 
-Traffic shifting strategies include stepwise percentage ramps, geography-based canaries, and cohort routing for internal users first. Automated rollback triggers should combine fast signals such as error spikes with slower signals such as statistically significant quality drops detected via logged judgments or delayed feedback. Feature flags decouple binary deployment from behavioral exposure so you can deploy artifacts widely but gate model IDs, temperature defaults, or retrieval corpora per tenant. The trade-off is configuration complexity: flags that interact badly can produce states nobody tested, so treat flag matrices as part of release engineering with contract tests.
+- **Blue-green** keeps two stacks: blue serves, green holds the candidate, and a router flips traffic once checks pass. The old stack stays warm, so a rollback is one flip, not a rebuild.
+- **A low error rate proves little.** Check **quality on sampled answers** as well as latency. In Brightpost's canary the latency check passes at every stage and the quality check blocks at **50 %** (illustrative).
+- **Small samples cannot see small drops.** With 50 graded answers the 95 % range is **±7.5 points**, wider than a 5-point regression. Early stages catch crashes; later stages catch quality.
+- **A release is a bundle:** model, prompt, retrieval index, guardrail config and tool schemas. They ship and roll back **together**, or you create a combination nobody tested.
+- **Pin the model.** An alias that moves under you turns a rollback into a different model. Use a dated or pinned ID and record it (as of November 2026).
+- **Shadow traffic** exercises real inputs with no user risk, but it **doubles the model bill** for that hour and must not repeat side effects such as a refund.
+
+## The idea in plain English
+
+A restaurant tests a new menu by running a second kitchen next door. The old kitchen keeps serving. Waiters send one table in a hundred to the new kitchen, then one in ten, then half, and a diner at each table fills in a card. If the cards say the food got worse, every table goes back to the old kitchen in a minute. The catch is that a new menu is also new recipes, new suppliers and new plating. Switch back to the old recipes but keep the new suppliers and the dishes no longer match. So the whole kitchen is swapped as one unit, and the old one stays lit until the cards are in.
+
+## Core concepts
+
+1. **Blue-green.** Two full stacks. Blue serves production; green runs the candidate. After health checks and synthetic requests pass, the router sends traffic to green and keeps blue warm for a rollback. It needs capacity for both stacks for as long as you keep blue. On a managed endpoint the same idea is built in: SageMaker AI provisions a green fleet, shifts traffic and ends the blue fleet only after a baking period (AWS documentation, checked November 2026).
+2. **Canary.** A small share of live traffic goes to the candidate in stages, with checks at each. Traffic shifting can be all at once, canary (two steps) or linear (equal steps); SageMaker documents all three. Argo Rollouts expresses stages as `setWeight` and `pause` steps with a background analysis that aborts the rollout when it fails.
+3. **Quality gates.** A stage passes only when every check passes. The checks that matter for LLMs are a pass rate on sampled answers from a grader, refusal rate, answer length, tool-call success and cost per request, next to the usual error rate and p95 latency. See [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
+4. **Why quality needs samples.** Outputs are non-deterministic, so one bad answer proves nothing. You compare pass rates over enough graded answers to tell a real drop from noise. The range on a pass rate p over n answers is about 1.96 × √(p(1 − p) ÷ n).
+5. **Shadow traffic.** The gateway copies each request to the candidate and discards its response. Istio's mirroring is "fire and forget" and can mirror a chosen percentage (Istio documentation, checked November 2026). It tests stability and real inputs, not user satisfaction.
+6. **The release bundle.** Model, prompt, retrieval index, guardrail configuration and tool schemas are versioned and released as one manifest. Rolling back means restoring the whole manifest. See [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance).
+7. **Aliases that move.** An alias such as "latest" can point to a new model next month. Anthropic's current model IDs are pinned snapshots, but its older shorter aliases point to the most recent dated snapshot, and serving infrastructure around fixed weights can change (documentation checked November 2026). Check each provider's rules, and pin.
+8. **Retirement.** A provider retires old models, so "roll back to last quarter's model" can stop being possible. Anthropic commits to at least 60 days' notice for publicly released models (checked November 2026). Keep your own fallback in the [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway).
+9. **Feature flags.** A flag decouples deploying code from exposing a behaviour: ship the artefacts widely and switch model ID, temperature default or retrieval corpus on per tenant. The cost is combinations nobody tested, so treat the flag matrix as part of release engineering and contract-test it.
+10. **Rollback triggers.** Combine fast signals (error spikes, timeouts) with slower ones (a significant fall in graded quality, delayed customer feedback). Name an owner and a threshold per signal.
+
+## Architecture
+
+The cloud track draws the five ways to ship one version. Blue-green is step 5 and the canary is step 6.
+
+<AnimatedDiagram
+  spec="animated/cloud/deployment-strategies"
+  stepper
+  step={5}
+  caption="Blue-green flips all traffic and keeps the old fleet warm; the canary sends a few percent first and lets an alarm roll back."
+/>
+
+**How to read it.** Step 5 shows a second fleet running the new version, a balancer that flips all traffic, and the old fleet kept for a rollback. Step 6 replaces the flip with 5 % of traffic and an alarm that watches the error rate. For an LLM, read "error rate" as "error rate and answer quality", and read "fleet" as the whole bundle: a model, its prompt, its index, its guardrails and its tools.
+
+1. Build bundle 42 and test it offline on the golden set (see [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines)).
+2. Run it in shadow: real requests, discarded answers, tools in dry-run mode.
+3. Send 1 %, then 10 %, then 50 % of traffic, with a quality check and a latency check at each stage.
+4. At any failed check, return the weight to 0 % and keep bundle 41 live.
+5. At 100 %, keep bundle 41 warm until the baking period ends, then release it.
+
+## Deep dive
+
+### Canary gates: one stage fails
+
+Brightpost's candidate, bundle 42, is a new model, a new prompt and a new index. Each stage runs for one hour at the average rate of 2.3 requests/s, which is 2.3 × 3,600 = 8,280 requests an hour.
+
+<AnimatedDiagram
+  spec="animated/serving/canary-gates"
+  stepper
+  caption="Three stages of a canary. The latency check passes every time; the quality check blocks at 50 % of traffic. Sample sizes and results are illustrative."
+/>
+
+**How to read it.** Each row is one stage: the candidate on the left, a quality check and a latency check in the middle, the decision on the right. Lime boxes pass and red boxes fail. Steps 1 and 2 pass. Step 3 passes the latency check (381 ms against a 400 ms target) and fails quality. Step 4 returns the weight to 0 %. The 100 % stage is never reached.
+
+**The numbers.** The floor is 85 %, which is the live bundle's 90 % minus 5 points. A judge grades 50, 200 and 500 answers at the three stages. At 1 %, 46 of 50 pass (92 %), and the 95 % range is ±7.5 points, so 84.5 to 99.5 %: a drop to 85 % cannot be ruled out. At 10 %, 178 of 200 pass (89 %) with ±4.3 points, a range of 84.7 to 93.3 %: still not ruled out. At 50 %, 405 of 500 pass (81 %) with ±3.4 points, a range of 77.6 to 84.4 %: every value is under the floor, so the gate blocks. The early stages mostly guard against crashes, timeouts and malformed output. Quality needs the later, larger samples, so do not let an early green stage stand for a quality pass.
+
+<Callout tone="red" title="What breaks">
+  Gating on latency and error rate alone. Bundle 42 returned fast, well-formed answers all the way to 50 %, so every dashboard stayed green while 19 in 100 graded answers failed. The quality check is the only thing that stops it.
+</Callout>
+
+A stage gate is a small config. This one follows the shape of an Argo Rollouts canary (checked November 2026); the metric names and thresholds are Brightpost's and illustrative:
+
+```yaml
+strategy:
+  canary:
+    steps:
+      - setWeight: 1
+      - pause: { duration: 1h }
+      - analysis: { templates: [{ templateName: quality-and-latency }] }
+      - setWeight: 10
+      - pause: { duration: 1h }
+      - setWeight: 50
+      - pause: { duration: 1h }
+# quality-and-latency fails when graded pass rate < 0.85 or p95 first token >= 400 ms
+```
+
+### The release bundle: what rolls back
+
+A model is rarely the only thing that changed. A prompt is written for a model, a tool call depends on its schema, and an index depends on the embedding model that built it.
+
+<AnimatedDiagram
+  spec="animated/serving/release-bundle"
+  stepper
+  caption="Bundle 41 is live; bundle 42 changes four parts. Rolling back only the tools leaves the new prompt calling a field that no longer exists; restoring the whole bundle does not."
+/>
+
+**How to read it.** Each row is a set of five pinned versions: model, prompt, index, guardrails, tools. Step 3 is a half rollback: the tool schema returns to t7 while the prompt stays at p12, and the two red boxes disagree. Step 4 restores all five. The version labels are invented for the figure.
+
+Store the bundle as one manifest and promote or roll it back as one record. Pin the model to a dated or snapshot ID; do not use a name that can move. A manifest for this example (field names illustrative):
+
+```yaml
+bundle: 42
+model: m7            # pinned ID, never an alias
+prompt: p12
+index: i31           # built with embedding model e3; query-time embedder must match
+guardrails: g5
+tools: t8
+previous: 41         # rollback target: restore this manifest whole
+```
+
+### Shadow traffic and its limits
+
+Shadow mode copies live requests to the candidate and drops its answers. It finds crashes, slow paths and odd inputs without any user risk. It has four limits. It doubles the model bill: an hour of Brightpost traffic is 8,280 × 2,200 = 18.2 M input and 8,280 × 250 = 2.1 M output tokens, all paid twice. It cannot measure satisfaction, because nobody sees the answer. It must not repeat side effects: a shadow run must not issue the £42 refund for order 4471 a second time, so tools run in dry-run mode. And it needs a privacy review before you store mirrored prompts. Tag shadow spans in your traces so they never reach production analytics.
+
+### Worked example: Brightpost ships bundle 42
+
+Bundle 41 is live on 3 replicas (2 plus 1 spare, from [LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference)). Bundle 42 swaps the model, rewrites the prompt and rebuilds the index. The team uses the figures above.
+
+1. **Shadow for an hour.** 8,280 requests run through bundle 42 in dry-run mode. No crashes. Cost: about 18.2 M input and 2.1 M output tokens of extra model use.
+2. **Canary at 1 %, then 10 %.** Both checks pass. At 10 % the quality range still touches the 85 % floor, so the team does not call it safe; it moves on only because 50 % has a rollback.
+3. **Canary at 50 %.** Quality falls to 81 %, p95 time to first token is a healthy 381 ms, and the gate blocks. The weight goes back to 0 % in one config change, because blue never stopped serving. Only the half of traffic that was on the canary could meet the regression, and only for part of an hour.
+4. **Find the cause.** The 50 % sample had more long, multi-turn tickets than the 1 % sample, and bundle 42's prompt drops earlier turns. The fix goes into prompt p13 and the cycle restarts.
+5. **Bundle, not part.** During the incident an engineer proposes rolling back "just the model". The manifest shows that prompt p12 and tools t8 were tested with model m7 only. The team restores the whole manifest 41.
+
+A green fleet next to a warm blue fleet is 3 + 3 = 6 GPU replicas for as long as blue stays. If green must start from scratch, it pays the cold start measured in [Load Balancing & Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling): 99 s from scratch, 23 s with the slow stages moved ahead of time (illustrative). On a hosted API there is no fleet; the "flip" is a model ID in the gateway's route.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Blue-green | One-flip rollback; old stack warm | Double capacity while both run; all users move at once | Self-hosted models with a quick quality check |
+| Canary by percentage | Limits the blast radius; real traffic | Small early samples hide quality drops; needs graders | Most LLM releases |
+| Shadow traffic | No user risk; real inputs | Doubles cost; no satisfaction signal; side effects | A new model or index with high stakes |
+| Cohort or internal-first | Friendly users find problems early | Not representative of all traffic | Before a public canary |
+| Feature flags | Per-tenant control; deploy and release separate | Untested flag combinations | Gradual exposure of a behaviour |
+| All at once | Fastest and cheapest | A regression hits everyone | Low-risk config changes with an instant rollback |
+
+## Real-world examples
+
+- **Amazon SageMaker AI deployment guardrails.** Blue-green updates with all-at-once, canary or linear traffic shifting, a baking period and automatic rollback on CloudWatch alarms (AWS documentation, checked November 2026).
+- **Argo Rollouts.** Canary steps with `setWeight`, `pause` and background analysis; a failed analysis aborts the rollout (documentation checked November 2026).
+- **Istio traffic mirroring.** Copies a percentage of live requests to a second version and discards its responses.
+- **Anthropic model lifecycle.** Pinned model IDs, notice of at least 60 days before a public model is retired, and published retirement dates (checked November 2026).
+
+## Common pitfalls
+
+- Declaring a canary healthy from HTTP errors and p95 latency alone.
+- Judging quality on 50 answers and treating a pass as proof; the range is wider than the regression you want to catch.
+- Rolling back the model but not the prompt, index or tool schema.
+- Using a model alias that the provider can repoint, so the "previous version" is no longer the previous behaviour.
+- Running shadow traffic with live tools, so a refund or an email goes out twice.
+- Rolling back on one noisy reading with no baking period, then flapping between versions.
+
+## How to answer in an interview
+
+1. Say why LLM releases differ: outputs vary, quality can fall while latency and errors look fine, and the release is a bundle, not a binary.
+2. Name the pattern: shadow, then a staged canary, with blue kept warm. Say what each stage checks.
+3. Give the gate: a pass rate on sampled answers against a floor, plus latency and cost, with a sample large enough for the drop you care about.
+4. Say what rolls back: the whole bundle, with the model pinned. Mention retirement and moving aliases.
+5. Cover the human side: owners and thresholds, a baking period, a manual override and a review after any rollback.
+
+**What interviewers listen for:** quality gates on graded samples, the sample-size argument, bundle-level rollback, and shadow traffic's cost and side effects.
+
+**Red flags:** "watch the error rate and latency", a rollback that restores only the model, and an unpinned model name in production.
+
+## Further reading
+
+- [Blue/Green Deployments (Amazon SageMaker AI documentation)](https://docs.aws.amazon.com/sagemaker/latest/dg/deployment-guardrails-blue-green.html)
+- [Canary strategy (Argo Rollouts documentation)](https://argo-rollouts.readthedocs.io/en/stable/features/canary/)
+- [Traffic mirroring (Istio documentation)](https://istio.io/latest/docs/tasks/traffic-management/mirroring/)
+- [Model IDs and versioning (Anthropic documentation)](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)
+- [Model deprecations (Anthropic documentation)](https://platform.claude.com/docs/en/about-claude/model-deprecations)
+- Related pages: [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why is a low HTTP error rate insufficient to declare an ML canary successful?" category="Deployment">
-    Models can return syntactically valid responses that are systematically wrong, biased, or empty in ways that damage user trust without raising transport errors. You need outcome metrics, human evaluation samples, automated quality checks on outputs, and comparisons to baseline distributions for length, refusal rate, and tool-call success. Roll forward only when those secondary signals remain within agreed bounds.
+  <InterviewQuestion question="Why is a low HTTP error rate not enough to declare an LLM canary successful?" category="Concepts" level="Junior">
+    A model can return fast, well-formed answers that are wrong, off-policy, empty or too long, and none of that raises a transport error. You need outcome signals: a grader's pass rate on sampled answers, refusal rate, answer length, tool-call success and cost per request, each compared with the live version. Promote only when those stay within agreed bounds. In Brightpost's example the latency check passes at every stage while quality falls to 81 %.
   </InterviewQuestion>
-  <InterviewQuestion question="How does shadow traffic help, and what are its limits?" category="Reliability">
-    Shadow requests validate runtime stability, autoscaling behavior, and integration with dependencies under production load shapes without user impact. Limits include inability to measure user satisfaction on the shadow path, potential privacy issues if payloads are sensitive, doubled compute cost, and blind spots if shadow consumers lack idempotency or mutate state you forgot to disable. Always tag shadow spans in tracing to avoid polluting production analytics.
+  <InterviewQuestion question="How does shadow traffic help, and what are its limits?" category="Trade-offs" level="Mid">
+    Shadow requests exercise the candidate on real inputs and production load shapes with no user impact, so they catch crashes, slow paths and odd inputs. The limits are cost, privacy, side effects and signal. The candidate's model calls are paid in full, so an hour of Brightpost traffic costs about 18.2 M extra input tokens. Mirrored prompts may need a privacy review. Tools must run in dry-run mode so a refund is not issued twice. And nobody sees the answer, so you learn nothing about satisfaction. Tag shadow spans so they stay out of production analytics.
   </InterviewQuestion>
-  <InterviewQuestion question="What operational playbooks should exist around automated rollback for models?" category="Operations">
-    Define explicit owners and thresholds per metric, ensure rollbacks revert not only routing weights but also caches and prompt bundles that were co-versioned, and verify observability distinguishes rollback events from unrelated incidents. Post-incident reviews should capture whether triggers were too sensitive causing churn or too slow allowing damage, and update SLO-based gates accordingly. Document manual override paths when automation conflicts with a planned experiment.
+  <InterviewQuestion question="What belongs in an automated rollback playbook for an LLM release?" category="Failure modes" level="Mid">
+    Name an owner and a threshold for each signal, fast ones such as errors and timeouts and slow ones such as graded quality. Make the rollback restore the whole bundle, meaning routing weight, prompt, index, guardrail config and tool schemas, and clear any cache keyed to the old version. Make observability mark rollback events apart from unrelated incidents. Review each rollback afterwards to see whether the triggers were too sensitive and caused churn or too slow and allowed damage. Keep a documented manual override for planned experiments.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can a canary at 1 % of traffic not detect a 5-point quality drop?" category="Concepts" level="Mid">
+    A pass rate measured on n graded answers has a 95 % range of about 1.96 × √(p(1 − p) ÷ n). With 50 graded answers and a pass rate near 92 % that is ±7.5 points, wider than the drop. The measurement cannot tell a regression from noise. Either grade more answers, run the stage longer or accept that early stages guard against crashes and gross failures. Quality gates carry weight at the later, larger stages, and you should size the sample for the smallest drop you want to catch.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the rollout of a new model, prompt and retrieval index for a support assistant." category="Architecture" level="Senior">
+    Package the three, with the guardrail config and tool schemas, as one versioned bundle and test it offline on the golden set first. Run it in shadow with tools in dry-run mode, then canary at 1 %, 10 % and 50 % with a quality check and a latency check at each stage and the old bundle kept warm. Size each stage's graded sample for the drop you care about. On any failed gate, return the weight to zero and restore the previous bundle as a whole. Pin the model ID, log the bundle version on every trace, and only release the old stack after a baking period.
+  </InterviewQuestion>
+  <InterviewQuestion question="A provider changes its model alias overnight and your quality drops. How do you prevent and handle it?" category="Failure modes" level="Senior">
+    Prevent it by calling a pinned or dated model ID and recording it in the bundle, so behaviour changes only when you change the manifest. Know that some aliases follow the latest snapshot, and that serving infrastructure around fixed weights can also shift behaviour. Detect it with the online quality sample and a scheduled run of the golden set against production, which shows drift without a release. Handle it by rolling the bundle back, or by routing to a fallback model through the gateway, then re-running your evaluation before you adopt the new model on purpose.
+  </InterviewQuestion>
+  <InterviewQuestion question="Blue-green or canary for an LLM release, and when do you use both?" category="Trade-offs" level="Senior">
+    Blue-green gives a one-flip rollback by keeping the old stack warm, but it moves all users at once and needs double capacity. A canary limits the blast radius and gathers quality evidence on real traffic, but small early samples are weak. Use them together: a green stack that is the canary target, a staged weight shift with quality and latency gates, and blue kept warm until the baking period ends. On a hosted API, where there is no fleet, the same thing is a staged change of the route in the gateway.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why must a model, a prompt and a tool schema roll back together?" category="Architecture" level="Mid">
+    They were tested as a set. A prompt is written for a particular model's behaviour, a tool call depends on the exact schema, and an index depends on the embedding model that built it. If you restore one part, the others may no longer fit it, which creates a combination nobody tested. In Brightpost's example the new prompt calls a refund field that the old tool schema lacks, so the call fails. Record the five versions in one manifest and make rollback a single switch to the previous manifest.
   </InterviewQuestion>
 </InterviewQuestions>
