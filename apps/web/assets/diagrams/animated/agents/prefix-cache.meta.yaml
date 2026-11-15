@@ -1,0 +1,17 @@
+title: "A stable prefix is cached; one early edit invalidates everything after it"
+alt: >-
+  Four request bars, revealed one at a time, for two consecutive model calls of the coding agent. Each bar is laid out
+  in the order the Claude API builds its cache prefix: tool definitions, 1,500 tokens, then the system prompt, 2,000,
+  then the messages, task and history, 4,500. Step 1: call 6 sends 8,000 tokens and writes them to the cache at 1.25
+  times the base price. Step 2: call 7 adds a 1,000-token tool call and result; the first 8,000 tokens are read from
+  the cache at 0.05 times, so the call costs 1,650 base-price tokens against 9,000 uncached. Step 3: the harness puts
+  the time, 10:42, into the system prompt, drawn red and ringed; only the 1,500 tokens of tools before it are read,
+  and the 7,500 after it are written again, costing 9,450, more than no cache at all. Step 4: the time goes at the
+  end, after the new messages, and 8,000 tokens are read from the cache again, about 1,650. Order and multipliers are
+  from the Claude prompt caching docs for Claude Opus 5.5 as of November 2026; token counts are illustrative.
+caption: >-
+  The cache matches a prefix, block by block, in the order tools, system, messages. Anything that changes belongs at
+  the end. Counts illustrative; multipliers for Claude Opus 5.5, November 2026.
+tags: [agents, context-engineering, prompt-caching, genai]
+source: original
+created: 2026-11-15
