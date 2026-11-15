@@ -6,8 +6,8 @@ export const NODE_H = 58;
 export const GLYPH_SIZE = 54;
 
 /** Default sizes of layout shapes (viewBox units). */
-const SHAPE_W = { box: 120, cell: 40, circle: 40, text: 80, arrow: 0 } as const;
-const SHAPE_H = { box: 48, cell: 40, circle: 40, text: 20, arrow: 0 } as const;
+const SHAPE_W = { box: 120, cell: 40, circle: 40, text: 80, arrow: 0, path: 0 } as const;
+const SHAPE_H = { box: 48, cell: 40, circle: 40, text: 20, arrow: 0, path: 0 } as const;
 
 export type Point = [number, number];
 
@@ -37,8 +37,14 @@ export function nodeBounds(node: DiagramNode): Bounds {
   return { x1: node.x - b.left, y1: node.y - b.top, x2: node.x + b.right, y2: node.y + b.bottom };
 }
 
-/** Where a layout shape sits: box, cell and text are anchored top-left, a circle at its centre. */
+/** Where a layout shape sits: box, cell and text are anchored top-left, a circle at its centre, a path spans its points. */
 export function shapeBounds(shape: LayoutShape): Bounds {
+  if (shape.type === "path") {
+    const pts = shape.points?.length ? shape.points : [[shape.x, shape.y] as Point];
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+  }
   const w = shape.w ?? SHAPE_W[shape.type];
   const h = shape.h ?? SHAPE_H[shape.type];
   if (shape.type === "circle") {
@@ -92,6 +98,26 @@ export function routeBetween(from: Bounds, to: Bounds, via: Point[]): Point[] {
 
 export function pathD(points: Point[]) {
   return points.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+}
+
+/**
+ * A smooth curve through every point (Catmull-Rom converted to cubic Béziers), for layout `path` shapes with
+ * `smooth`. Two points give a straight line; the curve passes exactly through each point.
+ */
+export function smoothPathD(points: Point[]) {
+  if (points.length < 3) return pathD(points);
+  const f = (n: number) => n.toFixed(1);
+  let d = `M${f(points[0][0])} ${f(points[0][1])}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const c1: Point = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2: Point = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${f(c1[0])} ${f(c1[1])} ${f(c2[0])} ${f(c2[1])} ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d;
 }
 
 // Point at fraction `t` of the polyline's total length.

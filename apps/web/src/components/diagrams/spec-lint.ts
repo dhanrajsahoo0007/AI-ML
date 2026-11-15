@@ -17,6 +17,9 @@ const SUB_CHAR_W = 4.8;
  */
 const ICON_PAD = 48;
 const TEXT_PAD = 16;
+/** Layout labels: at most this many "\n"-separated lines, each 15px tall (layout-diagram.client.tsx LINE_H). */
+const MAX_LINES = 3;
+const LINE_H = 15;
 
 /** Problems found in a spec of any kind; an empty array means it passes. */
 export function lintSpec(spec: AnySpec): string[] {
@@ -153,18 +156,34 @@ function lintLayout(spec: LayoutSpec): string[] {
 
   const solid = spec.shapes.filter((s) => s.type === "box" || s.type === "cell");
   for (const s of spec.shapes) {
+    if (s.weight !== undefined && !(s.weight >= 0 && s.weight <= 1))
+      out.push(`shape "${s.id}": weight ${s.weight} is not between 0 and 1`);
+    if (s.symbol && s.type !== "circle") out.push(`shape "${s.id}": symbol only applies to circles`);
+    if (s.fill && s.type !== "box" && s.type !== "cell" && s.type !== "circle")
+      out.push(`shape "${s.id}": fill only applies to boxes, cells and circles`);
     if (s.type === "arrow") {
       if (s.from && !shapes.has(s.from)) out.push(`arrow "${s.id}": unknown shape "${s.from}"`);
       if (s.to && !shapes.has(s.to)) out.push(`arrow "${s.id}": unknown shape "${s.to}"`);
       if (!s.from && !s.to && !s.w && !s.h) out.push(`arrow "${s.id}" has no from/to and no length`);
       continue;
     }
+    if (s.type === "path" && (s.points?.length ?? 0) < 2) {
+      out.push(`path "${s.id}" needs at least two points`);
+      continue;
+    }
     const b = shapeBounds(s);
     if (!insideCanvas(b, spec.width, spec.height))
       out.push(`shape "${s.id}" leaves the ${spec.width}×${spec.height} canvas`);
+    const lines = s.label?.split("\n") ?? [];
+    if (lines.length > MAX_LINES) out.push(`shape "${s.id}": label has ${lines.length} lines (at most ${MAX_LINES})`);
     if (s.label && (s.type === "box" || s.type === "cell")) {
       const room = b.x2 - b.x1 - 8;
-      if (s.label.length * CHAR_W > room) out.push(`shape "${s.id}": label "${s.label}" is wider than its box`);
+      const longest = lines.reduce((a, l) => (l.length > a.length ? l : a), "");
+      if (longest.length * CHAR_W > room) out.push(`shape "${s.id}": label "${longest}" is wider than its box`);
+      // A single line always fits (the default heights); stacked lines and a sub line need the room.
+      const textH = lines.length * LINE_H + (s.sub ? 14 : 0);
+      if (lines.length > 1 && textH + 6 > b.y2 - b.y1)
+        out.push(`shape "${s.id}": ${lines.length} label lines need a box at least ${textH + 6}px tall`);
     }
   }
   for (let i = 0; i < solid.length; i++) {

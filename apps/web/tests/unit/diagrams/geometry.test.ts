@@ -7,6 +7,7 @@ import {
   nodeBounds,
   routeBetween,
   shapeBounds,
+  smoothPathD,
 } from "@/components/diagrams/geometry";
 import type { DiagramSpec } from "@/components/diagrams/types";
 import { arch } from "./fixtures";
@@ -105,5 +106,42 @@ describe("composeSpecs", () => {
       { spec: limiter, dx: 400, dy: 300 },
     ]);
     expect(out.nodes.map((n) => n.id).slice(4)).toEqual(["a-gate", "a-lb", "gate", "lb"]);
+  });
+});
+
+describe("paths", () => {
+  it("bounds a path by its points", () => {
+    expect(
+      shapeBounds({
+        id: "p",
+        type: "path",
+        x: 0,
+        y: 0,
+        points: [
+          [40, 90],
+          [10, 20],
+          [70, 50],
+        ],
+      })
+    ).toEqual({ x1: 10, y1: 20, x2: 70, y2: 90 });
+  });
+
+  it("draws a smooth curve through every point, and a straight line for two points", () => {
+    expect(
+      smoothPathD([
+        [0, 0],
+        [10, 10],
+      ])
+    ).toBe("M0.0 0.0 L10.0 10.0");
+    const d = smoothPathD([
+      [0, 0],
+      [10, 10],
+      [20, 0],
+    ]);
+    expect(d.startsWith("M0.0 0.0 C")).toBe(true);
+    expect(d.match(/C/g)).toHaveLength(2);
+    // Each segment ends on the next point.
+    expect(d).toContain(" 10.0 10.0 C");
+    expect(d.endsWith(" 20.0 0.0")).toBe(true);
   });
 });

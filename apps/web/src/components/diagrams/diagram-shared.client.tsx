@@ -25,7 +25,7 @@ import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
 import { TONES, phaseOpacity, soft, stroke, textWidth } from "./diagram-style";
-import type { DiagramStep, DiagramZone, Tone } from "./types";
+import type { DiagramStep, LayoutGroup, LayoutTone, Tone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
 // play/pause, stepper, caption), zones, the NEW marker and the travelling packet.
@@ -246,11 +246,11 @@ function StepButton({
   );
 }
 
-/** Arrowhead markers, one per tone: url(#<uid>-arrow-<tone>). */
-export function Defs({ uid }: { uid: string }) {
+/** Arrowhead markers, one per tone: url(#<uid>-arrow-<tone>). Layout diagrams pass extra tones they use. */
+export function Defs({ uid, tones = TONES }: { uid: string; tones?: readonly LayoutTone[] }) {
   return (
     <defs>
-      {TONES.map((t) => (
+      {tones.map((t) => (
         <marker
           key={t}
           id={`${uid}-arrow-${t}`}
@@ -268,7 +268,7 @@ export function Defs({ uid }: { uid: string }) {
   );
 }
 
-export function Zone({ zone, phase, dim = false }: { zone: DiagramZone; phase: Phase; dim?: boolean }) {
+export function Zone({ zone, phase, dim = false }: { zone: LayoutGroup; phase: Phase; dim?: boolean }) {
   const cls = dim ? "dg-dim" : undefined;
   if (zone.kind) return <BoundaryZone zone={zone} phase={phase} className={cls} />;
   const tabW = zone.title.length * 8.2 + 28;
@@ -310,7 +310,7 @@ export function Zone({ zone, phase, dim = false }: { zone: DiagramZone; phase: P
 }
 
 // Deployment boundaries: a Region outline, a solid tinted VPC, and tinted subnet bands with an inline label.
-function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Phase; className?: string }) {
+function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Phase; className?: string }) {
   const t = zone.tone;
   const opacity = phaseOpacity(phase);
   if (zone.kind === "subnet") {
@@ -420,7 +420,7 @@ export function HighlightRing({
   rx = 14,
 }: {
   bounds: Bounds;
-  tone: Tone;
+  tone: LayoutTone;
   pad?: number;
   rx?: number;
 }) {
@@ -453,7 +453,7 @@ export function Packet({
   cycle,
 }: {
   d: string;
-  tone: Tone;
+  tone: LayoutTone;
   begin: number;
   dur: number;
   cycle?: number;
@@ -508,7 +508,7 @@ export function LabelPill({
   x: number;
   y: number;
   text: string;
-  tone: Tone;
+  tone: LayoutTone;
   bold?: boolean;
 }) {
   const w = textWidth(text) + 14;

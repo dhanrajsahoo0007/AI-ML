@@ -762,6 +762,12 @@ Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the defaul
 (`--dg-<tone>`, `--dg-<tone>-soft`) that switch automatically in dark mode. Suggested: clients and edge `neutral` or
 `blue`, app/compute `teal`, data stores `violet`, caches and queues `orange`, failure `red`, new or healthy `green`.
 
+Layout specs (and their groups) may also use two diagram-only tones, `pink` and `lime` (type `LayoutTone`), and a
+third, stronger value per tone, the pastel block fill `--dg-<tone>-fill` (shape `fill: "pastel"`). They exist for the
+Transformer figures; their fixed colour legend is `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts`
+(embeddings `pink`, attention `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
+Pink and lime are not section tones.
+
 Zone `kind`:
 
 - omitted: a dotted group with a title tab ("Clients", "Storage")
@@ -920,18 +926,35 @@ export default spec;
 
 ### Kind 3: layout (`LayoutSpec`)
 
-A static drawing for data structures (B-tree pages, hash buckets, rings, log segments), revealed step by step. No
-packets unless an arrow sets `packet: true`.
+A static drawing for data structures (B-tree pages, hash buckets, rings, log segments) and paper-style figures (the
+Transformer), revealed step by step. No packets unless an arrow sets `packet: true`.
 
-Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`.
+Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`, `"path"`.
 
 - `box`, `cell`, `text`: `x`,`y` is the **top-left** corner; text is centred in its `w`×`h` box.
 - `circle`: `x`,`y` is the **centre** and `w` is the diameter.
+- `path`: `x`,`y` are ignored (set them to 0); the line runs through `points`.
 - Default sizes: box 120×48, cell 40×40, circle 40, text 80×20.
 
 Shape fields: `id`, `type`, `x`, `y`, `w?`, `h?`, `label?`, `sub?` (second line on a box or cell), `tone?`, `step?`
 (default 1), `highlight?: true` (a pulsing ring in the shape's tone and a solid fill, for the element the paragraph is
 about).
+
+Paper-figure fields (all optional; a spec that sets none of them renders exactly as before):
+
+| Field    | On                      | Meaning                                                                                                                                                                         |
+| -------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`  | box, cell, circle, text | `"\n"` splits it into up to 3 centred lines: `"Multi-Head\nAttention"`. The stepper announces it on one line.                                                                   |
+| `fill`   | box, cell, circle       | `"paper"` (box default), `"soft"` (cell and circle default) or `"pastel"`, a coloured block with ink text (`--dg-<tone>-fill`). `highlight` still wins with its solid fill.     |
+| `symbol` | circle                  | `"plus"` (⊕ adder), `"times"` (⊗) or `"sine"` (the positional-encoding wave), drawn in the tone. The symbol replaces the label in the drawing; the label is still announced.    |
+| `weight` | cell                    | 0–1: fill in the tone's stroke colour at this strength over paper, for attention weights and heatmaps. Labels stay ink; the strength is capped per theme so they stay readable. |
+| `weight` | path                    | 0–1: stroke width 1–4 and opacity 0.25–1, for attention arcs.                                                                                                                   |
+| `head`   | arrow, path             | Arrowhead at the end. Arrows default to `true` (`head: false` is a plain line: brackets, residual taps); paths default to `false`.                                              |
+| `points` | path                    | `[x, y][]`, at least two. Compute them in the spec (`Math.sin` for a wave).                                                                                                     |
+| `smooth` | path                    | A smooth curve through every point instead of straight segments.                                                                                                                |
+| `dashed` | arrow, path             | Dashed line.                                                                                                                                                                    |
+
+Paths and arrows are drawn under every other shape. Lines never make a group appear.
 
 Arrow fields:
 
@@ -940,8 +963,13 @@ Arrow fields:
   other end.
 - `via?: [x, y][]`, `label?` (a pill at the midpoint), `dashed?`, `packet?`, `tone?`, `step?`.
 
-`groups?` are dotted zones drawn like architecture zones, with the same fields and tones. A group appears once any
-shape inside it does.
+`groups?` are dotted zones drawn like architecture zones, with the same fields and tones (plus `pink` and `lime`). A
+group appears once any box, cell, circle or text inside it does.
+
+Transformer figures build their shapes with the helpers in `src/components/diagrams/presets/transformer.ts`
+(`block`, `vector`, `matrix`, `residual`, `architectureShapes`, `miniMap`) instead of writing coordinates and tones by
+hand, so every figure keeps the same legend and proportions. `assets/diagrams/animated/transformer/architecture.ts` is
+the reference spec.
 
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
@@ -1028,9 +1056,13 @@ Sequence:
 Layout:
 
 - Arrow `from`/`to` name existing shapes; an arrow without `from`/`to` needs a `w` or `h`.
-- Every non-arrow shape lies inside the canvas.
-- Box and cell shapes do not overlap each other (text and circles may overlap anything).
-- Box and cell labels fit: length × 6.2 ≤ shape width − 8.
+- A path has at least two `points`.
+- Every non-arrow shape lies inside the canvas (a path: every point).
+- Box and cell shapes do not overlap each other (text, circles and paths may overlap anything).
+- Box and cell labels fit: the longest line's length × 6.2 ≤ shape width − 8.
+- A label has at most 3 lines. A box or cell with two or more lines is at least 15 × lines + 6 tall (+14 with a
+  `sub`): a 44-tall box holds two lines.
+- `weight` is between 0 and 1; `symbol` only on circles; `fill` only on boxes, cells and circles.
 
 Before committing, check the diagram in the browser at desktop width, at 375 px, in dark mode and with reduced motion
 (packets are hidden, rings and dashes stop moving).

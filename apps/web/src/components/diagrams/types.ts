@@ -157,23 +157,46 @@ export interface SequenceSpec {
 
 // ── Layout diagrams ────────────────────────────────────────────────────────────────────────────────────────────
 
-export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow";
+/** Layout specs may also use two diagram-only tones (the Transformer figures' embedding pink and Add & Norm lime). */
+export type LayoutTone = Tone | "pink" | "lime";
+
+export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow" | "path";
+
+/**
+ * Fill of a box, cell or circle: "paper" the page background (box default), "soft" the tone's pale tint (cell and
+ * circle default), "pastel" a stronger tint that reads as a coloured block (the paper-figure style).
+ */
+export type ShapeFill = "paper" | "soft" | "pastel";
+
+/** A drawing inside a circle: ⊕ adder, ⊗ multiplier, or one period of a sine wave (positional encoding). */
+export type CircleSymbol = "plus" | "times" | "sine";
 
 export interface LayoutShape {
   id: string;
   type: ShapeType;
   /**
    * box, cell, text: top-left corner (text is centred inside its w × h box). circle: centre, w is the diameter.
-   * arrow without from/to: start point; w and h are the vector to the end point.
+   * arrow without from/to: start point; w and h are the vector to the end point. path: ignored (use `points`).
    */
   x: number;
   y: number;
   w?: number;
   h?: number;
+  /** Up to three lines, separated by "\n" (box, cell, circle, text). */
   label?: string;
   /** Second, smaller line under the label (box and cell). */
   sub?: string;
-  tone?: Tone;
+  tone?: LayoutTone;
+  /** Box, cell, circle: background strength. Defaults: box "paper", cell and circle "soft". */
+  fill?: ShapeFill;
+  /** Circle: a symbol drawn inside it instead of (or as well as) a label. */
+  symbol?: CircleSymbol;
+  /**
+   * 0 to 1. Cell: fill in the tone's stroke colour at this strength over paper (attention weights, heatmaps); the
+   * label stays ink, and the opacity is capped per theme so it stays readable. Path: stroke opacity and width
+   * (attention arcs).
+   */
+  weight?: number;
   /** Build step that introduces this shape (default 1). */
   step?: number;
   /** Pulsing ring in the shape's tone, for the element the paragraph is about. */
@@ -183,10 +206,19 @@ export interface LayoutShape {
   to?: string;
   /** Intermediate points of an arrow, as [x, y] pairs. */
   via?: [number, number][];
-  /** Arrow: dashed line, and a dot travelling along it. */
+  /** Arrow and path: dashed line. Arrow: a dot travelling along it. */
   dashed?: boolean;
   packet?: boolean;
+  /** Arrowhead at the end. Arrows default to true (false draws a plain line); paths default to false. */
+  head?: boolean;
+  /** Path: the points it passes through, in order, as [x, y] pairs (at least two). */
+  points?: [number, number][];
+  /** Path: a smooth curve through the points instead of straight segments. */
+  smooth?: boolean;
 }
+
+/** A dotted group behind layout shapes: an architecture zone that may also use the layout-only tones. */
+export type LayoutGroup = Omit<DiagramZone, "tone"> & { tone: LayoutTone };
 
 export interface LayoutSpec {
   kind: "layout";
@@ -195,7 +227,7 @@ export interface LayoutSpec {
   height: number;
   shapes: LayoutShape[];
   /** Dotted groups behind the shapes, drawn like architecture zones. */
-  groups?: DiagramZone[];
+  groups?: LayoutGroup[];
   steps?: DiagramStep[];
 }
 
