@@ -1,11 +1,260 @@
 ---
 title: "Stream Processing and Windowed Aggregation"
-description: "Tumbling, sliding and session windows, watermarks and checkpoints."
+description: "Counting endless events per window: event time, tumbling, sliding and session windows, watermarks, allowed lateness and checkpoints."
 icon: bar-chart
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Events never stop, but every question about them has a time range. Count them by arrival time and late, out-of-order events land in the wrong window, so the trending list is quietly wrong.
 
-**What it will cover:** tumbling, sliding and session windows, watermarks and checkpoints.
+- Interviewers ask about stream processing to see whether you separate when an event happened from when it arrived, and can say when a window's answer is final.
+
+## Overview
+
+- **Stream processing** computes over an unbounded flow of events as they arrive: ad-click attribution, live metrics, fraud signals, trending feeds.
+- A **window** cuts the stream into finite pieces: **tumbling** (fixed, no overlap), **sliding** (fixed, overlapping) or **session** (closed by a gap in activity).
+- Group by **event time** (when it happened), not **processing time** (when it arrived), or a delayed event is counted in the wrong window.
+- A **watermark** says "events up to time t have probably arrived"; it decides when a window fires. **Allowed lateness** keeps the window open a little longer for stragglers.
+- Operators keep counts in local **state**; a **checkpoint** saves that state with the log offsets, so a crash replays without double counting.
+- **Kappa** runs one streaming code base and reprocesses by replaying the log; **Lambda** runs batch and stream side by side.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "A cron job counts clicks from the database every five minutes."
+  - **Why the interviewer pushes back:** "Events arrive late and out of order. Which window does a click from a phone that was offline for a minute go in, and when is the count final?"
+  - **The answer that stands out:** window by event time, close each window with a watermark that trails the largest time seen by a few seconds, accept stragglers for an allowed lateness and route the rest to a side output. Name the cost: results arrive one watermark lag late and may be revised until the lateness runs out.
+</Callout>
+
+## Mental model
+
+- Think of an election count where postal votes count by their postmark, not the day they reach the hall.
+- The count closes at a cut-off a little after the polls shut (the watermark). A vote posted on time that arrives within a grace period still counts (allowed lateness); a later one is logged, not counted (the side output).
+- Mapped back: the postmark is **event time**, the arrival at the hall is **processing time**, and a recount from the sealed ballot boxes is a replay of the log.
+
+## Core concepts
+
+- The running example is Brightpost's trending list: product views arrive at **463/s** on average (2,300/s at the sale-day peak) across **1,000,000 products**, so a 5-minute window holds **463 × 300 = 138,900 views**.
+
+### Event time and processing time
+
+- **Event time** is stamped where the event happens: the browser or app records when the shopper viewed the kettle.
+- **Processing time** is the clock of the machine handling it, and it is always later, by a network hop or by minutes for a phone that was offline.
+- A cron job that counts rows inserted between 12:00 and 12:05 counts by processing time. A view stamped 12:04:50 that is inserted at 12:05:20 falls into the next window.
+
+### Windows
+
+- **Tumbling** windows have one size and no overlap: every event falls in exactly one. Good for "views per 5 minutes".
+- **Sliding** (Kafka Streams calls them **hopping**) windows have a size and a slide: a 5-minute window every minute. Each event is counted in size ÷ slide windows.
+- **Session** windows are per key and close after a gap with no events: one shopper's visit, however long it lasts.
+
+The same eight clicks from one shopper, cut three ways.
+
+<AnimatedDiagram spec="animated/patterns/stream-windows" caption="The same eight clicks give different answers: tumbling windows count each click once, sliding windows count it up to five times, and sessions follow the shopper’s pauses." />
+
+**How to read it:**
+
+- Blue dots are clicks on a 10-minute event-time axis; green boxes are windows with the clicks they hold.
+- Sliding shows three of its windows, one per minute; the middle session crosses the 5-minute mark that splits the tumbling windows.
+
+**The numbers:**
+
+- Tumbling: 5 + 3 = 8 clicks, each counted once.
+- Sliding at 5 minutes every 1 minute: each click sits in up to 5 ÷ 1 = 5 windows, so state and output are up to 5 times the tumbling case.
+- Session with a 1.5-minute gap: gaps of 2.1 and 2.7 minutes split the clicks into sessions of 3, 3 and 2.
+
+<PremiumBreak />
+
+### Watermarks and allowed lateness
+
+- A **watermark** with value t is a promise travelling in the stream: no more events at or before t should arrive. In Flink, an operator's event-time clock is the minimum watermark across its inputs.
+- The common rule is **bounded out-of-orderness**: watermark = largest event time seen − a fixed lag. A window fires when the watermark passes its end, so a short lag is fast but misses more stragglers.
+- **Allowed lateness** keeps a fired window's state, so a late event fires it again with a corrected count. After that, Flink deletes the state and drops the event (lateness defaults to 0), or sends it to a **side output**.
+- A watermark is a guess: the Dataflow paper calls it sometimes too fast (late data arrives behind it) and sometimes too slow (one slow input holds back the whole pipeline).
+
+The window from 12:00 to 12:05, closed by a watermark that trails by 10 s, with 2 minutes of allowed lateness.
+
+<AnimatedDiagram spec="animated/patterns/stream-watermark" stepper caption="The window fires when the watermark passes its end; a late event inside the allowed lateness fires it again, and one after that goes to a side output." />
+
+<StepCards>
+  <StepCard n={1} title="Events arrive out of order">
+    Eight views arrive in the order shown, but their event times jump around: 12:04:48 arrives after 12:04:51. Counting by arrival would put some of them in the wrong window.
+  </StepCard>
+  <StepCard n={2} title="The watermark trails by 10 s">
+    After each arrival the watermark is the largest event time seen so far minus 10 seconds. It only moves forward, and an out-of-order event does not move it.
+  </StepCard>
+  <StepCard n={3} title="The watermark passes 12:05: fire">
+    The view stamped 12:05:12 moves the watermark to 12:05:02, past the window's end. The window fires with the 4 views it holds and keeps its state.
+  </StepCard>
+  <StepCard n={4} title="A late event fires it again">
+    A view stamped 12:04:40 arrives behind the watermark. It is within the 2 minutes of allowed lateness, so the window fires again with 5, and the sink must overwrite the earlier 4.
+  </StepCard>
+  <StepCard n={5} title="Too late: to the side output">
+    A view stamped 12:07:20 moves the watermark past 12:07:00, and the window's state is deleted. The view stamped 12:04:30 that follows goes to a side output and is not counted.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- First result: 12:05:00 + 10 s lag = about 12:05:10, plus processing time.
+- The result may change until the watermark passes 12:05:00 + 2 min = 12:07:00.
+
+## Architecture
+
+Brightpost's trending-products pipeline, one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/stream-pipeline" stepper caption="The counter keeps its counts in local state, and a checkpoint saves that state with the log offsets, so a crash rewinds both to the same point." />
+
+<StepCards>
+  <StepCard n={1} title="Views go into a log">
+    Web servers append every product view, stamped with its event time, to a log keyed by product id: 463 a second on average. The log keeps them in order per partition and lets a reader rewind.
+  </StepCard>
+  <StepCard n={2} title="A keyed operator counts per window">
+    A window counter reads the partitions and adds each view to its product's 5-minute event-time window: 138,900 views per window on average. All views of one product reach one worker.
+  </StepCard>
+  <StepCard n={3} title="Counts live in a local state store">
+    The counts sit in a state store beside the counter (in Flink, on the heap or in RocksDB on local disk), not in a remote database, so an update is a local read and write. A crash would lose them, which step 4 fixes.
+  </StepCard>
+  <StepCard n={4} title="Checkpoints save state and offsets">
+    Every 60 seconds the job saves the counts and the log offsets they reflect, as one consistent snapshot, to durable storage. The two always match.
+  </StepCard>
+  <StepCard n={5} title="Closed windows update the trending list">
+    When the watermark closes a window, the counter writes the top 20 products to the trending list as an upsert keyed by window. A late firing overwrites the same row instead of adding one.
+  </StepCard>
+  <StepCard n={6} title="A crash restores the last checkpoint">
+    A worker dies mid-window. The job restarts, restores the counts from the last checkpoint and rewinds the log to its offsets, so each view after the checkpoint is counted once, not twice.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Triggers and refinements
+
+- The Dataflow model (Akidau et al., VLDB 2015) splits a pipeline into four questions: **what** is computed, **where** in event time (windows), **when** in processing time results are emitted (triggers), and **how** later results relate to earlier ones.
+- A **trigger** can fire early (every 30 s of processing time, for a live dashboard), on time (the watermark), and late (each late event).
+- Refinement modes: **discarding** (each firing is a delta), **accumulating** (each firing is the new total, which overwrites) or **accumulating and retracting** (retract the old total, then send the new one). Choose by what the sink can do.
+
+### Effectively-once output
+
+- A checkpoint makes **state** exactly once: counts and offsets roll back together. The **sink** can still see a result twice, because the job may write before a checkpoint and then replay.
+- **Effectively once** = at-least-once replay plus an **idempotent sink**: upsert keyed by (window, product), so a rewrite overwrites.
+- Or a **transactional sink**: Flink's Kafka sink writes inside a Kafka transaction committed on each checkpoint, and readers set `isolation.level` to `read_committed`. Its `transaction.timeout.ms` must exceed the longest checkpoint plus restart, or Kafka may expire the transaction and lose its data.
+
+### Lambda against Kappa
+
+- **Lambda** runs a batch job for exact, late results and a stream job for fast ones, and merges them at query time. Jay Kreps ("Questioning the Lambda Architecture", 2014) named its cost: the same logic written and kept in step in two systems.
+- **Kappa** keeps one stream job and a log that retains enough history; to change the logic, start v2 from the beginning of the log into a new table, switch reads when it catches up, then drop v1.
+
+The trending counts built both ways.
+
+<AnimatedDiagram spec="animated/patterns/stream-lambda-kappa" caption="Lambda runs the same logic twice, in batch and in stream; Kappa keeps one stream job and reprocesses by replaying the log into a new table." />
+
+**How to read it:**
+
+- Top: two teal jobs from one log, two code bases, and a query that merges their views.
+- Bottom: one code base; the green v2 job replays the log while v1 keeps serving.
+
+**The numbers:**
+
+- A Kappa replay of 30 days at 463 views/s is 463 × 86,400 × 30 = about 1.2 billion views.
+- Replaying at 10 times the live rate (illustrative), v2 gains 9 days of log a day and catches up in 30 ÷ 9 = about 3.3 days, while v1 keeps serving.
+
+### Worked example: trending products over 5 minutes
+
+Follow one 5-minute window through the six steps of the Architecture figure, with 2 % of views late (illustrative rate).
+
+1. **Views go into the log.** 463 views a second for 300 seconds: 138,900 views stamped between 12:00:00 and 12:05:00.
+2. **The counter keys by product.** At most 138,900 distinct products are touched, out of 1,000,000.
+3. **State holds the counts.** At about 16 bytes per (product, count) entry, the window needs at most 138,900 × 16 = about 2.2 MB.
+4. **A checkpoint every 60 s.** A crash replays at most 60 s of the log: 463 × 60 = 27,780 views, counted once because the state rolls back with the offsets.
+5. **The watermark closes the window.** With a 10 s lag, the window fires at about 12:05:10 without the 2 % that are late.
+6. **Late firings and the side output.** Views within the 2 minutes of allowed lateness fire the window again; the rest go to a side output.
+
+**The numbers:**
+
+- Late views: 2 % × 138,900 = 2,778. On-time count: 138,900 − 2,778 = 136,122 (98 %).
+- If 90 % of the late views arrive within 2 minutes (illustrative), late firings add 2,500, and 278 (0.2 %) go to the side output.
+- A uniform 2 % loss lowers every count equally and leaves the ranking alone. A skewed loss does not: a product with 1,000 views, 100 of them from an app that uploads in batches, drops to 900 and falls below a product with 980.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Processing-time windows | No watermark; results at once | Late events land in the wrong window | Rough operational metrics where seconds of skew do not matter |
+| Event-time windows with a watermark | Correct windows despite disorder | Results wait for the watermark lag | Counts that people compare or bill on |
+| Early triggers (accumulating) | A live number before the window closes | Sink must overwrite; more writes | Dashboards and trending lists |
+| Lambda | Batch view exact, stream view fast | Two code bases to keep in step | A batch system already exists and must stay |
+| Kappa | One code base; replay to reprocess | Log retention and replay capacity | New pipelines on a replayable log |
+
+## Production systems
+
+- **Apache Flink** (docs, as of November 2026): allowed lateness defaults to 0; a late element after it is dropped unless `sideOutputLateData` collects it. Checkpoints use barriers that flow with the records, inspired by the Chandy-Lamport algorithm, and recovery restores the latest completed checkpoint.
+- **Kafka Streams** (docs, as of November 2026): a 09:00–10:00 window with a 10-minute grace period accepts out-of-order records until 10:10; `suppress(untilWindowCloses)` emits only the final result.
+- **Spark Structured Streaming** (docs, as of November 2026): `withWatermark` sets the watermark to the largest event time minus a threshold; a 2-hour threshold never drops data less than 2 hours late, and append mode emits a window's count once, after the watermark passes.
+- **Used in our case studies:** [Typeahead](/system-design-case-studies/case-studies/typeahead) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue)
+
+## Failure modes & pitfalls
+
+- **Windowing by processing time.** A consumer restart shifts minutes of views into the wrong window. Stamp event time at the source and window by it.
+- **An idle partition stalls the watermark.** The watermark is the minimum across inputs, so one silent partition holds every window open. Mark idle inputs (Flink's `withIdleness`).
+- **A device clock far in the future.** One event stamped next year drags the watermark forward and makes everything else late. Clamp event times to the receive time plus a small margin.
+- **Duplicated output after a restart.** Replay rewrites results the sink already has. Upsert by (window, key) or commit with a transactional sink.
+- **Unbounded state.** Session windows with no gap, or a global window with no trigger, never free their state. Set a gap, a lateness bound and a state TTL.
+
+## Interview framework
+
+1. Ask what the window is (5-minute trending, hourly billing, per-session) and how wrong a count may be.
+2. Put events on a replayable log, keyed by the aggregation key, with event time stamped at the source.
+3. Pick the window type, then the watermark lag and allowed lateness, with the numbers: events per window and how many arrive late.
+4. Keep state local with checkpoints, make the sink idempotent or transactional, and say what happens when the job falls behind ([Back Pressure and Load Shedding](/system-design/patterns/back-pressure)).
+5. Say how you reprocess (replay the log into a new table) and where rollups end up, for example a [time-series database](/system-design/databases/time-series-databases).
+
+**What interviewers listen for:** event time against processing time, and a stated rule for when a window's answer is final.
+
+**Red flags:** "a cron job queries the database every 5 minutes", or exactly once claimed with no word on the sink.
+
+## Further reading
+
+- [Timely Stream Processing (Apache Flink docs)](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/)
+- [Windows and allowed lateness (Apache Flink docs)](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/operators/windows/)
+- [Stateful Stream Processing: checkpoints (Apache Flink docs)](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/)
+- [The Dataflow Model (Akidau et al., VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf)
+- [Questioning the Lambda Architecture (Jay Kreps, O’Reilly, 2014)](https://www.oreilly.com/radar/questioning-the-lambda-architecture/)
+- Related pages: [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between event time and processing time?" category="Concepts" level="Junior">
+    - Event time is when the event happened, stamped at the source; processing time is when a machine in the pipeline handles it.
+    - Processing time is always later, by milliseconds normally and by minutes for an offline phone or a restarted consumer.
+    - Windows grouped by processing time put delayed events in the wrong window, so counts people compare should use event time.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare tumbling, sliding and session windows." category="Concepts" level="Junior">
+    - Tumbling windows have a fixed size and no overlap, so each event is counted once: views per 5 minutes.
+    - Sliding windows have a size and a smaller slide, so each event is counted in size ÷ slide windows: a 5-minute average updated every minute.
+    - Session windows are per key and close after a gap with no events: one visit, however long.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a watermark, and how do you choose its lag?" category="Concepts" level="Mid">
+    - A watermark is a marker in the stream that says events up to time t have probably arrived; a window fires when the watermark passes its end.
+    - A common rule is the largest event time seen minus a fixed lag, and late events after it go to allowed lateness or a side output.
+    - A short lag gives fast results that miss more stragglers; a long lag gives complete results later.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design a trending-products list over the last 5 minutes." category="Architecture" level="Mid">
+    - Web servers append views, with event time, to a log keyed by product id: 463 a second, 138,900 per window.
+    - A stream job counts per product in event-time windows, with local state and checkpoints every minute.
+    - When the watermark closes a window, it upserts the top 20 by window into a store the home page reads; with many products, keep a top-k per partition and merge the lists.
+  </InterviewQuestion>
+  <InterviewQuestion question="2 % of events arrive more than a minute late. What does that do to your counts, and what do you do?" category="Failure modes" level="Senior">
+    - With 138,900 views per window, 2,778 miss the first firing, so the first count is 98 % of the truth.
+    - A uniform loss leaves rankings alone; a skewed one, such as an app that uploads in batches, can reorder them.
+    - Set allowed lateness to cover most of them so late firings correct the count, with a sink that overwrites by (window, product); send the rest to a side output and alert on its rate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a stream job give exactly-once results after a crash?" category="Failure modes" level="Senior">
+    - Checkpoints save operator state and source offsets as one consistent snapshot; after a crash both roll back and the log is replayed.
+    - That makes the state exactly once, but the sink may receive results it already has.
+    - Close the gap with an idempotent upsert keyed by (window, key), or a transactional sink committed on each checkpoint, such as Flink's Kafka sink, whose readers must read only committed data.
+  </InterviewQuestion>
+  <InterviewQuestion question="Lambda or Kappa: which would you choose for a new pipeline, and why?" category="Trade-offs" level="Senior">
+    - Lambda runs a batch job for exact results and a stream job for fast ones, and merges them; its cost is two code bases that must agree.
+    - Kappa keeps one stream job and reprocesses by replaying a retained log into a new table, then switching reads.
+    - For a new pipeline on a replayable log, Kappa: one code base, and event-time windows already handle late data. Lambda still fits when a batch system must stay or the history is too large to replay.
+  </InterviewQuestion>
+</InterviewQuestions>
