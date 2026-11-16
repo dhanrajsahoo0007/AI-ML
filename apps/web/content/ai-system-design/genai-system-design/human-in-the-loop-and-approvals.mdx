@@ -2,41 +2,430 @@
 title: "Human-in-the-Loop & Approvals"
 description: "Where a person should approve, correct or take over from an agent, and how to build that without stalling the work."
 icon: user-check
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+An agent that can act can also act wrongly, and some actions cannot be taken back.
 
-**What it will cover:** Where a person should approve, correct or take over from an agent, and how to build that without stalling the work.
+- Human-in-the-loop (HITL) means a person sits at chosen points in an agent's run: to approve an action, correct it, or take the whole case over.
+- Interviewers use it to test whether you can decide **which** actions need a person, build the pause so it costs nothing while it waits, and keep the person paying attention.
+- This page answers the question-bank question "How do you decide how much autonomy to give an agent?". How a run is saved during the pause is on [State Persistence & Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval); the LangGraph code for a pause is on [Chain & Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration#technical-mechanics).
 
 ## Overview
 
+- Gate actions by **two questions**: can it be undone, and how much harm does it do if it is wrong? Reads run; small or undoable actions run and are reported; final and costly actions **ask**; actions outside policy are **forbidden** in code.
+- An **approval interrupt** holds one tool call. The harness saves the run, shows a person the pending call with its evidence, and waits. The person **approves**, **edits** the arguments or **rejects** with a reason. The harness then resumes the run from the saved state.
+- The pause is a database row, not a waiting process. It survives deploys and costs nothing for six minutes or six days.
+- **Escalation** hands the whole case to a person, with a summary, when the agent is stuck, unsure, or asked for a human.
+- Too many prompts make people stop reading. In Anthropic's Claude Code data, users approve **97 %** of permission prompts, and testers caught about 17 % of planted dangerous commands early in a session but about 5 % after 50 prompts.
+- So ask less and ask better: gate by risk, sandbox what you can, add automated checks, and make each question small.
+- Every decision goes into an **append-only audit record**: what the agent wanted, what the person saw, who decided and when, and what happened.
+
 ## Mental model
+
+- A new bank clerk can look up any account and print any statement on day one.
+- Refunds up to £30 they may give on their own; the branch manager reads a daily list.
+- Anything bigger needs the manager's signature on the slip, and the clerk waits with the slip, not with the customer's money.
+- Opening an account for someone with no ID is not allowed at all, whoever signs.
+- The clerk earns more freedom as their record grows. The manager signs carefully because they are asked a few times a day, not a few hundred.
+
+An agent is the clerk, the harness is the branch rule book, and the support agent is the manager.
 
 ## Core concepts
 
+- Every figure follows the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture). Customer 1847 writes: "My kettle arrived cracked. It's order 4471. Can I get my money back?"
+- The agent has four tools: `get_order`, `search_help`, `create_refund` and `send_email`. The kettle cost £42, and refunds over £30 wait for a support agent, who approves at 10:20.
+- Step 5–6 of that page's loop is the pause; this page opens it up.
+
 ### Which actions need approval
+
+Asking a person for every action stalls the work; asking for none lets one bad call through. The answer depends on the action, not the agent.
+
+<AnimatedDiagram
+  spec="animated/agents/risk-matrix"
+  stepper
+  minWidth={660}
+  caption="Most calls should run. Only the cell that is both final and costly waits for a person, and some calls no person should be asked about: code refuses them."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Reads change nothing: run">
+    `get_order(4471)` and `search_help` read and change nothing, so there is nothing to undo. They run at once. The
+    harness still adds customer 1847 to every call, so the model cannot read someone else's order.
+  </StepCard>
+  <StepCard n={2} title="Small or undoable: run, then tell a person">
+    `send_email` to the address on file cannot be unsent, and a refund of £30 or less cannot be taken back, but a wrong
+    one costs little. They run, the harness logs them, and a person reviews a sample later. Brightpost accepts the loss
+    because reviewing every one would cost more. Nothing in Brightpost's toolset is undoable but costly; elsewhere that
+    cell holds actions such as a bulk change with a one-click rollback.
+  </StepCard>
+  <StepCard n={3} title="Over £30 and final: ask">
+    `create_refund(4471, 42.00)` moves real money and cannot be undone, and £42 is over the limit. The harness holds the
+    call until the support agent approves it.
+  </StepCard>
+  <StepCard n={4} title="Out of policy: forbid, at any size">
+    A refund on order 5122, a stranger's order planted by a pasted note, or a refund above the price paid is never
+    right. Code refuses it before anyone is asked. A person who approves 97 % of prompts is not a safe last line for
+    these.
+  </StepCard>
+</StepCards>
+
+Three rules make the matrix work:
+
+- **Decide per call, not per tool.** `create_refund` is in three cells, depending on the amount and the order. The gate reads the arguments.
+- **Keep the rule in code.** If "over £30 needs approval" lived only in the prompt, a pasted note could talk the model out of it. The [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture) page shows what happened when it did.
+- **Move actions between cells with evidence.** Raise the £30 limit only when the review log shows small refunds are almost never wrong.
 
 ### Interrupt, approve, edit and resume
 
+An **interrupt** is the harness stopping a run at a tool call and handing control to a person. Here is the £42 refund, message by message.
+
+<AnimatedDiagram
+  spec="animated/agents/approval-interrupt"
+  stepper
+  minWidth={660}
+  caption="The pause lives in the harness, not the model: the call is held, the run is saved, a person answers, and the call runs with the key saved before the pause."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The model asks for a refund over £30">
+    The model's third call is an ordinary `tool_use`: `create_refund(4471, 42.00)`. The model does not know about the
+    limit. The harness's policy check reads the amount and returns "ask".
+  </StepCard>
+  <StepCard n={2} title="The harness saves the run and pauses">
+    The checkpointer saves `cp_3`: the messages so far, the pending call and its idempotency key, `run_8f3a:toolu_03`.
+    The worker may now stop. The run is a row in a database, not a process holding memory.
+  </StepCard>
+  <StepCard n={3} title="The support agent sees the pending action">
+    The question goes to the support agents' queue with the evidence: the order (a kettle, £42, delivered 12 Nov), the
+    help rule found ("Damaged on arrival: full refund"), the model's reason and the rule that held the call.
+  </StepCard>
+  <StepCard n={4} title="Approve, edit or reject">
+    The support agent approves at 10:20. They could instead edit the call, for example a partial refund of £30, or
+    reject it with a reason the model will read.
+  </StepCard>
+  <StepCard n={5} title="The harness records the decision and runs the call">
+    The harness saves `cp_4` with the decision, then runs `create_refund` with the key saved in `cp_3`. The payments
+    service creates refund R-2291. If the worker crashes here, the retry carries the same key and pays once.
+  </StepCard>
+  <StepCard n={6} title="The result goes back to the model">
+    The tool result reaches the model as if the call had been slow. The model goes on to `send_email` and its reply.
+  </StepCard>
+</StepCards>
+
+Here is step 3 as LangChain's `HumanInTheLoopMiddleware` presents it (LangChain v1, as of November 2026; trimmed). `interrupt_on` maps `create_refund` to a policy, and a `when` predicate returns true only for amounts over £30:
+
+```json
+{
+  "action_requests": [
+    {
+      "name": "create_refund",
+      "args": { "order_id": "4471", "amount": 42.0 },
+      "description": "Refund over £30: kettle, £42, delivered 12 Nov. Rule: Damaged on arrival."
+    }
+  ],
+  "review_configs": [{ "action_name": "create_refund", "allowed_decisions": ["approve", "edit", "reject"] }]
+}
+```
+
+Step 4 resumes the run on the same thread with one decision per pending action. Approve is `{"type": "approve"}`; reject is `{"type": "reject", "message": "…"}`, which the model reads as an error. Here is the edit:
+
+```json
+{
+  "decisions": [
+    {
+      "type": "edit",
+      "edited_action": { "name": "create_refund", "args": { "order_id": "4471", "amount": 30.0 } }
+    }
+  ]
+}
+```
+
+- **Approve** runs the call as written.
+- **Edit** runs a changed call. The model should be told: the middleware adds an `edit_notice` to the result, so the model does not tell the customer "£42 refunded".
+- **Reject** skips the call and returns the reason to the model, which can explain, ask the customer, or escalate. "Wrong order number" is a useful reason; "no" is not.
+
+<Callout tone="red" title="What breaks">
+  An approval that is not bound to the call. If the record says only "refund approved", a model that rewrites the
+  arguments after the pause, or a second call in the same turn, can ride on the approval. Bind the decision to the exact
+  tool-call id and arguments, and give it an expiry: an approval for `create_refund(4471, 42.00)` from 10:20 does not
+  cover `create_refund(4471, 420.00)` at 16:00.
+</Callout>
+
 ### Escalation and hand-off to a person
+
+An approval asks about one action. **Escalation** hands the whole case to a person, and the agent stops.
+
+- **When to escalate:**
+  - the customer asks for a person;
+  - the case is outside the agent's rules (delivered 40 days ago, past the 30-day window);
+  - the agent is stuck: the same call or the same failure three times, as on [Agent Reliability](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery#detecting-stuck-and-looping-agents);
+  - a gate keeps saying no. Claude Code's auto mode stops and asks the person after 3 blocked actions in a row or 20 in a session.
+- **What to hand over:** a short note that a person can act on in a minute. It holds the customer's words, what the agent found, what it did, what is pending, and why it stopped. The same idea as a [reset with a handoff note](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+- **Where it goes:** the same queue as approvals, marked as a takeover. The person can reply to the customer, or send the case back to the agent with an instruction.
+- **What the customer hears:** the truth. "A colleague is checking your refund and will email you today" beats a promise the agent cannot keep.
+
+A hand-off between agents (triage to refunds) is on [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems); a hand-off to a person is the same move with a person as the receiver.
 
 ## Architecture
 
+The approval adds five parts to the agent loop. Here is the loop at the moment of the approval, step 6 of the [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture) hero:
+
+<AnimatedDiagram
+  spec="animated/agents/agent-loop"
+  step={6}
+  minWidth={620}
+  caption="The support agent talks to the harness, never to the model; the run state is what lets the harness wait."
+/>
+
+| Part                | What it does                                                      | In the refund                                              |
+| ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
+| Policy gate         | Reads each proposed call and returns run, notify, ask or forbid   | £42 > £30: ask                                             |
+| Checkpointer        | Saves the run before the pause and after the decision             | `cp_3` before, `cp_4` after                                |
+| Approval queue      | Holds pending questions, assigns them, tracks how long each waits | One item in the support agents' queue                      |
+| Notifier and expiry | Tells a person; escalates or cancels a question nobody answers    | A reminder after 1 hour, cancelled after 24 (illustrative) |
+| Audit log           | Appends one record per decision                                   | See [the record](#audit-trails-for-agent-actions)          |
+
+- The model sees none of these. It sees a slow tool call, then a result, a changed result or an error.
+- The gate, the queue and the log are code you can test without a model, which is why they belong in the harness and not in the prompt.
+
 ## Technical mechanics
+
+### Worked example: the £42 refund, from hold to reply
+
+This follows the [interrupt figure](#interrupt-approve-edit-and-resume) through the whole run.
+
+| #   | Who             | What happens                                                                 | Saved                          |
+| --- | --------------- | ---------------------------------------------------------------------------- | ------------------------------ |
+| 1   | Model call 1, 2 | `get_order(4471)`, `search_help`: both run (reads)                           | `cp_1`, `cp_2`                 |
+| 2   | Model call 3    | Asks for `create_refund(4471, 42.00)`                                        |                                |
+| 3   | Policy gate     | £42 > £30 and final: ask                                                     | `cp_3`: pending call, key      |
+| 4   | Harness         | Question into the queue at 10:14; the worker stops                           | audit: request                 |
+| 5   | Support agent   | Reads order, rule and reason; approves at 10:20                              | audit: decision                |
+| 6   | Harness         | Loads `cp_3`, records the approval, runs the call with the saved key: R-2291 | `cp_4`, `cp_5`; audit: outcome |
+| 7   | Model call 4, 5 | `send_email` runs (small, logged); the reply                                 | `cp_6`, `cp_7`                 |
+
+**The numbers (10:14 is illustrative):**
+
+- Compute is the same as without the pause: 5 model calls × 1.5 s + 4 tool calls × 0.3 s = **8.7 s** (illustrative, from Agent Architectures).
+- The wait is 10:14 → 10:20 = **6 minutes**, about 41 times the compute. The person, not the model, sets the response time.
+- During those 6 minutes the run holds no worker and no memory, only the rows `cp_3` and the queue item.
+
+Two other endings, same start:
+
+- **Edited to £30.** Row 6 runs `create_refund(4471, 30.00)`. The model is told about the edit, so its email says £30, not £42.
+- **Rejected: "photo shows no damage".** Row 6 skips the refund and returns the reason as an error. The model asks the customer for a photo; nothing was paid, so nothing needs undoing.
 
 ### Permission modes and trust levels
 
+A **trust level** is how much an agent may do before it asks. Frameworks expose it as settings you can change per tool, per user or per session.
+
+- **Claude Code** (permission modes, as of November 2026). `default` asks before most edits and commands. `acceptEdits` lets file edits in the working directory through. `plan` researches and proposes without changing anything. `auto` runs actions past a separate classifier model instead of asking. `dontAsk` denies anything that would ask, for CI. `bypassPermissions` runs everything and is meant for isolated containers and VMs. Deny rules hold in every mode, including `bypassPermissions`.
+- **OpenAI Agents SDK.** A function tool takes `needs_approval`: `True`, or a function of the arguments, so a refund can ask only above £30. The run returns `interruptions`; you call `state.approve(...)` or `state.reject(...)` (with an optional `rejection_message`) and run again with the state. `always_approve=True` remembers the decision for later calls to the same tool while the same run context is reused. It offers approve and reject only; to change the arguments, reject with a reason and let the model call again. `RunState` serialises to JSON so the pause can outlive the process.
+- **LangGraph and LangChain.** `interrupt()` inside a node saves the state through the checkpointer and returns a payload to the caller; `Command(resume=…)` on the same thread continues. On resume, the interrupted node runs again from its first line. `HumanInTheLoopMiddleware` builds approve, edit and reject on top of it.
+
+The same ladder in every product, from least to most trust:
+
+1. **Suggest.** The agent drafts; a person does everything.
+2. **Ask.** The agent acts after a person approves each risky call.
+3. **Act and notify.** The agent acts; a person reviews a sample and can reverse.
+4. **Act.** The agent acts; checks and the audit log are the only watch.
+
+Different actions sit on different rungs at the same time. Brightpost's agent is at rung 4 for reads, rung 3 for small refunds and emails, and rung 2 for the £42 refund.
+
 ### Approval fatigue and risk-based gating
+
+**Approval fatigue** is what happens when a person is asked too often: they stop reading and click approve.
+
+<AnimatedDiagram
+  spec="animated/agents/approval-fatigue"
+  stepper
+  minWidth={620}
+  caption="After Anthropic's Claude Code data (2025–2026): people catch about 17 % of planted dangerous commands early in a session and about 5 % after 50 prompts, while a classifier stays at 89 %. The curve between the two measured points is illustrative."
+/>
+
+**How to read it:**
+
+- The dots are measured; the orange line between them is drawn by us.
+- Step 1: as prompts pile up, people catch fewer of the dangerous ones.
+- Step 2: a classifier does not get tired. Its line is flat.
+- Step 3: cutting prompts moves the person back up the curve, but even a fresh person caught only about 1 in 6.
+
+**The numbers (Anthropic, 7 Aug 2026):**
+
+- Users approve **97 %** of Claude Code's permission prompts, and reject **39 %** of plans. A plan is one question with a lot riding on it; a prompt is one of many.
+- 1,053 paid testers each met one prompt swapped for a clearly dangerous command. People caught 143: 143 / 1,053 = **13.6 %**. The auto-mode classifier blocked 937: 937 / 1,053 = **89 %**.
+- Sandboxing cut prompts by **84 %** in Anthropic's own use (20 Oct 2025). Applied to this chart: a session that reached 50 prompts reaches 50 × 0.16 = **8**.
+
+Risk-based gating fixes the cause, not the symptom:
+
+1. **Ask only in the "ask" cell.** Every prompt in the other cells spends attention that the £42 refund needs.
+2. **Shrink the "ask" cell with fences.** A sandbox, a spending limit or a scoped credential turns "final and costly" into "small" without asking anyone.
+3. **Put a machine check before the person.** A classifier or rule engine blocks the obvious cases; the person sees what remains.
+4. **Make each question small.** One action, its evidence, its consequence and a default. "Approve £42 refund for order 4471, kettle damaged on arrival?" is answerable in ten seconds.
+5. **Measure the queue.** Track approvals per person per hour, approval rate and time to decide. An approval rate near 100 % means the gate is too wide.
+
+For scale (illustrative): if 300 of Brightpost's daily refunds are over £30 and each takes a support agent 1 minute, that is 300 minutes, **5 hours** of one person's day. Raising the limit is a decision about that number, made from the review log.
+
+<Callout tone="red" title="What breaks">
+  A gate that asks about everything. At 97 % approval, each prompt is worth very little, and the dangerous one looks
+  like the rest. The planted-command study is the evidence: after 50 prompts, people let about 19 in 20 dangerous
+  commands through. A gate nobody reads is worse than no gate, because it looks like control.
+</Callout>
 
 ### Audit trails for agent actions
 
+An **audit trail** is the record that lets someone later answer: what did the agent do, who allowed it, and on what evidence?
+
+<AnimatedDiagram
+  spec="animated/agents/audit-trail"
+  stepper
+  minWidth={660}
+  caption="One record answers the four questions an auditor asks: what the agent wanted to do, what the person saw, who decided and when, and what actually happened."
+/>
+
+**How to read it:**
+
+- **Request:** which run, thread and tool call, and the key that makes a retry safe.
+- **Evidence shown:** exactly what the person saw, including the rule that held the call and its id. If the rule changes next month, the record still says which one applied.
+- **Decision:** who (an id from sign-in, not a name typed by the model), when asked and when decided, what they chose, and any edit.
+- **Outcome:** the checkpoint and the tool result. "Approved" and "refunded" are different facts; record both.
+
+Here is the record, one JSON line in an append-only log (ids `sa_31` and 10:14 are illustrative):
+
+```json
+{
+  "run_id": "run_8f3a",
+  "thread_id": "th_5e08",
+  "tool_call_id": "toolu_03",
+  "call": { "name": "create_refund", "args": { "order_id": "4471", "amount": 42.0 } },
+  "idempotency_key": "run_8f3a:toolu_03",
+  "rule": "refund-over-limit",
+  "shown": ["order 4471: kettle, £42, 12 Nov", "Damaged on arrival", "model reason"],
+  "decision": { "by": "sa_31", "asked": "10:14", "at": "10:20", "type": "approve", "edits": null },
+  "outcome": { "checkpoint": "cp_4", "result": "R-2291" }
+}
+```
+
+- **Append-only.** Nobody edits a record; a correction is a new record that points to the old one.
+- **Separate from the checkpoint.** The checkpointer may delete old runs; the audit log keeps them as long as the law or your policy says.
+- **Read it.** The log is also the data for raising limits, finding gates that are always approved, and spotting a person who approves in two seconds flat.
+
+The EU AI Act asks the same of high-risk systems (a refund chatbot is not one, but the design carries over). Article 12 requires automatic logs over the system's lifetime. Article 14 requires that people can override or reverse the output, can stop the system with a "stop" button, and stay aware of "automation bias", the over-trust this page's fatigue figure measures.
+
 ## Trade-offs
+
+| Decision                          | Option A                               | Option B                                   | Guidance                                                          |
+| --------------------------------- | -------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| Approve before vs review after    | Stops the bad action                   | No waiting; the person reviews a sample    | Before for final and costly; after for small or undoable          |
+| Per-call vs per-tool gate         | Asks only when the arguments are risky | Simple to write and explain                | Per call: the amount, the order and the recipient decide the risk |
+| Person vs classifier first        | Judgement on unusual cases             | Never tired, cheap, consistent             | Classifier first, person on what it flags or cannot decide        |
+| Edit vs approve/reject only       | Fixes a near-miss without another loop | Simpler; the model retries with the reason | Offer edit when people often want "yes, but less"                 |
+| Hold the run vs keep it in memory | Survives deploys and long waits        | Fewer moving parts                         | Always hold in a durable store once a person is involved          |
 
 ## Production systems
 
+- **Claude Code** has six permission modes (as of November 2026). Anthropic made auto mode, where a classifier reviews actions instead of the user, the default for new sessions on its paid individual and Team plans in August 2026, citing the 97 % approval rate.
+- **Claude Code's auto-mode classifier** runs in two stages, a fast filter and then reasoning only on what it flags; Anthropic reported a 0.4 % false-positive rate and a 17 % false-negative rate on real overeager actions (25 Mar 2026), and it hands control back to the person after 3 blocks in a row or 20 in total.
+- **OpenAI Agents SDK** pauses on tools marked `needs_approval` and on hosted MCP tools with `require_approval`, and serialises the paused `RunState` to JSON. Its docs warn that the snapshot is not authenticated: keep it on the server and check the reviewer's identity before applying a decision.
+- **LangGraph** pauses with `interrupt()` and a checkpointer; **LangChain**'s `HumanInTheLoopMiddleware` adds approve, edit, reject and respond per tool, with an optional predicate per call.
+- **MCP** puts the person in the host: the spec says a person should always be able to deny a tool call. See [Model Context Protocol](/ai-system-design/genai-system-design/model-context-protocol#security-tool-poisoning-and-confused-deputies).
+
 ## Failure modes & pitfalls
+
+- Approval rules written in the prompt, where a pasted note can argue with them.
+- Gating by tool name, so every `create_refund` asks, including £3 ones.
+- Asking about everything, until people approve without reading.
+- Questions without evidence: "Approve create_refund?" with no order, amount or reason.
+- Approvals not bound to the exact call and not expiring.
+- Side effects before the interrupt, which run again on resume (see [Chain & Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration#technical-mechanics)).
+- Holding the paused run in memory, so a deploy loses every pending approval.
+- No owner or timeout for the queue, so questions wait forever and customers hear nothing.
+- Edits the model is not told about, so its reply contradicts what happened.
+- An audit log that records "approved" but not who, when, what they saw, or what ran.
 
 ## Interview framework
 
+1. Place each action on the matrix: can it be undone, and how costly is a mistake? Name the gate for each cell, and what code forbids outright.
+2. Describe the interrupt: hold the call, save the run with its idempotency key, ask with evidence, resume on the same thread.
+3. Cover the three answers: approve, edit (and tell the model), reject (with a reason the model can use).
+4. Plan for scale: approval fatigue, classifiers and sandboxes before people, queue metrics.
+5. Close with the audit record and how its data moves limits over time.
+
+**What interviewers listen for:** gates decided by arguments and consequences, rules in code, a pause that survives restarts, and evidence that the person still reads.
+
+**Red flags:** "a human approves every action", or "the model will ask when it is unsure".
+
 ## Further reading
+
+- [Interrupts (LangGraph documentation)](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [Human-in-the-loop (LangChain documentation)](https://docs.langchain.com/oss/python/langchain/human-in-the-loop)
+- [Human-in-the-loop (OpenAI Agents SDK documentation)](https://openai.github.io/openai-agents-python/human_in_the_loop/)
+- [Choose a permission mode (Claude Code documentation)](https://code.claude.com/docs/en/permission-modes)
+- [How we built Claude Code auto mode (Anthropic, 25 Mar 2026)](https://www.anthropic.com/engineering/claude-code-auto-mode)
+- [Auto mode is now the default in Claude Code (Anthropic, 7 Aug 2026, updated 22 Oct 2026)](https://claude.com/resources/articles/auto-mode-default-in-claude-code)
+- [Beyond permission prompts: making Claude Code more secure and autonomous (Anthropic, 20 Oct 2025)](https://www.anthropic.com/engineering/claude-code-sandboxing)
+- [EU AI Act, Article 14: Human oversight](https://artificialintelligenceact.eu/article/14/)
+- [EU AI Act, Article 12: Record-keeping](https://artificialintelligenceact.eu/article/12/)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you decide how much autonomy to give an agent?" category="Concepts" level="Mid">
+    - Decide per action, not per agent: ask whether the action can be undone and how much harm it does if it is wrong. -
+    Reads run; small or undoable actions run and are reviewed after; final and costly ones wait for a person; actions
+    outside policy are refused in code. - Start conservative, log every decision, and move action classes to a freer
+    gate only when the log shows they are almost never wrong. - The same agent can be fully autonomous for reads and
+    gated for refunds over a limit.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Walk through what happens when an agent's tool call needs approval."
+    category="Architecture"
+    level="Mid"
+  >
+    - The model emits an ordinary tool call; the harness's policy gate reads the arguments and returns "ask". - The
+    harness saves the run, including the pending call and an idempotency key, and the worker stops. - A person sees the
+    call with its evidence and approves, edits or rejects it; the decision is bound to that exact call. - The harness
+    records the decision, runs (or skips) the call with the saved key, and returns the result to the model on the same
+    thread.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Why should approval rules live in the harness rather than in the system prompt?"
+    category="Concepts"
+    level="Junior"
+  >
+    - A rule in the prompt is text the model weighs against other text, and injected text can argue it away. - A rule in
+    the harness is code that runs whatever the model says, and you can test it without a model. - The harness also sees
+    the real arguments and the signed-in user, so it can refuse a refund on another customer's order before anyone is
+    asked. - The prompt can still explain the rule, so the model plans around it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your reviewers approve 98 % of agent actions. Is that good news?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Probably not: a near-100 % approval rate usually means the gate is too wide and people have stopped reading. -
+    Anthropic's Claude Code data shows the effect: users approve 97 % of prompts, and testers caught about 17 % of
+    planted dangerous commands early in a session but about 5 % after 50 prompts. - Narrow the gate to final and costly
+    actions, move small ones to review-after, add a classifier or sandbox before the person, and make each question
+    carry its evidence. - Then watch time to decide and the approval rate per gate; a two-second approval is a warning.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="An approval can take hours. How do you keep the system correct while it waits?"
+    category="Architecture"
+    level="Senior"
+  >
+    - Save the run in a durable checkpointer before pausing, so deploys and crashes lose nothing and no worker is held.
+    - Keep side effects after the interrupt, because frameworks such as LangGraph re-run the interrupted node from its
+    start on resume. - Save the idempotency key with the pending call, so a retry after the decision pays once. - Give
+    the question an owner, a reminder and an expiry, and re-check the facts on resume: the order may have been refunded
+    by someone else in the meantime.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What should an audit record for an agent's approved action contain?"
+    category="Failure modes"
+    level="Mid"
+  >
+    - The request: run, thread, tool call id, the exact arguments and the idempotency key. - What the person was shown,
+    including the rule that held the call and its version. - The decision: who (from sign-in), when asked, when decided,
+    approve, edit or reject, and any edit. - The outcome: what actually ran and its result. Keep it append-only and
+    separate from checkpoints, and use it to tune the gates.
+  </InterviewQuestion>
+</InterviewQuestions>
