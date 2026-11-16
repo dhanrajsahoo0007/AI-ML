@@ -92,14 +92,14 @@ const fits = (label: string, w: number, perChar = LABEL_CHAR_W) =>
   Math.max(...label.split("\n").map((l) => l.length)) * perChar <= w - 8;
 
 /** One cell of an option column: a label, an optional second line and an optional tone ("fail" turns it red). */
-export interface OptionRow {
+interface OptionRow {
   label: string;
   sub?: string;
   tone?: LayoutTone;
 }
 
 /** One option: its title (pastel, in its tone) and one row per property, in the same order as the row labels. */
-export interface OptionColumn {
+interface OptionColumn {
   id: string;
   title: string;
   tone: LayoutTone;
@@ -109,7 +109,7 @@ export interface OptionColumn {
   highlight?: boolean;
 }
 
-export interface OptionColumnsOpts {
+interface OptionColumnsOpts {
   columns: OptionColumn[];
   /** Property names down the left, one per row. Omit for no label column. */
   rowLabels?: string[];
