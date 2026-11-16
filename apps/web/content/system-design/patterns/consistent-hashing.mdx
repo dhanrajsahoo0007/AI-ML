@@ -1,92 +1,222 @@
 ---
 title: "Consistent Hashing"
 description: "Distributing keys across nodes so adding or removing a node moves only a small share of the data."
+icon: shuffle
+updated: 2026-11-16
 ---
 
-Consistent hashing is the standard answer to "how do you spread data or traffic across a changing set of nodes?" It underlies distributed caches, key-value stores and sharded databases.
+Adding one cache node to a cluster can empty the whole cache, if keys are placed with `hash(key) % N`.
 
-## TL;DR
+- Consistent hashing is the standard answer to "how do you spread data or traffic across a changing set of nodes?". It underlies distributed caches, key-value stores and sharded databases.
 
-- Plain `hash(key) % N` remaps almost every key when `N` changes.
+## Overview
+
+- Plain `hash(key) % N` remaps almost every key when `N` changes: going from 4 to 5 nodes moves 80 % of them.
 - Consistent hashing places nodes and keys on a **ring**; a key belongs to the next node clockwise.
-- Adding or removing a node moves only about `1/N` of the keys.
-- **Virtual nodes** give each machine many ring positions to even out load.
-- Replication places copies on the next few distinct nodes on the ring.
+- Adding or removing a node moves only about **1/N** of the keys.
+- **Virtual nodes** give each machine many ring positions, which evens out load and spreads a node's keys over many neighbours.
+- **Replication** places copies on the next few distinct machines on the ring.
+- It spreads **keys**, not **popularity**: one hot key still lands on one node.
 
-## The idea in plain English
+## Mental model
 
-Imagine a clock face. Servers sit at points on it, and each key is hashed to a point and handed to the first server found going clockwise. If a server leaves, only its keys move to its neighbour; everything else stays put.
+- Imagine a clock face with servers sitting at a few points on it.
+- Each key is hashed to a point on the clock and handed to the first server found going clockwise.
+- If a server leaves, only its keys move, to its clockwise neighbour; every other key stays where it was.
+- With modulo hashing, by contrast, every key's seat is recomputed whenever a server arrives or leaves.
 
 ## Core concepts
 
-1. **Hash ring.** Hash space (for example 0 to 2^32-1) bent into a circle.
-2. **Key placement.** Hash the key, walk clockwise to the first node.
-3. **Virtual nodes.** Each physical node owns many points, which smooths distribution and lets bigger machines take more points.
-4. **Replication.** Store a key on the next `R` distinct nodes clockwise.
-5. **Rebalancing.** A joining node takes over ranges from its successor; a leaving node hands ranges to its successor.
-6. **Variants.** Rendezvous (highest random weight) hashing and jump hash solve the same problem with different trade-offs.
+- The running example is Brightpost's product cache: **1,000,000 products** cached on **4 nodes**, read **2,300 times a second** at peak.
+
+### Why hash % N breaks
+
+- With `% N`, a key's node depends on `N`. Change `N` and the remainder changes for most keys.
+- On a cache, every moved key is a miss; on a database, every moved key is data to copy.
+
+<AnimatedDiagram spec="animated/patterns/ring-modn-vs-ring" stepper caption="Modulo hashing reshuffles almost every key when a node joins; on a ring only the new node's slice moves." />
+
+<StepCards>
+  <StepCard n={1} title="Four nodes: hash % 4">
+    Twenty keys with hash values 0 to 19 cycle through nodes A, B, C and D. The spread is perfectly even.
+  </StepCard>
+  <StepCard n={2} title="A fifth node: hash % 5 moves 16 of 20 keys">
+    With five nodes the remainder changes for every key except 0 to 3. Sixteen keys, 80 %, now live somewhere else.
+  </StepCard>
+  <StepCard n={3} title="A ring of four nodes">
+    The same keys on a ring with nodes at positions 4, 9, 14 and 19: each key goes to the first node at or after its hash. Each node owns one slice.
+  </StepCard>
+  <StepCard n={4} title="E joins the ring: only its slice moves">
+    E takes position 18 and with it keys 15 to 18, all from D. Four keys move, and the other 16 stay put. All the moved keys came from one node, which is what virtual nodes fix.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- A key keeps its node from `% 4` to `% 5` only when `k % 4 = k % 5`, which holds for 4 keys in every 20: 80 % move.
+- In general, going from N to N + 1 nodes, modulo moves about N ÷ (N + 1) of the keys; the ring moves about 1 ÷ (N + 1).
+
+<PremiumBreak />
+
+### Virtual nodes
+
+- With one point per node, the arcs between points are random lengths, so one node can own far more than its share.
+- **Virtual nodes** give each machine many points (say 100). The arcs average out, and each node's share lands near 1/N.
+- A joining node then takes small slices from every existing node, instead of one big slice from one neighbour.
+- Weighting is easy: a machine twice the size gets twice the points.
+
+<AnimatedDiagram spec="animated/patterns/ring-vnodes" caption="With one point each, one node can own half the ring; with 100 points each, every node lands within a few points of its fair share." />
+
+**How to read it:**
+
+- Each bar is the whole ring, split by how much of it each node owns.
+- With one point each, C owns 54.6 %, more than twice its fair share, and D owns 5.1 %. C is the node that falls over first.
+- With 100 points each, every node is within 3 points of 25 %.
+
+**The numbers:**
+
+- The shares are computed by hashing `A#0`, `A#1` and so on onto a 2^32 ring with a 32-bit hash, not typed by hand.
+- At 2,300 reads/s, the one-point ring would send C 0.546 × 2,300 ≈ 1,256 reads/s against a fair 575.
+
+### Replication and variants
+
+- **Replicas:** walk clockwise from the key and take the next R distinct physical machines, skipping other virtual nodes of the same machine, ideally across zones. Dynamo calls this the **preference list**.
+- **Rendezvous hashing** (highest random weight): score every node with `hash(key, node)` and pick the highest. No ring to store, but each lookup scores every node.
+- **Jump hash:** maps a key to one of N numbered buckets with no stored state. It needs buckets numbered 0 to N − 1, so it suits shards you only add to, not machines that fail at random.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    K["key -> hash"] --> RING(("Hash ring"))
-    RING --> A["Node A (vnodes a1,a2,a3)"]
-    RING --> B["Node B (vnodes b1,b2,b3)"]
-    RING --> C["Node C (vnodes c1,c2,c3)"]
-```
+Try it: add and remove servers on a ring and see which keys move, compared with `hash % N`.
 
-## Deep dive
+<ConsistentHashRing servers={4} vnodes={8} keys={32} showModulo={true} />
+
+<StepCards>
+  <StepCard n={1} title="A client hashes the key">
+    The product service hashes `product:kettle` to a point on the ring. Every client uses the same hash function and the same ring, so they all agree without asking anyone.
+  </StepCard>
+  <StepCard n={2} title="The next node clockwise owns it">
+    The client walks clockwise to the first virtual node and maps it to its machine. A sorted array of points makes this a binary search.
+  </StepCard>
+  <StepCard n={3} title="Replicas are the next distinct machines">
+    For a store with three copies, the next two distinct machines clockwise hold the replicas.
+  </StepCard>
+  <StepCard n={4} title="A node joins or leaves">
+    The membership list changes (from a coordinator or by gossip), every client rebuilds its ring, and only the keys in the changed slices move. Until every client has the new ring, some keys are looked up in two places.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
 
 ### Adding a node
 
-With `hash % N`, going from 4 to 5 nodes remaps about 80% of keys. With a ring and virtual nodes, the new node takes small slices from many existing nodes, moving about 20% in total, and each donor loses only a little.
+- With `hash % N`, going from 4 to 5 nodes remaps about 80 % of keys.
+- With a ring and virtual nodes, the new node takes small slices from many existing nodes, moving about 20 % in total, and each donor loses only a little.
+- Moving data takes time: copy the slice, then switch reads, so the old owner serves until the new one has the data.
+
+### Membership
+
+- Every client must agree on the ring. Either a coordination service holds the list of nodes, or nodes spread it by gossip.
+- See [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination) and [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection).
 
 ### Hot spots
 
-Hashing evens out key counts, not popularity. A viral key still lands on one node; combine with replication or key splitting.
+- Hashing evens out key counts, not popularity. A viral key still lands on one node.
+- Combine with replication, an in-process cache or key splitting: [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing).
+
+### Worked example: a fifth cache node at the peak
+
+Brightpost's product cache holds 1,000,000 products on 4 nodes with a 95 % hit rate. At 12:00 it is near its limit, so a fifth node joins.
+
+1. **With `hash % N`,** 80 % of the keys now belong to a different node: those reads miss.
+2. **With a ring and 100 virtual nodes each,** the new node takes about a fifth of the keys, in small slices from all four nodes.
+3. **The misses refill** as reads arrive, through cache-aside.
+
+**The numbers:**
+
+- Modulo: 0.8 × 1,000,000 = 800,000 keys move. Right after the change, about 80 % of 2,300 reads/s miss: 1,840 database reads/s instead of 115.
+- Ring: about 1,000,000 ÷ 5 = 200,000 keys move, around 50,000 from each old node. About 20 % of reads miss at first: 460 database reads/s, settling as the slice refills.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| More vnodes | Even load | More metadata, slower membership changes |
-| Ring lookup | Minimal data movement | Needs membership gossip or a coordinator |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| `hash % N` | Trivial; perfectly even | Moves almost every key when N changes | A fixed number of shards that never changes |
+| Ring, few virtual nodes | Small membership data | Lumpy load; one neighbour takes all of a leaving node's keys | Rarely; prefer more points |
+| Ring, many virtual nodes | Even load; small moves spread over every node | More metadata; more ranges to move | Caches and Dynamo-style stores |
+| Rendezvous hashing | No ring; minimal moves | Scores every node on each lookup | Tens of nodes, not thousands |
+| Jump hash | No memory; fast | Buckets must be numbered; cannot drop an arbitrary node | Shards you only add to |
 
-## Real-world examples
+## Production systems
 
-- Dynamo-style stores partition keys on a ring: [Key Value Store](/system-design-case-studies/case-studies/key-value-store).
+- **Amazon Dynamo** (2007): a ring with virtual nodes; each key's preference list is the next distinct physical nodes clockwise.
+- **Apache Cassandra** (as of November 2026): each node owns `num_tokens` points on the ring, 16 by default since 4.0, with an allocator that places them evenly for the replication factor.
+- **Maglev**: Google's L4 balancer uses its own consistent hashing so a connection stays on its backend when balancers change.
 - Distributed caches shard keys across nodes: [URL Shortener](/system-design-case-studies/case-studies/url-shortener), [Typeahead](/system-design-case-studies/case-studies/typeahead).
 - Message partitions and broker assignment: [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue).
-- Object stores place data across storage nodes: [S3](/system-design-case-studies/case-studies/s3).
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [S3](/system-design-case-studies/case-studies/s3) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Too few virtual nodes, giving lumpy load.
-- Ignoring that rebalancing moves real data and takes time.
-- Assuming it fixes hot keys.
+- **Too few virtual nodes.** Load is lumpy and one node runs hot. Use enough points per node, or a token allocator.
+- **Ignoring that rebalancing moves real data.** A new node is empty; copy its slices before switching reads to it.
+- **Assuming it fixes hot keys.** It spreads keys, not popularity. Add replication or an in-process cache for the hottest keys.
+- **Clients with different rings.** During a change, two clients send the same key to different nodes. Version the membership list and accept a short window of double lookups.
+- **Replicas on the same machine.** Walking the ring without skipping a machine's other virtual nodes puts two copies on one box.
 
-## How to answer in an interview
+## Interview framework
 
-Explain why modulo hashing breaks, draw the ring, add virtual nodes, then cover replication and what happens on node join and leave.
+1. Explain why `hash % N` breaks, with the number: 80 % of keys move from 4 to 5 nodes.
+2. Draw the ring: nodes and keys hashed onto it, a key owned by the next node clockwise.
+3. Add virtual nodes for even load and small, spread-out moves.
+4. Cover replication (next R distinct machines) and membership (a coordinator or gossip).
+5. Say what it does not fix: hot keys.
 
-## Related patterns
+**What interviewers listen for:** the 1/N movement, virtual nodes, and replicas on distinct machines.
 
-[Sharding](/system-design/patterns/sharding) · [Caching](/system-design/patterns/caching) · [Leader Election and Consensus](/system-design/patterns/leader-election)
+**Red flags:** `hash % N` for a cluster that grows, or claiming the ring solves hot keys.
 
 ## Further reading
 
 - [Consistent Hashing and Random Trees (Karger et al., 1997)](https://dl.acm.org/doi/10.1145/258533.258660)
 - [Dynamo: Amazon's Highly Available Key-value Store](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf)
+- [A Fast, Minimal Memory, Consistent Hash Algorithm (Lamping and Veach, 2014)](https://arxiv.org/abs/1406.2294)
+- [Production recommendations: tokens (Cassandra docs)](https://cassandra.apache.org/doc/latest/getting-started/production.html)
+- Related pages: [Sharding](/system-design/patterns/sharding) · [Caching](/system-design/patterns/caching) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing)
 
 <InterviewQuestions>
   <InterviewQuestion question="Why not use hash(key) % N?" category="Concepts" level="Junior">
-    Changing N changes the result for almost every key, forcing a mass data move or a cache wipe. Consistent hashing limits movement to roughly 1/N of the keys.
+    - Changing N changes the result for almost every key: from 4 to 5 nodes, 80 % of keys move.
+    - On a cache that is a wave of misses; on a store it is a mass data copy.
+    - Consistent hashing limits movement to roughly 1/N of the keys.
   </InterviewQuestion>
   <InterviewQuestion question="What are virtual nodes for?" category="Concepts" level="Mid">
-    They give each physical node many ring positions, so load evens out statistically and stronger machines can own more positions.
+    - They give each physical node many ring positions, so load evens out statistically.
+    - A joining or leaving node then exchanges small slices with every other node instead of one neighbour.
+    - Stronger machines can own more positions.
   </InterviewQuestion>
   <InterviewQuestion question="How are replicas chosen on the ring?" category="Architecture" level="Mid">
-    Walk clockwise from the key's position and take the next R distinct physical nodes, skipping virtual nodes of the same machine, ideally across failure zones.
+    - Walk clockwise from the key's position and take the next R distinct physical nodes.
+    - Skip other virtual nodes of the same machine, or two copies end up on one box.
+    - Ideally also spread the copies across failure zones.
+  </InterviewQuestion>
+  <InterviewQuestion question="You add a fifth node to a four-node cache at peak. What happens to the database?" category="Scaling" level="Mid">
+    - With modulo hashing, about 80 % of keys move, so about 80 % of reads miss at once and the database load jumps from the miss rate to most of the read rate.
+    - With a ring and virtual nodes, about 20 % move, spread across all old nodes, and the misses refill quickly.
+    - Add the node off-peak anyway, or warm its slices first.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does consistent hashing solve hot keys?" category="Failure modes" level="Mid">
+    - No: it evens out how many keys each node holds, not how often each key is read.
+    - One viral product still maps to one node.
+    - Use replicas for reads, an in-process cache, or split the key into salted copies.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare a hash ring, rendezvous hashing and jump hash." category="Trade-offs" level="Senior">
+    - A ring stores sorted points and finds the owner with a binary search; with virtual nodes it moves about 1/N of keys on any change.
+    - Rendezvous hashing scores every node per key and picks the highest: no ring to store and minimal moves, but the lookup is linear in the number of nodes.
+    - Jump hash needs no memory and is fast, but buckets must be numbered 0 to N − 1, so it fits shards you add at the end, not machines that fail at random.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do clients agree on the ring while nodes join and leave?" category="Architecture" level="Senior">
+    - Membership comes from a coordination service such as etcd or ZooKeeper, or spreads by gossip as in Dynamo-style stores.
+    - Version the ring, so a node can tell a client its view is old and redirect it.
+    - During a change, read from the new owner and fall back to the old one until the slice is copied.
   </InterviewQuestion>
 </InterviewQuestions>
