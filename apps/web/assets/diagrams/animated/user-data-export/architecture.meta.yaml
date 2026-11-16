@@ -1,0 +1,19 @@
+title: User data export high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, export orchestration, application services,
+  async pipeline and storage. Step 1: the user's request goes through the API gateway to the export API, which calls
+  the source services and zips the result inside the request, drawn red because it times out. Step 2: the export API
+  writes a job row to the job database and returns at once; export workers poll for jobs and call the sources. Step 3:
+  a workflow engine, the solid accent, starts forty steps through rate-limited task queues, and workers write each
+  step's chunks to a staging store as a checkpoint. Step 4: a per-user query against the date-partitioned warehouse,
+  drawn red because it scans the whole table. Step 5: a batch scanner joins the day's requesters with each warehouse
+  partition once and writes per-user files to staging. Step 6: a packager zips the chunks into 4 GB parts in the
+  archive store. Step 7: delivery emails a link to the page; the user re-authenticates, gets a 15-minute signed URL
+  and downloads straight from the archive store. Step 8: an ownership check sits between staging and the packager and
+  passes only rows whose owner is the requester.
+caption: >-
+  Download your data: an asynchronous job, one checkpointed step per source, one warehouse scan for the whole batch,
+  split archives, and a short signed link only the owner can get.
+tags: [case-studies, user-data-export, architecture, workflows, privacy]
+source: original
+created: 2026-11-17

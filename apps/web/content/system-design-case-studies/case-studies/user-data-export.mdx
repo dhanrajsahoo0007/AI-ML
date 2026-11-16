@@ -1,12 +1,664 @@
 ---
 title: "Design an App to Download User Data"
-description: "Asynchronous export jobs that gather a user's data across services."
+description: "A 'download your data' feature: a durable export job across forty services, batched warehouse scans, split archives and a link only the owner can use."
 logo: systems/user-data-export
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design the "download your data" feature: a user asks for a copy of everything the product holds about them, forty services gather it, and a download link arrives later.
+The hard parts are a job that runs for hours across services that fail, logs that are not indexed by user, and an archive that must never reach the wrong person.
 
-**What it will cover:** asynchronous export jobs that gather a user's data across services.
+- Interviewers use this question to see whether you move slow work off the request path, make a long job survive crashes and partial failures, and treat delivery as a security problem.
 
-**Patterns used:** [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design the 'download your data' feature: a user asks for a copy of everything the product holds about them, across dozens of services, and receives a download link."
+  level="Senior"
+  minutes={45}
+  bankId="design-job-scheduler"
+  tests={[
+    "Moving work that takes hours off the request path: submit, status, result",
+    "A job that survives worker crashes and reports partial failure",
+    "Reading stores that are not indexed by the key you need",
+    "Releasing a file only to its owner",
+  ]}
+  clarify={[
+    { q: "How many services hold user data?", a: "40, each owned by a different team." },
+    { q: "How fast must the export arrive?", a: "Within the legal deadline of one month; we aim for 3 days." },
+    { q: "How big is an export?", a: "2 GB on average, 50 GB for the heaviest 1% of users." },
+    { q: "Must the copy be a consistent snapshot across services?", a: "No: each source reads as of the request time; a few minutes of skew is fine." },
+    { q: "How many requests?", a: "20,000 a day; 400,000 on the day after a news story." },
+    { q: "How is it delivered?", a: "An email with a link to the product's page; download after signing in again." },
+  ]}
+  outOfScope={["Transfer to another provider", "Account deletion", "Correcting data", "Legal review of what is included"]}
+/>
+
+## Overview
+
+- `POST /v1/exports` writes a **job row** and returns `202` at once; an **idempotency key** and a rule of **one running export per user** stop duplicates.
+- A **workflow engine** runs **one step per source service** (40 steps), each **checkpointed** and **retried**, so a worker crash loses one page of work, not the export.
+- Live services answer through an **exporter API** by user; **warehouse logs** partitioned by date are read by a **daily batch join** that serves every requester with one scan.
+- An **ownership check** reads every row and passes only rows whose owner is the requester; then the **packager** writes **4 GB parts** to **object storage**.
+- The email carries a **link to the page**, never the file: the user **signs in again** and gets a **15-minute signed URL**; each part can be fetched **5 times** within **7 days**.
+- A source that keeps failing is **marked missing after 72 hours**; the rest is delivered and a **follow-up job** fills the gap.
+
+<Numbers
+  items={[
+    { value: "30 days", label: "legal deadline", hint: "we aim for 3" },
+    { value: "40", label: "source services per export" },
+    { value: "20,000 ×", label: "less read from the warehouse", hint: "one batch join, not one scan per user" },
+    { value: "0", label: "files sent to the wrong person" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Request an export", notes: "Choose data types, format (zip) and part size." },
+    { id: "F2", requirement: "Gather from every source", notes: "40 services and the warehouse, as of the request time." },
+    { id: "F3", requirement: "Package into archives", notes: "Split into parts of a chosen size; a manifest lists every file." },
+    { id: "F4", requirement: "Notify and deliver", notes: "Email a link; download through an expiring link, a limited number of times." },
+    { id: "F5", requirement: "Show progress", notes: "Per data type: waiting, gathering, done, missing." },
+    { id: "F6", requirement: "Answer within the legal deadline", notes: "One month from the request." },
+  ]}
+/>
+
+- Out of scope: transfer to another provider, account deletion, correcting data.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Turnaround", target: "99% ready within 3 days; 100% within 30 days", why: "The law sets one month; users expect days." },
+    { id: "N2", property: "No lost request", target: "0 accepted requests lost; a crash repeats at most one page of work", why: "A lost request is a missed legal deadline." },
+    { id: "N3", property: "No leak", target: "0 rows of another user in an archive; 0 downloads by anyone but the owner", why: "The archive is everything we know about a person." },
+    { id: "N4", property: "Live impact", target: "Export reads use at most 5% of any source's capacity", why: "An export must never slow the product." },
+    { id: "N5", property: "API latency", target: "Submit and status p99 under 500 ms", why: "The user is on a page waiting for a confirmation." },
+    { id: "N6", property: "Completeness", target: "Every chosen type delivered or listed as missing with a reason", why: "A silent gap is an incomplete legal answer." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Requests, normal day", assumption: "20,000 a day ÷ 86,400 s", result: "≈ 0.23 submits/s" },
+    { quantity: "Requests, after a news story", assumption: "20 × normal; 60,000 in the worst hour ÷ 3,600 s", result: "400,000 a day; ≈ 17 submits/s at peak" },
+    { quantity: "Steps", assumption: "20,000 × 40 sources", result: "800,000 a day; 16,000,000 on a burst day" },
+    { quantity: "Archive bytes", assumption: "20,000 × 2 GB average", result: "40 TB a day; 800 TB on a burst day" },
+    { quantity: "Archives kept", assumption: "40 TB × 7 days", result: "280 TB live in object storage" },
+    { quantity: "Parts", assumption: "4 GB parts: 2 GB average, 50 GB at p99", result: "1 part on average; 50 ÷ 4 → 13 parts" },
+    { quantity: "Warehouse log", assumption: "One table, 365 date partitions × ≈ 274 GB", result: "100 TB" },
+    { quantity: "Per-user scans", assumption: "20,000 × 100 TB", result: "2,000 PB read a day" },
+    { quantity: "One batch scan", assumption: "100 TB once a day", result: "20,000 × less read" },
+    { quantity: "One source's budget", assumption: "5% of a photo service's 200,000 reads/s", result: "10,000 export reads/s" },
+    { quantity: "Burst drain at that source", assumption: "400,000 exports × 500 pages ÷ 10,000/s", result: "20,000 s ≈ 5.6 hours" },
+    { quantity: "Packaging, burst day", assumption: "800 TB ÷ 86,400 s; 200 MB/s per packager", result: "≈ 9.3 GB/s; ≈ 47 packagers" },
+    { quantity: "Download egress", assumption: "40 TB × 1.2 downloads ÷ 86,400 s", result: "48 TB a day ≈ 4.4 Gbit/s" },
+    { quantity: "Job store", assumption: "20,000 × 90 days × 40 step rows × 200 bytes", result: "72,000,000 rows ≈ 14 GB" },
+  ]}
+  note="Requests are rare and the deadline is long; the bytes and the scans are the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Status reads ≈ 1.2/s; the heavy reads are the bulk reads from 40 sources and 100 TB of logs | No cache on the API; the design is about how the bulk data is read |
+| D2 | Peak against average | 20 × after a news story; ≈ 17 submits/s in the worst hour, a day of work behind each | Queue the work and drain it at each source's budget; never reject a request |
+| D3 | Consistency per operation | The job row strong (one running export per user); the data as of the request time, a few minutes of skew across sources is fine | Relational job store; no cross-service snapshot |
+| D4 | Latency target | Throughput over latency: the deadline is a month, not a second; submit p99 500 ms | Asynchronous job; a daily batch is fast enough |
+| D5 | Durability | An accepted request must never be lost; a finished step must not be redone | Job row committed before `202`; a checkpoint per page of each step |
+| D6 | Ordering | Only within one job: packaging after every step ends | The workflow orders steps; nothing ordered across users |
+| D7 | Duplicates | A second submit must not start a second job; a file sent to the wrong person is harmful, not annoying | Idempotency key and one running export per user; an owner check on every row |
+| D8 | Data size and growth | 2 GB per export, 50 GB at p99; 280 TB live; logs of 100 TB per table | Object storage, split parts, batched scans |
+| D9 | Fan-out shape | One request to 40 sources (scatter-gather); one warehouse scan to 20,000 users | A step per source; one join serves the batch |
+| D10 | Contention | Not a driver here: each job belongs to one user; nobody fights over a row | No locking beyond the one-running-export rule |
+| D11 | Geography | Users in many regions; residency rules for some | The archive stays in the user's home region; sources are read where they live |
+| D12 | Availability and degradation | One slow source must not fail the export; exports must not slow the product | Retries with a 72-hour budget, then partial delivery; export reads throttled first under stress |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/exports` | User | Ask for an export, with `Idempotency-Key` |
+| `GET /v1/exports/{id}` | User | The progress page, every 30 s while it is open |
+| `GET /v1/exports` | User | List my exports, by cursor |
+| `DELETE /v1/exports/{id}` | User | Cancel a running export |
+| `POST /v1/exports/{id}/parts/{n}/link` | User, signed in again in the last 10 minutes | Get a 15-minute signed URL for one part |
+| `Export(user_ids, types, as_of, cursor)` | Export worker or batch scanner → each source service | One page of one or many users' data |
+
+```http
+POST /v1/exports
+Authorization: Bearer <session>
+Idempotency-Key: 6c1e2f
+{ "types": ["posts", "photos", "messages"], "format": "zip", "part_size_gb": 4 }
+
+202 Accepted  Location: /v1/exports/9f3a71
+{ "export_id": "9f3a71", "status": "queued", "as_of": "2026-11-17T09:00:00Z" }
+200 OK        { "export_id": "9f3a71", "status": "gathering" }   (same key, or one already running)
+```
+
+- **Idempotency:** the same key returns the first answer; a new key while an export is running returns that export (`200`), never a second job.
+- **Errors:** `401 reauth_required` for a link without a fresh sign-in; `404` for an export that is not yours (not `403`, which would confirm it exists); `410` once the archive expired or a part was fetched 5 times.
+- **Pagination:** `GET /v1/exports` by cursor; the internal `Export` call returns a cursor per page, and that cursor is the step's checkpoint.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Export jobs and steps | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | A unique rule for one running export per user; status by user (D3, D7) | `user_id` | Strong | A key-value store: no partial unique index, so duplicates need a second table and a transaction |
+| Workflow history | The workflow engine's store, on the same relational database | Every step's result and cursor survives a crash (D5) | `workflow_id` = `export_id` | Strong per workflow | Status columns updated by hand: every retry path written and tested by us |
+| Download counts | Same relational database | 5 fetches per part, exact (D7) | `export_id` | Strong | An in-memory counter: a failover forgets counts and allows a sixth fetch |
+| Staging chunks | Object storage | Gigabytes per user, written once, read once by the packager (D8) | `export_id/source/chunk` prefix | Read by exact key | Rows in the job database: 40 TB a day of blobs in a transactional store |
+| Archives | Object storage, home region, a key per export | 280 TB for 7 days, then deleted by a lifecycle rule (D8, D11) | `export_id/part` | Read by exact key | Email attachments: gigabytes do not fit, and mail cannot be recalled |
+| Daily requester batch | Warehouse table (columnar) | The join input for one scan per partition (D8, D9) | `batch_date` | Fixed once the batch closes | A query per user: 100 TB read each time |
+
+```sql
+CREATE TABLE exports (
+  export_id       uuid PRIMARY KEY,      -- random: not guessable
+  user_id         bigint NOT NULL,       -- shard by user_id
+  idempotency_key text   NOT NULL,
+  types           text[] NOT NULL,
+  status          text   NOT NULL,       -- 'queued' | 'gathering' | 'packaging' | 'ready' | 'expired' | 'cancelled'
+  as_of           timestamptz NOT NULL,  -- every source reads as of this time
+  home_region     text   NOT NULL,
+  deadline_at     timestamptz NOT NULL,  -- as_of + 1 month
+  UNIQUE (user_id, idempotency_key)
+);
+CREATE UNIQUE INDEX one_running_export ON exports (user_id)
+  WHERE status IN ('queued', 'gathering', 'packaging');
+
+CREATE TABLE export_steps (
+  export_id uuid, source text,           -- one row per source service
+  status text, attempts int, cursor text, missing_reason text,
+  PRIMARY KEY (export_id, source)
+);
+CREATE TABLE archive_parts (
+  export_id uuid, part_no int, object_key text, bytes bigint, sha256 text,
+  fetches int NOT NULL DEFAULT 0,        -- at most 5
+  PRIMARY KEY (export_id, part_no)
+);
+```
+
+- **Submit:** insert into `exports`; a clash on the idempotency key or on `one_running_export` returns the existing row.
+- **Progress:** read the export and its 40 step rows by `export_id`, after checking `user_id`.
+- **Link:** `UPDATE archive_parts p SET fetches = fetches + 1 FROM exports e WHERE e.export_id = p.export_id AND e.user_id = :u AND e.status = 'ready' AND p.export_id = :e AND p.part_no = :n AND p.fetches < 5`; 1 row means sign a URL, 0 rows means `404` or `410`.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: A zip inside the request (F1)
+
+The smallest design: the export API calls every source and streams back a zip while the user waits.
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={1} caption="Step 1: the export API calls all 40 sources and zips the answer inside one request: it times out." />
+
+- **Adds:** the user, the API gateway, the export API, the 40 source services.
+- **Flow:**
+  1. The user asks for an export; the gateway passes the request to the export API.
+  2. The export API calls each source for the user's data and writes a zip into the response.
+- **Why this and not that:** it is the design most candidates draw first, and it works for a few megabytes.
+- **The gap:** 2 GB from 40 services takes hours; gateways and browsers close a request after seconds or minutes, and one slow source fails everything (D4, D12).
+
+<PremiumBreak />
+
+### Step 2: An asynchronous job: submit, status, result (F1, F5)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={2} caption="Step 2: the export API writes a job row and returns 202; workers claim jobs from the job database and call the sources." />
+
+- **Adds:** the **job database** and the **export workers**; the call inside the request goes away.
+- **Flow:**
+  1. `POST /v1/exports` inserts a job row and returns `202` with the export id in under 500 ms (N5).
+  2. A worker polls for queued jobs, claims one, and calls the sources one after another.
+  3. The progress page reads the job row with `GET /v1/exports/{id}`.
+- **Why this and not that:** the deadline is a month, not a second (D4), so the request only has to record the job durably (D5). The unique rules on the job row stop a double click from starting two jobs (D7).
+- **The gap:** one worker owns all 40 sources for hours; if it dies at source 31, nothing knows what was done, and one failing source blocks the rest.
+
+### Step 3: A workflow: one step per source service (F2, N2)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={3} caption="Step 3: a workflow engine starts 40 steps through rate-limited task queues; workers write each page to staging as a checkpoint." />
+
+- **Adds:** the **workflow engine** (the accent), **task queues** with a rate per source, and the **staging store**; polling the job database goes away.
+- **Flow:**
+  1. The export API starts a workflow whose id is the export id; starting it twice returns the same workflow.
+  2. The engine schedules 40 steps, one per source, onto that source's task queue.
+  3. A worker takes a step, asks the source for one page, writes it to staging and records the cursor; then the next page.
+  4. A failed page is retried with backoff; a worker that dies loses its lease and another worker resumes from the last cursor.
+- **Why this and not that:** the engine keeps every step's state and cursor durably, so a crash repeats one page, not the export (D5, N2). A rate per queue keeps exports inside each source's budget (N4, D2).
+- **The gap:** live services can answer "this user's data"; the activity logs in the warehouse cannot.
+
+### Step 4: Where the data lives: services and the warehouse (F2)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={4} caption="Step 4: live services answer by user, but a per-user query on the date-partitioned warehouse scans all 100 TB." />
+
+- **Adds:** the **warehouse**, which holds logs partitioned by date.
+- **Flow:**
+  1. Each live service implements one `Export` call that reads by `user_id` from its own store or a replica.
+  2. For the logs, a worker runs a query per user against the warehouse.
+- **Why this and not that:** an exporter API owned by each team keeps their schema and their privacy rules inside their service; the export system never reads a team's database directly (D3, N3).
+- **The gap:** the logs are partitioned by date, not by user, so every per-user query reads all 100 TB: 2,000 PB a day for 20,000 exports (D8).
+
+### Step 5: One scan serves the whole batch (F2, N4)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={5} caption="Step 5: a batch scanner joins the day's requesters with each warehouse partition once and writes per-user files to staging." />
+
+- **Adds:** the **batch scanner**; the per-user warehouse query goes away.
+- **Flow:**
+  1. The warehouse step of each workflow adds the user to today's batch and waits for a signal.
+  2. At 02:00 the scanner copies the day's requester ids into one table and runs one join per date partition on `owner_id`.
+  3. The output is split by owner into per-user files in staging, and each waiting workflow is signalled.
+- **Why this and not that:** one scan of 100 TB serves all 20,000 requesters: 20,000 × less read (D8, D9). Waiting up to a day costs nothing against a one-month deadline (D4).
+- **The gap:** staging now holds thousands of chunks per user; nobody can download a folder of chunks.
+
+### Step 6: Split archives in object storage (F3)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={6} caption="Step 6: when every step is done, the packager zips the chunks into 4 GB parts in the archive store." />
+
+- **Adds:** the **packager** and the **archive store**.
+- **Flow:**
+  1. When all 40 steps end, the workflow runs the packaging step.
+  2. The packager streams chunks into zip files, cuts a new part at 4 GB, encrypts each with the export's key and writes a manifest.
+  3. Each part's size and checksum go into `archive_parts`; a lifecycle rule deletes the parts after 7 days.
+- **Why this and not that:** a 50 GB archive as one file fails on a flaky connection and must restart from zero; 4 GB parts retry one at a time (D8). Object storage holds 280 TB cheaply with no servers to run.
+- **The gap:** the archive exists, but the user does not know, and anyone holding a plain link could take it.
+
+### Step 7: Delivery: re-auth and a short signed link (F4)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={7} caption="Step 7: delivery emails a link to the page; the user signs in again and downloads each part through a 15-minute signed URL." />
+
+- **Adds:** the **delivery service**, **re-auth**, the **email**; the download goes straight from the archive store to the user.
+- **Flow:**
+  1. The delivery service emails a link to the export page, never the file or a signed URL.
+  2. The user opens the page and signs in again with password and second factor.
+  3. For each part, the service counts the fetch and signs a URL valid for 15 minutes.
+  4. The browser downloads the part straight from the archive store.
+- **Why this and not that:** email gets forwarded and mailboxes get breached, so the email must carry nothing usable on its own (N3, D7). Bytes go store to browser, so 48 TB a day never pass through our servers (D8).
+- **The gap:** a bug upstream could still put another user's rows into this archive.
+
+### Step 8: Privacy: check the owner of every file (N3)
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" step={8} caption="Step 8: an ownership check sits between staging and the packager and passes only rows whose owner is the requester." />
+
+- **Adds:** the **ownership check**; the direct path from staging to the packager goes away.
+- **Flow:**
+  1. The check reads every chunk and compares each row's owner column with the requester's id.
+  2. Shared items, such as a group thread, pass when the requester is on the item's participant list; the exporter has already removed fields private to the other people.
+  3. A single mismatch stops the export and pages the on-call engineer; nothing is packaged.
+- **Why this and not that:** the batch join, the split by owner and 40 exporters are all code that can have bugs; a final check that knows only "requester = owner" catches them all (N3, D7).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/user-data-export/architecture" stepper caption="Download your data: an asynchronous job, one checkpointed step per source, one warehouse scan for the whole batch, split archives, and a short signed link only the owner can get." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | User's browser or app; email inbox | Ask, watch progress, download; receive the "ready" email |
+| **Edge** | API gateway, re-auth | Authenticate, limit submits, demand a fresh sign-in before any download |
+| **Export orchestration** | Export API, workflow engine | Record the job once; run 40 checkpointed steps and packaging |
+| **Application services** | Export workers, source services, packager, delivery | Read each source by page; zip and split; email and sign links |
+| **Async pipeline** | Task queues, batch scanner, ownership check | Pace each source; one warehouse scan per day; owner check on every row |
+| **Storage** | Job DB, warehouse, staging store, archive store | Jobs and history; logs by date; chunks; parts for 7 days |
+
+One export, start to finish:
+
+1. Monday 09:00: the user asks for all data; the export API writes the job with `as_of = 09:00` and returns `202`.
+2. The workflow starts 40 steps; 39 live sources page their data into staging by the afternoon.
+3. The warehouse step joins Monday's batch; Tuesday 02:00 the scanner joins the requesters with each partition and writes this user's log files.
+4. When all 40 steps are done, the ownership check passes every row and the packager writes 4 GB parts.
+5. The user gets the email, signs in again and downloads each part through a 15-minute signed URL.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST, an asynchronous job resource
+
+- **Choice:** REST over HTTPS; `POST` returns `202` with the job's URL; the page polls `GET` every 30 s while open; an email says when it is ready.
+- **Why:** the work takes hours and the user leaves; a job resource with a status is the whole contract (D4, F5). Polling at ≈ 1.2 reads/s costs nothing (D1).
+- **Why not a synchronous download:** gateways and browsers close requests long before 40 sources answer; a retry starts from zero (Step 1).
+- **Why not WebSockets or long polling:** an open connection for hours to show a status that changes a few times a day; most users close the tab.
+- **Why not webhooks:** the caller is a person in a browser, not a server with an endpoint.
+- **Why not gRPC or GraphQL for the public API:** browsers need a proxy for gRPC, and four fixed shapes need no query language; the internal `Export` call between services can be gRPC.
+
+### Load balancer and API gateway: layer 7, with a fresh-sign-in rule
+
+- **Choice:** an HTTP (layer-7) load balancer in front of the export API and the delivery service; the gateway checks the session, limits submits per user and requires a sign-in in the last 10 minutes on the link endpoint.
+- **Why:** every call is short HTTP, routed by path; the fresh-sign-in rule turns a stolen session cookie into nothing usable for downloads (N3).
+- **Why not layer 4:** it cannot route by path or read the session, and nothing here holds a long connection.
+- **Why not check re-auth inside the delivery service only:** both should check; the gateway rejects most bad requests before they reach a service that can sign URLs.
+
+### CDN: not on the archive path
+
+- **Choice:** a CDN serves only the web app's static files; archives go from object storage to the browser directly.
+- **Why:** each archive is fetched about 1.2 times by one person, so an edge cache would have nothing to reuse (D9), and it would copy personal data to every edge location that served it (N3, D11).
+- **Why not cache archives at the edge:** a hit rate near zero, plus copies of personal data we must then find and delete at expiry.
+
+### Cache: none, on purpose
+
+- **Choice:** no cache in front of the job database.
+- **Why:** status reads are ≈ 1.2/s on a normal day and ≈ 23/s on a burst day (2,000,000 page views ÷ 86,400 s); one relational primary answers that without noticing (D1).
+- **Why not Redis for job status:** a second copy that can disagree with the job row, to save reads nobody misses.
+
+### Job database: relational (PostgreSQL), sharded by user
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL holding exports, steps and fetch counts; the workflow engine's history on the same cluster; sharded by `user_id` if it ever outgrows one primary.
+- **Why:** "one running export per user" is a partial unique index, and "count a fetch only if under 5 and owned by this user" is one conditional update (D3, D7). 14 GB for 90 days of jobs fits one primary easily.
+- **Why not DynamoDB or Cassandra:** both scale far past 14 GB, which we do not need; both make the partial unique rule a second table and a transaction or a lightweight transaction.
+- **Why not the workflow engine's store alone:** it answers "what is this workflow doing", not "list this user's exports" or "how many fetches of part 2".
+
+### Workflow engine: durable workflows (Temporal or Cadence; AWS Step Functions)
+
+- **Choice:** a durable workflow engine: one workflow per export, one activity per source page, timers for the 72-hour budget, a signal from the batch scanner.
+- **Why:** it records every step's result and replays the code after a crash, so a dead worker repeats one page, not the export (D5, N2). Retries, backoff, timeouts and "wait for the batch" become a few lines (D12).
+- **Why not ad-hoc queues and status columns:** every retry, timeout and partial-failure path is our code, and the job's real state is spread over a queue and a table that can disagree.
+- **Why not a cron job per user or a DAG scheduler such as Airflow:** those suit a fixed nightly graph; here 20,000 different graphs a day start on demand and live for days.
+- **Why not one long-running process per export:** a deploy or a crash kills it, and its memory is its only checkpoint.
+
+### Task queues: the engine's queues, one per source, with a rate
+
+- **Choice:** the workflow engine's task queues, one per source service, each with a rate limit and a concurrency cap set by the source's owner.
+- **Why:** exports may use at most 5% of a source's capacity (N4); a burst of 400,000 exports drains at 10,000 reads/s in ≈ 5.6 hours at the photo service, instead of hurting the product (D2).
+- **Why not Kafka:** a log has no per-message retry with backoff, no lease that moves a task to another worker, and no per-source rate; we would rebuild the engine on top of it.
+- **Why not a separate work queue (SQS, RabbitMQ):** it works, but a second system then holds part of the job's state; the engine already provides the queue.
+
+### Source reads: an exporter API in every service
+
+- **Choice:** each of the 40 services implements `Export(user_ids, types, as_of, cursor)`, reading its own store or a replica, returning pages of 1,000 items in a common format.
+- **Why:** the owning team knows its schema, its deleted rows and what other people's data must be removed (N3); a cursor per page makes every page a checkpoint (D5). A replica read keeps the export off the primary (N4).
+- **Why not read every team's database directly:** the export system would break on every schema change and bypass each team's privacy rules.
+- **Why not copy everything into one central store by change data capture:** it copies 500,000,000 users' data to serve 20,000 a day, and the copy is one more place personal data lives.
+
+### Batch scanner: a daily join on the existing warehouse
+
+- **Choice:** a batch job on the warehouse's engine (Spark or Hive): copy the day's requester ids into one table, run one `INNER JOIN` on `owner_id` per date partition, split the output by owner.
+- **Why:** the logs are partitioned by date; one scan of 100 TB serves all 20,000 requesters instead of 20,000 scans (D8, D9). A day's wait fits a one-month deadline (D4).
+- **Why not a query per user:** 2,000 PB read a day.
+- **Why not a second copy of the logs indexed by user:** another 100 TB per table, written all the time, for 0.004% of users a day.
+- **Why not a column store such as <TechIcon id="oss/clickhouse" /> ClickHouse sorted by user:** it fixes this read and slows the analytics the warehouse exists for, which filter by date.
+
+### Staging and archive store: object storage
+
+- **Choice:** object storage (S3, GCS, Azure Blob) in the user's home region; staging chunks keyed by `export_id/source/chunk`, archives by `export_id/part`; a key per export; lifecycle rules delete staging after packaging and archives after 7 days.
+- **Why:** 280 TB live and 800 TB on a burst day, written once and read once or twice; object storage is priced for exactly that (D8). A region per user meets residency rules (D11).
+- **Why not blobs in the job database:** 40 TB a day of bytes in a transactional store built for 14 GB of rows.
+- **Why not a shared file system:** we would run and scale its servers; it adds nothing a key-value object store lacks here.
+- **Why not email attachments:** mail limits are measured in megabytes, and a sent attachment can never be recalled or expired (N3).
+
+### Delivery: re-auth, a fetch count and a 15-minute signed URL
+
+- **Choice:** the delivery service checks a fresh sign-in, counts the fetch with one conditional update, and signs a URL for one part valid for 15 minutes.
+- **Why:** a signed URL works for whoever holds it, so its life must be short; the archive's 7 days and 5 fetches live in our database, not in the URL (N3, D7).
+- **Why not one signed URL valid for 7 days in the email:** anyone who sees the email has the archive for a week.
+- **Why not stream the bytes through our servers:** exact counting and revocation mid-download, but 48 TB a day (≈ 4.4 Gbit/s) through our fleet for no other gain.
+
+### Notification: email with a link to the page
+
+- **Choice:** the email says the export is ready and links to the export page; nothing in it opens the archive.
+- **Why:** mail is forwarded, stored for years and read on shared devices; the page puts the sign-in between the email and the data (N3).
+- **Why not a push notification only:** users ask for exports on the web and may not have the app.
+
+### Ownership check: a final filter that trusts nothing upstream
+
+- **Choice:** a step after gathering and before packaging that reads every row and passes it only if its owner column equals the requester's id.
+- **Why:** the batch join, the split by owner and 40 exporters are all code that can be wrong; one small rule catches all of them, and a mismatch stops the export (N3, D7).
+- **Why not rely on the exporters:** 40 teams, 40 chances to get it wrong, and no single place to prove it.
+
+### Export ids: random, not sequential
+
+- **Choice:** a random 128-bit id (UUID) for each export.
+- **Why:** ids appear in URLs and emails; a sequential id invites guessing the next one (N3).
+- **Why not a sequence from the database:** fine for internal keys, never for an id a stranger can type.
+
+## Deep dives
+
+### The job as a durable workflow
+
+- **Idempotent submit:** the client sends an `Idempotency-Key`; the database enforces `UNIQUE (user_id, idempotency_key)` and one running export per user, so a double click, a retry after a timeout and a second tab all return the same export (D7).
+- **Start once:** the workflow id is the export id, and the engine refuses a second workflow with a running id; a submit that crashed after the insert is repaired by a sweeper that starts workflows for `queued` rows older than a minute.
+- **Checkpoint per page:** each source step is a loop of activities; each activity fetches one page, writes it to staging under a key that includes the page number, and returns the next cursor. The engine records the result, so a replay after a crash skips finished pages.
+- **Idempotent writes:** a page retried after a crash overwrites the same staging key with the same bytes, so a repeat is harmless.
+- **Partial failure:** a step retries with backoff capped at 1 hour for up to 72 hours; then it is marked `missing` with a reason, the other 39 are packaged, the manifest lists the gap, and a follow-up job for that type starts.
+
+An export job only moves forward through a handful of states.
+
+<AnimatedDiagram spec="animated/user-data-export/job-states" stepper caption="An export job only moves forward; a source that keeps failing is marked missing after 72 hours, the rest is delivered, and a follow-up job fills the gap." />
+
+<StepCards>
+  <StepCard n={1} title="The happy path">
+    The submit writes a queued row; the workflow gathers 40 steps with a checkpoint per page, packages once all 40 are done, and marks the export ready when every file passed the owner check. Seven days or five fetches later it expires.
+  </StepCard>
+  <StepCard n={2} title="One source keeps failing">
+    The photo service errors for longer than the 72-hour budget. The step is marked missing, the other 39 sources are delivered with a manifest that says so, and a follow-up job for photos goes back to queued.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 72 hours of retries leaves 30 − 3 = 27 days of the deadline for the follow-up job; backoff of 1, 2, 4 … 32 minutes, then hourly, is about 35 tries in 30 hours.
+
+The engine's replay is what makes "a crash repeats one page" true; the pattern page shows it on a different workflow.
+
+<AnimatedDiagram spec="animated/patterns/wf-history" stepper caption="After a crash the workflow code runs again from the top and the history answers every call it already made: an export's finished pages are not fetched twice." />
+
+**How to read it:**
+
+- Blue boxes are the recorded history; teal boxes are the code running again on a new worker.
+- Each call the code makes is matched to its recorded result, so finished work is skipped; only the code after the last event runs for real.
+
+<Callout tone="red" title="What breaks">
+  Workflow code that reads the clock or a random number directly takes a different branch on replay and stops with an error. Take the `as_of` time from the job row and do every side effect, such as a source call, inside an activity.
+</Callout>
+
+### Scanning stores that are not indexed by user
+
+- **The problem:** the activity logs are partitioned by date because analysts filter by date; finding one user's rows means reading every partition.
+- **Batch:** every warehouse step joins today's batch; at 02:00 the scanner writes the batch's requester ids into one table.
+- **Join per partition:** one job per date partition runs `INNER JOIN` between the requester table and the partition on `owner_id`; partitions run in parallel and each is a checkpoint.
+- **Split:** the join output is written per owner into staging; each workflow in the batch gets a signal with its file list.
+- **Late joiners:** a request after the batch closes waits for tomorrow's; the deadline is 30 days and the target 3.
+
+The log is partitioned by date, so one scan per user reads everything; one batch reads it once.
+
+<AnimatedDiagram spec="animated/user-data-export/batch-scan" stepper caption="The log is partitioned by date, not by user: 20,000 separate queries read 2,000 PB a day, one batched join reads 100 TB." />
+
+<StepCards>
+  <StepCard n={1} title="One query per user">
+    Each of the day's 20,000 requesters runs its own query. The table is not sorted by user, so each query reads all 100 TB: 2,000 PB a day.
+  </StepCard>
+  <StepCard n={2} title="One join for the whole batch">
+    The 20,000 ids go into one small table; one job per date partition joins it with that partition once. The output is split by owner into per-user files.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Per user: 20,000 × 100 TB = 2,000,000 TB = 2,000 PB a day; at an assumed \$5 per TB scanned, ≈ \$10,000,000 a day.
+- Batched: 100 TB once a day ≈ \$500, or \$500 ÷ 20,000 = \$0.025 an export.
+- On a burst day of 400,000 requests the batched scan still reads 100 TB; only the requester table and the output grow.
+
+<Callout tone="red" title="What breaks">
+  A batch that fails at partition 300 and restarts from partition 1 wastes most of a day's scan. Checkpoint per partition, and retry only the partitions that failed.
+</Callout>
+
+### Not leaking: owner checks, expiry, fetch limits, re-auth
+
+- **Before packaging:** the ownership check compares every row's owner with the requester; one mismatch stops the export and pages a person (N3).
+- **At the email:** a link to the page only; nothing in the email opens the archive.
+- **At the page:** a sign-in in the last 10 minutes with the second factor; the export id is random, and an export that is not yours answers `404`.
+- **At the link:** one conditional update counts the fetch only for the owner and under 5; the signed URL lives 15 minutes and names one part.
+- **At rest:** each export is encrypted with its own key; deleting the key at expiry makes any forgotten copy unreadable.
+
+A forwarded email and an old URL both get nothing.
+
+<AnimatedDiagram spec="animated/user-data-export/delivery" stepper caption="Re-authenticate, check the owner and the fetch count in one update, then hand out a 15-minute signed URL: a forwarded link or an old URL gets nothing." />
+
+<StepCards>
+  <StepCard n={1} title="The owner downloads a part">
+    User 42 opens the link, signs in again and asks for part 1. One update checks the owner and that the part was fetched fewer than 5 times, and counts this fetch. The browser downloads 4 GB straight from the archive store.
+  </StepCard>
+  <StepCard n={2} title="A forwarded link and an old URL">
+    User 77 opens a forwarded link: the same update matches no row, so the answer is 404. A signed URL used 16 minutes later is refused by the store.
+  </StepCard>
+</StepCards>
+
+**The numbers:** a 12 GB archive in 4 GB parts is 3 parts; 5 fetches each is at most 15 signed URLs, each usable for 15 minutes.
+
+<Callout tone="red" title="What breaks">
+  A signed URL can be reused until it expires, so a URL valid for 7 days pasted into a chat is a 7-day leak. Keep the URL short-lived and keep the limits in the database.
+</Callout>
+
+### Worked example: one export on a quiet Monday
+
+1. **Monday 09:00:** user 42 asks for all 40 types; the job row is written with `as_of = 09:00`; `202` in 80 ms.
+2. **09:00 to 11:00:** 38 live sources page their data into staging, 1,000 items a page, a checkpoint each.
+3. **10:00:** the photo service starts returning `503`; the step retries at 1, 2, 4 … 32 minutes, then hourly.
+4. **Tuesday 02:00:** the scanner joins Monday's 20,000 requesters with 365 partitions; at 100 TB in 6 hours (≈ 4.6 GB/s) it finishes at 08:00 and signals user 42's workflow.
+5. **Tuesday 16:00:** the photo service recovers after 30 hours, about 35 tries, well inside the 72-hour budget; its step finishes by 17:00.
+6. **Tuesday 17:00:** all 40 steps are done; the owner check and the packager turn 12 GB into 3 parts of 4 GB at 200 MB/s in 60 s.
+7. **Tuesday 17:05:** the email goes out, 32 hours after the request: inside the 3-day target and 28 days inside the legal deadline.
+8. **Tuesday 20:00:** user 42 signs in again and fetches the 3 parts; the archive is deleted the following Tuesday at 17:05.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Request shape | Synchronous download, asynchronous job | Asynchronous job: `202`, status, email | D4, N5, F5 | The user waits hours and comes back | Exports shrink to seconds: a settings page export |
+| Orchestration | Ad-hoc queues and status columns, a cron or DAG scheduler, a durable workflow engine | Durable workflow engine | D5, D12, N2 | One more system to run; deterministic workflow code | A handful of sources and minutes of work: a queue is enough |
+| Duplicate submits | Allow many, idempotency key only, key plus one running export per user | Key plus one running export | D7, D2 | A user cannot run two different exports at once | Users need parallel exports of different types |
+| Warehouse reads | A query per user, a user-indexed copy, a daily batch join | Daily batch join per partition | D8, D9, D4 | Up to a day of extra wait | The deadline shrinks to hours, or exports become frequent |
+| Source access | Read each team's database, a central copy by change data capture, an exporter API per service | Exporter API per service | D3, N3, N4 | 40 teams must build and keep an endpoint | Never: the teams own their schemas and rules |
+| Consistency across sources | One snapshot across all services, each source as of the request time | Each source as of `as_of` | D3 | Minutes of skew between sources | A legal hold that must match a single instant |
+| Failing source | Wait for everything, fail the export, deliver the rest after a budget | Deliver the rest after 72 hours; follow-up job | D12, N6, F6 | The first archive is incomplete, and says so | Sources become reliable enough that waiting is free |
+| Archive delivery | Email attachment, a 7-day signed URL, proxy through our servers, re-auth plus a 15-minute signed URL | Re-auth plus a 15-minute signed URL | N3, D7, D8 | Users must sign in again for each visit | Users on slow links cannot start a part within 15 minutes |
+| Archive life | 1 day, 7 days, 30 days | 7 days and 5 fetches a part | N3, D8, F4 | Users who miss the window ask again | Support tickets show users need longer |
+| Release gate | Trust the exporters, an owner check on every row | Owner check on every row before packaging | N3, D7 | A full extra read of every export | Never |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | One workflow per export, a step per source, timers, a signal from the batch | A job that runs for days must survive crashes and deploys |
+| [Idempotency](/system-design/patterns/idempotency) | Submit key, workflow id = export id, staging keys per page | A retry must not start a second export or duplicate a page |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Daily batch join; one request to 40 sources | One scan serves 20,000 users; one export gathers from 40 places |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | Task queues per source | Workers pull steps at their own pace; a lost worker's task moves on |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | A rate per source queue; submits per user | Exports use at most 5% of a source; one user cannot flood the system |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | A burst queues instead of hitting sources | 20 × the normal load drains in hours without slowing the product |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | Backoff per step; 72-hour budget | A failing source is retried, then marked missing |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Staging chunks, 4 GB parts, signed URLs, lifecycle | Gigabytes per user, downloaded directly and deleted on time |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Account deletion | A workflow per user, a step per source, the batch over the warehouse, checkpoints | Steps delete instead of read; each source must confirm, and nothing is delivered |
+| Legal hold and discovery | Gathering from many sources, owner checks, an archive | Requested by lawyers about many users; one exact snapshot time; kept for years |
+| A workspace export for a team | Job, steps, split archives, signed links | The owner is a workspace; an admin approves; permissions per channel |
+| A large report generated on request | `202`, status, a file in object storage, an expiring link | One source (the warehouse); minutes, not days |
+| Video rendering | Job states, checkpointed steps, retries, output in object storage | Steps are CPU or GPU work per segment, not reads from services |
+
+## How real systems do it
+
+- **Meta, 2025:** its warehouse cannot answer per-user requests in real time, so it batches requests on a schedule, copies the requester ids into a table, and runs one job per partition that does an `INNER JOIN` with the owner column. It relies on checkpointing to recover from timeouts and out-of-memory failures, and a final step checks that the user id column matches the requester before anything is delivered.
+- **Data Transfer Project, 2018:** adapters export into a common data model with continuation and pagination; a persistent key-value store keeps transfer jobs; a task library retries with retry strategies and rate-limits globally, per service and per user; tokens are revoked after a transfer.
+- **Google Takeout help (read 2026):** an export can take from a few minutes to a few days, and most arrive the same day; an archive expires in about 7 days and can be downloaded 5 times; archives above the chosen size are split; the user may be asked to enter their password again.
+- **GDPR, 2016:** Article 12(3) sets one month from receipt, extendable by two further months; Article 15(3) gives a copy of the personal data, in a commonly used electronic form for electronic requests, and 15(4) says it must not adversely affect the rights and freedoms of others; Article 20(1) asks for a structured, commonly used and machine-readable format.
+- **AWS S3 documentation (read 2026):** a presigned URL lasts up to 7 days when made with the CLI or SDKs, can be used many times until it expires, and expires earlier when made with temporary credentials; expiry is checked when a request starts, so a download already running continues.
+- **Where this design differs:** Google does not publish how Takeout is built, so the workflow, the batch join and the owner check here follow Meta's and the Data Transfer Project's published designs; Takeout's help page only shaped the delivery limits.
+
+## Failure modes & pitfalls
+
+- **Work inside the request:** timeouts, and every retry starts from zero; watch submit latency; return `202` and run a job.
+- **Double submit:** two jobs for one user, twice the source load and two emails; count exports per user per day; idempotency key plus one running export.
+- **No checkpoints:** a crash after 39 sources repeats all 39; watch pages fetched against pages delivered; a cursor per page, recorded by the engine.
+- **One source blocks everything:** exports stuck in gathering for weeks, close to the deadline; alert on the oldest step and on `deadline_at`; a 72-hour budget, then partial delivery.
+- **Exports hurt the product:** a burst day raises a source's latency for everyone; watch the source's own p99 against export traffic; a rate per source queue, read replicas.
+- **Another user's rows in an archive:** a privacy incident; the owner check counts mismatches and stops the export; never ship without the check.
+- **Long-lived links:** a forwarded email opens the archive for a week; audit the URL lifetime; re-auth, 15-minute signed URLs, limits in the database.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify sources, size, deadline, consistency, delivery; write F1 to F6 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 20,000 a day, 40 sources, 2 GB each, 280 TB live, 100 TB of logs, a month's deadline.
+3. **Minutes 10 to 15:** API (`202`, status, link) and the job tables; say where the idempotency lives.
+4. **Minutes 15 to 25:** Steps 1 to 4: the timeout, the job, the workflow with a step per source, where the data lives.
+5. **Minutes 25 to 35:** Steps 5 to 8: the batch scan, packaging, delivery and the owner check.
+6. **Minutes 35 to 45:** one deep dive: the durable workflow, the batch scan or not leaking; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** an asynchronous job with submit, status and result; object storage and an expiring link.
+- **Senior:** idempotent submit, checkpoints per step, partial failure reported, a rate per source, re-auth before download.
+- **Staff:** batching scans of stores not indexed by user, the owner check as a final gate, cost of 2,000 PB against 100 TB, residency, how the same machine serves deletion.
+
+**Red flags:** the zip built in the request; a days-long signed URL in the email; no checkpoints; a query per user on the warehouse; no plan for a dead source.
+
+## Further reading
+
+- [Data logs: The latest evolution in Meta's access tools](https://engineering.fb.com/2025/02/04/security/data-logs-the-latest-evolution-in-metas-access-tools/) (Meta Engineering, 2025)
+- [Data Transfer Project overview](https://github.com/dtinit/data-transfer-project/blob/master/Documentation/Overview.md) (Data Transfer Project, 2018)
+- [How to download your Google data](https://support.google.com/accounts/answer/3024190) (Google Account Help)
+- [Regulation (EU) 2016/679, the GDPR](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32016R0679) (EUR-Lex, 2016)
+- [Sharing objects with presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html) and [Download and upload objects with presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html) (AWS documentation)
+- Related pages: [Design Dropbox](/system-design-case-studies/case-studies/dropbox) · [Design S3](/system-design-case-studies/case-studies/s3) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) · [Idempotency](/system-design/patterns/idempotency)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not build the zip inside the request and stream it back?" category="Concepts" level="Mid">
+  - Gathering 2 GB from 40 services takes hours; gateways and browsers close a request long before that.
+  - One slow source fails the whole response, and a retry starts again from zero.
+  - Record the job in the request, return `202` with its URL, and do the work in the background.
+  </InterviewQuestion>
+  <InterviewQuestion question="What endpoints does an asynchronous export need, and how does the client get the result?" category="Architecture" level="Mid">
+  - `POST /v1/exports` returns `202` with the export id and a `Location` to poll.
+  - `GET /v1/exports/{id}` returns the state and per-type progress; the page polls every 30 s while open.
+  - When it is ready, an email links to the page; a separate call, after a fresh sign-in, returns a short signed URL per part.
+  </InterviewQuestion>
+  <InterviewQuestion question="How can a client retry the submit without creating a duplicate export?" category="Concepts" level="Mid">
+  - The client sends an `Idempotency-Key`; `UNIQUE (user_id, idempotency_key)` returns the first export on a retry.
+  - A partial unique index allows one running export per user, which also catches a second tab with a new key.
+  - The workflow id equals the export id, so the engine refuses to start the same export twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="How are jobs and their state stored, and how do they survive a worker crash?" category="Failure modes" level="Senior">
+  - The job row and step rows live in a relational database; the workflow engine keeps each workflow's event history.
+  - Each source step fetches one page per activity and records the cursor, so a crash repeats at most one page.
+  - A worker holds a step under a lease; when it dies the lease runs out and another worker resumes from the last cursor.
+  - Pages are written to staging under deterministic keys, so a repeated page overwrites, never duplicates.
+  </InterviewQuestion>
+  <InterviewQuestion question="One of the 40 services is down for days. How do you report a partial failure?" category="Failure modes" level="Senior">
+  - Retry with backoff inside a budget, here 72 hours, well inside the one-month deadline.
+  - After the budget, mark the step missing with a reason, package the other 39, and say so in the manifest and the email.
+  - Start a follow-up job for the missing type; alert on any export close to its `deadline_at`.
+  </InterviewQuestion>
+  <InterviewQuestion question="The activity logs are partitioned by date, not by user. How do you find one user's rows?" category="Scaling" level="Senior">
+  - Do not query per user: each query reads all 100 TB, 2,000 PB a day for 20,000 exports.
+  - Batch the day's requesters into one table and run one join per date partition on the owner column, then split the output by user.
+  - One scan serves the whole batch; a day's wait is fine against a one-month deadline.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure the archive reaches only the right person?" category="Trade-offs" level="Senior">
+  - Check every row's owner against the requester before packaging; one mismatch stops the export.
+  - Email a link to the page only; require a fresh sign-in with the second factor before any download.
+  - Count fetches in the database (5 a part) and sign URLs for 15 minutes; answer `404` for someone else's export.
+  - Encrypt each export with its own key and delete the key when the archive expires.
+  </InterviewQuestion>
+  <InterviewQuestion question="A news story brings 20 times the normal requests in a day. What happens?" category="Scaling" level="Senior">
+  - Submits are cheap: ≈ 17 a second at the worst hour, one row each.
+  - The work queues per source and drains at each source's budget: ≈ 5.6 hours at the photo service, without slowing the product.
+  - The warehouse batch still reads 100 TB once; packagers scale out to ≈ 47 for 800 TB in a day.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why a workflow engine instead of a queue and a status table?" category="Trade-offs" level="Senior">
+  - A queue plus a table works for one step; here each export has 40 steps, retries, a 72-hour timer and a wait for the batch.
+  - With a queue, every one of those paths is our code, and the real state is split between the queue and the table.
+  - The engine records each step and replays after a crash; the price is one more system and deterministic workflow code.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Durable workflows, because an export runs for days across 40 services and must survive crashes.
+  - Idempotency, because users double-click and clients retry.
+  - Batching, because the logs are not indexed by user and one scan must serve thousands.
+  - Rate limiting and back pressure, because exports must never slow the product.
+  </InterviewQuestion>
+</InterviewQuestions>
