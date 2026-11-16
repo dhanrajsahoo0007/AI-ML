@@ -8,7 +8,7 @@ export function Container({ className, children }: { className?: string; childre
   return (
     <div
       className={cn(
-        "mx-auto w-full max-w-[1200px] px-4 sm:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16",
+        "mx-auto w-full max-w-[1200px] px-4 sm:px-8 min-[1440px]:max-w-[2400px] min-[1440px]:px-12 min-[1920px]:px-16",
         className
       )}
     >

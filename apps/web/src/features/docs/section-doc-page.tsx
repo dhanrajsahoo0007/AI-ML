@@ -98,7 +98,7 @@ export async function SectionDocPage({
   return (
     <div data-access={premium ? (preview ? "preview" : "full") : "free"}>
       <div
-        className={`mx-auto px-4 pt-6 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16 ${docsLayout ? "max-w-6xl" : "max-w-4xl"}`}
+        className={`mx-auto px-4 pt-6 md:px-8 min-[1440px]:max-w-[2160px] min-[1440px]:px-12 min-[1920px]:px-16 ${docsLayout ? "max-w-6xl" : "max-w-4xl"}`}
       >
         <Breadcrumb items={crumbs} />
       </div>
