@@ -105,6 +105,12 @@ The seller feed, built one part at a time.
 - In-app inboxes are a feed: push the notification id into each inbox, or pull from a broadcast list for very large audiences.
 - Live delivery to open sessions goes through the gateway fleet (see [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence)).
 
+### Group chats
+
+- A chat group is fan-out on write with a small, capped audience: one message is stored once and delivered to every member's inbox or open session.
+- Groups are capped (hundreds or a few thousand members), so push stays cheap; broadcast channels with huge audiences switch to pull, like the Deals account.
+- Each member keeps a read cursor (the last message id seen), so a member who was offline fetches the gap instead of waiting for every copy.
+
 ### Worked example: "back in stock" to 500,000 shoppers
 
 The kettle is restocked with 10,000 units and 500,000 shoppers asked to be told.
