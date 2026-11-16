@@ -355,56 +355,51 @@ The published BrowseComp results show how hard the task is:
     category="Architecture"
     level="Senior"
   >
-    - Run it as a background job. A lead agent fixes the scope, splits the question into sub-questions that do not
-    overlap, and saves the plan to memory. - One worker per sub-question searches in parallel, wide then narrow, and
-    returns notes that each keep a source id, URL, quote and retrieval date. - The lead writes only from notes; a
-    citation pass checks each sentence against its quote and sends unsupported ones back for one more round. - Bound
-    each worker with a tool-call budget plus saturation and confidence rules, trace every query and page, and evaluate
-    with a rubric judge, a checkable benchmark and human review.
+    - Run it as a background job. A lead agent fixes the scope, splits the question into sub-questions that do not overlap, and saves the plan to memory.
+    - One worker per sub-question searches in parallel, wide then narrow, and returns notes that each keep a source id, URL, quote and retrieval date.
+    - The lead writes only from notes; a citation pass checks each sentence against its quote and sends unsupported ones back for one more round.
+    - Bound each worker with a tool-call budget plus saturation and confidence rules, trace every query and page, and evaluate with a rubric judge, a checkable benchmark and human review.
   </InterviewQuestion>
   <InterviewQuestion question="Why plan before searching, and what goes into the plan?" category="Concepts" level="Mid">
-    - Vague words send workers in different directions: "this month" and "up" need a date range and a measure, such as
-    refunds per 100 sold. - The plan lists sub-questions that do not overlap, where each worker looks, what it must not
-    do, and when it is done. - Saving it outside the context window lets the lead recover after the window fills or
-    resets. - For long or costly runs, show the plan to the user first.
+    - Vague words send workers in different directions: "this month" and "up" need a date range and a measure, such as refunds per 100 sold.
+    - The plan lists sub-questions that do not overlap, where each worker looks, what it must not do, and when it is done.
+    - Saving it outside the context window lets the lead recover after the window fills or resets.
+    - For long or costly runs, show the plan to the user first.
   </InterviewQuestion>
   <InterviewQuestion
     question="How does a research agent decide when to stop searching?"
     category="Concepts"
     level="Mid"
   >
-    - Three rules: a hard budget of tool calls, tokens and time; saturation, when a search adds no new source; and
-    confidence, when independent sources agree. - The harness enforces the budget and counts new sources by normalised
-    URL and site; the model proposes confidence, but it is checked against the count of independent sources. - When a
-    rule fires before confidence is reached, the worker reports what it found and how sure it is. - Log which rule ended
-    every run so cost and quality problems show up.
+    - Three rules: a hard budget of tool calls, tokens and time; saturation, when a search adds no new source; and confidence, when independent sources agree.
+    - The harness enforces the budget and counts new sources by normalised URL and site; the model proposes confidence, but it is checked against the count of independent sources.
+    - When a rule fires before confidence is reached, the worker reports what it found and how sure it is.
+    - Log which rule ended every run so cost and quality problems show up.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you make sure every claim in the report is backed by a source?"
     category="Architecture"
     level="Mid"
   >
-    - Carry the source from the first read: each note holds a claim, a source id and a short quote. - The lead writes
-    sentences that cite note ids, never free-floating facts. - A citation pass reads each sentence against its quote and
-    marks it supported, partly supported or unsupported. - Unsupported sentences go back to a worker or are cut, and the
-    check looks at content, not only at whether a link exists.
+    - Carry the source from the first read: each note holds a claim, a source id and a short quote.
+    - The lead writes sentences that cite note ids, never free-floating facts.
+    - A citation pass reads each sentence against its quote and marks it supported, partly supported or unsupported.
+    - Unsupported sentences go back to a worker or are cut, and the check looks at content, not only at whether a link exists.
   </InterviewQuestion>
   <InterviewQuestion
     question="Parallel sub-agents made your research agent faster but much more expensive. Is it worth it?"
     category="Trade-offs"
     level="Senior"
   >
-    - Anthropic measured about 15 times the tokens of a chat for its multi-agent system, against about 4 times for one
-    agent, and found token use explained most of the quality gain. - Parallel workers cut wall-clock time, up to 90 % on
-    complex queries in that write-up, and keep each context window small. - It pays off when sub-questions are
-    independent and the answer is valuable; it does not for a simple fact. - Scale the number of workers with the
-    question, cap the rounds, and compare cost per accepted report with a single-agent baseline.
+    - Anthropic measured about 15 times the tokens of a chat for its multi-agent system, against about 4 times for one agent, and found token use explained most of the quality gain.
+    - Parallel workers cut wall-clock time, up to 90 % on complex queries in that write-up, and keep each context window small.
+    - It pays off when sub-questions are independent and the answer is valuable; it does not for a simple fact.
+    - Scale the number of workers with the question, cap the rounds, and compare cost per accepted report with a single-agent baseline.
   </InterviewQuestion>
   <InterviewQuestion question="How would you evaluate a deep research agent?" category="Evaluation" level="Senior">
-    - Grade the final report, since good runs take different paths: a rubric judge for factual accuracy, citation
-    accuracy, completeness, source quality and tool efficiency. - Start with about 20 real queries; early changes have
-    large effects, so a small set shows them. - Add a benchmark with short, checkable answers, such as BrowseComp, and
-    track cost and time per report. - Keep human review: it catches problems the judge misses, such as a preference for
-    content farms.
+    - Grade the final report, since good runs take different paths: a rubric judge for factual accuracy, citation accuracy, completeness, source quality and tool efficiency.
+    - Start with about 20 real queries; early changes have large effects, so a small set shows them.
+    - Add a benchmark with short, checkable answers, such as BrowseComp, and track cost and time per report.
+    - Keep human review: it catches problems the judge misses, such as a preference for content farms.
   </InterviewQuestion>
 </InterviewQuestions>

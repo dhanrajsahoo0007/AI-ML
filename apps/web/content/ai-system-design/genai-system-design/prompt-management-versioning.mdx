@@ -226,67 +226,54 @@ Product facts checked against each vendor's docs on 16 November 2026.
     category="Management"
     level="Mid"
   >
-    - **Immutable version bundles:** Store each revision as an append-only record containing the template, variable
-    schema, model ID, decoding parameters, and offline benchmark score. - **Environment alias pointers:** Resolve
-    logical names (such as `ticket_summarizer:prod`) to pinned version hashes via configuration flags rather than
-    `latest`. - **CI evaluation gates:** Require schema validation, prompt-cache prefix checks, and regression benchmark
-    runs before any version can be promoted to `prod`. - **End-to-end trace attribution:** Log the `prompt_version_id`
-    and hash on every model call so cost, latency, and quality metrics join directly to the exact prompt revision.
+    - **Immutable version bundles:** Store each revision as an append-only record containing the template, variable schema, model ID, decoding parameters, and offline benchmark score.
+    - **Environment alias pointers:** Resolve logical names (such as `ticket_summarizer:prod`) to pinned version hashes via configuration flags rather than `latest`.
+    - **CI evaluation gates:** Require schema validation, prompt-cache prefix checks, and regression benchmark runs before any version can be promoted to `prod`.
+    - **End-to-end trace attribution:** Log the `prompt_version_id` and hash on every model call so cost, latency, and quality metrics join directly to the exact prompt revision.
   </InterviewQuestion>
   <InterviewQuestion
     question="What architectural boundaries belong between templates and application code?"
     category="Architecture"
     level="Mid"
   >
-    - **Templates own presentation and model config:** Wording, section ordering, few-shot demonstrations, and
-    model/temperature parameters live inside the versioned prompt artifact. - **Application code owns data and
-    orchestration:** Services supply typed, validated slot values and manage retries, timeouts, permissions, and side
-    effects. - **Local rendering via cached SDK:** Workers pull versioned bundles asynchronously into memory and render
-    templates locally so prompt lookups add zero network latency.
+    - **Templates own presentation and model config:** Wording, section ordering, few-shot demonstrations, and model/temperature parameters live inside the versioned prompt artifact.
+    - **Application code owns data and orchestration:** Services supply typed, validated slot values and manage retries, timeouts, permissions, and side effects.
+    - **Local rendering via cached SDK:** Workers pull versioned bundles asynchronously into memory and render templates locally so prompt lookups add zero network latency.
   </InterviewQuestion>
   <InterviewQuestion
     question="Describe a practical rollback strategy after a bad prompt deploy."
     category="Operations"
     level="Mid"
   >
-    - **Repoint the environment alias:** Flip the `prod` pointer back to the previous known-good version hash in the
-    config store; SDK caches pick up the change within seconds without a code deploy. - **Capture failing traces:**
-    Query observability logs by the bad `prompt_version_id` to extract the inputs and invalid completions that triggered
-    the alert. - **Add to the regression suite:** Convert the failing production inputs into permanent offline test
-    cases and verify the fix against both old and new versions before rolling forward.
+    - **Repoint the environment alias:** Flip the `prod` pointer back to the previous known-good version hash in the config store; SDK caches pick up the change within seconds without a code deploy.
+    - **Capture failing traces:** Query observability logs by the bad `prompt_version_id` to extract the inputs and invalid completions that triggered the alert.
+    - **Add to the regression suite:** Convert the failing production inputs into permanent offline test cases and verify the fix against both old and new versions before rolling forward.
   </InterviewQuestion>
   <InterviewQuestion
     question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?"
     category="Optimization"
     level="Senior"
   >
-    - **Use programmatic optimization (DSPy)** when you have 100+ labeled examples, an automated scoring metric,
-    multi-stage pipelines whose prompts interact, or frequent migrations across model families. - **Use hand-written
-    iteration** when labeled data is scarce, success criteria are nuanced brand/tone judgements, or you are
-    bootstrapping an initial prototype. - **Hybrid guardrails:** Always evaluate compiled prompts on a held-out test set
-    and review the generated instructions to prevent overfitting to small dev splits.
+    - **Use programmatic optimization (DSPy)** when you have 100+ labeled examples, an automated scoring metric, multi-stage pipelines whose prompts interact, or frequent migrations across model families.
+    - **Use hand-written iteration** when labeled data is scarce, success criteria are nuanced brand/tone judgements, or you are bootstrapping an initial prototype.
+    - **Hybrid guardrails:** Always evaluate compiled prompts on a held-out test set and review the generated instructions to prevent overfitting to small dev splits.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you reduce LLM cost through prompt changes without wrecking quality?"
     category="Cost"
     level="Mid"
   >
-    - **Protect prefix cache hits:** Place static instructions, tools, and few-shot examples first and volatile
-    per-request context last to cut cached input token cost by about 90 % (cache reads cost 0.1× the base input price on
-    most Claude models). - **Prune redundant few-shot examples:** Ablate examples against the offline evaluation
-    benchmark and remove demonstrations that do not improve accuracy or format compliance. - **Move reference bulk to
-    retrieval:** Replace long static policy tables in the system prompt with targeted RAG chunks or progressive tool
-    lookups, verifying end-to-end task resolution rate after each cut.
+    - **Protect prefix cache hits:** Place static instructions, tools, and few-shot examples first and volatile per-request context last to cut cached input token cost by about 90 % (cache reads cost 0.1× the base input price on most Claude models).
+    - **Prune redundant few-shot examples:** Ablate examples against the offline evaluation benchmark and remove demonstrations that do not improve accuracy or format compliance.
+    - **Move reference bulk to retrieval:** Replace long static policy tables in the system prompt with targeted RAG chunks or progressive tool lookups, verifying end-to-end task resolution rate after each cut.
   </InterviewQuestion>
   <InterviewQuestion
     question="What does an evaluation-driven iteration cadence look like in production?"
     category="Evaluation"
     level="Senior"
   >
-    - **Pre-merge CI checks:** Every prompt PR runs deterministic schema/syntax tests and offline benchmark rubrics
-    against the incumbent baseline. - **Canary and shadow traffic:** Promote passing versions to a 1–5% traffic slice
-    (keyed by user or session ID) and monitor online guardrails (parse errors, latency, user feedback). - **Continuous
-    dataset flywheel:** Cluster production failures and thumbs-down traces weekly, promote representative cases into the
-    golden evaluation set, and retire stale tests.
+    - **Pre-merge CI checks:** Every prompt PR runs deterministic schema/syntax tests and offline benchmark rubrics against the incumbent baseline.
+    - **Canary and shadow traffic:** Promote passing versions to a 1–5% traffic slice (keyed by user or session ID) and monitor online guardrails (parse errors, latency, user feedback).
+    - **Continuous dataset flywheel:** Cluster production failures and thumbs-down traces weekly, promote representative cases into the golden evaluation set, and retire stale tests.
   </InterviewQuestion>
 </InterviewQuestions>

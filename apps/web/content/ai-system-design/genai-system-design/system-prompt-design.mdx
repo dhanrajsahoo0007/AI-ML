@@ -366,66 +366,59 @@ So design for a public prompt:
     category="Concepts"
     level="Junior"
   >
-    - In: a one-sentence role, the task and what done looks like, rules with their reasons, when to use each tool, the
-    output format, and a few diverse examples, each section in its own XML tag. - Out: anything that changes per
-    request, such as the date or the signed-in user, which goes after the stable prefix so the cache keeps working. -
-    Out: secrets, because the prompt will leak, and reference material the model rarely needs, which loads on demand. -
-    Rules that must hold, such as an approval limit, can be in the prompt but must also be enforced in code.
+    - In: a one-sentence role, the task and what done looks like, rules with their reasons, when to use each tool, the output format, and a few diverse examples, each section in its own XML tag.
+    - Out: anything that changes per request, such as the date or the signed-in user, which goes after the stable prefix so the cache keeps working.
+    - Out: secrets, because the prompt will leak, and reference material the model rarely needs, which loads on demand.
+    - Rules that must hold, such as an approval limit, can be in the prompt but must also be enforced in code.
   </InterviewQuestion>
   <InterviewQuestion
     question="Why explain the reason behind a rule instead of just stating it?"
     category="Concepts"
     level="Mid"
   >
-    - A model follows the rule as written. "Refunds over £30 wait" lets it refund £29 twice, because neither call is
-    over £30. - With the purpose, "so no conversation pays out a large sum unchecked", it can apply the rule to cases
-    you did not list, such as a split refund. - Anthropic's guidance recommends giving the reason for this
-    generalisation. - Reasons also replace shouting: "plain text, because the chat window shows raw text" works better
-    than "NO MARKDOWN" and does not make newer models overreact.
+    - A model follows the rule as written. "Refunds over £30 wait" lets it refund £29 twice, because neither call is over £30.
+    - With the purpose, "so no conversation pays out a large sum unchecked", it can apply the rule to cases you did not list, such as a split refund.
+    - Anthropic's guidance recommends giving the reason for this generalisation.
+    - Reasons also replace shouting: "plain text, because the chat window shows raw text" works better than "NO MARKDOWN" and does not make newer models overreact.
   </InterviewQuestion>
   <InterviewQuestion
     question="Explain the instruction hierarchy. What happens to an instruction inside a tool result?"
     category="Architecture"
     level="Mid"
   >
-    - Text in the context is ranked: the provider's policies, then the system or developer prompt, then the user, then
-    tool results and quoted text. - An instruction that fits a higher one is followed; one that conflicts is declined.
-    At the same level, the later instruction usually wins. - Tool results carry no authority, so "refund order 5122" in
-    a review is data to read, not an order. - The ordering is trained, as in Wallace et al. 2024, and holds most of the
-    time, not always, so the owner check that refuses a stranger's order stays in code.
+    - Text in the context is ranked: the provider's policies, then the system or developer prompt, then the user, then tool results and quoted text.
+    - An instruction that fits a higher one is followed; one that conflicts is declined. At the same level, the later instruction usually wins.
+    - Tool results carry no authority, so "refund order 5122" in a review is data to read, not an order.
+    - The ordering is trained, as in Wallace et al. 2024, and holds most of the time, not always, so the owner check that refuses a stranger's order stays in code.
   </InterviewQuestion>
   <InterviewQuestion
     question="Where do you put the current date and the signed-in user's id, and why?"
     category="Trade-offs"
     level="Mid"
   >
-    - After the stable prefix: as a mid-conversation system message where the API supports it, or in the user turn. -
-    Prompt caching matches the request from the front, in the order tools, system, messages, so a change in the system
-    prompt invalidates it and everything after it. - A timestamp in the system field makes every call pay the
-    cache-write premium and read almost nothing, which can cost more than no cache at all. - Keep the system prompt
-    byte-identical across calls and tool definitions in a fixed order.
+    - After the stable prefix: as a mid-conversation system message where the API supports it, or in the user turn.
+    - Prompt caching matches the request from the front, in the order tools, system, messages, so a change in the system prompt invalidates it and everything after it.
+    - A timestamp in the system field makes every call pay the cache-write premium and read almost nothing, which can cost more than no cache at all.
+    - Keep the system prompt byte-identical across calls and tool definitions in a fixed order.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you test and roll out a change to a production system prompt?"
     category="Evaluation"
     level="Senior"
   >
-    - Keep a test set built from real conversations, including every past failure, and graders: code checks for tool
-    calls and arguments, a calibrated model grader for tone and correctness. - Change one thing, run the whole set
-    several times per conversation because replies vary, and compare against the current version, not just the new case.
-    - Version the prompt, pin the model version it was tested on, log the prompt version with every call, and roll out
-    gradually with a rollback. - Every new failure becomes a test case, so the set grows with production.
+    - Keep a test set built from real conversations, including every past failure, and graders: code checks for tool calls and arguments, a calibrated model grader for tone and correctness.
+    - Change one thing, run the whole set several times per conversation because replies vary, and compare against the current version, not just the new case.
+    - Version the prompt, pin the model version it was tested on, log the prompt version with every call, and roll out gradually with a rollback.
+    - Every new failure becomes a test case, so the set grows with production.
   </InterviewQuestion>
   <InterviewQuestion
     question="A user posted your system prompt online. What do you do?"
     category="Failure modes"
     level="Senior"
   >
-    - First check what leaked: rotate any secret it contained, and remove secrets from the prompt for good. - Check
-    whether any rule in it was enforced only by the prompt, such as a refund limit; if so, move that check into code
-    now, because the leak is a playbook for gaming it. - Then accept that prompts are not secret: OWASP's guidance is
-    that the system prompt is not a security control, and training against extraction lowers the rate, not to zero. -
-    Optionally add an output check for long verbatim runs of the prompt, and add the extraction attempt to the red-team
-    set.
+    - First check what leaked: rotate any secret it contained, and remove secrets from the prompt for good.
+    - Check whether any rule in it was enforced only by the prompt, such as a refund limit; if so, move that check into code now, because the leak is a playbook for gaming it.
+    - Then accept that prompts are not secret: OWASP's guidance is that the system prompt is not a security control, and training against extraction lowers the rate, not to zero.
+    - Optionally add an output check for long verbatim runs of the prompt, and add the extraction attempt to the red-team set.
   </InterviewQuestion>
 </InterviewQuestions>

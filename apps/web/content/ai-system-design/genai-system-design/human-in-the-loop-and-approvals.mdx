@@ -369,43 +369,40 @@ The EU AI Act asks the same of high-risk systems (a refund chatbot is not one, b
 
 <InterviewQuestions>
   <InterviewQuestion question="How do you decide how much autonomy to give an agent?" category="Concepts" level="Mid">
-    - Decide per action, not per agent: ask whether the action can be undone and how much harm it does if it is wrong. -
-    Reads run; small or undoable actions run and are reviewed after; final and costly ones wait for a person; actions
-    outside policy are refused in code. - Start conservative, log every decision, and move action classes to a freer
-    gate only when the log shows they are almost never wrong. - The same agent can be fully autonomous for reads and
-    gated for refunds over a limit.
+    - Decide per action, not per agent: ask whether the action can be undone and how much harm it does if it is wrong.
+    - Reads run; small or undoable actions run and are reviewed after; final and costly ones wait for a person; actions outside policy are refused in code.
+    - Start conservative, log every decision, and move action classes to a freer gate only when the log shows they are almost never wrong.
+    - The same agent can be fully autonomous for reads and gated for refunds over a limit.
   </InterviewQuestion>
   <InterviewQuestion
     question="Walk through what happens when an agent's tool call needs approval."
     category="Architecture"
     level="Mid"
   >
-    - The model emits an ordinary tool call; the harness's policy gate reads the arguments and returns "ask". - The
-    harness saves the run, including the pending call and an idempotency key, and the worker stops. - A person sees the
-    call with its evidence and approves, edits or rejects it; the decision is bound to that exact call. - The harness
-    records the decision, runs (or skips) the call with the saved key, and returns the result to the model on the same
-    thread.
+    - The model emits an ordinary tool call; the harness's policy gate reads the arguments and returns "ask".
+    - The harness saves the run, including the pending call and an idempotency key, and the worker stops.
+    - A person sees the call with its evidence and approves, edits or rejects it; the decision is bound to that exact call.
+    - The harness records the decision, runs (or skips) the call with the saved key, and returns the result to the model on the same thread.
   </InterviewQuestion>
   <InterviewQuestion
     question="Why should approval rules live in the harness rather than in the system prompt?"
     category="Concepts"
     level="Junior"
   >
-    - A rule in the prompt is text the model weighs against other text, and injected text can argue it away. - A rule in
-    the harness is code that runs whatever the model says, and you can test it without a model. - The harness also sees
-    the real arguments and the signed-in user, so it can refuse a refund on another customer's order before anyone is
-    asked. - The prompt can still explain the rule, so the model plans around it.
+    - A rule in the prompt is text the model weighs against other text, and injected text can argue it away.
+    - A rule in the harness is code that runs whatever the model says, and you can test it without a model.
+    - The harness also sees the real arguments and the signed-in user, so it can refuse a refund on another customer's order before anyone is asked.
+    - The prompt can still explain the rule, so the model plans around it.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your reviewers approve 98 % of agent actions. Is that good news?"
     category="Trade-offs"
     level="Senior"
   >
-    - Probably not: a near-100 % approval rate usually means the gate is too wide and people have stopped reading. -
-    Anthropic's Claude Code data shows the effect: users approve 97 % of prompts, and testers caught about 17 % of
-    planted dangerous commands early in a session but about 5 % after 50 prompts. - Narrow the gate to final and costly
-    actions, move small ones to review-after, add a classifier or sandbox before the person, and make each question
-    carry its evidence. - Then watch time to decide and the approval rate per gate; a two-second approval is a warning.
+    - Probably not: a near-100 % approval rate usually means the gate is too wide and people have stopped reading.
+    - Anthropic's Claude Code data shows the effect: users approve 97 % of prompts, and testers caught about 17 % of planted dangerous commands early in a session but about 5 % after 50 prompts.
+    - Narrow the gate to final and costly actions, move small ones to review-after, add a classifier or sandbox before the person, and make each question carry its evidence.
+    - Then watch time to decide and the approval rate per gate; a two-second approval is a warning.
   </InterviewQuestion>
   <InterviewQuestion
     question="An approval can take hours. How do you keep the system correct while it waits?"
@@ -413,19 +410,18 @@ The EU AI Act asks the same of high-risk systems (a refund chatbot is not one, b
     level="Senior"
   >
     - Save the run in a durable checkpointer before pausing, so deploys and crashes lose nothing and no worker is held.
-    - Keep side effects after the interrupt, because frameworks such as LangGraph re-run the interrupted node from its
-    start on resume. - Save the idempotency key with the pending call, so a retry after the decision pays once. - Give
-    the question an owner, a reminder and an expiry, and re-check the facts on resume: the order may have been refunded
-    by someone else in the meantime.
+    - Keep side effects after the interrupt, because frameworks such as LangGraph re-run the interrupted node from its start on resume.
+    - Save the idempotency key with the pending call, so a retry after the decision pays once.
+    - Give the question an owner, a reminder and an expiry, and re-check the facts on resume: the order may have been refunded by someone else in the meantime.
   </InterviewQuestion>
   <InterviewQuestion
     question="What should an audit record for an agent's approved action contain?"
     category="Failure modes"
     level="Mid"
   >
-    - The request: run, thread, tool call id, the exact arguments and the idempotency key. - What the person was shown,
-    including the rule that held the call and its version. - The decision: who (from sign-in), when asked, when decided,
-    approve, edit or reject, and any edit. - The outcome: what actually ran and its result. Keep it append-only and
-    separate from checkpoints, and use it to tune the gates.
+    - The request: run, thread, tool call id, the exact arguments and the idempotency key.
+    - What the person was shown, including the rule that held the call and its version.
+    - The decision: who (from sign-in), when asked, when decided, approve, edit or reject, and any edit.
+    - The outcome: what actually ran and its result. Keep it append-only and separate from checkpoints, and use it to tune the gates.
   </InterviewQuestion>
 </InterviewQuestions>

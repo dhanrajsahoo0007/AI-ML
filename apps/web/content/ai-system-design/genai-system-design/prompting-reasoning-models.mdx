@@ -324,67 +324,59 @@ Three things to take from it:
     category="Concepts"
     level="Junior"
   >
-    - A reasoning model plans its own steps in hidden thinking, so the prompt should say what to achieve, not how to
-    think. - Keep the goal, the constraints with their reasons, success criteria the model can check, and the output
-    format. - Drop step-by-step recipes and "think step by step"; start with no examples, because DeepSeek found
-    few-shot prompts degrade R1 and OpenAI says reasoning models often do not need them. - Control depth with the effort
-    or thinking-level parameter rather than with words.
+    - A reasoning model plans its own steps in hidden thinking, so the prompt should say what to achieve, not how to think.
+    - Keep the goal, the constraints with their reasons, success criteria the model can check, and the output format.
+    - Drop step-by-step recipes and "think step by step"; start with no examples, because DeepSeek found few-shot prompts degrade R1 and OpenAI says reasoning models often do not need them.
+    - Control depth with the effort or thinking-level parameter rather than with words.
   </InterviewQuestion>
   <InterviewQuestion
     question="What does an effort or thinking-level setting control, and how does it relate to the output token limit?"
     category="Concepts"
     level="Mid"
   >
-    - Effort tells the model how readily and how deeply to think, and on Claude it also shapes how many tool calls it
-    makes and how much it writes. - It is a soft signal: Anthropic calls it "a behavioral signal, not a strict token
-    budget", and Gemini's thinking budget is a soft limit too. - The output limit (`max_tokens`, `max_output_tokens`) is
-    the only hard cap, and it covers thinking plus the answer. - So you size the limit for the thinking, pick the lowest
-    effort that passes your evaluation, and check for a hit limit before using the output.
+    - Effort tells the model how readily and how deeply to think, and on Claude it also shapes how many tool calls it makes and how much it writes.
+    - It is a soft signal: Anthropic calls it "a behavioral signal, not a strict token budget", and Gemini's thinking budget is a soft limit too.
+    - The output limit (`max_tokens`, `max_output_tokens`) is the only hard cap, and it covers thinking plus the answer.
+    - So you size the limit for the thinking, pick the lowest effort that passes your evaluation, and check for a hit limit before using the output.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your agent uses a reasoning model with tools. What must the harness do with the model's thinking between tool calls?"
     category="Architecture"
     level="Mid"
   >
-    - The model thinks between tool calls (interleaved thinking), and the thinking comes back as blocks or reasoning
-    items next to the tool call. - The harness must send them back unchanged with the tool result: Claude thinking
-    blocks with their signatures, OpenAI reasoning items in their original order or via `previous_response_id`, Gemini
-    thought signatures. - Dropping them loses the reasoning behind earlier calls, often silently. - The risky path is
-    save and resume, for example an approval pause: store the assistant message exactly as the API returned it, and
-    never expect a thinking block on every response.
+    - The model thinks between tool calls (interleaved thinking), and the thinking comes back as blocks or reasoning items next to the tool call.
+    - The harness must send them back unchanged with the tool result: Claude thinking blocks with their signatures, OpenAI reasoning items in their original order or via `previous_response_id`, Gemini thought signatures.
+    - Dropping them loses the reasoning behind earlier calls, often silently.
+    - The risky path is save and resume, for example an approval pause: store the assistant message exactly as the API returned it, and never expect a thinking block on every response.
   </InterviewQuestion>
   <InterviewQuestion
     question="A JSON extraction step started failing about 2% of the time after you moved it to a reasoning model. What do you check?"
     category="Failure modes"
     level="Mid"
   >
-    - First, the stop reason: if thinking used up the output limit the JSON stops halfway (`max_tokens` on Claude,
-    `status: incomplete` on OpenAI), so raise the limit or lower the effort. - Second, the schema: a field that asks for
-    step-by-step reasoning duplicates the thinking and can be refused on newer Claude models; replace it with a short
-    explanation. - Third, forced tool choice, which some newer models reject; use `auto` with strict schemas or the
-    structured-output setting. - Then add a parse check that retries before the error reaches a user.
+    - First, the stop reason: if thinking used up the output limit the JSON stops halfway (`max_tokens` on Claude, `status: incomplete` on OpenAI), so raise the limit or lower the effort.
+    - Second, the schema: a field that asks for step-by-step reasoning duplicates the thinking and can be refused on newer Claude models; replace it with a short explanation.
+    - Third, forced tool choice, which some newer models reject; use `auto` with strict schemas or the structured-output setting.
+    - Then add a parse check that retries before the error reaches a user.
   </InterviewQuestion>
   <InterviewQuestion
     question="When would you mix a fast instruction model with a reasoning model, and when would you use one model at different effort levels?"
     category="Trade-offs"
     level="Senior"
   >
-    - Mix when traffic splits cleanly: a router sends easy requests to a fast model, a reasoning model plans and fast
-    models execute, or the fast model answers and only failed checks escalate. - One model at varying effort is often
-    enough: the newest model at low effort can match an older model at high, it keeps one prompt cache, and its thinking
-    blocks stay readable across the loop. - Thinking blocks do not carry between most models, so never switch models
-    inside a tool loop. - Decide with an evaluation that compares cost per completed task and p95 latency for both
-    designs.
+    - Mix when traffic splits cleanly: a router sends easy requests to a fast model, a reasoning model plans and fast models execute, or the fast model answers and only failed checks escalate.
+    - One model at varying effort is often enough: the newest model at low effort can match an older model at high, it keeps one prompt cache, and its thinking blocks stay readable across the loop.
+    - Thinking blocks do not carry between most models, so never switch models inside a tool loop.
+    - Decide with an evaluation that compares cost per completed task and p95 latency for both designs.
   </InterviewQuestion>
   <InterviewQuestion
     question="How would you decide which effort level to run a production route at?"
     category="Trade-offs"
     level="Senior"
   >
-    - Build an evaluation set of a few hundred real requests for that route, with checks on both the answer and the
-    steps, such as "the policy was looked up". - Run every effort level and record pass rate, p95 latency, output and
-    thinking tokens, and how often the output limit was hit. - Pick the lowest level that meets the quality bar, judged
-    on cost per completed task, and set it per route rather than globally. - Rerun the sweep when the model changes, and
-    keep effort fixed within a conversation so the prompt cache survives.
+    - Build an evaluation set of a few hundred real requests for that route, with checks on both the answer and the steps, such as "the policy was looked up".
+    - Run every effort level and record pass rate, p95 latency, output and thinking tokens, and how often the output limit was hit.
+    - Pick the lowest level that meets the quality bar, judged on cost per completed task, and set it per route rather than globally.
+    - Rerun the sweep when the model changes, and keep effort fixed within a conversation so the prompt cache survives.
   </InterviewQuestion>
 </InterviewQuestions>
