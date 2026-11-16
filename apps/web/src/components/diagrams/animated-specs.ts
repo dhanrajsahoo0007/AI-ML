@@ -874,21 +874,26 @@ import s868 from "../../../assets/diagrams/animated/url-shortener/code-options";
 import s869 from "../../../assets/diagrams/animated/url-shortener/long-tail";
 import s870 from "../../../assets/diagrams/animated/url-shortener/range-alloc";
 import s871 from "../../../assets/diagrams/animated/url-shortener/redirect-path";
-import s872 from "../../../assets/diagrams/animated/whatsapp/architecture";
-import s873 from "../../../assets/diagrams/animated/whatsapp/connection-budget";
-import s874 from "../../../assets/diagrams/animated/whatsapp/device-fanout";
-import s875 from "../../../assets/diagrams/animated/whatsapp/offline-queue";
-import s876 from "../../../assets/diagrams/animated/whatsapp/prekey-session";
-import s877 from "../../../assets/diagrams/animated/whatsapp/sender-keys";
-import s878 from "../../../assets/diagrams/animated/youtube/abr-ladder";
-import s879 from "../../../assets/diagrams/animated/youtube/architecture";
-import s880 from "../../../assets/diagrams/animated/youtube/transcode-dag";
-import s881 from "../../../assets/diagrams/animated/youtube/upload-resume";
-import s882 from "../../../assets/diagrams/animated/zillow/architecture";
-import s883 from "../../../assets/diagrams/animated/zillow/cluster-zoom";
-import s884 from "../../../assets/diagrams/animated/zillow/listing-ingest";
-import s885 from "../../../assets/diagrams/animated/zillow/reverse-match";
-import s886 from "../../../assets/diagrams/animated/zillow/viewport-query";
+import s872 from "../../../assets/diagrams/animated/vending-machine/architecture";
+import s873 from "../../../assets/diagrams/animated/vending-machine/auth-vend-capture";
+import s874 from "../../../assets/diagrams/animated/vending-machine/classes";
+import s875 from "../../../assets/diagrams/animated/vending-machine/states";
+import s876 from "../../../assets/diagrams/animated/vending-machine/store-forward";
+import s877 from "../../../assets/diagrams/animated/whatsapp/architecture";
+import s878 from "../../../assets/diagrams/animated/whatsapp/connection-budget";
+import s879 from "../../../assets/diagrams/animated/whatsapp/device-fanout";
+import s880 from "../../../assets/diagrams/animated/whatsapp/offline-queue";
+import s881 from "../../../assets/diagrams/animated/whatsapp/prekey-session";
+import s882 from "../../../assets/diagrams/animated/whatsapp/sender-keys";
+import s883 from "../../../assets/diagrams/animated/youtube/abr-ladder";
+import s884 from "../../../assets/diagrams/animated/youtube/architecture";
+import s885 from "../../../assets/diagrams/animated/youtube/transcode-dag";
+import s886 from "../../../assets/diagrams/animated/youtube/upload-resume";
+import s887 from "../../../assets/diagrams/animated/zillow/architecture";
+import s888 from "../../../assets/diagrams/animated/zillow/cluster-zoom";
+import s889 from "../../../assets/diagrams/animated/zillow/listing-ingest";
+import s890 from "../../../assets/diagrams/animated/zillow/reverse-match";
+import s891 from "../../../assets/diagrams/animated/zillow/viewport-query";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/agents/a2a-discovery": s0,
@@ -1763,19 +1768,24 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/url-shortener/long-tail": s869,
   "diagrams/animated/url-shortener/range-alloc": s870,
   "diagrams/animated/url-shortener/redirect-path": s871,
-  "diagrams/animated/whatsapp/architecture": s872,
-  "diagrams/animated/whatsapp/connection-budget": s873,
-  "diagrams/animated/whatsapp/device-fanout": s874,
-  "diagrams/animated/whatsapp/offline-queue": s875,
-  "diagrams/animated/whatsapp/prekey-session": s876,
-  "diagrams/animated/whatsapp/sender-keys": s877,
-  "diagrams/animated/youtube/abr-ladder": s878,
-  "diagrams/animated/youtube/architecture": s879,
-  "diagrams/animated/youtube/transcode-dag": s880,
-  "diagrams/animated/youtube/upload-resume": s881,
-  "diagrams/animated/zillow/architecture": s882,
-  "diagrams/animated/zillow/cluster-zoom": s883,
-  "diagrams/animated/zillow/listing-ingest": s884,
-  "diagrams/animated/zillow/reverse-match": s885,
-  "diagrams/animated/zillow/viewport-query": s886,
+  "diagrams/animated/vending-machine/architecture": s872,
+  "diagrams/animated/vending-machine/auth-vend-capture": s873,
+  "diagrams/animated/vending-machine/classes": s874,
+  "diagrams/animated/vending-machine/states": s875,
+  "diagrams/animated/vending-machine/store-forward": s876,
+  "diagrams/animated/whatsapp/architecture": s877,
+  "diagrams/animated/whatsapp/connection-budget": s878,
+  "diagrams/animated/whatsapp/device-fanout": s879,
+  "diagrams/animated/whatsapp/offline-queue": s880,
+  "diagrams/animated/whatsapp/prekey-session": s881,
+  "diagrams/animated/whatsapp/sender-keys": s882,
+  "diagrams/animated/youtube/abr-ladder": s883,
+  "diagrams/animated/youtube/architecture": s884,
+  "diagrams/animated/youtube/transcode-dag": s885,
+  "diagrams/animated/youtube/upload-resume": s886,
+  "diagrams/animated/zillow/architecture": s887,
+  "diagrams/animated/zillow/cluster-zoom": s888,
+  "diagrams/animated/zillow/listing-ingest": s889,
+  "diagrams/animated/zillow/reverse-match": s890,
+  "diagrams/animated/zillow/viewport-query": s891,
 };

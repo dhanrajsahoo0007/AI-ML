@@ -1,0 +1,14 @@
+title: Store and forward with sequence numbers
+alt: >-
+  A sequence diagram with five lanes: controller, local log, MQTT broker, stream job and fleet database, in two steps.
+  Step 1, online: the controller appends event 5120 to its local log, publishes it at QoS 1 and gets an acknowledgement;
+  the event reaches the stream job through the event log, which inserts it only if it is new and takes one off slot B4.
+  Step 2, two hours offline: events 5121 to 5148 pile up in the local log and the publish gets no answer, drawn as a
+  red timeout; after the link returns and a random wait the controller replays them, the acknowledgement for 5148 is
+  lost so it sends 5148 again, and the stream job inserts 5148 once and skips the copy.
+caption: >-
+  Every event is on the machine's disk before it is sent; the broker may deliver it twice, and the stream job applies
+  each machine and sequence number once.
+tags: [case-studies, vending-machine, store-and-forward, idempotency, sequence]
+source: original
+created: 2026-11-17
