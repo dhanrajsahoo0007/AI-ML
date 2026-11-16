@@ -9,21 +9,35 @@ import type { NavSection } from "@/lib/nav-tree";
 const SIDEBAR_MIN = 220;
 const SIDEBAR_MAX = 480;
 const SIDEBAR_DEFAULT = 280;
+const SIDEBAR_MAX_VIEWPORT_RATIO = 0.35;
 
-// The interactive part of ContentShell: on desktop a sticky, collapsible and resizable sidebar; on mobile
-// a "Contents" button that opens the same navigation in a drawer.
+function clampSidebarWidth(target: number) {
+  const viewportCap =
+    typeof window !== "undefined"
+      ? Math.max(SIDEBAR_MIN, Math.floor(window.innerWidth * SIDEBAR_MAX_VIEWPORT_RATIO))
+      : SIDEBAR_MAX;
+  return Math.min(SIDEBAR_MAX, viewportCap, Math.max(SIDEBAR_MIN, target));
+}
+
+// The interactive part of ContentShell: from lg (1024px) up, a sticky, collapsible and resizable sidebar;
+// below lg (phones and portrait tablets) a "Contents" button that opens the same navigation in a drawer.
 export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [width, setWidth] = React.useState(SIDEBAR_DEFAULT);
+
+  React.useEffect(() => {
+    const onResize = () => setWidth((w) => clampSidebarWidth(w));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const handleMouseDown = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX;
       const startW = width;
-      const onMove = (ev: MouseEvent) =>
-        setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (ev.clientX - startX))));
+      const onMove = (ev: MouseEvent) => setWidth(clampSidebarWidth(startW + (ev.clientX - startX)));
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
@@ -42,7 +56,7 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
     <>
       {/* Desktop: pinned below the header, scrolls on its own; the page scrolls normally so the footer follows the content */}
       <div
-        className="sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out md:block"
+        className="sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out lg:block min-[1601px]:border-l"
         style={{ width: collapsed ? 0 : width, overflow: "hidden" }}
       >
         {!collapsed && (
@@ -65,7 +79,7 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
       {collapsed ? (
         <button
           onClick={() => setCollapsed(false)}
-          className="fixed left-3 top-20 z-30 hidden rounded-full border border-hairline bg-paper p-2 text-muted-foreground transition-colors hover:border-ink hover:text-ink md:block"
+          className="fixed left-3 top-20 z-30 hidden rounded-full border border-hairline bg-paper p-2 text-muted-foreground transition-colors hover:border-ink hover:text-ink lg:block"
           aria-label="Expand sidebar"
         >
           <PanelLeft className="h-4 w-4" />
@@ -76,17 +90,17 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
-          className="group sticky top-16 z-10 -ml-px hidden h-[calc(100vh-4rem)] w-1.5 shrink-0 cursor-col-resize items-center justify-center md:flex"
+          className="group sticky top-16 z-10 -ml-px hidden h-[calc(100dvh-4rem)] w-1.5 shrink-0 cursor-col-resize items-center justify-center lg:flex"
         >
           <div className="h-full w-px bg-transparent transition-colors group-hover:bg-tint group-active:bg-tint" />
         </div>
       )}
 
-      {/* Mobile */}
-      <div className="md:hidden">
+      {/* Mobile & tablet (< lg) */}
+      <div className="lg:hidden">
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger
-            className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper shadow-[0_18px_40px_-24px_rgba(17,17,17,0.6)] transition-colors hover:bg-primary"
+            className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-4 z-40 inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper shadow-[0_18px_40px_-24px_rgba(17,17,17,0.6)] transition-colors hover:bg-primary"
             aria-label="Open navigation"
           >
             <Menu className="size-4" />

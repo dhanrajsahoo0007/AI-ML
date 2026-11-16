@@ -29,10 +29,10 @@ const COMPANY_FILTERS_SHOWN = 10;
 
 // Filter chips. The island sets aria-pressed, which drives the active style.
 const chipClass =
-  "inline-flex items-center gap-1.5 rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper [&[aria-pressed=true]_svg]:text-paper";
+  "inline-flex items-center gap-1.5 rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper [&[aria-pressed=true]_svg]:text-paper [&[aria-pressed=true]_[data-qa-tag-count]]:text-paper/80";
 // Company chips draw their own pill; this restyles it when pressed.
 const companyChipClass =
-  "rounded-full [&[aria-pressed=true]>span]:border-ink [&[aria-pressed=true]>span]:bg-ink [&[aria-pressed=true]>span]:text-paper";
+  "rounded-full [&[aria-pressed=true]>span]:border-ink [&[aria-pressed=true]>span]:bg-ink [&[aria-pressed=true]>span]:text-paper [&[aria-pressed=true]_[data-company-count]]:text-paper/80";
 // Wide enough for the longest label, "Company", so the chips of every row start on the same line.
 const labelClass = "w-[4.75rem] shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 const badgeClass =
@@ -115,7 +115,9 @@ function FollowUps({ items }: { items: FollowUpItem[] }) {
           <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-3 text-left [&::-webkit-details-marker]:hidden">
             <span className="w-5 shrink-0 pt-0.5 font-mono text-xs text-primary">{i + 1}</span>
             <span className="block min-w-0 flex-1">
-              <span className="block text-[15px] leading-snug font-medium text-ink">{f.question}</span>
+              <span className="block text-[15px] leading-snug font-medium text-ink [overflow-wrap:anywhere]">
+                {f.question}
+              </span>
               {(f.level || (f.companies && f.companies.length > 0)) && (
                 <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   {f.level && (
@@ -205,7 +207,7 @@ function QuestionItem({
               <span>Follow-up to: {followUpTo}</span>
             </span>
           )}
-          <span className="block font-display text-lg leading-snug text-ink transition-colors group-hover/q:text-primary">
+          <span className="block font-display text-lg leading-snug text-ink [overflow-wrap:anywhere] transition-colors group-hover/q:text-primary">
             {question}
           </span>
           {(area || category || level) && (
@@ -465,7 +467,7 @@ export function InterviewQuestions({ title, footer, company, icons, practice, ch
               <FilterChip key={name} group="area" value={name} tone={interviewArea(name)?.tone}>
                 <Icon icons={icons} id={`area:${name}`} className="size-3.5 text-tint" />
                 {name}
-                <span data-qa-tag-count className="opacity-60">
+                <span data-qa-tag-count className="text-muted-foreground">
                   {count}
                 </span>
               </FilterChip>
@@ -514,7 +516,7 @@ export function InterviewQuestions({ title, footer, company, icons, practice, ch
                       <FilterChip key={name} group="tag" value={name}>
                         <Icon icons={icons} id={`topic:${name}`} className="size-3.5 text-muted-foreground" />
                         {name}
-                        <span data-qa-tag-count className="opacity-60">
+                        <span data-qa-tag-count className="text-muted-foreground">
                           {count}
                         </span>
                       </FilterChip>

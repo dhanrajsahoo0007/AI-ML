@@ -33,12 +33,11 @@ const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items")
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-// The desktop bar is sized by how many sections it shows, because every step below is a fixed width. Up to seven
-// sections (`regular`): the phone menu below 1100px, small labels up to 1280px, icons from 1440px, Subscribe from
-// 1800px, the arrows from 1900px. With eight or more (`crowded`, eleven today, with the `shortLabel`s of sections.yaml)
-// each step comes later, so the links never run under the logo or the buttons: the bar from 1440px, larger text and
-// buttons from 1920px, icons from 2040px, Subscribe from 2200px, arrows from 2400px (measured with eleven sections;
-// below 1440px the phone menu is used).
+// The desktop bar is sized by how many sections it shows. Up to seven sections (`regular`): the phone menu below
+// 1100px, compact text up to 1280px, icons from 1440px, Subscribe and arrows from 1536px (inside the 1600px
+// max nav width). With eight or more sections (`crowded`, eleven in preview/local today, using `shortLabel`s):
+// laptops from 1280px still get the full desktop bar (slightly tighter text and gaps), scaling up at 1440px
+// and 1536px without adding icons/arrows that would overflow a 1600px bar.
 // The class names are written out in full so Tailwind can see them.
 const BAR_SIZES = {
   regular: {
@@ -51,21 +50,21 @@ const BAR_SIZES = {
     pricing: "xl:px-4 xl:py-2 xl:text-sm",
     gem: "xl:block",
     icon: "min-[1440px]:block",
-    subscribe: "min-[1800px]:inline-flex",
-    arrow: "min-[1900px]:block",
+    subscribe: "2xl:inline-flex",
+    arrow: "2xl:block",
   },
   crowded: {
-    show: "min-[1440px]:flex",
-    phone: "min-[1440px]:hidden",
-    item: "min-[1920px]:text-sm",
-    barGap: "min-[1920px]:gap-6",
-    linkGap: "min-[1920px]:gap-4",
-    toolGap: "min-[1920px]:gap-3",
-    pricing: "min-[1920px]:px-4 min-[1920px]:py-2 min-[1920px]:text-sm",
-    gem: "min-[1920px]:block",
-    icon: "min-[2040px]:block",
-    subscribe: "min-[2200px]:inline-flex",
-    arrow: "min-[2400px]:block",
+    show: "xl:flex",
+    phone: "xl:hidden",
+    item: "xl:text-[11.5px] min-[1440px]:text-[12.5px] 2xl:text-[13px]",
+    barGap: "xl:gap-3 min-[1440px]:gap-4 2xl:gap-6",
+    linkGap: "xl:gap-1.5 min-[1440px]:gap-2.5 2xl:gap-3.5",
+    toolGap: "xl:gap-2 2xl:gap-3",
+    pricing: "min-[1440px]:px-3.5 min-[1440px]:py-1.5 2xl:px-4 2xl:py-2 2xl:text-sm",
+    gem: "2xl:block",
+    icon: "hidden",
+    subscribe: "hidden",
+    arrow: "hidden",
   },
 } as const;
 const REGULAR_BAR_MAX = 7;
@@ -137,10 +136,18 @@ export function SiteHeader({
       onMouseEnter={() => clearTimeout(closeTimer.current)}
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
-      <nav aria-label="Main" className={cn("flex h-16 w-full items-center gap-3 px-4 sm:px-6", bar.barGap)}>
-        <Link href="/" className="flex shrink-0 items-center gap-2">
-          <BrandMark className="size-7 sm:size-8" />
-          <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
+      <nav
+        aria-label="Main"
+        className={cn(
+          "mx-auto flex h-16 w-full max-w-[1600px] items-center gap-2 px-3 min-[375px]:gap-3 min-[375px]:px-4 sm:px-6",
+          bar.barGap
+        )}
+      >
+        <Link href="/" className="flex shrink-0 items-center gap-1.5 min-[375px]:gap-2">
+          <BrandMark className="size-6 min-[375px]:size-7 sm:size-8" />
+          <span className="font-display text-[17px] whitespace-nowrap min-[375px]:text-xl sm:text-2xl">
+            {siteConfig.name}
+          </span>
         </Link>
 
         <div
@@ -280,13 +287,13 @@ export function SiteHeader({
           {profileMenu}
         </div>
 
-        <div className={cn("ml-auto flex items-center gap-1", bar.phone)}>
+        <div className={cn("ml-auto flex items-center gap-0 min-[375px]:gap-1", bar.phone)}>
           <SearchButton compact />
-          <ThemeToggle />
+          <ThemeToggle className="size-8 min-[375px]:size-10" />
           {profileMenuMobile}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
-              className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
+              className="inline-flex size-8 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2 min-[375px]:size-10"
               aria-label="Open menu"
             >
               <Menu className="size-5" />
@@ -481,7 +488,7 @@ function SectionPanel({
   const blocks = active && items ? (items[section.key]?.[active.slug] ?? []) : [];
 
   return (
-    <div className="flex max-h-[calc(100vh-6rem)] flex-col">
+    <div className="flex max-h-[calc(100dvh-6rem)] flex-col">
       <div className="flex items-baseline justify-between gap-4 border-b border-hairline px-6 py-4">
         <div className="flex items-baseline gap-3">
           <p className="font-display text-xl text-ink">{section.label}</p>

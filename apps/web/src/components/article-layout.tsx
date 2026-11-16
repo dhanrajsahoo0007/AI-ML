@@ -48,7 +48,7 @@ export function ArticleLayout({
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-10 pb-20 md:px-8">
       <ScrollProgress />
-      <div className="xl:grid xl:grid-cols-[minmax(0,72ch)_14rem] xl:justify-between xl:gap-12">
+      <div className="@[940px]:grid @[940px]:grid-cols-[minmax(0,72ch)_14rem] @[940px]:justify-between @[940px]:gap-12">
         <div className="min-w-0">
           <FadeIn>
             <div className="mb-10 border-b border-hairline pb-8">
@@ -61,13 +61,13 @@ export function ArticleLayout({
               )}
             </div>
           </FadeIn>
-          <div className="xl:hidden">
+          <div className="@[940px]:hidden">
             <OnThisPageMobile headings={docs.headings} />
           </div>
           <article className="prose-editorial [&_:is(h2,h3)]:scroll-mt-24">{children}</article>
           {after}
         </div>
-        <aside className="hidden xl:block">
+        <aside className="hidden @[940px]:block">
           <OnThisPage headings={docs.headings} />
         </aside>
       </div>

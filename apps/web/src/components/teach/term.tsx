@@ -49,7 +49,7 @@ export function Term({ id, children }: { id: string; children?: React.ReactNode 
       <span
         role="tooltip"
         id={tipId}
-        className="absolute left-0 top-full z-20 hidden w-[min(18rem,calc(100vw-2rem))] pt-1.5 group-hover/term:block group-focus-within/term:block group-data-[dismissed=true]/term:!hidden max-sm:fixed max-sm:inset-x-4 max-sm:bottom-4 max-sm:top-auto max-sm:w-auto max-sm:pt-0"
+        className="absolute left-0 top-full z-20 hidden w-[min(18rem,calc(100vw-2rem))] pt-1.5 group-hover/term:block group-focus-within/term:block group-data-[dismissed=true]/term:!hidden max-sm:fixed max-sm:inset-x-4 max-sm:bottom-[max(4.25rem,calc(env(safe-area-inset-bottom)+3.5rem))] max-sm:top-auto max-sm:z-50 max-sm:w-auto max-sm:pt-0"
       >
         <span className="block whitespace-normal rounded-lg border border-hairline bg-paper p-3 text-left text-sm font-normal not-italic leading-snug text-ink-2 shadow-lg">
           <span className="block font-semibold text-ink">{entry.term}</span>

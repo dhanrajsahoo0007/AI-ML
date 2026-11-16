@@ -65,7 +65,7 @@ export function ProfileMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Open profile menu"
-        className="inline-flex size-9 items-center justify-center rounded-full border border-hairline bg-paper-2 text-ink transition-colors hover:border-ink"
+        className="inline-flex size-8 items-center justify-center rounded-full border border-hairline bg-paper-2 text-ink transition-colors hover:border-ink min-[375px]:size-9"
       >
         <User className="size-4" />
       </button>

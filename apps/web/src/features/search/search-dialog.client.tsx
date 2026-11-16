@@ -45,7 +45,7 @@ export function SearchButton({ compact = false }: { compact?: boolean }) {
         aria-haspopup="dialog"
         className={cn(
           "inline-flex items-center gap-2 rounded-full border border-hairline text-muted-foreground transition-colors hover:border-ink hover:text-ink",
-          compact ? "size-9 justify-center" : "h-9 px-3 text-[13px]"
+          compact ? "size-8 justify-center min-[375px]:size-9" : "h-9 px-3 text-[13px]"
         )}
       >
         <Search aria-hidden className="size-4" />
@@ -146,7 +146,7 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
             <X aria-hidden className="size-4" />
           </button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className="max-h-[60dvh] overflow-y-auto">
           {index === null ? (
             <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
           ) : query.trim() === "" ? (

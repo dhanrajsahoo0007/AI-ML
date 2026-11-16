@@ -52,7 +52,7 @@ function CategoryCard({ c, count }: { c: Category; count: (category: string, sub
                 className="inline-flex rounded-full border border-hairline px-2.5 py-0.5 text-xs text-ink-2 transition-colors hover:border-ink/40 hover:text-ink"
               >
                 {s.title}
-                <span className="ml-1.5 opacity-60">{count(c.slug, s.slug)}</span>
+                <span className="ml-1.5 text-muted-foreground">{count(c.slug, s.slug)}</span>
               </Link>
             </li>
           ))}
@@ -81,7 +81,7 @@ export default function InterviewsIndexPage() {
   })).filter((t) => t.categories.length > 0);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-[1320px]">
       <JsonLd data={interviewsSeo().jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
 

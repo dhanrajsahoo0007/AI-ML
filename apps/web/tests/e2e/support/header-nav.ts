@@ -11,8 +11,7 @@ export interface HeaderEntry {
 }
 
 export async function desktopHeaderEntries(page: Page): Promise<HeaderEntry[]> {
-  // 1440px: the desktop bar starts here when it has eight or more sections (BAR_SIZES in site-header.tsx); below that
-  // width the header is the phone menu.
+  // Desktop bar is visible from 1280px+ even with 8+ sections (BAR_SIZES in site-header.tsx).
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const bar = page.locator("header nav[aria-label='Main'] > div").nth(0);
