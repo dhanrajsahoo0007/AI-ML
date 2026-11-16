@@ -15,10 +15,10 @@ const spec: DiagramSpec = {
   height: 740,
   steps: [
     { title: "One-to-one chat", covers: "F1" },
-    { title: "Many chat servers", covers: "NFR: scale" },
+    { title: "Many chat servers", covers: "N6" },
     { title: "Offline users and push", covers: "F7" },
     { title: "Group chat and fan-out", covers: "F2" },
-    { title: "Durable, ordered pipeline", covers: "NFR: durability, ordering" },
+    { title: "Durable, ordered pipeline", covers: "N3, N4" },
     { title: "Presence and receipts", covers: "F3, F4" },
     { title: "Photos and video", covers: "F5" },
     { title: "History and sync", covers: "F6" },
