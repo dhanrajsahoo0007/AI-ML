@@ -1,0 +1,21 @@
+title: Constrained decoding, the schema masks the next token
+alt: >-
+  A table built in five steps, one row per decision point while the model writes a JSON record from the Brightpost
+  message "My kettle arrived cracked. It's order 4471. Can I get my money back?". Four columns: what is written so far
+  with the schema rule at that point (grey), the tokens the mask keeps (lime), the tokens the mask removes by setting
+  their logits to minus infinity (red), and what the model writes (green). Row 1: nothing is written yet and the
+  schema wants an object, so only an opening brace is kept; a preamble such as "Sure," and a json code fence are
+  removed. Row 2: after the order_id key the pattern of four digits keeps only digits, removes a hash, a word and a
+  closing quote, and the model writes 4471. Row 3: the item is a free string, so the mask removes almost nothing and
+  the model writes kettle. Row 4, highlighted: the issue enum keeps damaged, missing, late and wrong_item and removes
+  "cracked", the customer's own word and the model's top pick without a mask; the model writes "damaged". Row 5: the
+  wants enum keeps refund, replacement and information and removes "money back"; the model writes "refund" and closes
+  the object. Under the table, the finished record reads order_id 4471, item kettle, issue damaged, wants refund, with
+  the note that it is valid by construction but whether order 4471 exists and belongs to this customer is still the
+  application's job.
+caption: >-
+  At every position the mask leaves only tokens that keep the object valid, so “cracked” can never reach your code;
+  it cannot tell whether order 4471 is real. Masked candidates are illustrative.
+tags: [agents, structured-output, constrained-decoding, json, genai]
+source: original
+created: 2026-11-16
