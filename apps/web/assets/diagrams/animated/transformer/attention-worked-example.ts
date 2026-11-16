@@ -1,5 +1,6 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { ROLE_TONE, vector } from "@/components/diagrams/presets/transformer";
+import { CAT_SAT, attend, dot, fix2, num, pair } from "@/components/diagrams/presets/llm-attention";
 
 // The worked example from "Self-attention explained" (section "A worked example"), drawn with the page's own numbers:
 // three tokens "the", "cat", "sat" with 2-dimensional queries, keys and values (d_k = 2).
@@ -25,55 +26,11 @@ import { ROLE_TONE, vector } from "@/components/diagrams/presets/transformer";
 //   cat: 0.140·(1,0) + 0.576·(0,1) + 0.284·(1,1) = (0.424, 0.860) → (0.42, 0.86)
 //   sat: 0.198·(1,0) + 0.401·(0,1) + 0.401·(1,1) = (0.599, 0.802) → (0.60, 0.80)
 // The "sat" row matches the page text: scores 1, 2, 2 → about 0.71, 1.41, 1.41 → about 0.20, 0.40, 0.40 →
-// (0.60, 0.80). Formula: Attention(Q, K, V) = softmax(Q Kᵀ / √d_k) V (Vaswani et al. 2017, §3.2.1).
+// (0.60, 0.80). The tokens, vectors and arithmetic live in presets/llm-attention.ts (shared with
+// attention-causal-example). Formula: Attention(Q, K, V) = softmax(Q Kᵀ / √d_k) V (Vaswani et al. 2017, §3.2.1).
 
-const TOKENS = ["the", "cat", "sat"];
-const Q = [
-  [1, 0],
-  [0, 1],
-  [1, 1],
-];
-const K = [
-  [1, 0],
-  [0, 2],
-  [1, 1],
-];
-const V = [
-  [1, 0],
-  [0, 1],
-  [1, 1],
-];
-const D_K = 2;
-const SCALE = Math.sqrt(D_K);
-
-const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
-const RAW = Q.map((q) => K.map((k) => dot(q, k)));
-const SCALED = RAW.map((row) => row.map((v) => v / SCALE));
-const softmax = (row: number[]) => {
-  const e = row.map(Math.exp);
-  const sum = e.reduce((a, b) => a + b, 0);
-  return e.map((v) => v / sum);
-};
-const WEIGHTS = SCALED.map(softmax);
-const OUTPUTS = WEIGHTS.map((w) => V[0].map((_, d) => w.reduce((acc, wj, j) => acc + wj * V[j][d], 0)));
-
-/** Rounds a row of probabilities to hundredths so the shown values still add up to exactly 1 (largest remainder). */
-function roundRow(p: number[]): number[] {
-  const cents = p.map((v) => Math.floor(v * 100));
-  let left = 100 - cents.reduce((a, b) => a + b, 0);
-  const order = p.map((v, i) => ({ i, rest: v * 100 - cents[i] })).sort((a, b) => b.rest - a.rest);
-  for (const { i } of order) {
-    if (left <= 0) break;
-    cents[i] += 1;
-    left -= 1;
-  }
-  return cents.map((c) => c / 100);
-}
-const SHOWN_WEIGHTS = WEIGHTS.map(roundRow);
-const fix2 = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
-/** Integers stay integers ("2"), everything else gets 2 decimals ("0.71"). */
-const num = (v: number) => (Number.isInteger(v) ? String(v) : fix2(v));
-const pair = (v: number[]) => `(${v.map(num).join(", ")})`;
+const { tokens: TOKENS, q: Q, k: K, v: V, dK: D_K } = CAT_SAT;
+const { scale: SCALE, raw: RAW, scaled: SCALED, shownWeights: SHOWN_WEIGHTS, outputs: OUTPUTS } = attend(false);
 
 // ── Geometry ────────────────────────────────────────────────────────────────────────────────────────────────────
 // Top tier: the inputs on the left, then raw scores and scaled scores, rows aligned with the input rows.
@@ -151,7 +108,7 @@ const inputs: LayoutShape[] = [
   text("h-v", VX, TOP - 26, 2 * VC, "V", ROLE_TONE.value, 1, 20, true),
   ...TOKENS.flatMap((t, r): LayoutShape[] => {
     const y = rowMid(TOP, r) - VC / 2;
-    const opts = (vals: number[]) => ({ cell: VC, labels: vals.map(String), step: 1 });
+    const opts = (vals: readonly number[]) => ({ cell: VC, labels: vals.map(String), step: 1 });
     return [
       text(`tok-${r}`, 20, rowMid(TOP, r) - 10, 56, t, "neutral", 1, 20, true),
       ...vector(`q-${r}`, QX, y, 2, ROLE_TONE.query, opts(Q[r])),

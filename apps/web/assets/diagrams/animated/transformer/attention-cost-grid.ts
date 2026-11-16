@@ -8,6 +8,11 @@ import { ROLE_TONE } from "@/components/diagrams/presets/transformer";
 // the score and weight matrices (n² entries per head). The page's "Cost" section: projections and the feed-forward
 // layers grow only linearly in n, so they double.
 //
+// Memory if the score matrix is stored (the "Cost" section's long-context example): at n = 32,768 tokens,
+// n² = 1,073,741,824 entries; at 2 bytes each (16-bit) that is 2,147,483,648 bytes ≈ 2.1 GB, per head and per layer.
+// FlashAttention (Dao et al. 2022, arXiv 2205.14135, §3.1, Theorem 1) computes the same exact result in tiles and
+// "requires O(N) additional memory beyond inputs and output", so it never stores that matrix.
+//
 // Each grid is drawn with paths (a border plus 2 · (n − 1) inner lines), not n² cells: 3 borders + 6 + 14 + 30 lines
 // + labels is about 63 shapes, far under the 250-shape cap. (Paths render under boxes and cells, so a filled box
 // behind the lines would hide them.)

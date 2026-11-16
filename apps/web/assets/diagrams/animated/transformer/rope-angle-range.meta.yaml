@@ -1,0 +1,19 @@
+title: Why RoPE fails past its trained length
+alt: >-
+  Four dials in a row, one for each of four RoPE dimension pairs of a 128-wide head with base 10,000, trained on 4,096
+  positions. Each dial starts at a dashed axis for position 0 and turns counter-clockwise. Pair 0 turns 1 radian per
+  position, one turn every 6.3 positions; by position 4,096 it has turned 652 times, so a green ring covers the whole
+  circle: every angle seen in training. Pair 32 turns 0.01 radians per position, one turn every 628 positions, 6.5
+  turns by 4,096: also a full green ring. Pair 48 turns 0.001 radians per position, one turn every 6,283 positions; by
+  4,096 it has reached only 235 degrees, drawn as a green arc, and a red arc from 235 to 360 degrees marks angles it
+  reaches by 16,384 but never saw in training. Pair 63 turns 0.000115 radians per position, one turn every 54,410
+  positions; a green arc covers 0 to 27 degrees, reached by 4,096, and a red arc 27 to 108 degrees, reached by
+  16,384. Notes underneath say pairs 46 to 63 never turn a full circle by 4,096, and that position interpolation
+  divides every position by 4, so 16,384 gets the angles of 4,096 and stays on the green arcs, but in pair 0
+  neighbouring positions are then a quarter of a radian, 14 degrees, apart instead of 1 radian, 57 degrees.
+caption: >-
+  Fast pairs have turned hundreds of times by 4,096 and have seen every angle; slow pairs have not finished one turn,
+  so positions past 4,096 give them angles (red) the model never trained on.
+tags: [transformer, positional-encoding, rope, long-context, genai]
+source: original
+created: 2026-11-16

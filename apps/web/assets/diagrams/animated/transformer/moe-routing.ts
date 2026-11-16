@@ -1,5 +1,6 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { ROLE_TONE, block, vector } from "@/components/diagrams/presets/transformer";
+import { ROUTING_LOGITS } from "@/components/diagrams/presets/llm-moe";
 
 // Top-2 routing in one mixture-of-experts layer, for one token. Replaces the Mermaid under "Architecture" on the
 // Mixture of Experts page. The 8 experts sit in rows, and the router's logit and mixing weight for expert i sit in the
@@ -22,7 +23,7 @@ import { ROLE_TONE, block, vector } from "@/components/diagrams/presets/transfor
 // Simplified: Mixtral is pre-norm, so the router and experts read RMSNorm(x) while the residual carries x itself; the
 // norm is left out here to keep the routing in focus.
 
-const LOGITS = [0.6, 2.1, 0.3, 1.1, 1.6, 0.4, 0.2, 0.8];
+const LOGITS = ROUTING_LOGITS; // [0.6, 2.1, 0.3, 1.1, 1.6, 0.4, 0.2, 0.8], from presets/llm-moe
 const K = 2;
 const TOP = LOGITS.map((v, i) => ({ v, i }))
   .sort((a, b) => b.v - a.v)
