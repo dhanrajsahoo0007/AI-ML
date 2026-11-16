@@ -407,7 +407,7 @@ export const USE_CASES: UseCase[] = [
     id: "flash-sale-booking",
     label: "Flash sale & seat booking",
     blurb: "Far more buyers than items at one moment: admit them fairly and never sell an item twice.",
-    caseStudies: cases("ticketmaster", "hotel-booking", "parking-garage"),
+    caseStudies: cases("ticketmaster", "hotel-booking"),
     patterns: [
       core("back-pressure", "Admit buyers at the rate you can serve"),
       core("saga", "Hold, pay and confirm with compensation"),
@@ -506,7 +506,7 @@ export const USE_CASES: UseCase[] = [
     id: "kv-coordination",
     label: "Distributed KV & coordination",
     blurb: "Keys spread over many nodes that join, fail and disagree about the latest value.",
-    caseStudies: cases("key-value-store", "rate-limiter"),
+    caseStudies: cases("key-value-store"),
     patterns: [
       core("consistent-hashing", "Place keys on a ring of nodes"),
       core("consistency-models", "Pick quorums for reads and writes"),
