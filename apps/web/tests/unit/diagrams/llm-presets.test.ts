@@ -4,6 +4,7 @@ import * as arch from "@/components/diagrams/presets/llm-architecture";
 import { BUDGET, FLASH, PAGED, WINDOW } from "@/components/diagrams/presets/llm-efficient";
 import { HEAD, LOSS, TABLES } from "@/components/diagrams/presets/llm-families";
 import { BALANCE, BATCH_CHOICE, CAPACITY_SWEEP, ROUTING, Z_LOSS } from "@/components/diagrams/presets/llm-moe";
+import { BUDGET as SCALE_BUDGET, OPTIMAL, TEN_X, ZERO, bubble } from "@/components/diagrams/presets/llm-scaling";
 import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
 
 // The LLM Foundations pages quote these numbers in prose; the presets compute them once. If a constant changes,
@@ -145,5 +146,28 @@ describe("llm-efficient: KV cache, FlashAttention, windows, pages", () => {
     expect(WINDOW.reach).toBe(131_072);
     expect(PAGED.wasted).toBe(2_621_440);
     expect(PAGED.worst).toBe(4_915_200);
+  });
+});
+
+describe("llm-scaling: one compute budget, three ways", () => {
+  it("Chinchilla and Kaplan allocations", () => {
+    expect(SCALE_BUDGET.c).toBeCloseTo(8.4e22, -19);
+    expect((OPTIMAL.n / 1e9).toFixed(1)).toBe("26.5");
+    expect((OPTIMAL.d / 1e9).toFixed(0)).toBe("529");
+    expect((TEN_X.chinchilla.n / 1e9).toFixed(1)).toBe("83.7");
+    expect((TEN_X.chinchilla.d / 1e12).toFixed(2)).toBe("1.67");
+    expect((TEN_X.kaplan.n / 1e9).toFixed(0)).toBe("142");
+    expect((TEN_X.kaplan.d / 1e9).toFixed(0)).toBe("985");
+  });
+
+  it("ZeRO memory per GPU and the pipeline bubble", () => {
+    expect([ZERO.baseline, ZERO.stage1, ZERO.stage2, ZERO.stage3].map((g) => g.toFixed(2))).toEqual([
+      "112.00",
+      "29.31",
+      "15.53",
+      "1.75",
+    ]);
+    expect(bubble(3, 4)).toBe(0.5);
+    expect(bubble(3, 32)).toBe(0.0625);
   });
 });
