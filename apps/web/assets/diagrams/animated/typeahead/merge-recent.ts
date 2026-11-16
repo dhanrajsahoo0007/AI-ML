@@ -10,7 +10,7 @@ import { PATTERN_TONE } from "@/components/diagrams/presets/patterns";
 // 7,200 in 30 days = 10 an hour in the base index, but 900 in the last 10 minutes × 6 = 5,400 an hour in the
 // trending layer, so it ranks first. Ten base candidates plus one trending = 11 checked; one is blocked; five return.
 // Layout: five lanes. Colours (PATTERN_TONE): the browser orange (traffic), the suggest service teal (compute), the
-// trie index and the trending layer violet (stores), the blocklist lime (a check); the missed deadline is the red
+// trie index and the trending layer violet (stores), the blocklist green (sequence lanes take section tones only, so not lime); the missed deadline is the red
 // timeout arrow.
 
 const spec: SequenceSpec = {
@@ -21,7 +21,7 @@ const spec: SequenceSpec = {
     { id: "svc", label: "Suggest service", icon: "api", tone: PATTERN_TONE.compute },
     { id: "index", label: "Trie index", icon: "trie", tone: PATTERN_TONE.store },
     { id: "trend", label: "Trending layer", icon: "cache", tone: PATTERN_TONE.store },
-    { id: "block", label: "Blocklist", icon: "shield", tone: PATTERN_TONE.check },
+    { id: "block", label: "Blocklist", icon: "shield", tone: PATTERN_TONE.pattern },
   ],
   messages: [
     { from: "browser", to: "svc", label: "GET /suggest?q=ele", step: 1 },
