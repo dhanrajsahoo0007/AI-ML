@@ -34,7 +34,7 @@ export function CategoryView({ category, preview = false }: { category: Category
   const seo = categorySeo(category.slug);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       {seo && <JsonLd data={seo.jsonLd} />}
       <Breadcrumb
         items={[{ label: "Home", href: "/" }, { label: section.label, href: section.href }, { label: category.title }]}
@@ -61,7 +61,7 @@ export function CategoryView({ category, preview = false }: { category: Category
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 min-[1440px]:grid-cols-3 min-[2000px]:grid-cols-4">
         {/* A subsection with no question yet is not listed. */}
         {category.subsections
           .filter((s) => getQuestions({ category: category.slug, subcategory: s.slug }).length > 0)

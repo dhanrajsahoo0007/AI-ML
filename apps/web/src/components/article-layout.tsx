@@ -34,21 +34,23 @@ export function ArticleLayout({
 }) {
   if (!docs) {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 md:px-8">
+      <div className="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
         <ScrollProgress />
         <FadeIn>
           <PageHeader className="mb-12 border-b border-hairline pb-10" title={title} lead={description} />
         </FadeIn>
-        <article className="prose-editorial max-w-[72ch] [&_:is(h2,h3)]:scroll-mt-24">{children}</article>
+        <article className="prose-editorial max-w-[72ch] min-[1440px]:max-w-none [&_:is(h2,h3)]:scroll-mt-24">
+          {children}
+        </article>
         {after}
       </div>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-10 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-10 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <ScrollProgress />
-      <div className="@[940px]:grid @[940px]:grid-cols-[minmax(0,72ch)_14rem] @[940px]:justify-between @[940px]:gap-12">
+      <div className="@[940px]:grid @[940px]:grid-cols-[minmax(0,72ch)_14rem] @[940px]:justify-between @[940px]:gap-12 @[1120px]:grid-cols-[minmax(0,1fr)_15rem] @[1600px]:grid-cols-[minmax(0,1fr)_17rem] @[1600px]:gap-16">
         <div className="min-w-0">
           <FadeIn>
             <div className="mb-10 border-b border-hairline pb-8">

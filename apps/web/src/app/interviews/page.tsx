@@ -81,7 +81,7 @@ export default function InterviewsIndexPage() {
   })).filter((t) => t.categories.length > 0);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-[1320px]">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <JsonLd data={interviewsSeo().jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
 
@@ -139,7 +139,7 @@ export default function InterviewsIndexPage() {
                         {group}
                       </Eyebrow>
                     )}
-                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 min-[1600px]:grid-cols-4 min-[2200px]:grid-cols-5">
                       {t.categories
                         .filter((c) => c.group === group)
                         .map((c) => (

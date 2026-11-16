@@ -14,7 +14,7 @@ export function generateMetadata(_props: unknown, parent: ResolvingMetadata) {
 export default function ProblemListPage() {
   const { section, problems } = dsaContent();
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <JsonLd data={listSeo(section).jsonLd} />
       <Breadcrumb items={[...hubCrumbs(section), { label: "Problems" }]} />
       <PageHeader className="mt-10 mb-10 border-b border-hairline pb-10" title={LIST_TITLE} lead={LIST_DESCRIPTION} />

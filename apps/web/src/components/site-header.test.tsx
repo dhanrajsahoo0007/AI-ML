@@ -91,7 +91,7 @@ describe("SiteHeader section panel layout", () => {
     expect(html).toContain("columns-2");
   });
 
-  it("caps the nav bar width for ultrawide monitors and keeps crowded bars visible from 1280px (xl)", () => {
+  it("keeps the nav bar full width and keeps crowded bars visible from 1280px (xl)", () => {
     const eightSections = Array.from({ length: 8 }, (_, i) => ({
       ...singleBlockSection,
       key: `sec-${i}`,
@@ -101,7 +101,8 @@ describe("SiteHeader section panel layout", () => {
     const html = renderToStaticMarkup(
       <SiteHeader navTree={eightSections} profileMenu={null} profileMenuMobile={null} />
     );
-    expect(html).toContain("max-w-[1600px]");
+    expect(html).toContain("w-full");
+    expect(html).not.toContain("max-w-[1600px]");
     expect(html).toContain("xl:flex");
     expect(html).not.toContain("min-[1440px]:flex");
   });

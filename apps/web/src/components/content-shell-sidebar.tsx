@@ -56,7 +56,7 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
     <>
       {/* Desktop: pinned below the header, scrolls on its own; the page scrolls normally so the footer follows the content */}
       <div
-        className="sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out lg:block min-[1601px]:border-l"
+        className="sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out lg:block"
         style={{ width: collapsed ? 0 : width, overflow: "hidden" }}
       >
         {!collapsed && (

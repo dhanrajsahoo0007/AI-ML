@@ -14,7 +14,7 @@ interface SectionIndexProps {
 
 export function SectionIndex({ breadcrumbLabel, title, subtitle, banner, children }: SectionIndexProps) {
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-[1320px]">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: breadcrumbLabel }]} />
 
       <FadeIn>
@@ -23,7 +23,10 @@ export function SectionIndex({ breadcrumbLabel, title, subtitle, banner, childre
 
       {banner}
 
-      <StaggerChildren className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" itemClassName="h-full">
+      <StaggerChildren
+        className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 min-[1600px]:grid-cols-4 min-[2200px]:grid-cols-5"
+        itemClassName="h-full"
+      >
         {children}
       </StaggerChildren>
     </div>

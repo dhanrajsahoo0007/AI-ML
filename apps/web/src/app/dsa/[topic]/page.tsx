@@ -39,7 +39,7 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
   return (
     <div>
       <JsonLd data={seo.jsonLd} />
-      <div className="mx-auto max-w-6xl px-4 pt-6 md:px-8">
+      <div className="mx-auto max-w-6xl px-4 pt-6 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
         <Breadcrumb items={[...hubCrumbs(section), { label: topic.fm.title }]} />
       </div>
       <ArticleLayout

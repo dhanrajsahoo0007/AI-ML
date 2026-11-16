@@ -2,8 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { TEMPLATE_PAGES } from "./support/templates";
 
 // Responsive & multi-display invariants (@core): verifies zero horizontal overflow, single-row desktop navigation,
-// ultrawide framing (<= 1600px centered), tablet drawer fallback (< 1024px), single visible footer, and container-aware
-// TOC rail resizing across phones, tablets, laptops, and large monitors.
+// full-width monitor expansion (nav + ContentShell span viewport width on large monitors), tablet drawer fallback
+// (< 1024px), single visible footer, and container-aware TOC rail resizing across phones, tablets, laptops, and
+// large monitors.
 
 const VIEWPORTS = [
   { name: "mobile-xs", width: 320, height: 568 },
@@ -59,16 +60,12 @@ test.describe("responsive layout invariants @core", () => {
           // 2. Exactly one visible footer (ContentShell hides root footer at lg+, never zero or two).
           expect(await visibleFooters(page), `visible footers on ${p.url} at ${vp.width}px`).toBe(1);
 
-          // 3. On desktop (1280px+), header nav bar is visible, single-row, non-overlapping, and <= 1600px wide.
+          // 3. On desktop (1280px+), header nav bar is visible, single-row, non-overlapping, and spans full monitor width.
           if (vp.width >= 1280) {
             const nav = page.locator("header nav[aria-label='Main']");
             await expect(nav).toBeVisible();
             const navBox = (await nav.boundingBox())!;
-            expect(navBox.width).toBeLessThanOrEqual(1600.5);
-            if (vp.width > 1600) {
-              const center = navBox.x + navBox.width / 2;
-              expect(Math.abs(center - vp.width / 2)).toBeLessThan(2);
-            }
+            expect(Math.abs(navBox.width - vp.width)).toBeLessThan(2);
 
             const linksBar = nav.locator("> div").nth(0);
             await expect(linksBar).toBeVisible();
@@ -99,13 +96,15 @@ test.describe("responsive layout invariants @core", () => {
             }
           }
 
-          // 4. On ultrawide monitors, ContentShell stays centered within max-w-[1600px].
+          // 4. On desktop and large monitors, ContentShell spans full viewport width so sidebar stays flush left and content expands.
           const shell = page.locator("[data-content-shell]");
-          if ((await shell.count()) > 0 && vp.width > 1600) {
+          if ((await shell.count()) > 0 && vp.width >= 1280) {
             const shellBox = (await shell.boundingBox())!;
-            expect(shellBox.width).toBeLessThanOrEqual(1600.5);
-            const center = shellBox.x + shellBox.width / 2;
-            expect(Math.abs(center - vp.width / 2)).toBeLessThan(2);
+            expect(Math.abs(shellBox.width - vp.width)).toBeLessThan(2);
+            if (vp.width >= 1920 && p.name === "article-diagrams") {
+              const articleBox = (await page.locator("article").first().boundingBox())!;
+              expect(articleBox.width).toBeGreaterThan(1200);
+            }
           }
 
           expect(errors, `page errors on ${p.url}`).toEqual([]);

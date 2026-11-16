@@ -33,11 +33,11 @@ const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items")
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-// The desktop bar is sized by how many sections it shows. Up to seven sections (`regular`): the phone menu below
-// 1100px, compact text up to 1280px, icons from 1440px, Subscribe and arrows from 1536px (inside the 1600px
-// max nav width). With eight or more sections (`crowded`, eleven in preview/local today, using `shortLabel`s):
-// laptops from 1280px still get the full desktop bar (slightly tighter text and gaps), scaling up at 1440px
-// and 1536px without adding icons/arrows that would overflow a 1600px bar.
+// The desktop bar is sized by how many sections it shows, spanning the full monitor width. Up to seven sections
+// (`regular`): the phone menu below 1100px, compact text up to 1280px, icons from 1440px, Subscribe from 1800px,
+// arrows from 1900px. With eight or more sections (`crowded`, eleven in preview/local today, using `shortLabel`s):
+// laptops from 1280px still get the full desktop bar (compact text and gaps), scaling up smoothly at 1440px,
+// 1536px, 1920px (icons), 2040px (Subscribe), and 2200px (arrows) to fill large monitors cleanly.
 // The class names are written out in full so Tailwind can see them.
 const BAR_SIZES = {
   regular: {
@@ -50,21 +50,21 @@ const BAR_SIZES = {
     pricing: "xl:px-4 xl:py-2 xl:text-sm",
     gem: "xl:block",
     icon: "min-[1440px]:block",
-    subscribe: "2xl:inline-flex",
-    arrow: "2xl:block",
+    subscribe: "min-[1800px]:inline-flex",
+    arrow: "min-[1900px]:block",
   },
   crowded: {
     show: "xl:flex",
     phone: "xl:hidden",
-    item: "xl:text-[11.5px] min-[1440px]:text-[12.5px] 2xl:text-[13px]",
-    barGap: "xl:gap-3 min-[1440px]:gap-4 2xl:gap-6",
-    linkGap: "xl:gap-1.5 min-[1440px]:gap-2.5 2xl:gap-3.5",
+    item: "xl:text-[11.5px] min-[1440px]:text-[12.5px] 2xl:text-[13px] min-[1920px]:text-sm",
+    barGap: "xl:gap-3 min-[1440px]:gap-4 2xl:gap-5 min-[1920px]:gap-6",
+    linkGap: "xl:gap-1.5 min-[1440px]:gap-2.5 2xl:gap-3.5 min-[1920px]:gap-4",
     toolGap: "xl:gap-2 2xl:gap-3",
     pricing: "min-[1440px]:px-3.5 min-[1440px]:py-1.5 2xl:px-4 2xl:py-2 2xl:text-sm",
     gem: "2xl:block",
-    icon: "hidden",
-    subscribe: "hidden",
-    arrow: "hidden",
+    icon: "min-[1920px]:block",
+    subscribe: "min-[2040px]:inline-flex",
+    arrow: "min-[2200px]:block",
   },
 } as const;
 const REGULAR_BAR_MAX = 7;
@@ -139,7 +139,7 @@ export function SiteHeader({
       <nav
         aria-label="Main"
         className={cn(
-          "mx-auto flex h-16 w-full max-w-[1600px] items-center gap-2 px-3 min-[375px]:gap-3 min-[375px]:px-4 sm:px-6",
+          "flex h-16 w-full items-center gap-2 px-3 min-[375px]:gap-3 min-[375px]:px-4 sm:px-6 min-[1920px]:px-8",
           bar.barGap
         )}
       >
@@ -239,7 +239,7 @@ export function SiteHeader({
           {openSection && (
             <div
               data-tone={openSection.tone}
-              className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]"
+              className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)] min-[1920px]:w-[72rem]"
             >
               <SectionPanel
                 key={openSection.key}
