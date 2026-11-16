@@ -2,43 +2,390 @@
 title: "Context Compaction, Resets & External State"
 description: "Surviving long-horizon tasks: summarization vs. fresh context resets, handoff artifacts, curing context anxiety and externalizing state."
 icon: layers
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Surviving long-horizon tasks: summarization vs. fresh context resets, handoff artifacts, curing context anxiety and externalizing state.
+An agent that runs for hours outgrows its context window many times over. Every file it reads, every test it runs and every message it writes stays in the window until something takes it out. This page is about that something: **compaction** (summarise the window and carry on), **resets** (start a fresh window from a written handoff) and **external state** (keep the record in files and databases, not in the prompt). Interviewers use it to test whether you can keep an agent sharp at step 300, not only at step 3. For the wider question of what belongs in the window on any one turn, start with [Context Engineering](/ai-system-design/genai-system-design/context-engineering).
 
 ## TL;DR
 
+- Quality falls as the window fills, long before it is full. Anthropic calls this **context rot**. Some models also rush to finish as they near what they think is their limit: **context anxiety**.
+- **Compaction** replaces old turns with a model-written summary and keeps going in the same session. It keeps the thread, but every summary loses detail.
+- A **reset** throws the window away and starts a new session from a **handoff note**, the git history and the tests. It gives a clean slate, but only what was written down survives.
+- The lightest edit is **clearing old tool results**: the calls stay visible, the bulky output goes. Try it before you summarise anything.
+- The window is a working set, not the record. **External state** (the repository, a progress note, a structured task list, a run store) holds what the window cannot, and a new session reads back only what it needs.
+- Choose by the shape of the work: compact mid-task, when the conversation still matters; reset at a milestone, when progress is saved and checkable.
+
 ## The idea in plain English
+
+Think of a surgeon handing over at the end of a twelve-hour shift. Compaction is the same surgeon carrying on with a page of notes about the morning, tired, but still holding the thread. A reset is a fresh surgeon who reads the chart, checks the patient's vital signs and takes over. The fresh surgeon is sharper, but knows only what the chart says. So the chart has to be good: what was done, what was decided and why, what is still open, and what comes next.
+
+The window is the surgeon's working memory. The chart, the scans and the lab results live outside it, and that is why a handover is possible at all.
 
 ## Core concepts
 
+Every figure on this page follows the bug-fix coding agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#core-concepts). It works in the `brightpost-orders` repository on the issue "Order import drops the last line of a CSV file". In nine steps it searches, reads `src/parser.ts`, fixes a loop bound, finds that an empty file now crashes, fixes that too, and gets all 18 tests passing. Then the developer asks a follow-up in the same session: "Also handle Windows line endings (CRLF)". The harness runs the agent under an illustrative budget of 32,000 tokens.
+
 ### Context rot and context anxiety in long sessions
+
+**Context rot** is Anthropic's name for a measured effect: as the number of tokens in the window grows, the model's ability to recall what is in it falls. Every model shows it, some more gently than others. Anthropic describes the window as an "attention budget": each new token draws on it, so the goal is the smallest set of high-signal tokens that does the job. A bigger window raises the ceiling, but it does not stop the slide.
+
+The coding agent shows why the window fills. At step 1 it holds 3,800 tokens: instructions, tool definitions and the issue. By step 9 it holds 24,000, 75 % of its budget. Files, its own history and tool results added 20,200 tokens in eight steps, about 2,500 per step. Most of that is test output and file contents the agent has already acted on.
+
+**Context anxiety** is a behaviour, not a measurement. Anthropic's Prithvi Rajasekaran describes models that "begin wrapping up work prematurely" as they near what they believe is their context limit (March 2026). The agent skips the last checks and declares success. In his harness, Claude Sonnet 4.5 showed it strongly enough that resets became essential: compaction does not give the model a clean slate, so the anxiety persisted. Claude Opus 4.5 "largely removed that behavior", and the resets were dropped in favour of automatic compaction. The lesson for design: whether a model needs resets is something you measure on your model, not something you assume.
 
 ### Compaction and sliding-window summarization
 
+Compaction summarises a window that is nearing its limit and restarts it with the summary. Here is the coding agent's window filling, being compacted at step 9, and carrying on with the follow-up.
+
+<AnimatedDiagram
+  spec="animated/agents/compaction"
+  stepper
+  minWidth={620}
+  caption="Compaction keeps the instructions and the task word for word and swaps 20,200 tokens of files, history and tool results for a 1,500-token summary and the file in hand. Token counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Step 1: the window starts small">
+    Instructions 2,000, tool definitions 1,500 and the issue 300: 3,800 tokens, 12 % of the budget. Nothing in it is
+    stale yet.
+  </StepCard>
+  <StepCard n={2} title="Step 9: the window reaches the trigger">
+    Two files, the agent's own calls and every tool result bring it to 24,000 tokens, 75 %. The harness compacts at 75
+    %, so this request triggers it. Tool results are the biggest slice, 9,800 tokens.
+  </StepCard>
+  <StepCard n={3} title="Compact: a summary replaces the history">
+    The model summarises its files, history and tool results into 1,500 tokens (ringed). The harness re-attaches the
+    file being edited, `parser.ts`. The window drops to 8,500 tokens, 27 %.
+  </StepCard>
+  <StepCard n={4} title="Continue: the follow-up uses the freed space">
+    The agent reads `parser.test.ts` again, edits, runs the tests and passes. It ends at 15,800 tokens, 49 %, with room
+    for about three more follow-ups of the same size.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative). Before: 3,800 + 6,400 + 4,000 + 9,800 = **24,000 tokens**. After: 3,800 + 1,500 (summary) + 3,200 (`parser.ts`) = **8,500 tokens**, so compaction freed 24,000 − 8,500 = 15,500. The follow-up adds 3,200 (the test file, read again) + 1,500 (history, with the developer's message) + 2,600 (tool results): 8,500 + 7,300 = **15,800 tokens**. The summary itself costs one model call that reads all 24,000 tokens and writes 1,500.
+
+What a good summary keeps, in Anthropic's description of Claude Code: architectural decisions, unresolved bugs and implementation details, plus the five most recently accessed files. What it drops: redundant tool outputs and messages. Here that means "loop bound changed from `< n - 1` to `< n`; empty input returns `[]`; 18 tests pass" survives, and the raw test log does not.
+
+The Claude API can do this on the server. With threshold compaction, the API summarises when the input passes a trigger you set, then answers as usual (beta header `compact-2026-01-12`, as of November 2026):
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 4096,
+  "context_management": {
+    "edits": [
+      {
+        "type": "compact_20260112",
+        "trigger": { "type": "input_tokens", "value": 150000 },
+        "instructions": "Summarise for a coding agent. Keep file paths, every decision and why, failing tests and the next step."
+      }
+    ]
+  },
+  "messages": ["…"]
+}
+```
+
+The response then starts with a `compaction` block. You append the response as usual, and on the next request the API ignores every block before it:
+
+```json
+{
+  "type": "compaction",
+  "content": "Fixing brightpost-orders: CSV import drops the last line. src/parser.ts: loop bound < n - 1 → < n; empty input returns []. 18 tests pass. Next: handle CRLF line endings."
+}
+```
+
+The trigger's default is 150,000 input tokens and its minimum is 50,000, so the 32,000-token budget in the figure is a harness running its own summariser. `instructions` replaces the default summary prompt entirely; it does not add to it. A second form, compaction on demand (beta header `compact-2026-09-04`), lets your code decide when to summarise and returns a signed block that must be sent back unchanged.
+
+**Sliding-window summarization** is the conversational version. Keep the last few turns word for word and summarise everything older into a running summary. Both API forms support keeping recent turns. Chat assistants use this pattern (see [Conversation & Short-Term Memory](/ai-system-design/genai-system-design/conversation-short-term-memory)); summaries of summaries are covered on [Memory Summarization & Compression](/ai-system-design/genai-system-design/memory-summarization-compression).
+
+<Callout tone="red" title="What breaks">
+  Compacting again and again. Each summary is a lossy copy of the last one, and the model wrote it, so an early wrong
+  belief can survive every round while the evidence against it is dropped. Claude Code's documentation adds a second
+  failure: if one file or tool output is so large that the window refills right after each summary, it stops
+  auto-compacting after a few attempts and shows an error instead of looping.
+</Callout>
+
 ### Clean context resets with structured handoffs
+
+A reset ends the session on purpose. Before it does, the old session writes down what the next one needs. Here is the same moment, step 9 and the follow-up, handled with a reset instead.
+
+<AnimatedDiagram
+  spec="animated/agents/reset-with-handoff"
+  stepper
+  minWidth={620}
+  caption="A reset throws the whole window away and keeps only what was written down. The note is a few hundred tokens; the git history and the tests hold the rest. Token counts are illustrative."
+/>
+
+**How to read it.** Step 1 is session 1's full window, as in the compaction figure. Step 2: before it ends, session 1 commits its fix and writes `HANDOFF.md` in four parts: what is done, which decisions were made, what debt is open, and what to do next. Step 3: session 2 starts from instructions, tool definitions, the note (ringed) and the new task. Its first actions read the note and the git log and run the 18 tests, so it checks what the note claims instead of trusting it.
+
+**The numbers** (illustrative). Session 2 starts at 2,000 + 1,500 + 600 + 300 = **4,400 tokens**, 14 %, against 8,500 after compaction. It has no copy of `parser.ts`, so it reads both files (6,400). After the same follow-up it ends at 4,400 + 6,400 + 1,500 + 2,600 = **14,900 tokens**, against 15,800 with compaction. The token gap is small, 900. The real difference is what survived: a model's summary of everything, or the few facts someone chose to write down and can check.
+
+Anthropic's harness for long-running coding agents builds on this. Every session starts with no memory of the last one, so each starts with the same routine: confirm the working directory, read the git log and the progress file, pick the highest-priority unfinished feature from a feature list, start the dev server and run a basic end-to-end test before touching anything.
+
+<Callout tone="red" title="What breaks">
+  A note that says "done" without evidence. Anthropic saw later sessions read the progress so far and declare the whole
+  job finished. Its fix: a feature list in which every feature starts as failing, and a rule that a session may only
+  flip a feature's `passes` field after testing it.
+</Callout>
 
 ### Moving state out of the prompt into files and databases
 
+Both compaction and resets work better when less of the task lives only in the window. Each kind of state has a natural home outside it:
+
+- **The code and data themselves** stay in the repository and are read on demand. The window holds file paths and identifiers, and the agent opens a file when a step needs it. Anthropic calls this loading context "just in time".
+- **Progress** goes in a short note the agent updates as it works (`HANDOFF.md` here, `claude-progress.txt` in Anthropic's harness, a `NOTES.md` in its context engineering post).
+- **Structured status** goes in a file the agent edits field by field. Anthropic's harness keeps its feature list in JSON, not Markdown, because the model is "less likely to inappropriately change or overwrite" JSON.
+- **History** goes in git. A descriptive commit per finished unit is both a log and an undo button.
+- **Run state** goes in a database the harness owns: which step, how many tokens, which approvals are pending. See [State Persistence & Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval) for checkpoints.
+
+The Claude API's memory tool (`memory_20250818`, released with Claude Sonnet 4.5 in September 2025) gives the model a directory of files that outlives the window. With context editing on, the model gets a warning before old tool results are cleared, so it can save what matters first.
+
 ## Architecture
+
+Here is where the coding agent's state lives, and how a new session gets it back.
+
+<AnimatedDiagram
+  spec="animated/agents/state-outside-the-window"
+  stepper
+  minWidth={620}
+  caption="The window is a working set, not the record. Code, history, progress and run state live outside it, and a new session reads back only what it needs."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The window holds only this step">
+    The developer's task reaches the coding agent, and the harness runs its loop. The window holds the instructions, the
+    task and whatever the current step needs.
+  </StepCard>
+  <StepCard n={2} title="Code stays in the repository">
+    The agent reads `parser.ts` when it needs it, not up front. A file it no longer needs can leave the window, because
+    it can be read again.
+  </StepCard>
+  <StepCard n={3} title="Each finished fix is committed and noted">
+    When the tests pass, the agent commits and adds a line to `HANDOFF.md`. Progress now exists outside the window, so
+    losing the window loses nothing that was finished.
+  </StepCard>
+  <StepCard n={4} title="The harness records the run">
+    The harness saves the run's progress to its own store: step 9, 24,000 tokens, status. This is the harness's record,
+    not the model's, so a crash or a reset cannot erase it.
+  </StepCard>
+  <StepCard n={5} title="A new session reads it all back">
+    A fresh session reads the note and the git log first. The harness resumes the run at step 9 from the store. The
+    files load on demand, as in step 2.
+  </StepCard>
+</StepCards>
+
+The harness needs five parts for this:
+
+1. **A token counter** that measures the window on every request, by category, as the figure's bars do.
+2. **A policy** that decides when to clear, compact or reset, with thresholds in code, not in the prompt.
+3. **A summariser** with a prompt written for the task: what a coding summary must keep differs from a support chat's.
+4. **A state writer** that commits, updates the note and saves run state at every milestone, before it is needed.
+5. **A start-up routine** for every new session: read the note, read the log, run the tests, then work.
 
 ## Deep dive
 
+### Worked example: one bug fix, compacted and then reset
+
+This follows the [compaction figure](#compaction-and-sliding-window-summarization) through the whole session, then replays the follow-up with a reset. Token counts are illustrative, for a 32,000-token budget with the trigger at 24,000.
+
+| #   | Moment                   | What happens                                                  | Window                |
+| --- | ------------------------ | ------------------------------------------------------------- | --------------------- |
+| 1   | Step 1                   | Instructions, tools and the issue                             | 3,800 (12 %)          |
+| 2   | Steps 2–8                | Search, read two files, two fixes, two test runs              | grows ~2,500 per step |
+| 3   | Step 9                   | 18 tests pass; window reaches the trigger                     | 24,000 (75 %)         |
+| 4   | Compaction call          | Reads 24,000 tokens, writes a 1,500-token summary             | one extra model call  |
+| 5   | After compaction         | Summary + `parser.ts` re-attached                             | 8,500 (27 %)          |
+| 6   | Follow-up, compacted     | Read `parser.test.ts`, add a CRLF test, fix, pass             | 15,800 (49 %)         |
+| 7   | Alternative: reset       | Session 1 commits and writes `HANDOFF.md` (600 tokens)        | session 1 ends        |
+| 8   | Session 2 starts         | Instructions, tools, note, new task; reads log, runs 18 tests | 4,400 (14 %)          |
+| 9   | Follow-up, after a reset | Reads both files, same fix                                    | 14,900 (47 %)         |
+
+Three things to take from it:
+
+- **Both cost one pass over the full window.** Compaction reads 24,000 tokens to write a summary; a reset reads them to write the note. Neither is free, so neither should run every turn.
+- **Compaction keeps what the model judged important; a reset keeps what was written down.** If the developer had said "don't touch the header row" in step 4, the summary might keep it. The note keeps it only if the agent wrote it under "Decisions".
+- **The reset checks itself.** Session 2 runs the 18 tests before it trusts "18 pass". A compacted session believes its summary.
+
 ### Designing handoff artifacts (task state, decisions, open debt)
+
+A handoff note is a contract between two sessions that share nothing else. Write it for a reader with no memory:
+
+- **Task state.** What is done, with evidence: "18 tests pass (commit on `fix/last-line`)", not "parser fixed".
+- **Decisions and why.** "Empty input returns `[]`, not an error, because the importer treats an empty file as zero orders." Without the why, the next session may undo it.
+- **Open debt.** Known gaps and shortcuts: "CRLF not handled", "no test for a file without a trailing newline".
+- **Next step.** One concrete action: "add a CRLF test first, then fix". A list of ten is a plan; the next session needs a starting point.
+- **Pointers, not copies.** File paths, commit ids and test names, so the next session loads details on demand.
+
+Keep it short: hundreds of tokens, not thousands. Write status the agent will update in JSON, and prose for the reasoning. Write the note at every milestone, not only at the end; a session that dies at step 7 should leave a note from step 5.
 
 ### Pruning noisy tool outputs while preserving evidence
 
+Tool results are the biggest slice of the coding agent's window: 9,800 of 24,000 tokens at step 9. Most of a test run's output is passing tests; the evidence is one failing assertion. Prune in three ways, lightest first:
+
+1. **Shape results at the source.** A `run_tests` tool that returns "17 passed, 1 failed: parses an empty file, parser.test.ts:42, TypeError: …" instead of 400 lines of log. Write the full log to a file and return its path.
+2. **Clear old results.** Once the model has acted on a result, the raw text is rarely needed again. Anthropic calls clearing it "one of the safest lightest touch forms of compaction".
+3. **Summarise what remains.** Compaction, as above.
+
+The Claude API's context editing clears old tool results by rule (beta header `context-management-2025-06-27`, as of November 2026). This clears once the input passes 30,000 tokens, keeps the last three tool calls' results, and skips the clear unless it frees at least 5,000 tokens:
+
+```json
+{
+  "context_management": {
+    "edits": [
+      {
+        "type": "clear_tool_uses_20250919",
+        "trigger": { "type": "input_tokens", "value": 30000 },
+        "keep": { "type": "tool_uses", "value": 3 },
+        "clear_at_least": { "type": "input_tokens", "value": 5000 }
+      }
+    ]
+  }
+}
+```
+
+The defaults are a trigger of 100,000 input tokens and three kept tool uses. Each cleared result becomes a short placeholder, and the tool calls stay visible unless `clear_tool_inputs` is set, so the model still knows it ran the tests. `exclude_tools` protects results that must never go, such as a tool that returns approvals.
+
+<Callout tone="red" title="What breaks">
+  Pruning the evidence with the noise. If the only copy of the failing assertion is cleared, the model will rerun the
+  tests to find out why it made a change, or worse, guess. Keep the evidence somewhere: in the shaped result, in the
+  note, or in a file the result points to.
+</Callout>
+
 ### Choosing between compaction and reset
+
+There are three tools, and the cheapest one that works is the right one.
+
+<AnimatedDiagram
+  spec="animated/agents/compact-or-reset"
+  stepper
+  minWidth={620}
+  caption="Try the cheapest edit first. Compact mid-task, when the thread still matters; reset at a milestone, or when compaction stops helping."
+/>
+
+**How to read it.** Start at the top left. If old tool results are most of the window, clear them and stop: nothing the model needs is lost. If not, ask whether the work is at a milestone, with progress saved outside the window. If yes, reset: the next session starts clean and checks the record. If not, compact: you are mid-task and the thread still matters. The dashed arrow is the escape hatch: when the window refills at once after compacting, or the model starts wrapping up early, write the state out and reset.
+
+Anthropic's context engineering post gives the same split by task shape: compaction for tasks with a lot of back-and-forth, note-taking for iterative development with clear milestones, and sub-agents for research where parallel exploration pays (see [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems)). A sub-agent is a reset in miniature: it explores in a fresh window and returns a summary of 1,000 to 2,000 tokens.
 
 ## Trade-offs
 
+| Decision                        | Option A                          | Option B                                      | Guidance                                                        |
+| ------------------------------- | --------------------------------- | --------------------------------------------- | --------------------------------------------------------------- |
+| Clear tool results vs summarise | Exact, cheap, keeps the calls     | Shrinks everything, loses detail              | Clear first; summarise only when history itself is the bulk     |
+| Compact vs reset                | Keeps the thread, no setup        | Clean slate, checkable state                  | Compact mid-task; reset at milestones or when compaction fails  |
+| Server compaction vs your own   | No summariser code, one parameter | Full control of the prompt and timing         | Server-side unless the summary needs task-specific structure    |
+| Early vs late trigger           | More headroom, more summaries     | Fewer summaries, more rot before each         | Trigger well before the limit; measure quality, not only tokens |
+| Note in Markdown vs JSON        | Easy to read and write            | Harder for the model to overwrite by accident | JSON for status fields, Markdown for reasoning                  |
+| State in the window vs outside  | Nothing to build                  | Survives resets and crashes                   | Outside for anything the task cannot lose                       |
+
 ## Real-world examples
+
+- **Claude Code** compacts automatically as the window nears its limit. Its documentation warns that detailed instructions from early in the conversation may be lost, so persistent rules belong in `CLAUDE.md`. A "Compact Instructions" section in `CLAUDE.md`, or `/compact` with a focus, controls what the summary keeps. Sub-agents work in their own window and return a summary.
+- **Claude API compaction** (as of November 2026): threshold compaction (`compact_20260112`) and on-demand compaction (`compact-2026-09-04`), both in beta, on Claude Opus 4.6, Claude Sonnet 4.6 and later models.
+- **Context editing and the memory tool** arrived with Claude Sonnet 4.5 in September 2025: tool-result clearing, later thinking-block clearing, and a file-based memory that outlives the window.
+- **Anthropic's long-running coding harness** (November 2025): an initializer session writes a feature list of over 200 features, all failing, a `claude-progress.txt` log, an `init.sh` and a first commit. Every later session builds one feature, tests it, commits and updates the log.
+- **Anthropic's three-agent harness** (March 2026): a planner, a generator and an evaluator. Resets were essential with Claude Sonnet 4.5; with Claude Opus 4.5 they were dropped for automatic compaction. A later run with Claude Opus 4.6 built a digital audio workstation app in 3 hours 50 minutes for $124.70.
+- **Claude playing Pokémon** keeps tallies in its own notes ("Pikachu has gained 8 levels toward the target of 10") and reads them back after each reset, across thousands of steps.
 
 ## Common pitfalls
 
+- Waiting until the window is full. Quality falls well before the limit, and a compaction call still needs the whole window to fit.
+- Summarising with a generic prompt. A coding summary must keep paths, decisions and failing tests; a default prompt may not.
+- Compacting the same history again and again until the summary is mostly guesses.
+- Writing the handoff note only at the end, so a crash leaves nothing.
+- Notes that say "done" without evidence, which invite the next session to stop.
+- Clearing tool results that hold the only copy of the evidence.
+- Keeping rules only in early conversation turns, where compaction can drop them.
+- Assuming a model needs resets, or does not, without measuring it on long tasks.
+
 ## How to answer in an interview
 
+1. Name the problem: windows fill, and quality falls before they are full (context rot). Some models also rush near the limit (context anxiety).
+2. Give the three tools in cost order: clear tool results, compact, reset with a handoff.
+3. Say what each keeps and loses: compaction keeps the thread and loses detail; a reset keeps only what was written down, but it is checkable.
+4. Move state out of the window: repository, progress note, JSON status, git, a run store.
+5. Describe the start-up routine of a new session and how you would measure whether the policy works.
+
+**What interviewers listen for:** a cost-ordered policy with thresholds in code, a concrete handoff format, and a new session that verifies the note before trusting it.
+
+**Red flags:** "use a model with a bigger window", or "summarise the conversation" with no word on what the summary must keep.
+
 ## Further reading
+
+- [Effective context engineering for AI agents (Anthropic, 29 Sep 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- [Effective harnesses for long-running agents (Anthropic, 26 Nov 2025)](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [Harness design for long-running application development (Anthropic, 24 Mar 2026)](https://www.anthropic.com/engineering/harness-design-long-running-apps)
+- [Compaction overview (Claude API docs)](https://platform.claude.com/docs/en/build-with-claude/compaction)
+- [Compaction at a token threshold (Claude API docs)](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold)
+- [Compaction on demand (Claude API docs)](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand)
+- [Context editing (Claude API docs)](https://platform.claude.com/docs/en/build-with-claude/context-editing)
+- [How Claude Code works: the context window (Claude Code docs)](https://code.claude.com/docs/en/how-claude-code-works)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What is context rot, and why does a bigger context window not fix it?"
+    category="Concepts"
+    level="Junior"
+  >
+    Context rot is the drop in a model's ability to recall and use what is in its window as the number of tokens grows.
+    Anthropic describes the window as an attention budget that every token draws on. A bigger window raises the ceiling
+    but not the slope: recall still falls as the window fills, long before it is full. So a long-running agent needs to
+    keep its window small and high-signal, by clearing, compacting or resetting, whatever the model's maximum.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does compaction work, and what should the summary keep?"
+    category="Concepts"
+    level="Mid"
+  >
+    When the window passes a threshold, the model summarises the older turns and the session continues from the summary
+    instead of the full history. Instructions and the task stay word for word; often the most recent files and turns are
+    kept too. For a coding agent the summary must keep decisions and their reasons, unresolved bugs, file paths and the
+    next step, and can drop raw tool output. Write the summary prompt for the task, because a generic one may drop
+    exactly the detail the next step needs.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you reset the context instead of compacting it?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    Compact mid-task, when the conversation itself still matters and there is no clean point to hand over. Reset at a
+    milestone, once progress is committed, tested and written in a handoff note, because a fresh window is sharper and
+    the new session can check the record. Also reset when compaction stops helping: the window refills at once,
+    summaries of summaries lose the thread, or the model starts wrapping up early. Before either, try clearing old tool
+    results, which is cheaper and loses less.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Design the handoff artifact for a coding agent that works on a feature over several days."
+    category="Architecture"
+    level="Senior"
+  >
+    Keep status in a JSON feature list where every feature starts as failing and only a tested session may flip its
+    passes field, so no session can declare the job done early. Keep a short progress note with what was done (with
+    evidence such as commits and test names), decisions and why, open debt, and one next step. Commit after every
+    finished unit with a descriptive message, so git is both the log and the undo. Give every new session a fixed
+    start-up routine: read the note and the log, run the tests, then pick the next failing feature.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Tool results are most of your agent's context. How do you shrink them without losing evidence?"
+    category="Architecture"
+    level="Mid"
+  >
+    First shape results at the source: return a short structured result, such as counts plus the failing assertion and
+    its location, and write the full log to a file whose path is returned. Then clear old results the model has already
+    acted on, keeping the tool calls visible and the last few results intact, as the Claude API's context editing does.
+    Exclude tools whose results must never be dropped. Summarise only what is left, and make sure each piece of evidence
+    survives in at least one place: the shaped result, the note or a file.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your long-running agent declares success too early on long tasks. How do you diagnose and fix it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    Look at where in the run it stops: if it happens as the window fills, it may be context anxiety, where the model
+    wraps up as it nears what it believes is its limit. It may also be a handoff problem, where a new session reads
+    progress notes and concludes the job is done. Fix the first with earlier compaction or resets, and measure again on
+    your model, since newer models show it less. Fix the second with an explicit list of required features that all
+    start failing, and a rule that only a passing test can mark one done. In both cases, put a verifier outside the
+    model in the loop.
+  </InterviewQuestion>
+</InterviewQuestions>

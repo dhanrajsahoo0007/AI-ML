@@ -1,0 +1,16 @@
+title: A run with checkpoints, a crash and a resume from the last checkpoint
+alt: >-
+  A timeline diagram built in seven steps, in three bands: worker A on top, the checkpoints in the middle and worker
+  B at the bottom. The run is the Brightpost refund for order 4471. Worker A runs get_order (call 1) and search_help
+  (call 2), and saves a checkpoint after each, cp_1 and cp_2. Call 3 asks for create_refund, which is held because
+  £42 is over £30; the run saves cp_3, the paused call with its idempotency key, and stops. The support agent
+  approves at 10:20 and worker A saves cp_4. Worker A then runs create_refund, the payments service makes refund
+  R-2291, and the worker crashes, drawn in red, with nothing saved. Worker B loads the latest checkpoint, cp_4, which
+  is ringed; calls 1 to 3 and the approval do not run again. Worker B runs create_refund with the same key, gets
+  R-2291 back and saves cp_5, then runs send_email (call 4, cp_6) and the reply (call 5, cp_7).
+caption: >-
+  A crash costs one step, not the run. Worker B starts from cp_4, and the refund it repeats is safe because the key
+  was saved in cp_3, before any money moved.
+tags: [agents, reliability, state, genai]
+source: original
+created: 2026-11-15
