@@ -1,0 +1,15 @@
+title: Four layers between a request and the API
+alt: >-
+  A layout with one column of boxes from top to bottom. An orange request from key k42 passes four layers before the
+  teal API services. Layer 1, lime, is a rate limit per key: a token bucket of 100 a second with a burst of 200; it
+  stops one key sending too many requests and answers 429 with Retry-After. Layer 2, lime, is a concurrency limit per
+  key of 20 requests in flight; it stops one key sending slow, heavy requests and answers 429. Layer 3, green, is a
+  fleet shedder that keeps 20 percent of capacity for critical calls; it stops all keys together going above capacity
+  and answers 503. Layer 4, green, is a worker shedder that drops test traffic, then reads, then writes; it stops one
+  worker pool being saturated and answers 503.
+caption: >-
+  Per-key limits keep tenants apart; the shedders protect the fleet when every key is within its limit but the sum is
+  not.
+tags: [case-studies, rate-limiter, load-shedding, rate-limiting]
+source: original
+created: 2026-11-17

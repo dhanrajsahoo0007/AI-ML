@@ -1,0 +1,19 @@
+title: Rate limiter high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, rate limiting, application services, async
+  pipeline and storage. Step 1: an API client's request reaches any API gateway through a load balancer, and the
+  rate limiter, drawn as the solid green accent, counts the key in that gateway's own memory before the request goes
+  to the API services. Step 2: a shared counter store is added, and the limiter reads the count, then writes it, drawn
+  red because two gateways can both allow the same last request. Step 3: the check becomes one atomic script in the
+  store, and a rejected client gets a 429 with Retry-After. Step 4: an operator edits rules and the kill switch in the
+  config service, which keeps plans and overrides in a rules database and serves a snapshot that every gateway polls
+  every 10 seconds. Step 5: the gateway keeps blocked keys in a local cache. Step 6: the limiter writes every decision
+  to a decision log that feeds usage analytics, so a new rule can run in shadow mode first. Step 7: a region sync swaps
+  each region's totals with the other regions every 10 seconds. Step 8: allowed requests pass a load shedder that
+  serves critical calls first before they reach the API services.
+caption: >-
+  A rate limiter: one atomic check per request in a sharded in-memory store, rules from a snapshot, blocked keys in
+  memory, fail open, count per region, shed by priority.
+tags: [case-studies, rate-limiter, architecture, rate-limiting]
+source: original
+created: 2026-11-17

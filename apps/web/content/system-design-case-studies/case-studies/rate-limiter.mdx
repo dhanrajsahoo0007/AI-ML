@@ -1,13 +1,677 @@
 ---
 title: "Design a Rate Limiter"
-description: "Token bucket, sliding windows and distributed rate limiting."
+description: "A rate limiter for a public API: token buckets in a sharded in-memory store, per-plan rules, fail open, regions and load shedding."
 logo: systems/rate-limiter
 modelledOn: [tech/oss/nginx, tech/oss/redis]
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a rate limiter for a public API: every customer key gets a quota, bursts are allowed, and one noisy customer must not slow anyone else.
+The hard parts are a check on every request that adds almost no latency, many gateways sharing one count without a race, and a limiter that must never become the outage itself.
 
-**What it will cover:** token bucket, sliding windows and distributed rate limiting.
+- Interviewers use this question to see whether you can pick an algorithm with numbers, make a shared counter atomic, and say what happens when the limiter fails.
 
-**Patterns used:** [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) · [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a rate limiter for a public API. Each customer gets a quota, and one noisy customer must not slow the others down."
+  level="Mid"
+  minutes={45}
+  bankId="design-rate-limiter"
+  tests={[
+    "Choosing an algorithm: fixed window, sliding window or token bucket, with numbers",
+    "Keeping one count correct across many gateway servers",
+    "Adding almost no latency to every request",
+    "Deciding what happens when the limiter itself fails",
+  ]}
+  clarify={[
+    { q: "What is limited: users, API keys or IP addresses?", a: "API keys, one per customer; IP limits for unauthenticated calls are a variant." },
+    { q: "How many keys and how much traffic?", a: "1,000,000 keys; 100,000 requests/s at peak, 40,000 on average." },
+    { q: "Are bursts allowed?", a: "Yes: each plan has a rate and a burst, for example 100/s with bursts of 200." },
+    { q: "How exact must the count be?", a: "Within 5% is fine; a few extra requests are cheaper than a slow check." },
+    { q: "One region or many?", a: "Three regions, each with its own gateways." },
+    { q: "What if the limiter is down?", a: "The API keeps answering: the limiter fails open." },
+  ]}
+  outOfScope={["Bot detection and CAPTCHAs", "DDoS defence at the network layer", "Billing for usage", "Per-user limits inside a customer's app"]}
+/>
+
+## Overview
+
+- Every request passes the **API gateway**, which finds the key's plan and asks the **rate limiter**: allow or reject.
+- The limiter keeps a **token bucket** per key and rule in a **sharded in-memory store**; one **atomic script** reads, refills, takes a token and writes back in one round trip.
+- A rejected request gets **429** with `Retry-After`; it never reaches the API services.
+- **Rules per plan** live in a rules database; gateways poll a **snapshot** every 10 s, so a change needs no deploy.
+- Gateways keep **blocked keys** in memory, so an abusive key costs no network calls; if the store is slow the check **fails open**.
+- Each **region counts locally**; a **load shedder** behind the limiter keeps capacity for critical calls when the sum of every key is too much.
+
+<Numbers
+  items={[
+    { value: "100K/s", label: "checks at peak", hint: "one per request" },
+    { value: "< 2 ms", label: "added at p99", hint: "one in-zone round trip" },
+    { value: "200 MB", label: "of counters", hint: "1M keys × 2 buckets × 100 B" },
+    { value: "0", label: "API errors when the limiter fails", hint: "fail open" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Limit requests per key per window", notes: "Per second for rate, per day for quotas; per endpoint where needed." },
+    { id: "F2", requirement: "Allow a burst", notes: "A key idle for a while may send up to its burst at once." },
+    { id: "F3", requirement: "Reject with 429 and Retry-After", notes: "Plus limit, remaining and reset headers on every response." },
+    { id: "F4", requirement: "Rules per plan, changeable without a deploy", notes: "Free, Pro, Enterprise, and overrides for single keys." },
+    { id: "F5", requirement: "One limit across many gateways and regions", notes: "60 gateways in 3 regions enforce one number per key." },
+    { id: "F6", requirement: "Protect critical traffic under overload", notes: "Writes and payments keep working when reads are shed." },
+  ]}
+/>
+
+- Out of scope: bot detection, network-layer DDoS defence, usage billing, limits inside a customer's own app.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Added latency", target: "p50 ≤ 0.5 ms, p99 ≤ 2 ms per request", why: "Every request pays it, including the allowed ones." },
+    { id: "N2", property: "Limiter failure", target: "0 failed API requests when the counter store is down", why: "The limiter protects the API; it must not take it down." },
+    { id: "N3", property: "Accuracy", target: "At most 5% above a key's limit in one region", why: "Customers are billed and promised by plan." },
+    { id: "N4", property: "Rule changes", target: "Live on every gateway within 30 s, no deploy", why: "Support raises a limit while the customer waits." },
+    { id: "N5", property: "Isolation", target: "A key at 1,000 × its limit adds < 1 ms to other keys' p99", why: "The noisy neighbour is the reason this exists." },
+    { id: "N6", property: "Scale", target: "100,000 checks/s today, 10 × by adding shards", why: "Traffic grows with customers." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Keys", assumption: "Given", result: "1,000,000 API keys; about 100,000 active in a minute" },
+    { quantity: "Requests", assumption: "40,000/s average, 2.5 × at peak", result: "100,000 requests/s; 40,000 × 86,400 ≈ 3.5 billion a day" },
+    { quantity: "Gateways", assumption: "3 regions × 20 gateways", result: "60 gateways; 100,000 ÷ 60 ≈ 1,700 requests/s each" },
+    { quantity: "Store operations", assumption: "One script per request", result: "100,000 scripts/s at peak" },
+    { quantity: "Store shards", assumption: "Plan 25,000 scripts/s a shard, leaving headroom", result: "100,000 ÷ 25,000 = 4 primaries, 1 replica each" },
+    { quantity: "Counter memory", assumption: "1,000,000 keys × 2 buckets (per second, per day) × ≈ 100 B with key name and overhead", result: "200 MB: one machine's memory; shards are for operations, not size" },
+    { quantity: "Raw numbers only", assumption: "1,000,000 × 2 buckets × 2 numbers × 8 B", result: "32 MB" },
+    { quantity: "Latency budget", assumption: "In-zone round trip ≈ 0.5 ms + script ≈ 0.05 ms", result: "≈ 0.6 ms typical; the 2 ms p99 covers the network tail" },
+    { quantity: "Decision log", assumption: "Every reject (1% of traffic) + 1% sample of allows ≈ 2,000 events/s × 200 B", result: "400 KB/s ≈ 35 GB a day" },
+    { quantity: "Rules snapshot", assumption: "3 plans × 50 endpoints + 10,000 key overrides × 100 B", result: "≈ 1 MB; 60 gateways poll every 10 s = 6 requests/s" },
+  ]}
+  note="The data is tiny; the cost is one extra round trip on every request."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 1 to 1: every check reads a bucket and writes it back | Read and write in one script; a read cache in front of counters cannot work |
+| D2 | Peak against average | Fleet 2.5 × (100,000 against 40,000/s); one key can jump 10 × its rate in a second | A burst parameter per plan (token bucket); store sized for the peak |
+| D3 | Consistency per operation | Approximate counts are fine (within 5%, N3); a bucket update must be atomic within a region | One primary per key, atomic scripts; regions sync asynchronously |
+| D4 | Latency target | The defining driver: ≤ 2 ms p99 on every request (N1) | In-memory store, one round trip, blocked keys cached in the gateway, a 5 ms timeout |
+| D5 | Durability | Losing counters only resets windows: a few extra requests once | No disk persistence for counters; rules are durable in a database |
+| D6 | Ordering | Not a driver here: counts add up the same in any order | No ordering anywhere in the design |
+| D7 | Duplicates | Not a driver here: a retried request costs one more token, by design | No deduplication; clients back off with `Retry-After` |
+| D8 | Data size and growth | 200 MB of counters, 1 MB of rules, 35 GB a day of decision events | Counters in memory; events in a columnar store |
+| D9 | Fan-out shape | One rule change must reach 60 gateways | Gateways poll a versioned snapshot; no per-request rule lookups |
+| D10 | Contention | One Enterprise key at 20,000/s makes 20 gateways update one counter | Atomic scripts; local batching for hot keys |
+| D11 | Geography | 3 regions, 60 to 100 ms apart | Count per region; sync daily totals every 10 s, never on the request path |
+| D12 | Availability and degradation | The API must answer when the limiter cannot (N2); under overload, shed non-critical calls first | Fail open with a local fallback; a kill switch; priority load shedding |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| Any `/v1/*` call | Every client | Every request; the gateway checks the key before forwarding |
+| `GET /v1/rate_limits` | Client | To see its own limits and what is left |
+| `PUT /admin/v1/plans/{plan}/rules/{rule}` | Operator | Change a plan's limit, with `mode: shadow` first |
+| `PUT /admin/v1/keys/{key}/overrides` | Support | Raise or lower one customer's limit |
+| `POST /admin/v1/kill-switch` | On-call engineer | Put every rule in shadow mode at once |
+| `GET /internal/v1/rules?since=v42` | Each gateway, every 10 s | Fetch the rules snapshot; `304` when unchanged |
+
+A rejected request costs the client nothing but a wait.
+
+```http
+GET /v1/orders?limit=10
+Authorization: Bearer <api key k42>
+
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1794880801
+{ "error": "rate_limited", "message": "Plan Pro allows 100 requests/s with bursts of 200. Retry after 1 s." }
+```
+
+- **Idempotency:** a request rejected with `429` never reached the API, so a retry is always safe; clients back off with jitter and honour `Retry-After`.
+- **Cost per call:** a rule can charge more than one token for an expensive endpoint (a search costs 5), so one bucket covers cheap and heavy calls.
+- **Errors:** `429` means "you, slow down" (a key over its limit); `503` with `Retry-After` means "we are overloaded" (the load shedder). Never answer the second with the first.
+- **Headers on every response:** limit, remaining and reset, so well-behaved clients slow down before they are rejected.
+- **Pagination:** only the admin lists, by cursor.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Token buckets | In-memory key-value store (<TechIcon id="oss/redis" /> Redis), sharded | Atomic scripts in under a millisecond (D1, D4, D10) | Hash of the API key | Atomic per key on one primary; lost on a crash (D5) | A relational database: a durable write on every request, 100,000 writes/s for data we can lose |
+| Blocked keys, hot-key batches | In-process memory in each gateway | Zero network calls (D4) | None: one per gateway | Up to 100 ms stale | Asking the store every time: an abusive key costs 10,000 calls/s |
+| Rules, plans, overrides | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | Rare edits, audit trail, joins with plans (D9) | None: about 1 MB | Strong; gateways read a snapshot ≤ 10 s old | Rules in config files: every change is a deploy (F4) |
+| Regional totals for daily quotas | The same in-memory store, one key per region | Read every 10 s, never per request (D11) | Hash of the API key | Eventual, 10 s | One global store: a cross-region round trip of 60 to 100 ms per request |
+| Decision events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) into a columnar store (<TechIcon id="oss/clickhouse" /> ClickHouse) | 2,000 events/s, queried by key and rule (D8) | API key | Eventual | Per-key metrics: 1,000,000 keys is too many time series for a metrics system |
+
+```lua
+-- Token bucket, one atomic script. KEYS[1] = "rl:{k42}:rps"  (the {k42} hash tag keeps a key's buckets on one shard)
+-- ARGV: rate per second, burst, cost
+local rate, burst, cost = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+local t = redis.call("TIME")                       -- the store's clock, not the gateway's
+local now = t[1] * 1000 + math.floor(t[2] / 1000)  -- milliseconds
+local b = redis.call("HMGET", KEYS[1], "tokens", "ts")
+local tokens = math.min(burst, (tonumber(b[1]) or burst) + (now - (tonumber(b[2]) or now)) * rate / 1000)
+local allowed = tokens >= cost
+if allowed then tokens = tokens - cost end
+redis.call("HSET", KEYS[1], "tokens", tokens, "ts", now)
+redis.call("PEXPIRE", KEYS[1], math.ceil(burst / rate * 1000) + 1000)  -- idle keys vanish once full again
+return { allowed and 1 or 0, math.floor(tokens), allowed and 0 or math.ceil((cost - tokens) * 1000 / rate) }
+```
+
+```sql
+CREATE TABLE rules (
+  rule_id     text PRIMARY KEY,       -- 'pro:default:rps'
+  plan        text NOT NULL,          -- 'free' | 'pro' | 'enterprise'
+  endpoint    text NOT NULL,          -- '*' or '/v1/search'
+  rate        numeric NOT NULL,       -- tokens a second
+  burst       int NOT NULL,           -- bucket size
+  cost        int NOT NULL DEFAULT 1, -- tokens per call
+  mode        text NOT NULL,          -- 'enforce' | 'shadow'
+  version     bigint NOT NULL         -- snapshot version that last changed it
+);
+CREATE TABLE key_overrides (
+  api_key text, rule_id text REFERENCES rules, rate numeric, burst int,
+  reason text, expires_at timestamptz,
+  PRIMARY KEY (api_key, rule_id)
+);
+```
+
+- **Check:** one script on the key's bucket: refill by elapsed time, take `cost` tokens, return allow, tokens left and the wait in milliseconds.
+- **Snapshot:** the config service reads every rule and override with a version above the gateway's, and returns them as one document.
+- **Usage report:** the columnar store answers "how many requests would this new rule have blocked, per key, last 7 days".
+
+## Building the architecture, step by step
+
+- We start with the smallest limiter that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: A counter in each gateway (F1)
+
+The smallest design: each gateway counts each key in its own memory.
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={1} caption="Step 1: the limiter counts each key in the gateway's own memory; nothing is shared." />
+
+- **Adds:** the load balancer, the API gateway, the rate limiter inside it, a local cache of counters, the API services.
+- **Flow:**
+  1. The load balancer sends the request to any gateway.
+  2. The gateway finds key k42 and asks the limiter, which counts k42 in memory.
+  3. Under the limit, the request goes on to the API services.
+- **Why this and not that:** no network call, so the check costs microseconds (D4); for one gateway it is the whole answer.
+- **The gap:** with 20 gateways in a region, k42 gets 20 counters and can send 20 × its limit (F5).
+
+<PremiumBreak />
+
+### Step 2: A shared counter store: the race (F1, F5)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={2} caption="Step 2: every gateway reads the count from a shared store, then writes it back: two gateways can both allow the last request." />
+
+- **Adds:** the **counter store**, an in-memory key-value store shared by all gateways in the region.
+- **Flow:**
+  1. Gateway A reads k42's count: 99 of 100.
+  2. Gateway B reads it in the same millisecond: also 99.
+  3. Both allow and both write 100; 101 requests passed and the store says 100.
+- **Why this and not that:** a shared count fixes "20 × the limit"; the read and the write are still two steps (D10).
+- **The gap:** under a burst the overshoot is not one request; every gateway in the gap between read and write can pass one.
+
+### Step 3: One atomic check and a 429 (F1, F2, F3)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={3} caption="Step 3: one script refills the bucket, takes a token and writes it back inside the store; a rejected client gets 429 with Retry-After." />
+
+- **Adds:** the token-bucket script in the store, and the `429` answer.
+- **Flow:**
+  1. The gateway sends one script for `rl:{k42}:rps` with the plan's rate (100/s), burst (200) and cost (1).
+  2. The store runs it alone: refill by elapsed time, take a token, write back, return allow, tokens left and the wait.
+  3. On reject the gateway answers `429` with `Retry-After` and the limit headers; the API never sees the request.
+- **Why this and not that:** the store runs one script at a time, so two gateways get 100 and 101, never 99 and 99 (D3, D10). A token bucket and not a fixed window, because the plan promises a burst (F2) and a fixed window lets 2 × the limit through at its boundary (Deep dive 1).
+- **The gap:** limits are hard-coded in the gateway; changing a plan is a deploy.
+
+### Step 4: Rules per plan, no deploy (F4)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={4} caption="Step 4: rules and overrides live in a rules database; the config service serves a snapshot that every gateway polls every 10 seconds." />
+
+- **Adds:** the **rules DB**, the **config service** and the **operator**.
+- **Flow:**
+  1. An operator raises k42's override to 500/s; the rules DB stores it with version 43.
+  2. Each gateway asks for rules newer than its version every 10 s; it gets the change, or `304`.
+  3. The next check for k42 uses 500/s; nothing restarted.
+- **Why this and not that:** rules are read on every request but change a few times a day, so each gateway keeps them in memory (D4, D9). Polling every 10 s meets the 30 s target (N4) and costs 6 requests/s in total.
+- **The gap:** an abusive key at 10,000 requests/s still costs 10,000 store calls a second, all rejected.
+
+### Step 5: The fast path: blocked keys in memory (N1, N5)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={5} caption="Step 5: a gateway remembers keys the store has rejected and turns them away without a network call." />
+
+- **Adds:** blocked keys and hot-key batches in each gateway's **local cache**.
+- **Flow:**
+  1. The store rejects free key k9 (10/s) and says the next token is 100 ms away.
+  2. The gateway marks k9 blocked for 100 ms and answers its next requests from memory.
+  3. For a few very hot keys the gateway adds up allowed requests locally and sends one increment every 50 ms.
+- **Why this and not that:** an abuser at 10,000/s over 20 gateways now costs 20 × 10 = 200 store calls/s, not 10,000 (D4, N5). Batching only hot keys keeps everyone else exact (D3, D10; Deep dive 2).
+- **The gap:** when the counter store is slow or down, every request waits on it.
+
+### Step 6: When the limiter fails (N2)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={6} caption="Step 6: the store call has a 5 ms timeout and fails open; every decision goes to a decision log, so a new rule runs in shadow mode first." />
+
+- **Adds:** a 5 ms timeout and a circuit breaker on the store call, the **decision log**, **usage analytics**, and a kill switch in the config.
+- **Flow:**
+  1. The store does not answer within 5 ms: the gateway allows the request and counts a limiter error.
+  2. If errors stay above 50% for 10 s, the breaker opens and each gateway enforces a local share: 100/s ÷ 20 gateways = 5/s.
+  3. A new rule starts in `shadow` mode: it is evaluated and logged as "would block", but always allows.
+  4. The operator checks the would-block report, then flips the rule to `enforce`; the kill switch flips every rule back to `shadow` at once.
+- **Why this and not that:** a few unthrottled seconds cost far less than an API outage caused by its own guard (D12, N2). Shadow mode catches a rule that would block a good customer before it does (Deep dive 3).
+- **The gap:** a customer calling all 3 regions gets 3 separate buckets, and a cross-region store would cost 60 to 100 ms per request.
+
+### Step 7: Regions count locally (F5)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={7} caption="Step 7: each region counts in its own store; a region sync swaps daily totals with the other regions every 10 seconds." />
+
+- **Adds:** the **region sync**.
+- **Flow:**
+  1. Per-second buckets live only in the region that serves the key; most keys are served by one region.
+  2. Every 10 s the sync reads each key's daily total in this region and writes it to the other two.
+  3. A daily quota check adds the other regions' last totals to the local count.
+- **Why this and not that:** a global counter puts a 60 to 100 ms round trip on every request, 30 × the latency budget (D4, D11). Syncing every 10 s means at most 10 s of traffic per other region passes after a quota runs out.
+- **The gap:** every key can be within its limit while the sum of all keys is above what the API services can serve.
+
+### Step 8: Protect critical traffic (F6)
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" step={8} caption="Step 8: a load shedder behind the limiter serves critical calls first when the fleet is overloaded; the direct path to the services goes away." />
+
+- **Adds:** a **concurrency limit** per key and a **load shedder** in front of the API services; the gateway no longer forwards straight to them.
+- **Flow:**
+  1. The gateway also counts k42's requests in flight; past 20, it answers `429`.
+  2. The shedder measures fleet utilisation; above 80%, it rejects non-critical calls (lists, searches) with `503` and keeps the last 20% for critical ones (orders, payments).
+  3. Inside each worker pool, a last shedder drops test traffic first, then reads, then writes.
+- **Why this and not that:** a rate limit counts arrivals, not cost; 20 slow requests in flight can hurt more than 100 fast ones (D12). Autoscaling takes minutes; shedding takes effect on the next request.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/rate-limiter/architecture" stepper caption="A rate limiter: one atomic check per request in a sharded in-memory store, rules from a snapshot, blocked keys in memory, fail open, count per region, shed by priority." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | API clients; operators | Call the API; change rules and the kill switch |
+| **Edge** | Load balancer, API gateways, local cache in each gateway | Spread requests, authenticate, find the plan, answer blocked keys from memory |
+| **Rate limiting** | Rate limiter (a library in each gateway) | Token bucket per key and rule; concurrency per key; fail open |
+| **Application services** | Load shedder, API services, config service | Shed by priority; serve the API; serve the rules snapshot |
+| **Async pipeline** | Region sync, decision log | Swap daily totals between regions; carry every decision to analytics |
+| **Storage** | Counter store, rules DB, usage analytics | Buckets in memory; rules and overrides; would-block reports |
+
+One request from key k42, step by step:
+
+1. The load balancer sends `GET /v1/orders` to gateway 7 in region A.
+2. The gateway authenticates k42, finds plan Pro (100/s, burst 200) in its rules snapshot, and checks its blocked keys: not there.
+3. It runs the token-bucket script on k42's shard: 57 tokens left, allow; 0.6 ms so far.
+4. It counts k42's requests in flight (3 of 20), passes the load shedder (utilisation 55%) and reaches the API service.
+5. The response carries `X-RateLimit-Remaining: 57`; the decision goes to the log asynchronously, sampled.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### Where the limiter runs: a library in the API gateway
+
+- **Choice:** the limiter is a library inside each API gateway, calling the counter store directly.
+- **Why:** the gateway already authenticates the key and knows the plan, so the check adds one store round trip and nothing else (D4, N1). A rejected request never costs an API server anything (N5).
+- **Why not in each service:** 30 services would each re-implement it, and a rejected request would already have used a service connection; services keep only their own concurrency guard as a second layer.
+- **Why not a separate rate-limit service:** a network hop from gateway to limiter service, then to the store, doubles the round trips (D4). It wins when many proxies in many languages need one limiter; then run it as a sidecar on the same host.
+- **Why not only at the CDN or edge network:** it can stop floods by IP, but it does not know plans or API keys before authentication (F4).
+
+### API style: HTTP status codes and headers
+
+- **Choice:** `429` with `Retry-After` and limit headers for a key over its limit; `503` with `Retry-After` for shedding; REST for the admin and rules calls.
+- **Why:** every HTTP client already understands both codes and backs off on `Retry-After`; the headers let a client slow down before it is rejected (F3).
+- **Why not queue the excess and serve it later:** a held request keeps a connection and memory on the gateway; at 10,000/s from one abuser the queue grows by 9,990 a second (D2). Rejecting fast is cheaper.
+- **Why not `503` for quota rejections:** it tells the client the service is broken, triggers its retries and alerts, and hides the fact that the key needs a bigger plan.
+- **Why not gRPC for the rules snapshot:** a 1 MB document fetched 6 times a second is plain HTTP with `ETag`; nothing streams.
+
+### Algorithm: a token bucket per key and rule
+
+- **Choice:** a token bucket for request rate (rate plus burst per plan); a fixed daily window for quotas, which reset at midnight UTC like the bill.
+- **Why:** the plan promises a burst (F2), and a bucket is 2 numbers per key, so 1,000,000 keys fit in 200 MB (D8). Refill is computed from elapsed time, so no timer runs per key.
+- **Why not a fixed window for rate:** at the boundary a key can send its whole limit right before and again right after: 2 × the limit in 2 s (Deep dive 1).
+- **Why not a sliding log:** it stores one timestamp per request; an Enterprise key at 1,000/s over a 60 s window keeps 60,000 timestamps, 480 KB for one key (D8).
+- **Why not a sliding window counter:** a good choice with 2 counters per key and no boundary burst; it has no separate burst setting, which the plans need (F2). Use it for per-minute limits.
+- **Why not a leaky bucket that queues:** it smooths output but adds waiting, which breaks the latency budget for the requests that are allowed (D4).
+
+### Counter store: an in-memory key-value store, sharded by key
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, 4 primaries with 1 replica each, keys sharded by a hash of the API key, scripts for every check, no disk persistence.
+- **Why:** one round trip runs the whole check atomically (D1, D3, D10); memory answers in microseconds (D4); 200 MB fits on one node, so 4 shards are only for 100,000 scripts/s (N6).
+- **Why not Memcached:** it has atomic increment and compare-and-set, but no scripts; a token bucket needs read, refill and write, so contended keys loop on failed compare-and-set (D10). As a cache it evicts under memory pressure, so live counters can vanish.
+- **Why not a relational database:** a durable write per request is 100,000 writes/s for data we are happy to lose (D5), and row locks on a hot key queue every gateway (D10).
+- **Why not a wide-column store (Cassandra) or a managed key-value database (DynamoDB):** both are durable and spread across zones, but a conditional write costs milliseconds, not microseconds (D4); Cassandra's counters cannot be safely retried.
+- **Why never read from replicas:** a replica applies writes and expiries late, so a check there sees an old window and wrongly allows or rejects (Deep dive 2). Replicas are for failover only.
+
+### Local cache: blocked keys and hot-key batches in each gateway
+
+- **Choice:** an in-process map in each gateway: keys blocked until a time the store returned, and local counts for a short list of hot keys.
+- **Why:** the most expensive keys are the abusive ones; answering them from memory removes 98% of their store calls (D4, N5). A hot key's 20,000 increments a second become 400 batches (D10).
+- **Why not cache every key's count:** a stale count lets every gateway allow on it; for normal keys the error would break the 5% target (N3).
+- **Why not a shared cache in front of the store:** the store already is the in-memory cache; another hop adds latency and saves nothing (D1).
+
+### Rules store: a relational database behind a polled snapshot
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL for rules, plans and overrides; the config service serves a versioned snapshot; gateways poll every 10 s.
+- **Why:** edits are rare, need an audit trail and expiry dates, and must be correct (D3); a 1 MB snapshot held in memory means no rule lookup on the request path (D4, D9).
+- **Why not rules in config files shipped with the gateway:** every limit change becomes a deploy of 60 gateways (F4, N4).
+- **Why not a coordination store with watches (<TechIcon id="oss/etcd" /> etcd, ZooKeeper):** pushes changes in under a second, but adds a consensus cluster to run for a document that changes a few times a day; polling meets the 30 s target (N4).
+- **Why not read the database per request:** 100,000 reads/s for data that changes daily, and a database outage would block every request (D12).
+
+### Decision log and usage analytics: a log into a columnar store
+
+- **Choice:** gateways write every reject and a 1% sample of allows to <TechIcon id="oss/apache-kafka" /> Kafka, asynchronously; a consumer loads them into <TechIcon id="oss/clickhouse" /> ClickHouse.
+- **Why:** shadow mode needs "who would this rule block" per key over days (D12); 35 GB a day of events with group-by queries is a columnar workload (D8).
+- **Why not per-key metrics in <TechIcon id="oss/prometheus" /> Prometheus:** 1,000,000 keys × rules is too many time series; keep only fleet totals (allowed, rejected, limiter errors) as metrics.
+- **Why not log synchronously:** a slow log would slow every request (D4); a dropped event costs one line in a report.
+- **Why not a work queue (SQS, RabbitMQ):** analytics and alerting both read every event, and a report must be rebuilt by replaying; a work queue deletes a message once one consumer takes it.
+
+### Load balancer: layer 7, any gateway
+
+- **Choice:** an HTTP (layer-7) load balancer that sends each request to any healthy gateway, least outstanding requests first.
+- **Why:** with a shared counter store, any gateway can serve any key, so gateways stay stateless and scale freely (D2).
+- **Why not route each key to one gateway (consistent hashing on the key):** counts would be exact in memory with no store, but a hot key overloads its one gateway (D10), and adding or losing a gateway moves keys and resets their counts.
+- **Why not layer 4:** it cannot read the key or the path, and short HTTP requests gain nothing from connection-level balancing.
+
+### Region sync: count locally, swap daily totals
+
+- **Choice:** a worker per region copies each key's daily total to the other two regions every 10 s; per-second buckets stay in the region that serves the key.
+- **Why:** quotas need a global number and rates do not; a 10 s lag bounds the overshoot without a cross-region call on any request (D4, D11).
+- **Why not one global store:** 60 to 100 ms per check, 30 × the latency budget (D4).
+- **Why not split each limit evenly across regions:** a key served by one region would get a third of what it paid for (N3).
+- **Why not synchronous replication between regions:** the same cross-region wait, paid on every write instead of every read.
+
+### Load shedder: priority in front of the services
+
+- **Choice:** a shedder in front of each service pool that measures utilisation and rejects by priority, plus a concurrency limit of 20 in flight per key in the gateway.
+- **Why:** per-key limits cannot see the sum of all keys; shedding by priority keeps orders and payments working while lists and searches wait (F6, D12).
+- **Why not only autoscaling:** new capacity arrives in minutes; the overload arrives in seconds.
+- **Why not lower every key's limit during overload:** a rules change takes up to 30 s to spread (N4) and punishes critical calls as much as the rest.
+
+## Deep dives
+
+### The algorithms compared, with numbers
+
+- **The question:** which algorithm, and what does each cost in memory and accuracy for 1,000,000 keys?
+
+The same two bursts at a window boundary, through three algorithms.
+
+<AnimatedDiagram spec="animated/patterns/rl-algorithms" stepper caption="A fixed window forgets everything at the boundary and lets twice the limit through; the sliding counter and the token bucket still remember the first burst." />
+
+<StepCards>
+  <StepCard n={1} title="Fixed window: 200 pass">
+    The key sends 100 requests right before 1:00 and 100 right after. The counter resets at 1:00, so all 200 pass in 2 seconds: twice the limit of 100 a minute.
+  </StepCard>
+  <StepCard n={2} title="Sliding window counter: 1 more">
+    At 1:01 the previous minute's 100 still count for 59/60, an estimate of 98.3. One more request fits; the other 99 are rejected.
+  </StepCard>
+  <StepCard n={3} title="Token bucket: 1 token refilled">
+    The first burst empties the bucket of 100. It refills 1.67 tokens a second, so one token is back by 1:01: one request passes, 99 are rejected.
+  </StepCard>
+</StepCards>
+
+The sliding counter's estimate, worked through for one key.
+
+<AnimatedDiagram spec="animated/rate-limiter/sliding-estimate" stepper caption="Two counters per key: weight the previous minute by how much of it is still inside the last 60 seconds, then add the current count." />
+
+**How to read it:**
+
+- Step 1: the store keeps only two counters for k42: 80 for the previous minute and 30 so far for this one.
+- Step 2: at 10:01:15 the last 60 s include 45 s of the previous minute, so its 80 counts as 80 × 45/60 = 60.
+- Step 3: 60 + 30 = 90 of 100, so 10 more requests fit; the 11th gets `429`.
+
+**The numbers:**
+
+| Algorithm | State per key and rule | Worst case at a boundary | Burst setting | Memory for 1,000,000 keys |
+| --- | --- | --- | --- | --- |
+| Fixed window | 1 counter | 2 × the limit in 2 s | No | ≈ 100 MB |
+| Sliding log | 1 timestamp per request | Exact | No | Pro 100/s × 60 s = 6,000 × 8 B = 48 KB a key; 100,000 active keys ≈ 4.8 GB |
+| Sliding window counter | 2 counters | An estimate, close when traffic is even | No | ≈ 200 MB |
+| Token bucket | 2 numbers in one entry | The burst plus the rate × time | Yes | ≈ 100 MB |
+
+<Callout tone="red" title="What breaks">
+  The sliding counter assumes the previous minute's requests were spread evenly. If all 80 came in its last 15 s, the estimate counts only 60 of them and lets about 20 extra through. For a 5% target that is fine; for a security limit, use a token bucket or a shorter window.
+</Callout>
+
+### Atomicity and stale reads
+
+- **The race:** two gateways that read, decide and then write can both pass the last request; under a burst every gateway in that gap passes one.
+- **The fix:** send the whole check as one script; the store runs one script at a time, so every gateway sees the result of the one before it.
+- **Why not optimistic transactions (watch, then commit):** under contention most commits fail and retry, and a hot key is exactly where contention lives (D10).
+- **Several rules in one call:** a hash tag such as `{k42}` puts all of a key's buckets on one shard, so per-second and per-day rules are checked by one script.
+- **Whose clock:** the script reads the store's clock; gateway clocks drift, and a gateway 50 ms ahead would refill the bucket early.
+- **Never read a replica:** a replica applies writes and expiries after the primary does, so a check there can see an expired window as current, or miss the last refill. Read and write the primary only.
+
+Two gateways race on one counter; one script makes the store pick.
+
+<AnimatedDiagram spec="animated/patterns/rl-distributed" stepper caption="Read-then-write lets both gateways see the same 99; one atomic script makes the store hand out 100 and 101, so exactly one request is turned away." />
+
+<StepCards>
+  <StepCard n={1} title="Read, then write: both allow">
+    Both gateways read 99, both see room under the limit of 100, both allow and both write 100. Two requests passed and the count rose by one.
+  </StepCard>
+  <StepCard n={2} title="One atomic script: one rejects">
+    Each gateway sends one script that increments and sets the expiry. The store runs them one after the other: A gets 100 and allows, B gets 101 and answers 429.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 100,000 scripts/s over 4 shards is 25,000 a shard at peak.
+- One Enterprise key at 20,000/s would take 80% of its shard alone (D10). With local batching every 50 ms on 20 gateways it costs 20 × 20 = 400 calls/s.
+- The price: up to 50 ms of that key's traffic passes before the store sees it: 20,000 × 0.05 = 1,000 requests, 5% of one second's limit (N3).
+
+<Callout tone="red" title="What breaks">
+  Splitting the check into a read on a replica and a write on the primary gives answers that disagree: a request can be rejected while the headers say most of the quota is left. Keep the check and its headers on one call to the primary, and reuse its answer for the response.
+</Callout>
+
+### When the limiter is the outage
+
+- **The rule:** the limiter protects the API; it must never be the reason the API fails (N2).
+- **Fail open:** every store call has a 5 ms timeout; on timeout or error, allow and count a limiter error.
+- **Not wide open:** if errors stay above 50% for 10 s, a circuit breaker stops calling the store and each gateway enforces limit ÷ gateways in the region.
+- **Fail closed only where abuse costs more than an outage:** login attempts and password resets reject when the limiter cannot count.
+- **Shadow mode:** a new rule is evaluated and logged as "would block" but always allows; enforce it only after a week of reports shows no good customer in it.
+- **Kill switch:** one flag in the rules snapshot puts every rule in shadow mode, live within 10 s.
+
+What the gateway does when the counter store stops answering.
+
+<AnimatedDiagram spec="animated/rate-limiter/fail-open" stepper caption="A slow counter store never slows the API: time out after 5 ms and allow; if the store stays down, each gateway enforces its own share of the limit." />
+
+<StepCards>
+  <StepCard n={1} title="Normal: one script, then forward">
+    The gateway runs the bucket script for k42, gets allow with 57 tokens left, forwards the request and returns 200 with the limit headers.
+  </StepCard>
+  <StepCard n={2} title="Store silent: fail open">
+    The store does not answer within 5 ms. The gateway allows the request anyway, counts a limiter error and forwards it.
+  </StepCard>
+  <StepCard n={3} title="Breaker open: a local share">
+    Errors stay above half for 10 s, so the gateway stops calling the store. It allows k42 at 100 ÷ 20 = 5 requests a second, answers 429 past that, and probes the store every 5 s.
+  </StepCard>
+</StepCards>
+
+Failing open is safe because the limiter is not the only guard.
+
+<AnimatedDiagram spec="animated/rate-limiter/layers" caption="Per-key limits keep tenants apart; the shedders protect the fleet when every key is within its limit but the sum is not." />
+
+**How to read it:**
+
+- The cheapest, most specific check runs first: the rate limit per key, then requests in flight per key.
+- The two shedders look at the whole fleet and at one worker pool; they answer `503`, not `429`.
+- If the counter store fails open, layers 2 to 4 still stand between a flood and the API.
+
+**The numbers:**
+
+- 20 gateways × 5/s = 100/s: the local share equals the plan limit when the load balancer spreads k42 evenly.
+- The timeout costs at most 5 ms per request for the 10 s before the breaker opens, on the keys of the failed shard only.
+
+<Callout tone="red" title="What breaks">
+  Failing open with no fallback turns a store outage into no limits at all, at exactly the moment something is already wrong. Keep the local share and the shedders behind it, and alert on limiter errors, not only on 429s.
+</Callout>
+
+### Worked example: a bad minute for key k42
+
+1. **10:00:00:** k42 (Pro: 100/s, burst 200) has been idle; its bucket holds 200 tokens.
+2. **10:00:00 to 10:00:01:** a client bug sends 500 requests over 20 gateways. 200 tokens plus 100 refilled in that second: 300 pass, 200 get `429` with `Retry-After: 1`.
+3. **From 10:00:01:** the bug keeps sending 500/s; 100/s pass and 400/s are rejected. That is 500 scripts/s, 0.5% of store capacity.
+4. **Meanwhile:** free key k9 (10/s) sends 10,000/s. Each gateway blocks it for 100 ms after a reject, so the store sees 20 × 10 = 200 calls/s, not 10,000 (N5).
+5. **10:00:30:** k42's shard stops answering. Each check waits 5 ms and fails open: for 10 s k42 gets all 500/s, 4,000 requests more than its limit.
+6. **10:00:40:** the breaker opens; each gateway allows k42 5/s, 100/s in total, until the shard is back.
+7. **Cost of the minute:** other keys' p99 rose by 5 ms for 10 s on one shard of four; no API request failed (N2).
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Algorithm | Fixed window, sliding log, sliding window counter, token bucket | Token bucket for rate; fixed daily window for quotas | D2, D8, F2 | An exact rolling count | Limits per minute with no burst: a sliding window counter |
+| Where to count | In each gateway, one store per region, one global store | One store per region | D3, D4, D11, F5 | A store to run; 0.6 ms per request | Each key always lands on one gateway |
+| When the store fails | Fail closed, fail open, fail open with a local share | Fail open with a local share | D12, N2 | Up to 10 s of unthrottled traffic | Security limits such as login attempts: fail closed |
+| Increments | Synchronous script, asynchronous batches | Synchronous; batched for a short list of hot keys | D4, D10, N3 | Up to 5% overshoot on hot keys | Store latency rises: batch more keys |
+| Where the limiter runs | Each service, a separate limit service, the gateway | A library in the gateway | D4, N1 | Services trust the gateway | Many proxy types in many languages: a sidecar service |
+| Rule distribution | Read per request, push with watches, poll a snapshot | Poll a versioned snapshot every 10 s | D9, N4 | Up to 10 s stale rules | Changes must land in under a second |
+| Regions | One global counter, an even split, local counts plus sync | Local counts; daily totals synced every 10 s | D4, D11 | 10 s of overshoot on daily quotas | Customers spread evenly and need an exact global rate |
+| Counter durability | Persist to disk, memory only with a replica | Memory only, replica for failover | D5, D4 | A failover resets some buckets | Limits that are billed per request |
+| Rule rollout | Enforce at once, shadow first | Shadow first, then enforce | D12, N2 | A week before a new rule protects | An attack in progress: an override, enforced now |
+| Over the limit | Queue and delay, reject | Reject with 429 | D2, D4, F3 | The client must retry | Internal batch jobs: queue them instead |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | The token bucket per key and rule | The whole system: a quota per customer |
+| [Caching](/system-design/patterns/caching) | Blocked keys and the rules snapshot in each gateway | No network call for abusers or rule lookups |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | 429 and 503 with `Retry-After`; the load shedder | Reject fast instead of queueing past capacity |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) (advanced) | Concurrency limit per key; worker pools | One tenant cannot take every worker |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | 5 ms timeout and breaker on the store call | A slow store must not slow the API |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Local batching for the hottest keys | One key at 20,000/s on one shard |
+| [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination) | The versioned rules snapshot | 60 gateways must agree on the rules |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | The 2 ms budget; shadow mode; shedding order | Degrade the limiter before the API |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Login-attempt throttling | Counters per key in an in-memory store, atomic scripts | Key is account and IP; fails closed; lockouts and backoff instead of `Retry-After` |
+| Sending caps for email or SMS | Token bucket per sender, per-plan rules | Over the limit means queue and send later, not reject; daily caps reset by time zone |
+| A storage quota | Per-customer limits, rules from a database | Bytes, not requests: uploads add, deletes subtract, retries must not count twice, so it needs a durable ledger |
+| Tenant admission control in a database | Token bucket per tenant, local buckets refilled from a central tracker | Cost is read and write units, not requests; the limiter sits in the request router |
+
+## How real systems do it
+
+- **Stripe (2017):** runs four limiters: a request-rate limiter (a token bucket in Redis), a concurrent-requests limiter, a fleet usage load shedder that reserves part of capacity for critical methods, and a worker utilisation load shedder. Limiter failures fail open, and each limiter is dark-launched before it enforces.
+- **Cloudflare (2017):** uses the sliding window counter, previous count × remaining share of the window + current count. On 400 million requests from 270,000 sources, 0.003% were wrongly allowed or limited. Counting is isolated inside each point of presence, increments run asynchronously, and a mitigation decision is cached in memory for its known duration.
+- **GitHub (2021):** moved API rate limits from Memcached to sharded, replicated Redis, with the shard picked by the application per key and the logic in Lua scripts. A check that read a replica still holding an expired window produced rejections that reported the full quota remaining; expiry moved into application code and the first response's data was reused for headers.
+- **Envoy ratelimit (read 2026):** a gRPC service that limits by descriptors (key and value pairs per domain) in Redis, keeps over-limit keys in a local cache, reloads rules from disk without a restart, and offers a per-rule shadow mode whose answer is always OK. Envoy allows the request by default when the service fails.
+- **Amazon DynamoDB (2022):** global admission control tracks a table's consumption in tokens centrally; each request router keeps a local token bucket and asks for more tokens every few seconds. Partition-level token buckets stay as defence in depth.
+- **Where this design differs:** none of these publishes one design with every part here. The token bucket in a script follows Stripe and GitHub, counting per region follows Cloudflare's per-location counts, and the local share on failure is a simpler cousin of DynamoDB's local buckets. Each answers the same latency and isolation drivers.
+
+## Failure modes & pitfalls
+
+- **Read, then write:** a burst passes several times the limit; compare allowed counts with the limit per key in the decision log; one atomic script.
+- **Reading a replica:** rejections with full quota left in the headers; alert on 429s whose remaining is above zero; check and headers on the primary only.
+- **Failing closed by accident:** an uncaught store error returns `500` for every request; watch API errors during store failovers; catch every limiter error and allow.
+- **Failing open with nothing behind it:** a store outage removes all limits; watch limiter errors next to fleet utilisation; local share and load shedding.
+- **A new rule blocks a big customer:** a support storm minutes after a deploy; read the would-block report; shadow mode first, kill switch ready.
+- **A hot key melts one shard:** p99 for every key on that shard rises; watch per-shard CPU and the top keys; batch the hot key locally.
+- **Clients retry 429s at once:** the rejected load comes back in waves; watch 429s per key per second; `Retry-After` with jitter, and a lower limit for keys that ignore it.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify what is limited (keys), scale, bursts, accuracy and what happens on failure; write F1 to F6 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 100,000 checks/s, 200 MB of counters, a 2 ms budget, 4 shards.
+3. **Minutes 10 to 15:** the API (`429`, `Retry-After`, headers) and the bucket's key layout; say what must be atomic.
+4. **Minutes 15 to 25:** Steps 1 to 4: counters per node, the race, one atomic script, rules without a deploy.
+5. **Minutes 25 to 35:** Steps 5 to 8: blocked keys, fail open, regions, load shedding.
+6. **Minutes 35 to 45:** one deep dive: the algorithms with numbers, atomicity and replicas, or the limiter as the outage.
+
+**What interviewers listen for:**
+
+- **Mid:** token bucket against fixed window with the boundary burst, a shared store, `429` with `Retry-After`.
+- **Senior:** an atomic script and why read-then-write fails, fail open with a timeout, rules without a deploy, the latency budget.
+- **Staff:** hot keys and batching, regions without a global round trip, shadow mode, rate limits against load shedding.
+
+**Red flags:** a relational write per request; reading counters from replicas; a limiter whose failure fails the API; "we will count globally" with no latency number; queueing every excess request.
+
+## Further reading
+
+- [Scaling your API with rate limiters](https://stripe.com/blog/rate-limiters) (Stripe, 2017)
+- [How we built rate limiting capable of scaling to millions of domains](https://blog.cloudflare.com/counting-things-a-lot-of-different-things/) (Cloudflare, 2017)
+- [How we scaled the GitHub API with a sharded, replicated rate limiter in Redis](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/) (GitHub, 2021)
+- [envoyproxy/ratelimit](https://github.com/envoyproxy/ratelimit) (Envoy, read 2026)
+- [Amazon DynamoDB: A Scalable, Predictably Performant, and Fully Managed NoSQL Database Service](https://www.usenix.org/system/files/atc22-elhemali.pdf) (USENIX ATC, 2022)
+- Related pages: [Rate Limiting](/system-design/patterns/rate-limiting) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [API Gateway](/system-design/fundamentals/api-gateway)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does a token bucket differ from a fixed window counter?" category="Concepts" level="Mid">
+  - A fixed window counts requests per calendar minute and resets at the boundary, so a key can send its whole limit right before and again right after: 2 × the limit in 2 s.
+  - A token bucket refills at the rate and holds at most the burst, so the worst case is the burst, never twice the limit.
+  - Both keep about two numbers per key; the bucket also lets each plan set the burst separately from the rate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you allow bursts without letting a customer exceed their quota?" category="Concepts" level="Mid">
+  - Give each plan a rate and a burst: 100/s with a bucket of 200.
+  - An idle key can send 200 at once; after that it gets 100/s, so over any long period it never beats the rate.
+  - Keep daily quotas as a separate rule, so bursts never add up past the day's total.
+  </InterviewQuestion>
+  <InterviewQuestion question="Twenty gateways serve the same key. How do you keep one count correct?" category="Architecture" level="Senior">
+  - Keep the bucket in a shared in-memory store, one primary per key, sharded by a hash of the key.
+  - Run the whole check as one script, so the store applies gateways' checks one after the other; read-then-write lets several gateways pass the last request.
+  - Use the store's clock in the script and never read from replicas.
+  - For a few very hot keys, batch increments locally every 50 ms and accept a bounded overshoot.
+  </InterviewQuestion>
+  <InterviewQuestion question="The check runs on every request. How do you keep it fast?" category="Scaling" level="Senior">
+  - One round trip to an in-memory store in the same zone: about 0.6 ms, under a 2 ms p99 budget.
+  - Keep rules in gateway memory from a snapshot, so the request path never reads a database.
+  - Cache blocked keys in the gateway until the store says a token is back; an abuser at 10,000/s costs 200 store calls/s.
+  - Write decision events asynchronously and sampled.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens when the counter store goes down?" category="Failure modes" level="Senior">
+  - Fail open: a 5 ms timeout, then allow and count a limiter error, so the API keeps answering.
+  - If errors persist, a circuit breaker stops calling the store and each gateway enforces limit ÷ gateways locally.
+  - Concurrency limits and load shedders still protect the fleet behind it.
+  - Fail closed only for security limits such as login attempts.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you enforce limits across several regions?" category="Architecture" level="Senior">
+  - Count per-second rates only in the region that serves the key; a global counter costs 60 to 100 ms per request.
+  - Sync daily totals between regions every 10 s, off the request path, and add them in the quota check.
+  - Accept up to 10 s of overshoot per region after a quota runs out, and say so.
+  </InterviewQuestion>
+  <InterviewQuestion question="Per-customer limits are all respected, yet the API is overloaded. Why, and what do you add?" category="Trade-offs" level="Senior">
+  - Rate limits cap each key's arrivals, not the sum of all keys or the cost of each request.
+  - Add a concurrency limit per key, so slow, heavy requests cannot take every worker.
+  - Add a load shedder that keeps capacity for critical calls and rejects the rest with `503`.
+  - Shed test traffic first, then reads, then writes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you roll out a new, stricter limit safely?" category="Failure modes" level="Mid">
+  - Ship it in shadow mode: evaluated and logged as "would block", always allowed.
+  - Read the would-block report per key for a week; raise overrides for customers who need them.
+  - Flip it to enforce in the rules snapshot; it is live within 10 s, and the kill switch reverts every rule to shadow at once.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not keep the counters in the relational database you already have?" category="Trade-offs" level="Mid">
+  - Every request would be a durable write: 100,000 writes/s for data that is fine to lose.
+  - A hot key's row lock would queue every gateway behind it.
+  - An in-memory store answers in microseconds and runs the check as one script; keep only the rules in the database.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should the limiter live in the gateway, in each service, or in its own service?" category="Architecture" level="Senior">
+  - In the gateway: it already knows the key and plan, and a rejected request never reaches a service.
+  - A separate limit service adds a network hop per request; it pays off when many proxy types share one limiter, run as a sidecar.
+  - Services keep their own concurrency guard as a second layer, in case the gateway is bypassed.
+  </InterviewQuestion>
+</InterviewQuestions>
