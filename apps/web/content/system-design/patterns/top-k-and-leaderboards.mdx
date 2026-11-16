@@ -1,11 +1,260 @@
 ---
 title: "Top-K, Heavy Hitters and Leaderboards"
-description: "Sorted-set rankings and Count-Min heavy hitters over windows."
+description: "Exact rankings with sorted sets and sharded merges, and approximate heavy hitters with Count-Min sketches, heaps and Space-Saving over windows."
 icon: star
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Brightpost's "trending now" row shows the hour's 10 most viewed products. A `GROUP BY` over 8 million views, rerun every few seconds, falls behind, and exact counters stop fitting for search terms.
 
-**What it will cover:** sorted-set rankings and Count-Min heavy hitters over windows.
+- Interviewers ask about top-k to see whether you can choose between an exact ranking and an approximate one, and state the error you accept.
+
+## Overview
+
+- **Top-k** is the k items with the highest score or count. A **heavy hitter** is an item whose count is above a set fraction of all events.
+- An **exact leaderboard** is a **sorted set**: every update and every top-10 read costs O(log N), about 20 steps for a million members.
+- When counts live on many shards, **partition by key**, keep a **local top-k** on each shard and **merge**. The answer stays exact because no key is split.
+- **Approximate heavy hitters** use fixed memory: a **Count-Min sketch** (d rows of w counters) with a **min-heap** of k, or **Space-Saving** with m counters.
+- A Count-Min estimate is never too low. It is too high by at most **ε·N** with probability **1 − δ**, where ε = e/w, δ = e⁻ᵈ and N is the number of events counted.
+- For "the last hour", keep **one sketch per minute** and add the last 60 together, cell by cell.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Store every view in a table and run `GROUP BY product_id`, `ORDER BY count DESC`, `LIMIT 10`."
+  - **Why the interviewer pushes back:** "That is over a billion events an hour, and the list must be live. What runs on each event, and how much memory does it need?"
+  - **The answer that stands out:** count each event in a 5 × 2,000 Count-Min sketch (40 kB) per minute, keep a min-heap of the top 10, and add 60 sketches for the hour. Name the cost: any count can be up to 0.14 % of the hour's events too high, with 99.3 % confidence, so keep exact counts wherever money or prizes depend on the rank.
+</Callout>
+
+## Mental model
+
+- A league table on a clubhouse wall lists every team in order. After each match the steward moves one team to its exact new place: that is a sorted set.
+- At a festival with thousands of drinks, five volunteers each keep a tally sheet of 2,000 boxes, and each has a private rule for which box a drink goes in. Boxes are shared, so every tally is too high, never too low.
+- Asked how many lemonades were sold, you take the smallest of the five tallies: that is a Count-Min sketch, fixed paper and a bounded overcount.
+- A clipboard with the 10 best sellers so far, where a drink replaces the weakest name when its tally beats it, is the min-heap.
+
+## Core concepts
+
+- The running example: Brightpost serves **40,000,000 product views a day**, **2,300 a second at peak**, over **1,000,000 products**. A peak hour holds 2,300 × 3,600 = **8,280,000 views**.
+
+### Exact rankings: the sorted set
+
+- A **sorted set** stores each member once with a numeric score, in score order. Redis, an in-memory [key-value store](/system-design/databases/key-value-stores), builds it from a **skip list** plus a **hash table** (member to score).
+- `ZINCRBY` adds to a score, `ZRANGE … REV` reads the top of the list, `ZREVRANK` gives one member's rank. All cost O(log N); the range read adds the M members it returns.
+- `ZSCORE` reads the hash table, so it costs O(1) at any size. `ZREVRANGE` still works but is deprecated since Redis 6.2 in favour of `ZRANGE … REV`.
+
+A sorted set answers both questions a leaderboard asks, "who is on top" and "where am I", in logarithmic time.
+
+<AnimatedDiagram spec="animated/patterns/topk-zset" caption="A sorted set keeps every product in score order, so an update and a top-10 read both cost about log₂ N: 20 steps for a million products." />
+
+**How to read it:**
+
+- The violet table is the set, highest score first: 5 of the 1,000,000 members, with illustrative scores.
+- Each orange command sits next to its cost; only `ZSCORE` does not depend on N, and the billion-member line shows how slowly log N grows.
+
+**The numbers:**
+
+- log₂ 1,000,000 ≈ 20 steps per update or rank lookup; a billion members would need about 30 steps, but a thousand times the memory.
+
+<PremiumBreak />
+
+### A leaderboard too big for one node
+
+- A loyalty leaderboard of all **2,000,000 shoppers** fits one node; a game with hundreds of millions of players, or a sorted set per region per category, may not.
+- **Shard by member id** to spread writes evenly. The top 10 is a merge of each shard's top 10, but a rank needs `ZCOUNT` (scores above mine) on every shard, summed.
+- **Shard by score range** (score bucketing) to make rank cheap: rank = members in all higher shards (`ZCARD`, O(1) each) + my rank on my shard.
+- Score bucketing costs moves: a member whose score crosses a boundary is removed from one shard and added to the next, and the top shard takes the most reads.
+
+### Approximate counts: Count-Min sketch
+
+- A **Count-Min sketch** is a grid of **d rows × w counters** with one hash function per row, answering "how many times has x appeared?" in fixed memory. A [Bloom filter](/system-design/patterns/bloom-filter) answers only "has x appeared?".
+- **Update:** hash the item once per row and add 1 to that row's counter, so d counters change per event.
+- **Estimate:** read the item's d counters and take the **minimum**. Other items share each counter, so every counter is at least the true count, and the smallest is the closest.
+- **Bound** (Cormode and Muthukrishnan, 2005): choose w = ⌈e/ε⌉ and d = ⌈ln(1/δ)⌉. Then the estimate is at most the true count + ε·N with probability at least 1 − δ.
+- The sketch stores no keys, so it cannot list the top items by itself. Pair it with a **min-heap of k**: after each update, if the item's estimate beats the heap's smallest entry, it replaces that entry.
+
+The sketch counts, the minimum estimates, and the heap remembers who is winning.
+
+<AnimatedDiagram spec="animated/patterns/topk-cms" stepper caption="Every view adds 1 to one counter per row; the smallest of a product’s counters is its estimate, never too low, and a min-heap of k keeps the leaders." />
+
+<StepCards>
+  <StepCard n={1} title="Add a view: one counter per row">
+    A view of the kettle is hashed by five functions, one per row, and each picks a column. Those five counters go up by 1. Every other cell holds the counts of whichever products hash there.
+  </StepCard>
+  <StepCard n={2} title="Estimate: the smallest counter">
+    The kettle's counters read 412, 403, 431, 407 and 418. Each includes other products that collided with it, so the smallest, 403, is the estimate: 3 above the true 400, and never below it.
+  </StepCard>
+  <StepCard n={3} title="Keep the top k in a min-heap">
+    The heap keeps the k best estimates with the smallest at the root. 403 beats the mug's 380, so the kettle replaces the mug and sifts down; an estimate below the root changes nothing.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The grid drawn is 5 × 10 with illustrative values. One update touches d = 5 counters and compares once with the root; a heap change costs O(log k), about 3 steps for k = 10.
+
+### Space-Saving: counters that keep their keys
+
+- **Space-Saving** (Metwally, Agrawal and El Abbadi, 2005) keeps **m counters**, each holding a key, a count and an error.
+- A monitored key adds 1 to its counter. A new key takes over the counter with the **smallest count**, sets it to that count + 1, and records the old count as its error.
+- The smallest counter is at most ⌊N/m⌋, and any key that appeared more often than that smallest count is guaranteed to be in the summary.
+- Each count is at least the true count. The top k are **guaranteed** when, for each of them, count − error is at least the count in position k + 1.
+
+## Architecture
+
+Brightpost's trending row across four counter shards, built one step at a time.
+
+<AnimatedDiagram spec="animated/patterns/topk-merge" stepper caption="Partitioning by product id keeps each product’s whole count on one shard, so merging four local top-10 lists gives the exact global top 10." />
+
+<StepCards>
+  <StepCard n={1} title="Partition views by product id">
+    Every product view goes into an event log keyed by product id, so all views of the kettle reach the same counter shard. Four shards share the 2,300 views a second, about 575 each, and 250,000 products each.
+  </StepCard>
+  <StepCard n={2} title="Each shard keeps its local top 10">
+    A shard counts only its own products, in a sorted set or a sketch, and keeps its 10 leaders. Nobody yet knows the global top 10.
+  </StepCard>
+  <StepCard n={3} title="Merge 40 candidates into one top 10">
+    The merger collects 4 × 10 = 40 candidates and keeps the 10 highest. The result is exact, because no product's count is split across shards: the global 10th product is in its own shard's top 10.
+  </StepCard>
+  <StepCard n={4} title="Serve the list from a cache">
+    The merger writes the list to a cache every 10 seconds, and the home page reads only the cache. Shoppers see a list up to 10 seconds old, and the shards never see page traffic.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Windowed top-k from per-minute sketches
+
+- Count-Min sketches with the same w, d and hash functions **add up cell by cell**: the sum is the sketch of both streams together.
+- So keep a ring of one sketch per minute, in event-time windows (see [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)). "The last hour" is the sum of the latest 60, and at 13:01 the 12:00 sketch drops out.
+- The summed sketch gives estimates, but not the keys. Keep candidates, such as each minute's top 100, estimate each of them from the hour's sum, and keep the top 10 in a heap.
+
+A sliding hour costs 60 small sketches, not 60 copies of every counter.
+
+<AnimatedDiagram spec="animated/patterns/topk-window" caption="A sliding hour is 60 one-minute sketches added cell by cell: 2.4 MB of counters where exact per-minute maps would take 720 MB." />
+
+**How to read it:**
+
+- Each thin green cell is one minute's sketch; the grey one on the left has just left the window.
+- The query sums the 60, estimates the candidates and keeps 10; the bottom row compares memory for the hour.
+
+**The numbers:**
+
+- One sketch: 5 × 2,000 × 4 bytes = 40,000 bytes = 40 kB; 60 sketches = 2.4 MB.
+- One exact map: 1,000,000 products × 12 bytes (8-byte id, 4-byte count) = 12 MB before hash-table overhead; 60 of them = 720 MB.
+- With sorted sets, `ZUNIONSTORE` over 60 per-minute sets costs O(N) + O(M log M): it touches every member on every refresh.
+
+<Callout tone="red" title="What breaks">
+  - A product that is 101st in every minute never enters the candidate list, yet it can be in the hour's top 10. Keep many more candidates than you report, or run Space-Saving over the whole hour.
+</Callout>
+
+### When exact is required
+
+- **Money, prizes and contracts need exact counts**: a sales rank that sets a seller's fee, a prize leaderboard, billing. Use sorted sets or a batch job over the event log.
+- **Bounded keys often fit exactly**: Brightpost's 1,000,000 products take 12 MB as a plain map. The sketch earns its place when keys are unbounded (search terms, URLs, IP addresses) or multiplied (per minute, per region, per category).
+
+### Worked example: top 10 products of the last hour
+
+At 13:00 on a peak afternoon, follow one hour of views through the four steps of the Architecture figure.
+
+1. **Partition.** The event log is keyed by product id, so the 8,280,000 views of the hour split into about 2,070,000 per shard, 575 a second.
+2. **Count per shard.** Each shard adds every view to its current minute's 5 × 2,000 sketch and keeps that minute's top 100 as candidates. Every 10 seconds it sums its last 60 sketches, estimates its candidates and keeps its top 10.
+3. **Merge.** The merger takes the 40 candidates from the four shards and keeps the 10 highest estimates.
+4. **Serve.** The merger writes the list to the cache, and the home page reads it.
+
+**The numbers:**
+
+- Sketch size: 5 × 2,000 counters × 4 bytes = 40 kB, against at least 12 MB for an exact map of 1,000,000 products: 300 times smaller.
+- ε = e/w = 2.718 ÷ 2,000 = 0.00136, or 0.136 %. δ = e⁻⁵ = 0.0067, so the bound holds with 99.3 % confidence.
+- Over one shard's hour: ε·N = 0.001359 × 2,070,000 ≈ 2,813 views. Each estimate is at most 2,813 above the true count, and never below it.
+- So two products within about 2,800 views of each other may swap places in the list. A product far above the 11th place is safe.
+- To tighten the bound tenfold, use w = 20,000: 400 kB per sketch and an error of about 281 views. Memory grows with 1/ε.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| One sorted set | Exact top-k and rank in O(log N) | One node's memory; one key takes every write | Leaderboards that fit one node |
+| Sorted sets sharded by score range | Rank = higher shards' sizes + local rank | Members move when scores cross a boundary; top shard is hot | Rank lookups over hundreds of millions of members |
+| Partition by key, local top-k, merge | Exact; scales with shards | Needs the stream keyed by item; adds a merge step | Top-k of counts across a cluster |
+| Count-Min sketch + min-heap | Fixed memory; mergeable; never under-counts | Over-counts by up to ε·N; stores no keys | Unbounded keys, trending lists, hot-key detection |
+| Space-Saving | m counters that keep their keys; flags a guaranteed top-k | Over-counts by up to N/m; rare keys churn through the smallest counter | Top-k with keys in fixed memory |
+| Batch `GROUP BY` over the log | Exact; plain SQL | Minutes or hours late | Billing, prizes, daily reports |
+
+## Production systems
+
+- **Redis sorted sets** (as of November 2026): a skip list plus a hash table. `ZADD`, `ZINCRBY` and `ZREVRANK` cost O(log N), `ZRANGE` O(log N + M), `ZSCORE` O(1); tied scores are ordered lexicographically.
+- **Redis Count-Min sketch** (as of November 2026): `CMS.INITBYPROB` takes the error as a share of the total count and the probability of exceeding it; `CMS.MERGE` adds sketches only of identical width and depth.
+- **Redis Top-K** (as of November 2026): based on HeavyKeeper, with a probabilistic counter table plus a min-heap of the k leaders; `TOPK.ADD` returns any item it pushed out of the list.
+- **ClickHouse `topK`** (as of November 2026): implements Filtered Space-Saving, and the docs state the result is not guaranteed.
+- **Used in our case studies:** [Typeahead](/system-design-case-studies/case-studies/typeahead)
+
+## Failure modes & pitfalls
+
+- **Merging local top-k when keys are split across shards.** A product 11th on every shard can be 1st overall. Partition by key, or fetch exact counts for the merged candidates in a second round.
+- **A sketch sized for a quiet hour.** The error is ε·N, so a sale hour with three times the views has three times the error. Size w from the busiest window you will query.
+- **A heap that never forgets.** An all-time heap keeps the 12:05 favourite forever. Rebuild the heap from each window's summed sketch.
+- **Ties broken by accident.** Redis orders equal scores by member name, so the alphabet settles ties, not who got there first. Put a tie-breaker in the score, such as the time reached; doubles hold integers exactly up to 2⁵³.
+- **One sorted set as one hot key.** Every view becomes a write to one node. Buffer increments in each app server and send one `ZINCRBY` per product per second, or shard (see [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing)).
+
+## Interview framework
+
+1. Ask whether the ranking must be exact (prizes, money) or can be approximate (trending), and over which window.
+2. Size the stream: events per second, distinct keys, and whether one exact map fits in memory.
+3. For exact: a sorted set; across shards, partition by key, local top-k and a merge; for rank at huge scale, shard by score range.
+4. For approximate: a Count-Min sketch with a min-heap, w and d from ε and δ, one sketch per minute summed for the window.
+5. State the error bound in events, the freshness of the cached list, and the batch job that corrects it.
+
+**What interviewers listen for:** a sketch sized from ε and δ with the overcount stated in events, and a clear line between rankings that must be exact and lists that may be approximate.
+
+**Red flags:** a `GROUP BY` rerun on every page view, merging top-k lists from shards that split a key, or a sketch with no stated error.
+
+## Further reading
+
+- [An Improved Data Stream Summary: The Count-Min Sketch and its Applications (Cormode and Muthukrishnan, 2005)](https://dimacs.rutgers.edu/~graham/pubs/html/CormodeMuthukrishnan04CMJalg.html)
+- [Efficient Computation of Frequent and Top-k Elements in Data Streams (Metwally, Agrawal and El Abbadi, ICDT 2005)](https://link.springer.com/chapter/10.1007/978-3-540-30570-5_27)
+- [Redis sorted sets (Redis docs)](https://redis.io/docs/latest/develop/data-types/sorted-sets/)
+- [Top-K (Redis docs)](https://redis.io/docs/latest/develop/data-types/probabilistic/top-k/)
+- [Frequent Items sketch overview (Apache DataSketches)](https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html)
+- Related pages: [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Tries, Prefix Trees and Typeahead](/system-design/patterns/tries-and-typeahead) · [Sharding and Partitioning](/system-design/patterns/sharding)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you build a game leaderboard that shows the top 10 and each player's rank?" category="Concepts" level="Junior">
+    - Keep one sorted set with the player as member and the score as score.
+    - Update with `ZADD` or `ZINCRBY`, read the top 10 with `ZRANGE … REV`, and a player's rank with `ZREVRANK`; each is O(log N).
+    - Put a tie-breaker in the score, because equal scores are ordered by member name.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a Count-Min sketch estimate a count, and in which direction is it wrong?" category="Concepts" level="Mid">
+    - It keeps d rows of w counters; each item adds 1 to one counter per row, picked by that row's hash.
+    - The estimate is the minimum of the item's d counters.
+    - Collisions only add, so the estimate is never too low; it is too high by at most ε·N with probability 1 − δ, where w = e/ε and d = ln(1/δ).
+  </InterviewQuestion>
+  <InterviewQuestion question="Your counts are spread over four shards. How do you get a correct global top 10?" category="Architecture" level="Mid">
+    - Partition the events by item, so each item's whole count lives on one shard.
+    - Each shard reports its local top 10, and a merger keeps the best 10 of the 40.
+    - This is exact because the global 10th item must be in its own shard's top 10.
+    - If items are split across shards, merge larger candidate lists and fetch exact counts for them in a second round.
+  </InterviewQuestion>
+  <InterviewQuestion question="A leaderboard has 200 million players. How do you answer 'what is my rank?'" category="Scaling" level="Mid">
+    - Shard the sorted set by score range, so each shard holds one band of scores.
+    - Rank = the sizes of all higher shards (`ZCARD`, O(1)) + my rank in my own shard (O(log N)).
+    - Players move between shards when their score crosses a boundary, and the top shard takes the most reads, so cache its top 100.
+  </InterviewQuestion>
+  <InterviewQuestion question="Find the top 10 products of the last hour from a billion view events an hour." category="Scaling" level="Senior">
+    - That is about 278,000 events a second, so partition the stream by product id across shards.
+    - Each shard keeps a Count-Min sketch per minute, 5 × 2,000 counters (40 kB), and a candidate list per minute.
+    - Every few seconds, sum the last 60 sketches, estimate the candidates, keep a top 10, and merge the shards' lists.
+    - The error: ε = e/2,000 ≈ 0.14 % of each shard's events, with 99.3 % confidence; widen w if the 10th and 11th are closer than that.
+  </InterviewQuestion>
+  <InterviewQuestion question="When must top-k be exact, and when is approximate fine?" category="Trade-offs" level="Senior">
+    - Exact when money, prizes or contracts depend on the rank: sales ranks that set fees, prize leaderboards, billing.
+    - Approximate when the list steers attention and a swap between near neighbours does no harm: trending products, popular searches, hot-key detection.
+    - If the keys are bounded and fit in memory, exact may be cheap enough anyway: 1 M products take about 12 MB.
+    - A common design runs both: a sketch for the live list and an exact batch job that corrects it hourly.
+  </InterviewQuestion>
+  <InterviewQuestion question="The trending list shows a product that is not really trending. What could cause it?" category="Failure modes" level="Senior">
+    - Sketch collisions: a small product shares counters with big ones and its estimate is inflated; widen w or add rows.
+    - A heap that never forgets: an earlier spike stays in an all-time heap; rebuild from each window.
+    - A sketch sized for a quiet hour: the error ε·N grows with the busier hour.
+    - Bots or repeated views from one shopper: count distinct shoppers or filter before counting.
+  </InterviewQuestion>
+</InterviewQuestions>
