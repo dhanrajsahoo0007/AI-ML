@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { attend } from "@/components/diagrams/presets/llm-attention";
 import * as arch from "@/components/diagrams/presets/llm-architecture";
+import { HEAD, LOSS, TABLES } from "@/components/diagrams/presets/llm-families";
 import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
 
 // The LLM Foundations pages quote these numbers in prose; the presets compute them once. If a constant changes,
@@ -71,5 +72,28 @@ describe("llm-tokens: BPE on low, lower, newest", () => {
 
   it("UTF-8 byte counts for tea", () => {
     expect(TEA.map((t) => t.byteCount)).toEqual([3, 3, 6, 9, 3, 4]);
+  });
+});
+
+describe("llm-families: BERT on the kettle example", () => {
+  it("losses match the probabilities bert-pretrain-finetune shows", () => {
+    expect(LOSS.pBoiled.toFixed(2)).toBe("0.54");
+    expect(LOSS.pTea.toFixed(2)).toBe("0.63");
+    expect(LOSS.pIsNext.toFixed(2)).toBe("0.97");
+    expect(LOSS.boiled.toFixed(3)).toBe("0.610");
+    expect(LOSS.tea.toFixed(3)).toBe("0.456");
+    expect(LOSS.mlmMean.toFixed(3)).toBe("0.533");
+    expect(LOSS.nsp.toFixed(3)).toBe("0.033");
+    expect(LOSS.total.toFixed(3)).toBe("0.566");
+  });
+
+  it("head and embedding table sizes", () => {
+    expect(HEAD.weights).toBe(1_536);
+    expect(HEAD.withBias).toBe(1_538);
+    expect(HEAD.squadVectors).toBe(1_536);
+    expect(TABLES.token).toBe(23_040_000);
+    expect(TABLES.position).toBe(393_216);
+    expect(TABLES.segment).toBe(1_536);
+    expect(TABLES.maxPositions).toBe(512);
   });
 });
