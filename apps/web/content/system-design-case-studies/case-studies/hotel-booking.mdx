@@ -1,12 +1,662 @@
 ---
 title: "Design a Hotel Booking Service"
-description: "Availability search, reservations, overbooking and concurrency control."
+description: "Room types over date ranges, atomic multi-night reservations, availability search across many hotels, overbooking and channel managers."
 logo: systems/hotel-booking
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a hotel booking service: guests search hotels by place and dates, open a hotel, and book a room type for a range of nights.
+The hard parts are a stay that spans several nights, a search that asks about hundreds of hotels at once, and rooms the hotel also sells on other sites.
 
-**What it will cover:** availability search, reservations, overbooking and concurrency control.
+- Interviewers use this question to see whether you can model inventory over date ranges, keep one booking atomic across nights and payment, and keep the search load away from the booking path.
 
-**Patterns used:** [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Idempotency](/system-design/patterns/idempotency) · [Saga and Distributed Transactions](/system-design/patterns/saga) · [Unique ID Generation](/system-design/patterns/unique-id-generation)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a hotel booking service: guests search by place and dates and book a room. Two guests must never get the same room for the same night."
+  level="Senior"
+  minutes={45}
+  bankId="design-hotel-booking"
+  tests={[
+    "Overlapping date ranges under concurrency",
+    "One consistency model that spans booking and payment",
+    "Search across many hotels without touching the booking database",
+    "Saying why for every choice when requirements change",
+  ]}
+  clarify={[
+    { q: "Does the guest book a room type or a specific room?", a: "A room type (Double, Twin); the hotel assigns the room at check-in. A specific room is a variant." },
+    { q: "How big is it?", a: "1,000,000 hotels, 4 room types each, 1,000,000 bookings a day, sold up to a year ahead." },
+    { q: "How long is a hold while the guest pays?", a: "15 minutes, then the rooms go back on sale." },
+    { q: "Pay now or at the hotel?", a: "Pay now, through an external card processor called with an idempotency key." },
+    { q: "Do hotels sell the same rooms elsewhere?", a: "Yes: a channel manager pushes rates and room counts to us, and we push our bookings back." },
+    { q: "May we overbook?", a: "Only up to an allowance the hotel sets per room type and night; the default is 0." },
+    { q: "Must search results be exact?", a: "No: a few seconds stale is fine. The hotel page and the booking must be exact." },
+  ]}
+  outOfScope={["Reviews", "Loyalty points", "Pricing models", "Fraud scoring"]}
+/>
+
+## Overview
+
+- Inventory is **one row per room type per night** with counts (`total`, `held`, `sold`); a three-night stay touches three rows.
+- A booking **reserves every night in one transaction** with a guarded `UPDATE`; if any night is full, the row count comes up short and nothing is kept.
+- All of a hotel's rows and bookings live on **one shard keyed by `hotel_id`**, so every booking is a local ACID transaction.
+- **Hold, pay, confirm** runs as a **durable workflow**: a 15-minute hold timer, authorise, confirm, capture; a failure runs **compensations**, and every step is idempotent.
+- **Search** reads an index of hotels and their open nights, fed from the database's **change stream** seconds behind; the hotel page and the booking **re-check** live.
+- Hotels push rates and room counts through a **partner API**; each booking is pushed back to their channel manager, and a per-room-type **overbooking allowance** absorbs the gaps.
+
+<Numbers
+  items={[
+    { value: "100", label: "searches for every booking", hint: "5,800/s against 58/s at peak" },
+    { value: "1.46 B", label: "room-night rows", hint: "1 M hotels × 4 types × 365 nights" },
+    { value: "20.9 M/s", label: "rows search would read from the primary", hint: "why search has its own index" },
+    { value: "0", label: "nights sold past the hotel's limit" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Search by place, dates and guests", notes: "Hotels near a place with a room type open on every night of the stay, with a price." },
+    { id: "F2", requirement: "Hotel page", notes: "Room types, live availability and the total price for the dates." },
+    { id: "F3", requirement: "Book: hold, pay, confirm", notes: "All nights or none; one charge per booking, never two." },
+    { id: "F4", requirement: "Cancel and refund", notes: "Free the nights; refund by the hotel's cancellation policy." },
+    { id: "F5", requirement: "Hotels manage inventory and rates", notes: "Room counts and prices per room type per night, often pushed by a channel manager." },
+    { id: "F6", requirement: "My bookings", notes: "The guest sees upcoming and past stays." },
+  ]}
+/>
+
+- Out of scope: reviews, loyalty points, pricing models, fraud scoring.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Correctness", target: "0 nights sold past total + allowance; 0 bookings charged twice", why: "A walked guest costs the hotel a room elsewhere and the guest a night." },
+    { id: "N2", property: "Search latency", target: "p99 under 400 ms", why: "Guests compare many dates and places." },
+    { id: "N3", property: "Search freshness", target: "Under 10 s stale at p99", why: "A stale result costs a click; the booking re-checks." },
+    { id: "N4", property: "Reserve latency", target: "p99 under 500 ms for the hold", why: "The guest is waiting on the button." },
+    { id: "N5", property: "Durability", target: "A confirmed booking is never lost (RPO 0)", why: "The guest travels on it." },
+    { id: "N6", property: "Availability", target: "99.95% for search and booking", why: "Every minute down is bookings lost to other sites." },
+    { id: "N7", property: "Partner sync", target: "A booking reaches the hotel's channel manager in under 60 s", why: "Until then the room is still for sale elsewhere." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Inventory rows", assumption: "1,000,000 hotels × 4 room types × 365 nights", result: "1.46 B rows × 100 B ≈ 146 GB" },
+    { quantity: "Bookings", assumption: "1,000,000 a day ÷ 86,400 s; peak 5 ×", result: "≈ 12/s average, ≈ 58/s at peak" },
+    { quantity: "Guarded row updates", assumption: "58 bookings/s × 3 nights a stay", result: "≈ 174 row updates/s at peak" },
+    { quantity: "Searches", assumption: "100 per booking: 100,000,000 a day; peak 5 ×", result: "≈ 1,160/s average, ≈ 5,800/s at peak" },
+    { quantity: "Rows one search asks about", assumption: "300 hotels in a city × 4 room types × 3 nights", result: "3,600 rows" },
+    { quantity: "If search read the primary", assumption: "5,800/s × 3,600 rows", result: "≈ 20.9 M rows/s" },
+    { quantity: "Hotel-page re-checks", assumption: "20 pages per booking at peak: 1,160/s × 12 rows", result: "≈ 14,000 rows/s, one hotel each" },
+    { quantity: "Rate and room updates (ARI)", assumption: "50 per hotel a day: 50,000,000 ÷ 86,400 s", result: "≈ 580/s; one full-year reprice = 1,460 rows" },
+    { quantity: "Search index", assumption: "4,000,000 room-type documents × ≈ 2.5 KB of nights and prices", result: "≈ 10 GB" },
+    { quantity: "Bookings kept", assumption: "1,000,000 a day × 1 KB × 365 days × 3 years", result: "≈ 1.1 TB" },
+  ]}
+  note="The data fits a few database shards; the reads are the problem, and they ask about date ranges."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 100 searches per booking; one search asks about 3,600 rows | Search reads an index fed by a stream; only the hotel page and the booking read the primary |
+| D2 | Peak against average | 5 × daily peak, higher on holiday weekends and sale days | Size search to the peak; booking writes stay small (174 rows/s) |
+| D3 | Consistency per operation | Reserve and confirm strong; search eventual, seconds behind; my bookings read-your-writes | Guarded updates on the primary; re-check before every booking |
+| D4 | Latency target | Search p99 400 ms (N2), hold p99 500 ms (N4) | Precomputed open nights in the index; the hold is one transaction on one shard |
+| D5 | Durability | A confirmed booking is never lost (N5) | Synchronous replica for the booking database; confirm and booking in one transaction |
+| D6 | Ordering | Rate and room updates for one room type and night must apply in order | A version on every ARI message; an older version is ignored |
+| D7 | Duplicates | A duplicate charge or a duplicate booking is harmful | Idempotency keys on payment and booking; every workflow step idempotent |
+| D8 | Data size and growth | 146 GB of inventory, about 365 GB of bookings a year | Shard by hotel; keep old stays in cheaper storage |
+| D9 | Fan-out shape | One search reads hundreds of hotels; one room change feeds the index, the trips view and the channel manager | A change stream with several consumers; never a search fan-out to shards |
+| D10 | Contention | Moderate: the last rooms of a popular night, a few attempts a second at most | Guarded counters per night; nights locked in date order |
+| D11 | Geography | Hotels and guests worldwide; a stay touches one hotel | One home region per hotel shard; search index copies near guests |
+| D12 | Availability and degradation | 99.95% (N6); under stress search may show older prices, booking stays exact | Shed search freshness first; never skip the re-check |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/search?place=…&check_in=…&check_out=…&guests=…` | Guest | Every search; served from the search index |
+| `GET /v1/hotels/{id}?check_in=…&check_out=…` | Guest | Hotel page; live availability for one hotel |
+| `POST /v1/holds` | Guest | Pick a room type; returns `hold_id`, `expires_at` and the total |
+| `POST /v1/bookings` | Guest | Pay for a hold, with `Idempotency-Key`; returns `202` and a booking id |
+| `GET /v1/bookings/{id}` | Guest | Poll until `confirmed` or `failed` |
+| `POST /v1/bookings/{id}/cancel` | Guest | Cancel, with `Idempotency-Key` |
+| `GET /v1/me/bookings` | Guest | My bookings, by cursor |
+| `PUT /partner/v1/hotels/{id}/ari` | Channel manager | Rates and room counts for a date range, with a version |
+| Booking webhook to the channel manager | Booking workflow | Each new booking or cancellation |
+
+```http
+POST /v1/holds
+Authorization: Bearer <session>
+{ "hotel_id": 42, "room_type_id": 2, "check_in": "2026-06-12", "check_out": "2026-06-15", "rooms": 1 }
+
+201 Created   { "hold_id": "h_7c2e", "expires_at": "2026-05-01T10:15:00Z", "total": { "amount": 36000, "currency": "USD" } }
+409 Conflict  { "error": "sold_out", "nights": ["2026-06-13"] }
+```
+
+- **Dates:** `check_out` is exclusive: a stay from the 12th to the 15th is the nights of the 12th, 13th and 14th.
+- **Idempotency:** `POST /v1/bookings` and `/cancel` require `Idempotency-Key`; a retry returns the first result, never a second charge or refund.
+- **Errors:** `409` a night is sold out; `410` the hold expired; `402` the card was declined; `409` with `stale_version` on an ARI push older than the stored one.
+- **Pagination:** search results and my bookings, by cursor.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Room-nights (counts, rates) | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL) | Guarded updates across several rows in one transaction (D3, D10) | `hotel_id` | Strong | A key-value store: no transaction across the nights of a stay |
+| Holds and bookings | Same relational database, same shard | Confirm and booking commit together (D5, D7) | `hotel_id` | Strong | A separate bookings store: a two-system write with no atomic step |
+| Workflow state | Same database (an embedded engine) | The workflow's steps commit next to the data they change (D5) | `hotel_id` | Strong | Timers in server memory: lost on a restart |
+| Change stream | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | One change, three readers (D9) | `hotel_id` | Ordered per hotel | Polling the primary for changes |
+| Search documents | Search engine (<TechIcon id="oss/elasticsearch" /> Elasticsearch, OpenSearch) | Geo filter plus "open on every night" at 5,800/s (D1, D4) | Hotel, by region | Seconds stale | Querying 3,600 rows per search on the primary |
+| Trips view | Relational table sharded by `guest_id` | My bookings by guest; bookings are sharded by hotel (D9) | `guest_id` | Seconds stale; read-your-writes from the primary | Scatter-gather across every hotel shard |
+| Hotel catalog | Relational database + blob store + CDN | Read-mostly content and photos (D1) | `hotel_id` | Eventual | None worth the cost |
+
+A room type's nights are rows with counts; the guard lives in the `UPDATE`, not in a `CHECK`, because a hotel may lower `total` below what is already sold.
+
+```sql
+CREATE TABLE room_nights (
+  hotel_id     bigint,
+  room_type_id int,
+  night        date,          -- the night of 12 June = check-in on the 12th
+  total        smallint,      -- rooms the hotel offers us (from ARI)
+  overbook     smallint DEFAULT 0, -- allowance the hotel sets
+  held         smallint DEFAULT 0,
+  sold         smallint DEFAULT 0,
+  price_cents  int,
+  ari_version  bigint,        -- last applied ARI message
+  PRIMARY KEY (hotel_id, room_type_id, night)   -- shard by hotel_id
+);
+
+CREATE TABLE bookings (
+  booking_id bigint, hotel_id bigint, guest_id bigint,
+  room_type_id int, check_in date, check_out date, rooms smallint,
+  hold_id uuid UNIQUE,            -- one booking per hold
+  idempotency_key text UNIQUE,    -- one charge per key
+  status text,                    -- 'held' | 'confirmed' | 'expired' | 'cancelled'
+  PRIMARY KEY (hotel_id, booking_id)
+);
+```
+
+- **Hold:** add `rooms` to `held` on every night of the stay where `held + sold + rooms <= total + overbook`; succeed only if the row count equals the number of nights.
+- **Confirm:** move `held` to `sold` on those nights and set the booking `confirmed`, in one transaction, only while its status is still `held`.
+- **Search:** read the room type's open nights from the index, never from these rows.
+
+A three-night stay is three guarded rows in one transaction.
+
+<AnimatedDiagram spec="animated/hotel-booking/night-rows" stepper caption="One transaction updates every night of the stay; if any night is full, the row count comes up short and nothing is kept." />
+
+<StepCards>
+  <StepCard n={1} title="All three nights open: commit">
+    Guest A books one double room for Friday to Monday. Each night passes the guard, Saturday taking its last room, so 3 rows change for 3 nights and the hold commits.
+  </StepCard>
+  <StepCard n={2} title="Saturday is full: roll back">
+    Guest B asks for the same nights a moment later. Friday and Sunday change, Saturday is at 10 of 10 and changes nothing, so 2 rows for 3 nights: the whole transaction rolls back.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 174 guarded row updates/s at peak, spread over 1.46 B rows on several shards; a hot row sees a few attempts a second, far below what one row lock can serialise.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Search hotels and open a hotel (F1, F2)
+
+The smallest design: a guest searches through an API gateway and the search service asks the databases directly.
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={1} caption="Step 1: the search service finds hotels in the catalog and reads each one's nights from the inventory database; photos come from the CDN." />
+
+- **Adds:** the API gateway, a CDN for photos and pages, the search service, the hotel catalog, the inventory database.
+- **Flow:**
+  1. The guest asks for Lisbon, 12 to 15 June, 2 guests.
+  2. The search service finds about 300 hotels near Lisbon in the catalog.
+  3. For each, it reads 4 room types × 3 nights from the inventory database and keeps hotels with a room type open on all 3.
+- **Why this and not that:** it is correct and easy to explain; it shows the reader what "open on every night" means before any shortcut (F1).
+- **The gap:** there is no inventory yet: someone must say how many rooms exist on each night.
+
+<PremiumBreak />
+
+### Step 2: A row per room type per night, kept by the hotel (F5)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={2} caption="Step 2: the hotel's channel manager pushes rates and room counts through the partner API; the booking service writes one row per room type per night." />
+
+- **Adds:** the hotel's **channel manager** (external), the **partner API**, the **booking service** as the only writer of room-night rows.
+- **Flow:**
+  1. The channel manager sends "Double, 12 to 30 June, 10 rooms, \$120, version 812" (rates, availability and inventory: ARI).
+  2. The booking service upserts one row per night, only where the stored `ari_version` is older (D6).
+- **Why this and not that:** a row per night, not a row per booking range, because availability changes night by night and prices differ per night; a stay is then a set of rows (F5).
+- **Why counts and not rooms:** guests book a room type; the hotel picks the room number at check-in, so a count per night is all we must protect (Deep dive 1 has the specific-room variant).
+- **The gap:** nothing yet stops two guests taking the last room.
+
+### Step 3: A naive booking overbooks (F3)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={3} caption="Step 3: the booking service reads each night's count, then writes it: two overlapping stays can both see the last room and both win." />
+
+- **Adds:** the booking path from the gateway.
+- **Flow:**
+  1. Guest A wants Friday and Saturday; guest B wants Saturday and Sunday; Saturday has 9 of 10 taken.
+  2. The service reads Saturday as 9 for both, then writes 10 for both.
+  3. Both are told "booked": 11 guests, 10 rooms.
+- **Why this and not that:** this is the design most candidates draw first; on the last rooms of a popular night, overlapping requests within the same second are normal (D10).
+- **The gap:** the check and the write must be one step, for every night of the stay at once.
+
+### Step 4: Reserve every night in one transaction (F3)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={4} caption="Step 4: one transaction runs a guarded UPDATE over every night of the stay; the hold counts only if every night changed." />
+
+- **Adds:** nothing new: the hold becomes one guarded `UPDATE` over the stay's nights, with a hold row that expires in 15 minutes.
+- **Flow:**
+  1. Begin; `UPDATE room_nights SET held = held + 1 WHERE … AND night >= '06-12' AND night < '06-15' AND held + sold + 1 <= total + overbook`.
+  2. Three rows changed for three nights: insert the hold and commit. Fewer: roll back and return `409` with the full night.
+- **Why this and not that:** the database applies the guard under each row's lock, so the last room goes to exactly one stay (D3, D10). Every stay updates its nights in date order, so two overlapping stays never wait on each other in a cycle.
+- **Why one shard:** all rows of one hotel share `hotel_id`, so the stay is a local transaction; no two-phase commit across shards (D4).
+- **The gap:** a hold is not a booking; the guest still has to pay.
+
+### Step 5: Hold, pay, confirm as a workflow (F3)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={5} caption="Step 5: a durable booking workflow runs the 15-minute hold, payment and confirmation, and undoes earlier steps when a later one fails." />
+
+- **Adds:** the **booking workflow**, the **payment service** and the external **card processor**.
+- **Flow:**
+  1. The guest pays with an `Idempotency-Key`; the workflow authorises the card (funds reserved, not taken).
+  2. It moves the nights from `held` to `sold` and confirms the booking in one transaction, only while the hold is still `held`.
+  3. It captures the payment. If the card is declined or the 15-minute timer fires first, it runs the compensation: release the held nights, void the authorisation.
+- **Why this and not that:** the card processor cannot join our transaction, so the steps are a saga; a durable workflow records each step, so a crash resumes instead of leaving rooms held and money reserved (D5, D7).
+- **Same order as the Ticketmaster case study:** authorise, claim, capture, so an expired hold voids instead of refunding; see [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster).
+- **The gap:** search still reads 3,600 rows per query from the primary.
+
+### Step 6: Availability into the search index from a change stream (F1, N3)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={6} caption="Step 6: room-night changes flow from the inventory database through a change stream into the search index; the hotel page re-checks one hotel live." />
+
+- **Adds:** the **change stream** and the **search index**; search stops reading the inventory database.
+- **Flow:**
+  1. Every committed change to a room-night row is read from the database's log (change data capture) onto the stream, keyed by hotel.
+  2. An indexer updates that room type's document: its open nights and nightly prices.
+  3. Search asks the index for hotels near Lisbon with a room type open on 12, 13 and 14 June.
+  4. The hotel page re-checks those 12 rows live through the booking service; the hold checks them again.
+- **Why this and not that:** 20.9 M row reads/s would land on the same primaries that take bookings (D1). The index is seconds behind; a stale "open" costs a "sold out" on the hotel page, never an overbooking (D3, N3).
+- **The gap:** a guest cannot list their bookings: bookings are sharded by hotel, not by guest.
+
+### Step 7: My bookings and cancellation (F4, F6)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={7} caption="Step 7: a trips view keyed by guest is built from the same stream; a cancel runs the workflow's release and refund." />
+
+- **Adds:** the **trips service** and the **trips view**, keyed by `guest_id`.
+- **Flow:**
+  1. Each booking change on the stream is written into the trips view under the guest's id.
+  2. `GET /v1/me/bookings` reads the view; right after booking, the confirmation page reads the primary (read-your-writes).
+  3. A cancel starts the workflow: `sold - 1` on each night, a refund by the hotel's policy with its own idempotency key.
+- **Why this and not that:** asking every hotel shard "bookings for guest 7" is a scatter-gather on every page view (D9); a second copy keyed by guest costs one stream consumer.
+- **The gap:** the hotel still does not know about our bookings, and it sells the same rooms on other sites.
+
+### Step 8: Tell the hotel, and decide how far to overbook (F5)
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" step={8} caption="Step 8: the workflow pushes each booking and cancellation to the hotel's channel manager, which lowers the count on its other sites." />
+
+- **Adds:** a push from the workflow to the hotel's channel manager through the partner API.
+- **Flow:**
+  1. After confirming, the workflow sends booking 8812 to the channel manager, retrying with the same id until it is acknowledged (N7).
+  2. The channel manager lowers the room count on the other sites that sell this hotel.
+  3. If another site sold the last room in the meantime, its next ARI push lowers our `total` below `held + sold`: we flag the night as oversold for the hotel.
+- **Why this and not that:** no database of ours can lock a room that another site sells; a fast push narrows the window, and the hotel's `overbook` allowance and walk policy cover what is left (D11, N1).
+- **What the allowance buys:** the hotel chooses it from its no-show rate; the worked example below has the numbers.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/hotel-booking/architecture" stepper caption="Hotel booking: search from an index fed by a change stream, reserve every night in one transaction, pay through a workflow, and tell the hotel." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Guest app or browser; the hotel's channel manager and the card processor (external) | Search and book; send rates and rooms; authorise and capture cards |
+| **Edge** | API gateway, partner API, CDN | Authenticate and limit guests and partners; serve photos and pages |
+| **Reservation core** | Booking service | The only writer of room-nights: ARI, holds, confirm, release |
+| **Application services** | Search, trips and payment services | Search and the hotel page; my bookings; idempotent payments |
+| **Async pipeline** | Booking workflow, change stream | Hold timer, payment, compensation, partner push; carry every change to readers |
+| **Storage** | Inventory DB, search index, hotel catalog, trips view | Room-nights and bookings (ACID); open nights by place; content; bookings by guest |
+
+Booking one Double room in Lisbon for three nights, step by step:
+
+1. Search for 12 to 15 June returns Hotel 42 from the index: Double open on all three nights, from \$120.
+2. The hotel page re-checks Hotel 42's 12 rows live: Double still open, total \$360.
+3. `POST /v1/holds` runs one guarded `UPDATE` over three rows on Hotel 42's shard: three changed, held until 10:15.
+4. `POST /v1/bookings` with a key: the workflow authorises \$360, confirms the booking and moves the nights to sold in one transaction, then captures.
+5. The change stream updates the index and the trips view; the workflow pushes booking 8812 to the hotel's channel manager.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for guests, a versioned push API and webhooks for partners
+
+- **Choice:** REST over HTTPS for guests; partners `PUT` rates and rooms with a version; we call the channel manager's webhook for each booking.
+- **Why:** every guest action is a short request and response, and search and hotel GETs can be cached briefly at the edge (D1). ARI is a stream of absolute values ("10 rooms on the 13th"), so a version per message makes a retry or a late duplicate harmless (D6, D7).
+- **Why not GraphQL for search:** the client needs a few fixed shapes, and queries in POST bodies are hard to cache at a CDN.
+- **Why not WebSockets for availability:** nothing changes fast enough to need a push; the hotel page re-checks on load and the booking re-checks again.
+- **Why not polling the channel manager for changes:** a million hotels polled every minute is 16,700 calls a second, mostly "no change"; partners push only when something changed.
+- **Booking status:** `POST /v1/bookings` returns `202` and the client polls, because the workflow may wait on the bank's card check.
+
+### CDN: photos and pages, and short-lived search pages
+
+- **Choice:** a CDN for hotel photos, scripts and the static parts of hotel pages; popular search pages cached for 30 s.
+- **Why:** photos are most of the bytes and never change between bookings (D1); a 30-second cache on "Lisbon, this weekend" is allowed because search may be 10 s stale anyway (N3).
+- **Why not cache hotel-page availability at the edge:** the hotel page is the re-check; caching it would turn a stale "open" into a failed booking more often.
+- **Never cached:** holds, bookings, prices with the guest's discounts, anything with the guest's identity.
+
+### Load balancer and API gateway
+
+- **Choice:** a layer-7 load balancer behind the gateway, routing by path (`/search` to search, `/holds` and `/bookings` to booking) with health checks; the gateway authenticates and limits per guest.
+- **Why:** every request is short HTTP; path routing keeps 5,800 searches/s from sharing servers with 58 bookings/s (D2, D12).
+- **Why not layer 4:** it cannot route by path; it suits long-lived sockets, which this design does not have.
+- **Algorithm:** least outstanding requests, so a slow search node gets fewer new queries.
+- **Per-guest limits:** a scraper asking for every hotel's price every second is the usual abuser of search; the gateway limits it before the index sees it.
+
+### Partner API: a separate front door for hotels
+
+- **Choice:** a partner API with its own credentials, rate limits and schema checks for ARI pushes and booking acknowledgements.
+- **Why:** partner traffic is bursty (a full-year reprice is 1,460 rows in one push) and must not slow guest traffic (D2, D12); a bad push is rejected at the door, not in the booking service.
+- **Why not reuse the guest gateway:** different clients, different limits, and a partner outage must not page the guest on-call.
+- **Why every message carries a version:** two pushes for the same night can arrive out of order; the row keeps the higher version (D6).
+
+### Inventory database: relational (PostgreSQL, MySQL), sharded by hotel
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL, one row per room type per night, holds, bookings and workflow state in the same database, sharded by `hotel_id`, a synchronous replica per shard.
+- **Why:** a hold is a guarded update across 1 to 14 rows, all or nothing, and the confirm must commit with the booking (D3, D5, D10). A stay never spans two hotels, so `hotel_id` keeps every transaction on one shard; 146 GB plus bookings is a handful of shards.
+- **Why not Cassandra:** its compare-and-set works on one partition with consensus round trips per write, and there is no transaction across the nights and the booking.
+- **Why not Redis as the system of record:** atomic and fast, but the booking lives in another system and the two cannot commit together; a crash between them overbooks or strands a room.
+- **Why not DynamoDB or MongoDB:** both offer conditional writes and multi-item transactions, so either could work; relational wins for range queries over nights, SQL reporting for hotels, and a data size that needs no horizontally scaled store.
+- **Why not shard by date:** a stay spans dates, so one booking would cross shards; by hotel, it never does.
+
+### Booking workflow: a durable workflow engine
+
+- **Choice:** a durable workflow (an embedded engine whose state lives in the inventory database, or a workflow service) with steps hold, authorise, confirm, capture, notify, and a 15-minute timer.
+- **Why:** the payment is outside our transaction, so success needs several steps and failure needs compensations; the engine records each step, so a crash resumes where it stopped (D5, D7).
+- **Why not a chain of queue messages:** each service would need its own retries, timeouts and dead letters, and nobody owns "where is booking 8812 now".
+- **Why not a cron sweep for expired holds:** with counts, an expired hold cannot be seen in the row itself; it must be released by its own record, and a per-hold timer in the workflow does exactly that. A nightly sweep stays as a safety net.
+- **Why not two-phase commit with the card processor:** it does not offer one, and a lock held across a bank call would block the night's row.
+- **The cost:** steps run at least once, so every step is idempotent: payment calls carry a key, database steps check the booking's status first.
+
+### Change stream: Kafka, fed by change data capture
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `hotel_id`, filled by reading each shard's log (change data capture).
+- **Why change data capture:** the stream sees exactly what committed; a service that publishes after its commit loses the change if it crashes in between (the dual-write problem).
+- **Why Kafka:** three readers (index, trips view, analytics) each need every change, in order per hotel, and the index can be rebuilt by replaying (D9).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is deleted; there is no replay to rebuild the index.
+
+### Search index: Elasticsearch or OpenSearch, one document per room type
+
+- **Choice:** <TechIcon id="oss/elasticsearch" /> Elasticsearch or OpenSearch; one document per hotel room type with location, capacity, amenities, the list of open nights and nightly prices.
+- **Why:** one query combines a geo filter, a guest-count filter and "every night of the stay is open", ranked by price or score, at 5,800/s within 400 ms (D1, D4). 10 GB of documents fits in memory across a few nodes per region (D11).
+- **Why not the relational primary with a geo index:** correct, but 20.9 M row reads/s on the booking shards.
+- **Why not read replicas of the inventory database:** still 3,600 rows per search, now with replication lag we do not control, and a scatter to every shard for a city.
+- **Why not precompute results per city and date range:** the number of (place, check-in, check-out, guests) combinations is too large to precompute.
+- **Geo:** a geo-point field and a radius or bounding-box filter (see [Geospatial Indexing](/system-design/patterns/geospatial-indexing)).
+
+### Cache: what we cache and what we never cache
+
+- **Choice:** cache hotel content (names, photos, room descriptions) for minutes, popular search pages for 30 s; never cache availability in front of the hotel page or the hold.
+- **Why:** content changes rarely and is read on every search result (D1); availability must be exact at the re-check (D3).
+- **Why not Redis for live availability:** a second copy of the counts that can drift from the database; the re-check reads 12 rows from the shard, which a primary or its synchronous replica serves easily.
+- **Why not a cache of search results per query:** most queries are unique (place, dates, guests), so the hit rate is low; the index already answers in milliseconds.
+
+### Trips view: a relational table sharded by guest
+
+- **Choice:** a relational table keyed by `(guest_id, check_in)`, written by a stream consumer.
+- **Why:** my bookings is "all stays of guest 7, newest first", and the bookings table is sharded by hotel (D9); 12 writes/s on average need no special store.
+- **Why not Cassandra:** a fine fit for "rows by guest, clustered by date", but a second database technology for 12 writes/s.
+- **Why not a global secondary index on bookings:** it is another eventually consistent copy, maintained by the database instead of by us, and not every relational database offers one across shards.
+
+### Hotel catalog: relational rows, photos in a blob store behind the CDN
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL for hotel and room-type content; photos in an object store served by the CDN.
+- **Why:** content is read-mostly and edited by hotels a few times a year (D1); search reads it through the index, so the catalog sees little load.
+- **Why not photos in the database:** bytes the database must back up and serve, for no transactional benefit.
+
+### Payment: an external processor, authorise then capture
+
+- **Choice:** a card processor called with an idempotency key; authorise in the workflow, capture after the confirm.
+- **Why:** card data never touches our systems; the key makes retries safe (D7). Capturing after the confirm means a hold that expires mid-payment voids instead of refunding (D5).
+- **Why not charge in one step:** a declined confirm would need a refund, which the guest sees for days.
+
+## Deep dives
+
+### Overlapping stays under concurrency
+
+- **The rule:** the check and the change are one statement per night, inside one transaction for the whole stay; no service decides from a count it read earlier.
+- **Room types: counts per night.** `UPDATE … SET held = held + :rooms WHERE (hotel, type) = … AND night >= :in AND night < :out AND held + sold + :rooms <= total + overbook`; commit only if the row count equals the number of nights.
+- **Lock order:** the `UPDATE` touches nights in date order (the primary key order), so stays that overlap queue on the first shared night instead of deadlocking.
+- **Why not `SELECT … FOR UPDATE`, then write:** correct, but it holds the locks across a round trip to the service; the guarded update holds them for one statement.
+- **Why not optimistic versions:** a retry on every conflict works when conflicts are rare; on the last rooms of a festival night, guests retry into each other.
+- **A specific room (a home rental, a numbered room):** one row per booking with a date range, and the database rejects any overlap for the same room.
+
+<AnimatedDiagram spec="animated/hotel-booking/overlap-race" stepper caption="Reading a count and writing it back lets two overlapping stays take one last room; a guarded update per night lets the database pick one." />
+
+<StepCards>
+  <StepCard n={1} title="Read, then write: 11 guests, 10 rooms">
+    Guest A wants Friday and Saturday, guest B Saturday and Sunday. Both reads see Saturday at 9 of 10, both writes set 10, and both guests are told they are booked.
+  </StepCard>
+  <StepCard n={2} title="Guarded update: one gets the room">
+    Each stay is one transaction that updates its nights in date order. A's two rows change and commit; B waits on Saturday's lock, finds 10 of 10, changes nothing there and rolls back.
+  </StepCard>
+</StepCards>
+
+**The numbers:** a row lock held for about 5 ms serialises about 200 updates a second on one night; the hottest night sees a few attempts a second.
+
+For a specific room, PostgreSQL's exclusion constraint makes the database refuse an overlapping range:
+
+```sql
+CREATE EXTENSION btree_gist;   -- lets room_id take part in a GiST constraint
+
+CREATE TABLE room_stays (
+  room_id    bigint,
+  booking_id bigint,
+  stay       daterange,        -- '[2026-06-12,2026-06-15)': check-out day is free
+  EXCLUDE USING gist (room_id WITH =, stay WITH &&)
+);
+-- A second stay for room 7 overlapping these nights fails with
+-- "conflicting key value violates exclusion constraint".
+```
+
+- **Half-open ranges:** `[12, 15)` and `[15, 18)` do not overlap, so a guest can check in on the day another checks out.
+- **When to use which:** counts for room types (thousands of identical rooms, one row per night); a range constraint for one bookable thing (one row per booking).
+
+### Hold, pay, confirm with compensation and idempotency
+
+- **Order of operations:** hold the nights (Step 4), authorise, confirm (held to sold + booking, one transaction), capture, push to the hotel. Money moves only for nights already the guest's.
+- **Compensation per step:** hold → release the nights; authorise → void; confirm → cancel and free the nights; capture → refund by policy. A failure runs the compensations of the finished steps in reverse.
+- **The hold timer:** 15 minutes in the workflow; when it fires, release runs only if the hold is still `held`. With counts, an expired hold leaves no trace in the row, so it must be released by its own record.
+- **Idempotency:** a crash between a step and its checkpoint runs the step again. Payment calls carry the booking's key; database steps change a booking only from the status they expect (`held` → `confirmed`), so a second run changes 0 rows.
+- **Consistency model:** strong inside one shard (the nights and the booking); a saga across the shard and the card processor, which ends either confirmed and captured or released and voided.
+
+<AnimatedDiagram spec="animated/hotel-booking/book-workflow" stepper caption="The workflow records each step, so a crash resumes where it stopped; a failure runs the compensations, and a cancel is the same steps in reverse." />
+
+<StepCards>
+  <StepCard n={1} title="Authorise, confirm, capture">
+    The guest pays \$360 with key k7. The card is authorised, the three nights move from held to sold with booking 8812 in one transaction, the payment is captured, and the hotel is told.
+  </StepCard>
+  <StepCard n={2} title="Card declined: release the nights">
+    Another guest's card is declined. The workflow releases the three held nights at once instead of waiting 15 minutes, so the rooms are back on sale and back in the index within seconds.
+  </StepCard>
+  <StepCard n={3} title="Cancel later: release and refund">
+    The guest cancels booking 8812. The workflow moves the nights from sold back to free, refunds by the hotel's policy with its own key, and tells the channel manager.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  A refund or release that is not idempotent runs twice after a crash: the guest is refunded twice, or `sold` goes below the real number and the hotel overbooks. Guard every compensation by the booking's status, and key every refund.
+</Callout>
+
+### A stale search index and the re-check
+
+- **The lag:** a commit reaches the stream in under a second, the indexer updates the document, and the index makes it searchable on its next refresh, about a second later: about 2 s end to end, 10 s at p99 (N3).
+- **What staleness costs:** an "open" that is already full shows as "sold out" on the hotel page; a "full" that has freed is missed for a few seconds. Neither overbooks.
+- **Three checks, three costs:** the index (cheap, seconds stale) filters 1,000,000 hotels to 300; the hotel page (12 rows, exact at that moment) shows a price; the hold (guarded update) is the only check that decides.
+- **Watch the gap:** count hotel pages where the index said "open" and the re-check said "full"; a rise means the stream or the indexer is behind.
+- **Rebuild:** a new index version is built by replaying the stream from a snapshot, then reads swap to it.
+
+<AnimatedDiagram spec="animated/patterns/mv-staleness" caption="Freshness moves cost: updating the index in the booking transaction charges every booking, a stream costs a second or two of lag, a timer costs minutes." />
+
+**How to read it:**
+
+- The middle column, a change stream, is this design: the booking transaction stays small and the index lags by seconds.
+- The left column would put an index write inside every hold; the right column would leave search minutes behind every sale.
+
+**The numbers:** at 174 room-night changes/s from bookings and about 580/s from ARI, the indexer applies about 750 document updates/s, well within one small cluster.
+
+### Worked example: how far should a hotel overbook?
+
+1. A hotel's Double type has 100 rooms; 4% of booked guests do not arrive (an assumption the hotel takes from its own history).
+2. **Allowance 0:** sell 100; on average 4.0 rooms stand empty a night, and nobody is ever walked.
+3. **Allowance 2:** sell 102; 2.2 rooms empty on average; on 8.2% of nights at least one guest arrives to a full hotel, about 0.1 walked guests a night.
+4. **Allowance 5:** sell 105; 0.5 rooms empty; a walk on 58.9% of nights, 1.3 walked guests a night.
+5. The figures come from a binomial with 102 or 105 bookings and a 96% chance each guest arrives; the hotel picks the allowance, we store it as `overbook` and enforce it in the guard.
+
+**The numbers:** at \$120 a night, allowance 2 recovers about (4.0 − 2.2) × \$120 = \$216 a night against about 0.1 walks a night; whether a walk costs more than \$2,160 decides it.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Where the guard lives | Lock in application code, `SELECT FOR UPDATE`, guarded `UPDATE` in the database | Guarded `UPDATE` per night in one transaction | D3, D10, N1 | Booking logic partly in SQL | Never while the counts live in one database |
+| Inventory unit | A specific room per booking, a count per room type per night | Counts per room type per night | F3, D8, D10 | The hotel assigns rooms at check-in | Rentals or numbered rooms: a range constraint per room |
+| Search source | Primary, read replicas, a separate index fed by a stream | Separate search index from CDC | D1, D4, N3 | Results seconds stale; a re-check on every hotel page | A small catalogue where the primary can answer |
+| Overbooking | Never, a fixed site-wide rate, a hotel-set allowance | Allowance per room type and night, default 0 | N1, F5 | Some nights a guest is walked | The hotel's no-show rate changes |
+| Partitioning | By date, by region, by hotel | By `hotel_id` | D3, D10, D11 | My bookings needs a second copy keyed by guest | A single hotel group outgrows one shard |
+| Payment flow | Charge then hold, a two-phase commit, a saga in a durable workflow | Saga: hold, authorise, confirm, capture | D5, D7, F3 | More steps; every step must be idempotent | The processor supports one-step pay with a hold |
+| Hold length | 5, 15, 30 minutes | 15 minutes | F3, D10 | Rooms sit unsold while guests dither | Abandoned holds pass a set share of nights |
+| Partner updates | Polling, deltas, absolute values with a version | Absolute values with a version | D6, D7, F5 | A version column per row | Never: ordering is not optional |
+| My bookings | Scatter-gather, global index, a stream-fed view | Stream-fed trips view by guest | D9, F6 | Seconds of lag; read-your-writes from the primary | Bookings move to a store with global indexes |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Guarded update per night, the exclusion constraint | Overlapping stays race for the last room |
+| [Saga and Distributed Transactions](/system-design/patterns/saga) | Hold, authorise, confirm, capture, with compensations | The card processor cannot join our transaction |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | The booking workflow and its 15-minute timer | Steps must resume after a crash; expired holds must be released |
+| [Idempotency](/system-design/patterns/idempotency) | Payment keys, booking status checks, ARI versions | Steps run at least once; a retry must never charge twice |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) | Inventory changes onto the stream | The index and trips view must see exactly what committed |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Search index, trips view | Read models with different keys than the bookings table |
+| [Caching](/system-design/patterns/caching) | Hotel content, popular search pages | Content is read on every result and rarely changes |
+| [Geospatial Indexing](/system-design/patterns/geospatial-indexing) | Hotels near a place | 1,000,000 hotels filtered to about 300 per search |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Inventory by `hotel_id` | A stay never leaves one shard |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A home rental | Search index from a stream, workflow, idempotent payment | One bookable listing: a range per booking with an exclusion constraint, not counts |
+| Car rental | Counts per car class per day, holds, workflow | Pick-up and drop-off locations: inventory moves between branches |
+| Restaurant tables | Slots as rows, guarded claims, holds that expire | Slots of an hour; tables combine for big groups |
+| Meeting rooms | A range constraint per room | Ranges in minutes; recurring bookings expand into many ranges |
+| Concert seats | Holds, authorise and capture, expiry | One seat, one night, a crowd in one minute: see [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) |
+
+## How real systems do it
+
+- **PostgreSQL 18 documentation (read 2026):** the range-types chapter's own room-reservation example; `EXCLUDE USING GIST (room WITH =, during WITH &&)` rejects an overlapping booking for the same room and allows one for a different room; `btree_gist` lets the plain `room` column take part.
+- **Airbnb, Skipper (read 2026):** an embedded workflow engine that runs inside each service and keeps its state in that service's own MySQL or Unified Data Store database; `@Compensate` pairs an action with an undo that runs in reverse order on failure.
+- **Airbnb, Skipper (read 2026):** actions run at least once, so "actions should be idempotent"; at peak it has scaled to 10,000 workflows a second; it powers 15+ use cases across insurance, payments, media, infrastructure, incentives and wallet teams.
+- **Shopify, 2026:** inventory is reserved when payment starts and claimed when payment succeeds; one row per sellable unit, rows taken with `SKIP LOCKED`, reservations and the inventory ledger in one MySQL database so reserve and claim are one ACID step; they moved off Redis because reserve and claim in two systems could not be made atomic.
+- **Elasticsearch documentation (read 2026):** by default an index refreshes about once a second, and only if it has received a search in the last 30 seconds; changes are not visible to search until then.
+- **Where this design differs:** no primary source used here describes how a large hotel site holds rooms, so the inventory model follows PostgreSQL's documented constraint and Shopify's reserve-then-claim, and the workflow follows Skipper; none of them is a statement about Booking.com's or Airbnb's booking path.
+
+## Failure modes & pitfalls
+
+- **Read, then write:** two stays share one last room; alert on any night where `held + sold > total + overbook`; one guarded `UPDATE` per night, row count checked.
+- **Nights updated in random order:** two overlapping stays deadlock and one fails at random; watch deadlock counts on the inventory shards; update nights in date order.
+- **Holds never released:** a lost timer keeps rooms off sale; watch the oldest `held` booking; the workflow timer plus a nightly sweep of expired holds.
+- **Non-idempotent compensation:** a crash re-runs "release" or "refund"; reconcile `held` and `sold` against bookings nightly; guard each step by the booking's status.
+- **Index stuck behind:** search shows sold-out hotels as open; watch stream lag and the re-check mismatch rate; page when lag passes 10 s (N3).
+- **ARI applied out of order:** an old count overwrites a newer one; count rejected stale versions; keep the higher `ari_version`.
+- **Push to the channel manager fails:** the room is sold here and still for sale elsewhere; watch unacknowledged pushes older than 60 s (N7); retry with the same booking id, alert the hotel.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify room type against specific room, hold length, pay now, channel managers, overbooking; write F1 to F6 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 100 searches per booking, 3,600 rows a search, 20.9 M rows/s, 174 row updates/s, 146 GB of inventory.
+3. **Minutes 10 to 15:** API and the `room_nights` table; say a stay is a set of nights and where strong consistency lives.
+4. **Minutes 15 to 25:** Steps 1 to 5: draw the overlap race, fix it with one guarded update over all nights, add the workflow.
+5. **Minutes 25 to 35:** Steps 6 to 8: the index from a stream and the re-check, my bookings, the channel manager and overbooking.
+6. **Minutes 35 to 45:** one deep dive: overlapping stays, the payment saga or the stale index; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** a row per room type per night, a hold with an expiry, an idempotency key on payment, search from an index.
+- **Senior:** all nights in one transaction with a row-count check, sharding by hotel so it stays local, a saga with compensations, the re-check against a stale index.
+- **Staff:** channel managers and oversold nights, the overbooking allowance as a business setting, ARI ordering, how the design changes for a rental with one listing.
+
+**Red flags:** a lock in app memory; one transaction per night; search reading the primary; a distributed transaction with the card processor; a cached count as the booking check.
+
+## Further reading
+
+- [Range Types: Constraints on Ranges](https://www.postgresql.org/docs/current/rangetypes.html) (PostgreSQL 18 documentation)
+- [Skipper: Building Airbnb's embedded workflow engine](https://airbnb.tech/?p=791) (Airbnb Engineering)
+- [We replaced Redis with MySQL for inventory reservations, and it scaled](https://shopify.engineering/scaling-inventory-reservations) (Shopify Engineering, 2026)
+- [Near real-time search](https://www.elastic.co/guide/en/elasticsearch/reference/current/near-real-time.html) (Elasticsearch documentation)
+- Related pages: [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Saga and Distributed Transactions](/system-design/patterns/saga) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you stop two guests booking the same room for the same night?" category="Concepts" level="Mid">
+  - Keep one row per room type per night with counts, and change each night with a guarded update that only succeeds while a room is left.
+  - Update every night of the stay in one transaction and commit only if the row count equals the number of nights.
+  - The database applies the guard under each row's lock, so exactly one stay gets the last room.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you model availability for a stay that spans several nights?" category="Architecture" level="Mid">
+  - A stay is a set of nights; check-out is exclusive, so 12 to 15 June is three nights.
+  - Store one row per room type per night with `total`, `held`, `sold`, the price and an overbooking allowance.
+  - A booking touches its nights in one transaction; search reads the nights from an index, never from these rows.
+  </InterviewQuestion>
+  <InterviewQuestion question="What consistency model spans booking and payment?" category="Trade-offs" level="Senior">
+  - Strong inside one shard: the nights and the booking change in one ACID transaction, sharded by hotel so it stays local.
+  - A saga across the database and the card processor: hold, authorise, confirm, capture, with a compensation for each step.
+  - A durable workflow records the steps, so the saga always ends confirmed and captured, or released and voided.
+  - Every step is idempotent, because the workflow runs steps at least once.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use an exclusion constraint instead of counts per night?" category="Trade-offs" level="Senior">
+  - When the guest books one specific thing: a home rental, a numbered room, a meeting room.
+  - Store one row per booking with a date range and `EXCLUDE USING gist (room_id WITH =, stay WITH &&)`; the database rejects any overlap.
+  - For room types with many identical rooms, counts per night are smaller and the hotel assigns the room at check-in.
+  </InterviewQuestion>
+  <InterviewQuestion question="Search shows a hotel as available, but the booking fails. Is that a bug?" category="Failure modes" level="Mid">
+  - No: the index is fed by a change stream and is seconds behind by design.
+  - The hotel page re-checks one hotel live, and the hold's guarded update is the only check that decides.
+  - It becomes a bug when the mismatch rate rises: then the stream or the indexer is behind, and we page on lag.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not search availability straight from the booking database?" category="Scaling" level="Mid">
+  - One search asks about 300 hotels × 4 room types × 3 nights: 3,600 rows.
+  - At 5,800 searches/s that is about 20.9 M row reads/s on the same shards that take bookings.
+  - An index with each room type's open nights answers the same question in one query, seconds stale.
+  </InterviewQuestion>
+  <InterviewQuestion question="The hotel also sells its rooms on other sites. How do you avoid overbooking across channels?" category="Architecture" level="Senior">
+  - We cannot lock a room another site sells; the channel manager is the link between sites.
+  - Push every booking to the channel manager within seconds and accept its ARI pushes with a version, so the newest count wins.
+  - If its push lowers `total` below what we have sold, flag the night as oversold for the hotel.
+  - The hotel's overbooking allowance and walk policy cover the small window that remains.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should a hotel booking system allow overbooking?" category="Trade-offs" level="Senior">
+  - Yes, but only as an allowance the hotel sets per room type and night, enforced in the same guard.
+  - With 100 rooms and 4% no-shows, an allowance of 2 cuts empty rooms from 4.0 to 2.2 a night for about 0.1 walked guests a night.
+  - The default is 0; the trade between empty rooms and walked guests is the hotel's to make.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you shard the inventory, and what does that break?" category="Scaling" level="Senior">
+  - By `hotel_id`: a stay never spans hotels, so every hold and confirm is a single-shard transaction.
+  - Sharding by date would split one stay across shards and need a distributed transaction.
+  - It breaks "my bookings", which is keyed by guest; a trips view keyed by `guest_id` is built from the change stream.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Guarded updates (concurrency control) because overlapping stays race for the last room.
+  - A saga in a durable workflow because the card processor cannot join our transaction.
+  - Idempotency because workflow steps and partner pushes run more than once.
+  - Change data capture into materialised views (the search index, the trips view) because reads outnumber bookings 100 to 1.
+  </InterviewQuestion>
+</InterviewQuestions>
