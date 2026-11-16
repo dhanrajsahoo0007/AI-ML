@@ -407,67 +407,59 @@ A middle path: write the loop yourself and borrow one part, such as an OpenTelem
     category="Concepts"
     level="Mid"
   >
-    - LangGraph runs graphs of nodes over one saved state; the OpenAI Agents SDK and Claude Agent SDK run a model in a
-    loop with tools; CrewAI runs teams of role-based agents; Microsoft Agent Framework and Google ADK offer agents plus
-    workflows. - All of them give you tool schemas, saved state, retries, a pause for a person and tracing. - Avoid one
-    when the agent is a short loop with a few tools and no long pause, when you need every token of the prompt under
-    your control, or when the framework would hide the prompt you need to debug. - If you adopt one, pin the version and
-    keep tools as plain functions so you can leave.
+    - LangGraph runs graphs of nodes over one saved state; the OpenAI Agents SDK and Claude Agent SDK run a model in a loop with tools; CrewAI runs teams of role-based agents; Microsoft Agent Framework and Google ADK offer agents plus workflows.
+    - All of them give you tool schemas, saved state, retries, a pause for a person and tracing.
+    - Avoid one when the agent is a short loop with a few tools and no long pause, when you need every token of the prompt under your control, or when the framework would hide the prompt you need to debug.
+    - If you adopt one, pin the version and keep tools as plain functions so you can leave.
   </InterviewQuestion>
   <InterviewQuestion
     question="What does an agent framework give you that a while loop does not?"
     category="Concepts"
     level="Junior"
   >
-    - The loop itself is a few lines: call the model, run the tool it asks for, send the result back, repeat. - A
-    framework adds tool schemas from typed functions, a checkpoint after each step, retries with backoff, a pause that
-    waits for a person and resumes later, and traces of every call. - Those parts are where most of the work is,
-    especially a pause that survives a deploy. - It does not add idempotency keys or your business rules; those stay
-    yours.
+    - The loop itself is a few lines: call the model, run the tool it asks for, send the result back, repeat.
+    - A framework adds tool schemas from typed functions, a checkpoint after each step, retries with backoff, a pause that waits for a person and resumes later, and traces of every call.
+    - Those parts are where most of the work is, especially a pause that survives a deploy.
+    - It does not add idempotency keys or your business rules; those stay yours.
   </InterviewQuestion>
   <InterviewQuestion
     question="Graph-based or loop-based: how would you build a refund agent with an approval step?"
     category="Trade-offs"
     level="Mid"
   >
-    - Ask which steps are fixed. Looking up the order, checking the rule and asking for approval over £30 are fixed, so
-    they can be edges a reviewer reads. - Writing the reply to an angry customer is open, so that can be a model call or
-    a small loop inside one node. - A loop-based SDK also works if the approval is a setting on the refund tool, checked
-    in code on every call. - Either way the £30 rule lives in code, not in the prompt, and the pause is saved, not held
-    in memory.
+    - Ask which steps are fixed. Looking up the order, checking the rule and asking for approval over £30 are fixed, so they can be edges a reviewer reads.
+    - Writing the reply to an angry customer is open, so that can be a model call or a small loop inside one node.
+    - A loop-based SDK also works if the approval is a setting on the refund tool, checked in code on every call.
+    - Either way the £30 rule lives in code, not in the prompt, and the pause is saved, not held in memory.
   </InterviewQuestion>
   <InterviewQuestion
     question="A refund waits six hours for approval. How do the frameworks hold that pause, and what can go wrong?"
     category="Architecture"
     level="Senior"
   >
-    - LangGraph and Microsoft Agent Framework write a checkpoint and stop; any worker resumes the same thread with the
-    decision. - The OpenAI Agents SDK returns the pending calls and a run state you serialise to JSON and store, then
-    resume with the approval. - A callback that waits for the answer, as in the Claude Agent SDK's canUseTool, keeps the
-    process alive, so a restart loses the run unless you deny with a message and resume the session later. - Risks:
-    resumed code runs again, so side effects must sit after the pause; serialised state must stay on the server; and the
-    decision must be checked against the pending call before it is applied.
+    - LangGraph and Microsoft Agent Framework write a checkpoint and stop; any worker resumes the same thread with the decision.
+    - The OpenAI Agents SDK returns the pending calls and a run state you serialise to JSON and store, then resume with the approval.
+    - A callback that waits for the answer, as in the Claude Agent SDK's canUseTool, keeps the process alive, so a restart loses the run unless you deny with a message and resume the session later.
+    - Risks: resumed code runs again, so side effects must sit after the pause; serialised state must stay on the server; and the decision must be checked against the pending call before it is applied.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you limit lock-in when you adopt an agent framework?"
     category="Trade-offs"
     level="Senior"
   >
-    - Keep tools as plain functions or MCP servers, and keep business rules such as the refund limit in your own code. -
-    Own your prompts and your evaluation set, so a change of framework can be measured. - Pin exact versions and re-run
-    evaluations before every upgrade; several frameworks are still on 0.x. - Remember that projects end or change:
-    AutoGen moved to maintenance mode and the Assistants API was shut down in August 2026, so plan the exit before you
-    need it.
+    - Keep tools as plain functions or MCP servers, and keep business rules such as the refund limit in your own code.
+    - Own your prompts and your evaluation set, so a change of framework can be measured.
+    - Pin exact versions and re-run evaluations before every upgrade; several frameworks are still on 0.x.
+    - Remember that projects end or change: AutoGen moved to maintenance mode and the Assistants API was shut down in August 2026, so plan the exit before you need it.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your agent started calling the wrong tool after a framework upgrade, and no code changed. How do you debug it?"
     category="Failure modes"
     level="Senior"
   >
-    - Compare traces from before and after the upgrade, looking at the full request: system prompt, tool definitions and
-    message format. - Frameworks own part of the prompt, so a new release can reword it or change how tool results are
-    sent. - Roll back the pinned version to confirm, then fix the prompt or tool descriptions on your side and run the
-    evaluation set. - Add a check in CI that fails when the rendered prompt changes, so the next upgrade shows the diff
-    before it ships.
+    - Compare traces from before and after the upgrade, looking at the full request: system prompt, tool definitions and message format.
+    - Frameworks own part of the prompt, so a new release can reword it or change how tool results are sent.
+    - Roll back the pinned version to confirm, then fix the prompt or tool descriptions on your side and run the evaluation set.
+    - Add a check in CI that fails when the rendered prompt changes, so the next upgrade shows the diff before it ships.
   </InterviewQuestion>
 </InterviewQuestions>

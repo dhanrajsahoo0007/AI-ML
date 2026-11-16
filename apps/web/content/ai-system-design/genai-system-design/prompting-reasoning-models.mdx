@@ -2,43 +2,381 @@
 title: "Prompting Reasoning Models"
 description: "Goal-first prompting for o-series, R1 and thinking models: why explicit chain-of-thought can hurt, reasoning budgets and instruction clarity."
 icon: brain
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+A reasoning model thinks before it answers, so the prompt's job changes: say what done looks like, and let the model work out the steps.
 
-**What it will cover:** Goal-first prompting for o-series, R1 and thinking models: why explicit chain-of-thought can hurt, reasoning budgets and instruction clarity.
+- Interviewers use this topic to check that you know which prompting habits from chat models carry over, which ones hurt, and which knobs now live in the API call instead of the prompt.
+- How these models are trained, and what test-time compute buys, is on [Reasoning Models & Test-Time Compute](/ai-system-design/genai-system-design/reasoning-models-and-test-time-compute). This page is about how to prompt and configure them.
 
 ## Overview
 
+- A **reasoning model** writes a hidden chain of thought, its **thinking**, before the visible answer. It was trained to do this, so it does not need to be told how to reason.
+- **Drop the scaffolding.** Step-by-step recipes, "think step by step" and long worked examples compete with the model's own plan. OpenAI advises against chain-of-thought prompts for its reasoning models, and DeepSeek reports that few-shot prompts make R1 worse.
+- **Keep what only you know:** the goal, the constraints, what counts as done, and the output format. Turn "done" into **success criteria** the model can check itself against.
+- **Set depth in the API, not in words.** Claude takes an `effort` level, OpenAI a `reasoning.effort` level and Gemini a `thinking_level` (as of November 2026). Prompt wording is the second lever, and on some models it does not reliably reduce thinking.
+- **Thinking is billed as output** and counts against the output limit, whether or not you see it.
+- **In a tool loop the model thinks between calls** (interleaved thinking). The harness must send every thinking block or reasoning item back unchanged.
+- **Mix models deliberately:** a reasoning model to plan or decide, a fast model for well-defined steps, and an evaluation to prove each choice.
+
 ## Mental model
+
+- A chat model is a new hire on day one. You hand them a checklist: open the order, read the policy, decide, reply.
+- A reasoning model is a senior colleague. Handing them the same checklist slows them down and can stop them noticing what the checklist forgot.
+- With a senior colleague you say: "Sort out this refund. The limit is £30 without sign-off. You are done when the customer has an answer by email and you can point to the policy."
+- How long they think about it is a separate decision. That is the effort setting, and it costs money and time, like a senior colleague's hour.
 
 ## Core concepts
 
+Every example on this page follows the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures): customer 1847 writes "My kettle arrived cracked. It's order 4471. Can I get my money back?", and the agent has four tools, `get_order`, `search_help`, `create_refund` and `send_email`. Brightpost is moving the agent from a chat model to a reasoning model.
+
 ### Reasoning models vs. standard instruction models
+
+|                          | Standard instruction model       | Reasoning model                                             |
+| ------------------------ | -------------------------------- | ----------------------------------------------------------- |
+| Before the answer        | Starts the answer at once        | Writes thinking tokens first, often hidden                  |
+| How it learned to reason | Prompted (chain-of-thought)      | Trained with reinforcement learning to think                |
+| Best prompt              | Explicit steps, examples, format | Goal, constraints, success criteria, format                 |
+| Depth control            | Words in the prompt              | An effort or thinking-level parameter                       |
+| Cost and wait            | Output tokens of the answer      | Thinking tokens + answer tokens                             |
+| Visible reasoning        | Whatever it writes               | A summary or nothing; never the raw thinking on hosted APIs |
+
+- The line is blurring. As of November 2026, Claude Opus 5.5 always thinks and decides per request how much; Claude Sonnet 5.5 and Haiku 5.5 think by default; OpenAI's and Gemini's current models take an effort or thinking level with "none" or "minimal" at the bottom on some models.
+- So "reasoning model" is better read as "a model with thinking turned on", and the question becomes how much thinking each request should get.
 
 ### Why "think step by step" can backfire
 
+"Let's think step by step" helped older chat models because it gave them room to write intermediate results (see [Prompting Techniques](/ai-system-design/genai-system-design/prompt-engineering-types)). On a model that already thinks, the same habits cost tokens and can lower quality.
+
+1. **The recipe competes with the model's plan.** Anthropic's prompting guide says to prefer general instructions over prescriptive steps: "think thoroughly" often beats a hand-written plan, because the model's own reasoning often goes further than the plan a person would write.
+2. **Recipes freeze yesterday's process.** A recipe that says "1. `get_order` 2. `search_help` 3. decide" has no step for a customer who sends a photo instead of an order number. The model follows the recipe, or ignores it; neither is what you wanted.
+3. **Examples can hurt.** DeepSeek found that few-shot prompting made R1 worse in every case it tried, and recommends describing the problem zero-shot. OpenAI says its reasoning models usually do well without examples, so add them only if needed. Anthropic is more positive: examples still shape how Claude thinks. Start with none, and add one only to fix a format problem your evaluation shows.
+4. **Asking for written-out reasoning can fail outright.** On Claude Opus 5.5, Sonnet 5.5 and the Fable models, a prompt that asks for reasoning inside `<thinking>` tags, or a JSON field for "step-by-step reasoning", may be declined (`reasoning_extraction`). Ask for a short explanation of the decision instead.
+
 ### Specifying goals, constraints and verifiable criteria
+
+Here is the Brightpost prompt before and after the move: each line is kept, replaced, moved into the API call or cut.
+
+<AnimatedDiagram
+  spec="animated/agents/prompt-for-reasoning-vs-chat"
+  stepper
+  minWidth={620}
+  caption="Keep what only you know (the goal, the rules, the format), replace the steps with what done looks like, and set depth in the API call, not in words. Counts illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The chat-model prompt">
+    910 tokens, and 790 of them (the recipe, the "think step by step" line and three worked conversations) tell the
+    model how to think. All of it is sent with every model call.
+  </StepCard>
+  <StepCard n={2} title="Keep the goal, the rules and the format">
+    These are facts only you know. The goal gets sharper: it now says what done means, a refund or a clear no, told to
+    the customer by email. The rules gain the owner check, "only the customer's own orders".
+  </StepCard>
+  <StepCard n={3} title="Replace the recipe with success criteria">
+    The model plans its own steps, so tell it how to check the result instead: the amount matches the order, a policy
+    article supports the decision, the email went out. OpenAI's guide makes the same point: be specific about the end
+    goal and let the model keep going until it meets your success criteria.
+  </StepCard>
+  <StepCard n={4} title="Move depth to the API, cut the examples">
+    "Think step by step" becomes `effort: "medium"` in the request. The examples go: none to start, one later if the
+    reply format drifts.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 910 − 220 = 690 fewer prompt tokens per model call. The refund takes 5 model calls, so 690 × 5 = 3,450 fewer input tokens per refund (illustrative counts).
+
+Three rules for writing the new prompt:
+
+- **Goal and done.** One sentence each. "Resolve the refund request. Done means a refund or a clear no, and an email to the customer."
+- **Constraints, with their reason.** "Refunds over £30 wait for a support agent, because larger refunds need a person's sign-off." Reasons let the model handle cases the rule did not name. [System Prompt Design](/ai-system-design/genai-system-design/system-prompt-design) covers where rules go and which ones code must also enforce.
+- **Criteria the model can check.** Prefer checks with a yes or no answer: "the refund amount equals the order total", not "be accurate". Anthropic suggests ending with "verify your answer against [test criteria]"; it also notes that Claude Opus 5 verifies well unprompted and over-verifies when told to, so test the line on your model.
 
 ### Tuning reasoning effort and thinking token budgets
 
+Effort sets how much the model thinks; it does not set a token count. Here is one refund at three levels.
+
+<AnimatedDiagram
+  spec="animated/agents/reasoning-budget"
+  stepper
+  minWidth={620}
+  caption="Effort is a dial on thinking, not on the answer: high buys nothing on a routine refund, and low saves money by skipping a step. Tokens, speed and the low-effort skip are illustrative; the price is Claude Opus 5.5's."
+/>
+
+**How to read it:**
+
+- Each row is a whole refund run. The bar is its output tokens to scale: green is thinking, grey is the tool-call arguments and the reply.
+- Steps 1 and 2: medium and high produce the same £42 refund with the same 4 tool calls. High thinks almost three times as much.
+- Step 3: low is cheapest, and it skipped `search_help`. The refund was right this time because the order was in time; the policy was never checked. Anthropic notes the same risk for Claude Haiku 5.5: at low effort, in long agent prompts, it is more likely to skip a search, stop early or skip a check.
+
+**The numbers** (Claude Opus 5.5 output at \$20 per million tokens; tokens and 100 tokens per second illustrative):
+
+- Medium: (920 + 400) × 20 / 1,000,000 = \$0.0264 per refund. High: 3,030 × 20 / 1,000,000 = \$0.0606, 2.3 times as much.
+- Thinking adds 920 ÷ 100 = 9.2 s at medium and 2,600 ÷ 100 = 26 s at high: 16.8 s more for the same answer.
+- At an illustrative 10,000 refunds a day, high costs \$606 a day against \$264 at medium.
+
+The knobs, as of November 2026:
+
+| Provider                   | Depth control                                                   | Hard cap                                 | Notes                                                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Anthropic (Claude)         | `output_config.effort`: `low`, `medium`, `high`, `xhigh`, `max` | `max_tokens` (thinking + text)           | Default `high`; `medium` on Opus 5.5 and Haiku 5.5. The old `budget_tokens` (minimum 1,024, below `max_tokens`) is deprecated on the 4.6 models and rejected from 4.7 on |
+| OpenAI                     | `reasoning.effort`: `none` to `max`, by model                   | `max_output_tokens` (reasoning + output) | Current models default to `medium`; reserve at least 25,000 tokens when you start                                                                                        |
+| Google (Gemini)            | `thinking_level` on Gemini 3 and later                          | `max_output_tokens`                      | Gemini 2.5 uses `thinking_budget` (Pro 128–32,768; Flash 0–24,576, where 0 turns thinking off; −1 dynamic). Sending both is an error                                     |
+| DeepSeek-R1 (open weights) | None: it thinks until done                                      | Your generation limit                    | Temperature 0.6, no system prompt, instructions in the user turn                                                                                                         |
+
+Here is the request Brightpost now sends on every model call of the refund loop (Claude Messages API; tools and messages left out):
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 16000,
+  "thinking": { "type": "adaptive", "display": "omitted" },
+  "output_config": { "effort": "medium" },
+  "system": "Resolve the refund request. Done means a refund or a clear no...",
+  "tools": [],
+  "messages": []
+}
+```
+
+- Every one of these is a **soft** target. Anthropic calls effort "a behavioral signal, not a strict token budget". Google documents the Gemini budget as a soft limit, and Claude's old `budget_tokens` was a target, not a cap.
+- The only hard cap is the output limit, and it covers thinking and answer together. Size it for the thinking, or hard requests end with no answer.
+- Effort shapes tool use too. Anthropic documents that lower effort makes fewer, terser tool calls, which is what step 3 shows.
+
+<Callout tone="red" title="What breaks">
+  Changing effort in the middle of a conversation. On Claude the effort value is rendered into the prompt, so a new
+  top-level value can invalidate the prompt cache for the whole history, and a long agent run pays full input price
+  again. Pick one level per conversation, or use the per-message effort setting (beta), which keeps the cache.
+</Callout>
+
 ## Architecture
+
+- A system that uses reasoning models has three parts the prompt cannot replace: a **router** that picks a model and an effort per request, a **harness** that runs the tool loop and keeps every thinking block, and a **budget check** that logs thinking tokens and handles a hit output limit.
+- The loop is where most mistakes happen. Here is the refund with thinking on, at medium effort.
+
+<AnimatedDiagram
+  spec="animated/agents/interleaved-thinking"
+  stepper
+  minWidth={620}
+  caption="The model reasons about each result before its next call, and skips thinking where there is nothing to decide. Every thinking block goes back to the API unchanged, even after a pause. Token counts illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Call 1 thinks the most">
+    The first request after a new user message carries most of the reasoning, as Anthropic's docs describe: 420 tokens
+    to read the message, choose a tool and plan. The response holds a thinking block and a `get_order` call.
+  </StepCard>
+  <StepCard n={2} title="Call 2 reasons about the result">
+    This is **interleaved thinking**: the model thinks after each tool result, before its next action. It reads "£42,
+    delivered 12 Nov" and decides it needs the damage policy. On Claude it is automatic with adaptive thinking; older
+    Claude 4 models needed the `interleaved-thinking-2025-05-14` beta header.
+  </StepCard>
+  <StepCard n={3} title="Call 3 decides, and the run waits">
+    The model asks for a £42 refund. £42 is over £30, so the harness saves the run and waits for the support agent. The
+    saved run must hold the assistant messages exactly as received, thinking blocks and their signatures included. At
+    10:20 the agent approves and the loop resumes.
+  </StepCard>
+  <StepCard n={4} title="Call 4 skips thinking">
+    The refund went through; sending the email needs no decision. With adaptive thinking the model can skip the thinking
+    block entirely, so do not write code that expects one on every response.
+  </StepCard>
+  <StepCard n={5} title="Call 5 checks and replies">
+    A short think against the success criteria (amount, policy, email), then the reply. Thinking over the whole run: 420
+    + 180 + 260 + 0 + 60 = 920 tokens.
+  </StepCard>
+</StepCards>
+
+This is the assistant message from call 1 as the harness stores it and sends it back on call 2. With `display: "omitted"` the thinking text is empty and only the signature remains (Claude Messages API):
+
+```json
+{
+  "role": "assistant",
+  "content": [
+    { "type": "thinking", "thinking": "", "signature": "EqQBCkYIBxgCKkA..." },
+    { "type": "tool_use", "id": "toolu_01", "name": "get_order", "input": { "order_id": "4471" } }
+  ]
+}
+```
+
+- **Claude:** pass thinking blocks back complete and unmodified with the `tool_result`. The signature lets the API check the block; dropping blocks loses the reasoning behind the tool calls, even when no error is raised.
+- **OpenAI (Responses API):** pass the reasoning items returned with function calls back with the tool outputs, in their original order, or chain with `previous_response_id`. With `store: false` the items carry `encrypted_content`.
+- **Gemini:** in stateless use, resend every thought block and its signature exactly as received.
+
+<Callout tone="red" title="What breaks">
+  A harness that saves only text and tool calls. The approval pause in step 3 is where it shows: the run is written to a
+  database and read back an hour later. If the save step keeps `text` and `tool_use` blocks but drops `thinking`, call 4
+  runs without the reasoning behind call 3. Store the assistant message as the API returned it. See [State Persistence &
+  Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval).
+</Callout>
 
 ## Technical mechanics
 
+### Worked example: moving the refund agent to a reasoning model
+
+This follows the [interleaved-thinking figure](#architecture) from first message to reply, after the prompt rewrite above. The model is Claude Opus 5.5 at medium effort; token counts are illustrative.
+
+| #   | Step                                         | Thinking | What the harness does                                           |
+| --- | -------------------------------------------- | -------- | --------------------------------------------------------------- |
+| 1   | Customer 1847's message arrives              |          | Router: a refund goes to the reasoning model at `medium`        |
+| 2   | Call 1: `get_order(4471)`                    | 420      | Runs the tool; stores the full assistant message                |
+| 3   | Call 2: `search_help("damaged item refund")` | 180      | Same, with call 1's thinking block resent unchanged             |
+| 4   | Call 3: `create_refund(4471, 42.00)`         | 260      | £42 > £30: saves the run with all three thinking blocks, pauses |
+| 5   | Support agent approves at 10:20              |          | Loads the run, sends the result "refund R-2291"                 |
+| 6   | Call 4: `send_email`                         | 0        | No thinking block to store this time                            |
+| 7   | Call 5: the reply                            | 60       | Logs 920 thinking tokens and 400 visible tokens                 |
+
+**The numbers:**
+
+- Output: 920 + 400 = 1,320 tokens, \$0.0264 at \$20 per million.
+- Input: the prompt is 690 tokens shorter on each of 5 calls, 3,450 tokens in all. Thinking blocks kept in the context are billed as input on later requests, so log both `input_tokens` and the usage field `thinking_tokens`.
+- Wait: 9.2 s of thinking across the run, plus the tools and the approval.
+
+Three things to take from it:
+
+- **The prompt got shorter, and the run got more careful.** The success criteria made call 5 check the policy citation, which the old recipe never asked for.
+- **The harness changed more than the prompt.** Storing assistant messages whole, sizing `max_tokens` for thinking and logging thinking tokens are code changes.
+- **Effort is per route.** A refund dispute that spans three orders and two partial refunds is a different route; that one may earn `high`. Measure it, as in [Evaluating quality vs. latency and cost](#evaluating-quality-vs-latency-and-cost).
+
 ### Structured outputs with hidden reasoning tokens
+
+- **The schema constrains the answer, not the thinking.** On Claude, the grammar applies to the final output only and resets between sections, so the model thinks without constraint and still returns valid JSON. Thinking does not need to be squeezed into the schema.
+- **Do not add a reasoning field.** A `"reasoning"` or `"step_by_step"` property asks for the thinking a second time, costs output tokens, and on newer Claude models can be refused (`reasoning_extraction`). If people need a reason, ask for a one-sentence `"explanation"`.
+- **Leave room in the output limit.** If thinking uses most of `max_tokens`, the JSON stops halfway: `stop_reason: "max_tokens"` on Claude, `status: "incomplete"` on OpenAI. Check for it before parsing, and retry with a larger limit or lower effort.
+- **Forced tool choice is gone on some models.** Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 and 5.2 reject `tool_choice` `any` or `tool` with HTTP 400; on other Claude models a forced call skips thinking. Use `auto` with `strict: true`, or `output_config.format` for JSON. See [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation).
 
 ### Mixing fast instruction models and slow reasoning models
 
+- OpenAI's guide calls reasoning models "the planners" and its GPT models "workhorses" for well-defined steps, and suggests using both in one workflow.
+- Three common mixes:
+  1. **Router.** A cheap classifier, or rules, sends easy requests to a fast model and hard ones to a reasoning model. See [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks).
+  2. **Planner and executors.** The reasoning model writes the plan once; fast models carry out each step.
+  3. **Fast first, reasoning on failure.** The fast model answers, a check runs (tests, a schema, a policy rule), and only failures go to the reasoning model.
+- **Measure the simpler option first.** Anthropic reports that its newest models at lower effort often match or beat older models at high effort. One model also keeps one prompt cache; caches are per model, so a mix of models gives up cache reuse.
+- **Thinking blocks do not travel between models.** On Claude, a block written by one model is dropped, unread, by most other models, so a mid-run model switch loses the reasoning so far. Switch between turns, not inside a tool loop.
+
 ### Evaluating quality vs. latency and cost
+
+- **Run an effort sweep, per route.** Take 100 to 300 real requests for one route, run each effort level, and grade with the same checks you use in production. Anthropic says to rerun the sweep for every new model rather than carry settings over.
+- **Score cost per completed task**, not per request. A cheap run that skips a check and needs a person later is not cheap.
+- **Watch four numbers per level:** pass rate, p95 latency, output tokens (thinking separately), and the share of runs that hit the output limit.
+- **Check the steps, not only the answer.** Step 3 of the budget figure passed on the answer and failed on the process. Grade tool calls too; see [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation).
+- **Re-check prompt steering separately.** A line such as "respond directly for simple questions" is a prompt change: measure how often thinking triggers with and without it.
 
 ## Trade-offs
 
+| Decision                          | Option A                                    | Option B                                        | Guidance                                                                        |
+| --------------------------------- | ------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| Recipe vs goal-first prompt       | Predictable steps                           | Model plans; handles cases you did not list     | Goal-first on reasoning models; recipes only where the order of steps is a rule |
+| Examples vs zero-shot             | Fixes format and tone fast                  | Fewer tokens, no anchoring on the examples      | Start zero-shot; add one example to fix a measured format problem               |
+| Low vs high effort                | Cheaper, faster, fewer tool calls           | Deeper, checks more                             | Lowest level that passes your evaluation, per route                             |
+| Effort setting vs prompt steering | Calibrated, but may reset the cache mid-run | Per message, keeps the cache, wording-sensitive | Effort first; prompt lines only after measuring                                 |
+| One model vs a mix                | One cache, one prompt, simpler              | Cheaper on easy traffic                         | Try one model at lower effort before building a mix                             |
+| Summarised vs hidden thinking     | Users see progress; easier debugging        | No extra stream to handle                       | Summaries for long waits in a UI; never parse them as logic                     |
+
 ## Production systems
+
+- **OpenAI** (reasoning guide, as of November 2026): `reasoning.effort` from `none` to `max` depending on the model, opt-in reasoning summaries, reasoning tokens in the usage field `reasoning_tokens`, and a suggestion to reserve at least 25,000 output tokens.
+- **Anthropic** (as of November 2026): adaptive thinking on current Claude models, with Opus 5.5 always thinking; `effort` from `low` to `max`; interleaved thinking between tool calls; thinking blocks passed back unchanged; thinking text omitted by default on the newest models and billed in full either way.
+- **Google** (as of November 2026): `thinking_level` on Gemini 3 and later, `thinking_budget` on 2.5 (deprecated on Gemini 3, rejected on Gemini 4), thought summaries opt-in, billing for all thought tokens.
+- **DeepSeek-R1** (2025): open weights with visible `<think>` reasoning. Its paper reports that few-shot prompting degrades it; the model card recommends temperature 0.6 and no system prompt.
 
 ## Failure modes & pitfalls
 
+- Porting a chat prompt as is, with its recipe, "think step by step" and five worked examples.
+- Asking the model to write its reasoning in tags or in a JSON field, which costs tokens and may be refused.
+- Sizing the output limit for the answer alone, so hard requests end with no answer or half a JSON object.
+- Dropping or editing thinking blocks or reasoning items between tool calls, often in the save-and-resume path.
+- Expecting a thinking block on every response; adaptive thinking skips it when there is nothing to decide.
+- Changing top-level effort mid-conversation and losing the prompt cache.
+- Setting high effort everywhere "to be safe", or low effort everywhere to save money, without an evaluation.
+- Grading only the final answer, so a run that skipped a required check still passes.
+
 ## Interview framework
 
+1. Say what changes: the model plans its own reasoning, so the prompt states the goal, constraints, success criteria and format, not the steps.
+2. Name what to remove (recipes, chain-of-thought instructions, most examples) and why, with one source.
+3. Move depth to the API: effort or thinking level per route, the output limit sized for thinking, both soft except the limit.
+4. Cover the loop: interleaved thinking, and thinking blocks or reasoning items passed back unchanged, including across pauses.
+5. Close with measurement: an effort sweep per route, cost per completed task, p95 latency and process checks.
+
+**What interviewers listen for:** goal-first prompts with checkable criteria, effort as a per-route setting backed by an evaluation, and a harness that preserves thinking.
+
+**Red flags:** "add 'think step by step' to make it reason better", parsing the thinking text as program logic, or "always use maximum effort".
+
 ## Further reading
+
+- [Steering thinking: effort, prompt guidance and cost (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost)
+- [Effort (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/effort)
+- [Thinking in tool and multi-turn workflows (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)
+- [Extended thinking, legacy budget_tokens (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)
+- [Prompting best practices: thinking (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)
+- [Structured outputs (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+- [Reasoning models (OpenAI)](https://developers.openai.com/api/docs/guides/reasoning)
+- [Reasoning best practices (OpenAI)](https://developers.openai.com/api/docs/guides/reasoning-best-practices)
+- [Thinking (Gemini, Vertex AI)](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thinking)
+- [Thinking (Gemini API)](https://aistudio.google.com/docs/thinking)
+- [DeepSeek-R1 model card: usage recommendations](https://huggingface.co/deepseek-ai/DeepSeek-R1)
+- [DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning (DeepSeek-AI, 2025)](https://arxiv.org/abs/2501.12948)
+- [Pricing (Anthropic)](https://platform.claude.com/docs/en/about-claude/pricing)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How should a prompt for a reasoning model differ from a prompt for a standard chat model?"
+    category="Concepts"
+    level="Junior"
+  >
+    - A reasoning model plans its own steps in hidden thinking, so the prompt should say what to achieve, not how to think.
+    - Keep the goal, the constraints with their reasons, success criteria the model can check, and the output format.
+    - Drop step-by-step recipes and "think step by step"; start with no examples, because DeepSeek found few-shot prompts degrade R1 and OpenAI says reasoning models often do not need them.
+    - Control depth with the effort or thinking-level parameter rather than with words.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What does an effort or thinking-level setting control, and how does it relate to the output token limit?"
+    category="Concepts"
+    level="Mid"
+  >
+    - Effort tells the model how readily and how deeply to think, and on Claude it also shapes how many tool calls it makes and how much it writes.
+    - It is a soft signal: Anthropic calls it "a behavioral signal, not a strict token budget", and Gemini's thinking budget is a soft limit too.
+    - The output limit (`max_tokens`, `max_output_tokens`) is the only hard cap, and it covers thinking plus the answer.
+    - So you size the limit for the thinking, pick the lowest effort that passes your evaluation, and check for a hit limit before using the output.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent uses a reasoning model with tools. What must the harness do with the model's thinking between tool calls?"
+    category="Architecture"
+    level="Mid"
+  >
+    - The model thinks between tool calls (interleaved thinking), and the thinking comes back as blocks or reasoning items next to the tool call.
+    - The harness must send them back unchanged with the tool result: Claude thinking blocks with their signatures, OpenAI reasoning items in their original order or via `previous_response_id`, Gemini thought signatures.
+    - Dropping them loses the reasoning behind earlier calls, often silently.
+    - The risky path is save and resume, for example an approval pause: store the assistant message exactly as the API returned it, and never expect a thinking block on every response.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A JSON extraction step started failing about 2% of the time after you moved it to a reasoning model. What do you check?"
+    category="Failure modes"
+    level="Mid"
+  >
+    - First, the stop reason: if thinking used up the output limit the JSON stops halfway (`max_tokens` on Claude, `status: incomplete` on OpenAI), so raise the limit or lower the effort.
+    - Second, the schema: a field that asks for step-by-step reasoning duplicates the thinking and can be refused on newer Claude models; replace it with a short explanation.
+    - Third, forced tool choice, which some newer models reject; use `auto` with strict schemas or the structured-output setting.
+    - Then add a parse check that retries before the error reaches a user.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you mix a fast instruction model with a reasoning model, and when would you use one model at different effort levels?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Mix when traffic splits cleanly: a router sends easy requests to a fast model, a reasoning model plans and fast models execute, or the fast model answers and only failed checks escalate.
+    - One model at varying effort is often enough: the newest model at low effort can match an older model at high, it keeps one prompt cache, and its thinking blocks stay readable across the loop.
+    - Thinking blocks do not carry between most models, so never switch models inside a tool loop.
+    - Decide with an evaluation that compares cost per completed task and p95 latency for both designs.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you decide which effort level to run a production route at?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Build an evaluation set of a few hundred real requests for that route, with checks on both the answer and the steps, such as "the policy was looked up".
+    - Run every effort level and record pass rate, p95 latency, output and thinking tokens, and how often the output limit was hit.
+    - Pick the lowest level that meets the quality bar, judged on cost per completed task, and set it per route rather than globally.
+    - Rerun the sweep when the model changes, and keep effort fixed within a conversation so the prompt cache survives.
+  </InterviewQuestion>
+</InterviewQuestions>

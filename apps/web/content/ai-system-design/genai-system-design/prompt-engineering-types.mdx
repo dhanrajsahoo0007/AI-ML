@@ -99,18 +99,55 @@ How to choose in practice:
 
 ### Self-consistency in one picture
 
-```mermaid
-flowchart LR
-    Q["Question"] --> S1["Reasoning path 1 → 42"]
-    Q --> S2["Reasoning path 2 → 42"]
-    Q --> S3["Reasoning path 3 → 38"]
-    Q --> S4["Reasoning path 4 → 42"]
-    S1 --> V["Majority vote"]:::accent
-    S2 --> V
-    S3 --> V
-    S4 --> V
-    V --> A["Answer: 42"]
-```
+- Self-consistency (Wang et al., 2022) asks the same question several times and keeps the answer that comes up most often.
+- Here a Brightpost assistant answers a small sum five times: a customer paid for the £42 kettle and 3 mugs at £8 each, and the kettle was refunded.
+
+<AnimatedDiagram
+  spec="animated/agents/self-consistency-vote"
+  stepper
+  minWidth={640}
+  caption="Three different routes reach £24, so £24 wins. Path 1 alone would have answered £66: one sample can be the bad one."
+/>
+
+**How to read it:**
+
+<StepCards>
+  <StepCard n={1} title="One question, with a single correct number">
+    Self-consistency needs a question whose final answers can be compared exactly. A sum in pounds qualifies; a free-text reply does not.
+  </StepCard>
+  <StepCard n={2} title="Sample it five times">
+    The harness sends the same chain-of-thought prompt five times at temperature 0.7. Temperature is the sampling randomness: above 0, each run can take a different route. Green boxes are the five reasoning paths.
+  </StepCard>
+  <StepCard n={3} title="Each path ends in a final answer">
+    Paths 2, 3 and 5 reach £24 by three different routes. Path 1 forgets the refund (£66). Path 4 counts one mug instead of three (£8). The wrong answers are red.
+  </StepCard>
+  <StepCard n={4} title="Count the final answers, not the reasoning">
+    The vote ignores how each path got there. It counts answers: £24 three times, £66 once, £8 once.
+  </StepCard>
+  <StepCard n={5} title="The majority wins">
+    £24 wins with 3 of 5 votes. The share that agrees, 60 %, is a confidence signal you get for free.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The correct sum: £42 + 3 × £8 − £42 = £24. Agreement: 3 ÷ 5 = 60 %.
+- Cost: five samples cost about five times the output tokens of one chain-of-thought answer. The figure's question and paths are illustrative.
+- In the paper, with 40 sampled paths, self-consistency raised GSM8K (grade-school maths word problems) accuracy from 56.5 % to 74.4 % on PaLM 540B, and from 60.1 % to 78.0 % on GPT-3 code-davinci-002: +17.9 points each.
+- Most of that gain arrives early: the paper reports that accuracy saturates quickly, with 5 to 10 paths capturing most of it.
+
+<Callout tone="red" title="What breaks">
+  Voting needs answers that can be matched. If the paths end in free text, such as a drafted reply to the customer, no two match exactly and there is no majority. The paper limits the method to problems with a fixed answer set.
+</Callout>
+
+### Worked example: voting on a refund sum
+
+1. **Prompt.** The harness sends the question with "think step by step, then end with `Final answer: £<amount>`". The fixed last line makes the answer easy to pull out.
+2. **Sample.** It sends that prompt five times at temperature 0.7, in parallel, so the wait is about one call, not five.
+3. **Parse and normalise.** It reads each `Final answer:` line and turns "£24", "24" and "24.00" into the same number. Without this step, equal answers split the vote.
+4. **Vote.** It counts: 24 three times, 66 once, 8 once. It returns £24.
+5. **Act on agreement.** It keeps the 60 % with the answer. Below a threshold you set, say 3 of 5, it does not guess: it asks a person or recomputes with a tool.
+6. **Know when not to vote.** For a real refund, the amount should come from `get_order` and be computed in code. Self-consistency is for questions where no tool holds the answer.
 
 ### Anatomy of a production prompt
 
@@ -161,7 +198,7 @@ flowchart LR
 - [Language Models are Few-Shot Learners (Brown et al., 2020)](https://arxiv.org/abs/2005.14165)
 - [Chain-of-Thought Prompting Elicits Reasoning (Wei et al., 2022)](https://arxiv.org/abs/2201.11903)
 - [Large Language Models are Zero-Shot Reasoners (Kojima et al., 2022)](https://arxiv.org/abs/2205.11916)
-- [Self-Consistency Improves Chain of Thought Reasoning (Wang et al., 2022)](https://arxiv.org/abs/2203.11171)
+- [Self-Consistency Improves Chain of Thought Reasoning (Wang et al., 2022; ICLR 2023)](https://arxiv.org/abs/2203.11171)
 - [ReAct: Synergizing Reasoning and Acting (Yao et al., 2022)](https://arxiv.org/abs/2210.03629)
 - [Tree of Thoughts (Yao et al., 2023)](https://arxiv.org/abs/2305.10601)
 

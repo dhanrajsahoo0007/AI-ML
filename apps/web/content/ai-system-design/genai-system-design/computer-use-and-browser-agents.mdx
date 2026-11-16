@@ -368,64 +368,59 @@ Reading a score:
     category="Concepts"
     level="Junior"
   >
-    - A screenshot shows pixels, as a person sees them, and works for any software, including desktop apps and canvases;
-    the agent acts by coordinates. - The accessibility tree lists elements by role and name with a reference; it is
-    smaller and the agent acts by reference, which survives scrolling and layout changes. - The DOM is the full HTML:
-    useful for reading text, but mostly noise and brittle selectors for acting. - In a browser, act through the tree and
-    use screenshots to check what a person would see.
+    - A screenshot shows pixels, as a person sees them, and works for any software, including desktop apps and canvases; the agent acts by coordinates.
+    - The accessibility tree lists elements by role and name with a reference; it is smaller and the agent acts by reference, which survives scrolling and layout changes.
+    - The DOM is the full HTML: useful for reading text, but mostly noise and brittle selectors for acting.
+    - In a browser, act through the tree and use screenshots to check what a person would see.
   </InterviewQuestion>
   <InterviewQuestion
     question="Walk through one turn of a computer-use loop. Who does what?"
     category="Architecture"
     level="Mid"
   >
-    - The harness takes a screenshot, resizes it to fit the model's image limits and sends it with the task. - The model
-    answers with one action, such as a click at a point in screenshot pixels; nothing has happened yet. - The harness
-    validates the point, scales it to the real screen, applies policy (a submit button needs approval), runs it in the
-    sandbox and waits for the page. - It returns a fresh screenshot, and the loop ends when the model replies without a
-    tool call or a step budget runs out.
+    - The harness takes a screenshot, resizes it to fit the model's image limits and sends it with the task.
+    - The model answers with one action, such as a click at a point in screenshot pixels; nothing has happened yet.
+    - The harness validates the point, scales it to the real screen, applies policy (a submit button needs approval), runs it in the sandbox and waits for the page.
+    - It returns a fresh screenshot, and the loop ends when the model replies without a tool call or a step budget runs out.
   </InterviewQuestion>
   <InterviewQuestion
     question="What is grounding, and why do computer-use agents mis-click?"
     category="Concepts"
     level="Mid"
   >
-    - Grounding turns an intent, such as "submit the claim", into a target the computer can act on: a pixel or an
-    element reference. - Clicks go wrong when the harness forgets to scale coordinates from the resized screenshot to
-    the real screen, when the page moves after the screenshot, or when targets are small. - Research such as SeeAct
-    found grounding, not planning, to be the main bottleneck. - Act by element reference where a tree exists, zoom
-    before small targets, and verify every action with a fresh screenshot.
+    - Grounding turns an intent, such as "submit the claim", into a target the computer can act on: a pixel or an element reference.
+    - Clicks go wrong when the harness forgets to scale coordinates from the resized screenshot to the real screen, when the page moves after the screenshot, or when targets are small.
+    - Research such as SeeAct found grounding, not planning, to be the main bottleneck.
+    - Act by element reference where a tree exists, zoom before small targets, and verify every action with a fresh screenshot.
   </InterviewQuestion>
   <InterviewQuestion
     question="The agent clicked Submit and the page timed out. What should it do?"
     category="Failure modes"
     level="Senior"
   >
-    - It must not click Submit again, because the first request may have gone through and a second makes a duplicate. -
-    Take a fresh screenshot, then check the system of record: the claims list, a confirmation email, or an API lookup by
-    tracking number. - Re-submit only if no claim exists, and record the attempt so a later run sees it. - Design for
-    this up front: mark submit actions as non-idempotent in the harness and require a check before any retry.
+    - It must not click Submit again, because the first request may have gone through and a second makes a duplicate.
+    - Take a fresh screenshot, then check the system of record: the claims list, a confirmation email, or an API lookup by tracking number.
+    - Re-submit only if no claim exists, and record the attempt so a later run sees it.
+    - Design for this up front: mark submit actions as non-idempotent in the harness and require a check before any retry.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you protect a browser agent from prompt injection in web pages?"
     category="Failure modes"
     level="Senior"
   >
-    - Assume some injections get through: classifiers and training lower the rate, and Anthropic still reported 1.4 %
-    against an adaptive attacker in late 2025. - Limit what a successful injection can do: a sandboxed browser with no
-    saved credentials, a domain allow-list, and only the tools the task needs. - Avoid the lethal trifecta: never
-    combine private data, untrusted pages and a way to send data out in one session. - Check consequential actions in
-    code against facts the model cannot change, and ask a person before submitting, paying or sending.
+    - Assume some injections get through: classifiers and training lower the rate, and Anthropic still reported 1.4 % against an adaptive attacker in late 2025.
+    - Limit what a successful injection can do: a sandboxed browser with no saved credentials, a domain allow-list, and only the tools the task needs.
+    - Avoid the lethal trifecta: never combine private data, untrusted pages and a way to send data out in one session.
+    - Check consequential actions in code against facts the model cannot change, and ask a person before submitting, paying or sending.
   </InterviewQuestion>
   <InterviewQuestion
     question="A vendor says its agent scores 80 % on OSWorld. How do you judge whether it will work for you?"
     category="Trade-offs"
     level="Senior"
   >
-    - Ask which benchmark and which metric: OSWorld-Verified, OSWorld 2.0, binary completion or partial score, and with
-    what step budget and harness. - A partial score credits checkpoints, so it is far higher than the share of tasks
-    fully done; on OSWorld 2.0 the paper's best was 20.6 % complete and 54.8 % partial. - Then build your own set of 30
-    to 50 tasks on your real portals, check the final state, and run each several times to see consistency, cost and
-    time per task. - Compare that with the API route, which often wins where it exists.
+    - Ask which benchmark and which metric: OSWorld-Verified, OSWorld 2.0, binary completion or partial score, and with what step budget and harness.
+    - A partial score credits checkpoints, so it is far higher than the share of tasks fully done; on OSWorld 2.0 the paper's best was 20.6 % complete and 54.8 % partial.
+    - Then build your own set of 30 to 50 tasks on your real portals, check the final state, and run each several times to see consistency, cost and time per task.
+    - Compare that with the API route, which often wins where it exists.
   </InterviewQuestion>
 </InterviewQuestions>

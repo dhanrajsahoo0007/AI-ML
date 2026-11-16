@@ -7,13 +7,15 @@ icon: book-template
 Production LLM systems treat prompts as versioned, testable software artifacts rather than hard-coded strings scattered across application services.
 
 - A prompt registry decouples prompt iteration from code deploys while keeping every change gated by offline evaluations and tied to trace logs.
+- A one-sentence change to a system prompt can change what an agent does on thousands of conversations. This page follows one such change at Brightpost, the support agent used across this track, from a new version to a rollback.
 
 ## Overview
 
 - **Typed templates over raw strings:** Separate static instructions from dynamic variable slots (`user_query`, `retrieved_chunks`, `policy`) with compile-time schema validation so missing variables fail in CI.
 - **Immutable registry versions:** Store every prompt revision as an immutable bundle containing the template text, model ID, decoding parameters (`temperature`, `max_tokens`), tool definitions, and benchmark score.
-- **Environment promotion & instant rollback:** Resolve logical aliases (`refund_assistant:prod`) to pinned version hashes via configuration flags so bad prompts roll back in seconds without redeploying application code.
+- **Environment promotion & instant rollback:** Resolve logical aliases (`refund_assistant:prod`) to pinned versions via configuration so a bad prompt rolls back within one cache refresh, without redeploying application code.
 - **Trace correlation:** Log the exact `prompt_version_id` and content hash on every production request to attribute latency, token cost, and quality shifts to specific edits.
+- **Two gates, not one:** An offline gate on a fixed evaluation set catches what the set contains. A canary gate on live traffic catches what it does not. The [worked example](#worked-example-the-refund-wording-change-v12-to-v13-and-back) needs both.
 - **Systematic optimization:** Replace ad-hoc playground tweaking with evaluation-driven iteration and programmatic optimizers (such as DSPy) backed by held-out datasets.
 
 ## Mental model
@@ -26,56 +28,164 @@ Production LLM systems treat prompts as versioned, testable software artifacts r
 
 1. **Template engine & variable schemas:** Defines typed slots, default values, and escaping rules for untrusted user inputs so injected delimiters cannot silently rewrite system instructions.
 2. **Immutable prompt bundle:** Packages the system prompt, user template, few-shot demonstrations, tool schemas, target model identifier, and decoding parameters into a single content-addressed record.
-3. **Alias and environment pointers:** Maps human-readable names (`support_triage@prod`, `support_triage@canary`) to immutable version numbers so traffic routing and rollbacks happen via config updates.
+3. **Alias and environment pointers:** Maps human-readable names (`support_triage@prod`, `support_triage@canary`) to immutable version numbers so traffic routing and rollbacks happen via config updates. Registries call these labels (Langfuse, PromptLayer) or commit tags (LangSmith).
 4. **Versioned few-shot packs:** Stores few-shot examples as structured dataset rows with provenance metadata rather than inline text, preventing evaluation-set leakage and enabling dynamic example selection.
-5. **CI regression gate:** Runs golden-dataset assertions (schema validity, deterministic checks, and LLM-as-judge rubrics) on every prompt pull request before promotion.
-6. **Programmatic prompt compilation (DSPy):** Treats prompts as declarative signatures (`input -> output`) and uses an optimizer to search over instructions and few-shot combinations against a validation metric.
-7. **Prompt compression:** Trims duplicate policy clauses, prunes low-leverage few-shot examples, and moves reference text into retrieval while verifying that task accuracy and safety scores do not regress.
+5. **CI regression gate:** Runs golden-dataset assertions (schema validity, deterministic checks, and LLM-as-judge rubrics) on every prompt pull request before promotion. The same idea guards an agent's whole harness: see the [eval gate on Harness Engineering](/ai-system-design/genai-system-design/harness-engineering).
+6. **Canary gate:** Sends a small, fixed share of live conversations to the new version and compares live signals (hand-offs to a person, judge scores on sampled chats, parse errors, latency) with the current version before widening the share.
+7. **Programmatic prompt compilation (DSPy):** Treats prompts as declarative signatures (`input -> output`) and uses an optimizer to search over instructions and few-shot combinations against a validation metric.
+8. **Prompt compression:** Trims duplicate policy clauses, prunes low-leverage few-shot examples, and moves reference text into retrieval while verifying that task accuracy and safety scores do not regress.
 
 ## Architecture
 
-A production prompt management pipeline separates authoring and evaluation from the low-latency runtime serving path:
+A production prompt management pipeline separates authoring and evaluation from the low-latency runtime serving path. Follow one Brightpost change through it: v12 of the support agent's system prompt is live, and v13 adds one rule about how to word a refund.
 
-- **Step 1 — Author & commit:** Engineers or domain experts edit the prompt bundle (template + model config + few-shot IDs) in Git or a prompt registry UI.
-- **Step 2 — CI validation & offline eval:** CI validates variable schemas, checks token length against prompt-cache breakpoints, and runs the offline benchmark suite.
-- **Step 3 — Publish immutable version:** Passing bundles receive an immutable version number (`v14`, hash `8c4e1b`) in the registry store.
-- **Step 4 — Canary & promote:** The `canary` pointer shifts 5% of live traffic to `v14`; if online guardrails (schema parse rate, latency, user thumbs-down rate) hold steady, `prod` promotes to `v14`.
-- **Step 5 — Local SDK caching at runtime:** Application workers fetch `prod` bundles from an edge cache or local memory with a short TTL (e.g., 30 seconds), rendering slots locally with zero external network hops per request.
-- **Step 6 — Observability join:** Every LLM trace logs `prompt_name`, `prompt_version`, and `prompt_hash` alongside token usage and outcome signals.
+<AnimatedDiagram
+  spec="animated/agents/prompt-release-flow"
+  stepper
+  minWidth={660}
+  caption="The offline gate passed v13 because its fixed set had no return visits; the canary gate caught the regression on live chats, and the rollback was a label move, not a deploy. Scores and canary counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Save v13 as a new version">
+    An engineer or a support lead edits the prompt bundle (template, model settings, few-shot IDs) in Git or a registry
+    UI. Saving creates v13 with its own number and content hash. Nothing changes for customers: the `prod` label still
+    points at v12.
+  </StepCard>
+  <StepCard n={2} title="Run the offline gate on the fixed set">
+    CI validates the variable schema, checks token length against prompt-cache breakpoints, and runs the fixed set of
+    200 Brightpost chats. v13 passes 187; v12 passed 184; the floor is 170 (85 %).
+  </StepCard>
+  <StepCard n={3} title="Canary: 5 % of chats get v13">
+    The `canary` label moves to v13 and 5 % of conversations, split by chat id, use it. Splitting by chat, not by
+    request, keeps a multi-turn conversation on one version.
+  </StepCard>
+  <StepCard n={4} title="The canary gate compares v13 with v12, live">
+    The ringed gate reads live signals from both groups: hand-offs to a person, judge scores on sampled chats, parse
+    errors and latency.
+  </StepCard>
+  <StepCard n={5} title="It catches a regression">
+    On refund chats, v13 hands 19 % to a person against v12's 8 %. Nearly all the extra hand-offs are return visits,
+    which the fixed set never contained.
+  </StepCard>
+  <StepCard n={6} title="Roll back: move the label, not the code">
+    The `canary` label goes back to v12. Workers reading the registry through a cached SDK pick it up within one
+    refresh, 60 s with Langfuse's default TTL. v13 stays in the registry, unchanged, so its traces can still be read.
+  </StepCard>
+  <StepCard n={7} title="The failures become fixed cases">
+    20 return-visit chats from the failing traces join the fixed set, which grows to 220. The next version must pass
+    them before it reaches a single customer.
+  </StepCard>
+</StepCards>
+
+Two parts of the serving path sit outside the figure:
+
+- **Local SDK caching at runtime:** Application workers fetch labelled bundles into memory and serve the cached copy while it refreshes in the background, rendering slots locally with zero external network hops per request. Ship a fallback copy in the image so a cold start works when the registry is down.
+- **Observability join:** Every LLM trace logs `prompt_name`, `prompt_version`, and `prompt_hash` alongside token usage and outcome signals. That join is how step 5 knew the extra hand-offs came from v13.
+
+One version as the registry stores it. This is an illustrative record; Langfuse, LangSmith and PromptLayer name the fields differently:
+
+```json
+{
+  "name": "brightpost-support",
+  "version": 13,
+  "labels": ["canary"],
+  "hash": "sha256:8c4e1b…",
+  "commit_message": "Do not call a pending refund approved",
+  "template": "… Say a refund is approved only after create_refund returns \"approved\" in this conversation. …",
+  "variables": ["customer_id", "order_context"],
+  "model": "provider-model-2026-09-01",
+  "config": { "temperature": 0, "max_tokens": 400 },
+  "tools": "support-tools@8",
+  "eval": { "set": "fixed-200", "passed": 187, "baseline": { "version": 12, "passed": 184 } }
+}
+```
+
+The model snapshot and tool schemas are part of the record because the prompt was tested with them. Roll back the prompt alone and it may meet a tool schema it was never tested with ([Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) shows that failure).
 
 ## Technical mechanics
 
 ### Versioning templates, parameters, and few-shot examples
 
 - **Coupled model + prompt versioning:** A prompt tuned for Claude Sonnet often behaves differently on GPT-5 or a smaller open-weights model; pin the model snapshot and temperature inside the version record.
-- **Cache-friendly slot placement:** Keep static instructions and few-shot examples at the top of the rendered template and inject dynamic user slots at the bottom so provider [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) hits remain above 50%.
+- **Cache-friendly slot placement:** Keep static instructions and few-shot examples at the top of the rendered template and inject dynamic user slots at the bottom so the cached prefix stays identical from call to call. Anthropic caches in the order tools, system, messages, and a change at one level invalidates that level and every level after it; cache reads cost 0.1× the base input price on most Claude models (as of November 2026). See [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
 - **Provenance for few-shot sets:** Tag every few-shot example with its source dataset ID and verify in CI that zero examples overlap with the offline evaluation benchmark.
 
 ### Programmatic optimization and prompt compression
 
-- **DSPy-style compilation:** Define task signatures, provide 50–200 labeled examples and a scoring metric, and let bootstrap or MIPRO optimizers select demonstrations and instruction phrasings automatically.
+- **DSPy-style compilation:** Define task signatures, provide labelled examples and a scoring metric, and let an optimizer select demonstrations and instruction phrasings. DSPy's own guidance: `BootstrapFewShot` with about 10 examples, `BootstrapFewShotWithRandomSearch` with 50 or more, and `MIPROv2` (instructions and few-shot examples together) with 200 or more, to avoid overfitting. More on [Automated Prompt Optimization](/ai-system-design/genai-system-design/automated-prompt-optimization).
 - **Guard against dev-set overfitting:** Always hold out a separate test split that the prompt optimizer never sees, and inspect optimized prompts for brittle formatting hacks.
 - **Token-budget pruning:** Measure each prompt section's marginal contribution to accuracy by ablating few-shot examples one by one; drop examples that add token cost without lifting recall or format compliance.
 
 ### Rollouts, canaries, and instant rollback
 
-- **Zero-deploy rollback:** When a newly promoted prompt spikes schema validation errors or latency, repoint the `prod` alias to `v13`; local SDK caches pick up the rollback within one refresh interval.
+- **Zero-deploy rollback:** When a newly promoted prompt spikes schema validation errors, hand-offs or latency, repoint the label to the previous version; local SDK caches pick up the rollback within one refresh interval. In Langfuse this is setting the `production` label on the earlier version; in LangSmith each environment keeps a rollback history of commits.
 - **Shadow and A/B routing:** Route traffic by hashing `user_id` or `conversation_id` so multi-turn conversations stay on the same prompt version throughout a session (see [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)).
+- **Size the canary for the signal:** A canary can only catch a rise larger than its noise. With 600 refund chats and a baseline hand-off rate of 8 %, the 95 % interval is ±2.2 points, so the gate can see a rise of 3 points but not of 1.
+
+### Worked example: the refund-wording change, v12 to v13 and back
+
+This follows the [release figure](#architecture) step by step. The counts are illustrative; the shop, the order and the approval rule are the ones every Brightpost page uses.
+
+**Why v13.** Refunds over £30 wait for a support agent. v12 sometimes told a customer "your refund is on its way" while a £42 kettle refund was still waiting. Three of the 200 fixed cases caught it. v13 adds one rule:
+
+> Say a refund is approved only after `create_refund` returns "approved" in this conversation. Until then, say: "I've asked for your refund of £42; a support agent will confirm it."
+
+| Step             | What happened                               | The numbers                                                                      |
+| ---------------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
+| 1. Save          | v13 saved; `prod` and `canary` still on v12 | —                                                                                |
+| 2. Offline gate  | Passes: above the floor, not below v12      | 187 of 200 vs 184; floor 170. The 3 wording cases now pass, nothing else changed |
+| 3. Canary        | `canary` label → v13                        | 5 % of chats, split by chat id                                                   |
+| 4–5. Canary gate | Flags hand-offs to a person on refund chats | First 600 refund chats: 114 (19 %) vs 8 % on v12                                 |
+| 6. Roll back     | `canary` label → v12; no code deploy        | Every worker on v12 within 60 s                                                  |
+| 7. New cases     | Failing return visits join the fixed set    | 200 + 20 = 220 cases                                                             |
+
+Where the 19 % came from:
+
+- **First visits (450 chats):** both versions hand 36 to a person, 8 %. The rule works as intended here.
+- **Return visits (150 chats):** v12 hands off 12 (8 %); v13 hands off 78 (52 %).
+- **Totals:** v12 = (36 + 12) / 600 = 8 %. v13 = (36 + 78) / 600 = 19 %.
+- **Is it noise?** 1.96 × √(0.08 × 0.92 / 600) = 0.022, so ±2.2 points. An 11-point rise is five times that, and the gate blocks any rise over 3 points.
+
+A return visit is the customer from last week asking "Did my refund for order 4471 go through?". The agent calls `get_order(4471)` and gets this result:
+
+```json
+{
+  "order_id": "4471",
+  "item": "kettle",
+  "price": 42.0,
+  "refund": { "id": "R-2291", "amount": 42.0, "status": "approved" }
+}
+```
+
+The refund was approved in an earlier conversation, not "in this conversation", so v13 followed its rule to the letter: it would not confirm, and it passed the customer to a person. The offline gate could not see this, because all 200 fixed cases are a customer's first message.
+
+Three things to take from it:
+
+- **The rollback was a label move.** No build, no deploy, and 95 % of customers never saw v13.
+- **v13 was kept, not edited.** Its traces still point at an exact, unchanged prompt, which is how the team found the 78 return-visit hand-offs.
+- **The fix is v14, not v13 again:** "Say a refund is approved only after `create_refund` or `get_order` shows it approved." It goes through the same flow, now against 220 cases, 20 of them return visits.
 
 ## Trade-offs
 
-| Decision | Option A | Option B | Guidance |
-| --- | --- | --- | --- |
-| Git-backed files vs external registry DB | Full code review, PR checks, zero extra runtime infra | Non-engineer editing, instant pointer flips without CI deploy | Hybrid: Git as source of truth synced to a fast config store for alias pointers |
-| Hand-tuned templates vs DSPy compilation | Transparent wording, works with < 20 examples | Higher ceiling on multi-step pipelines, adapts when swapping models | Start hand-tuned with evals; adopt programmatic optimizers once labeled data > 100 rows |
-| Verbose instructions vs compressed prompts | Explicit edge-case handling | Lower TTFT and token cost | Compress only after establishing an offline regression suite |
-| Runtime fetch vs build-time bundle | Instant rollbacks | Zero external dependency at request time | Bundle fallback defaults in the image + poll config store asynchronously |
+| Decision                                   | Option A                                              | Option B                                                            | Guidance                                                                                               |
+| ------------------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Git-backed files vs external registry DB   | Full code review, PR checks, zero extra runtime infra | Non-engineer editing, instant pointer flips without CI deploy       | Hybrid: Git as source of truth synced to a fast config store for alias pointers                        |
+| Hand-tuned templates vs DSPy compilation   | Transparent wording, works with < 20 examples         | Higher ceiling on multi-step pipelines, adapts when swapping models | Start hand-tuned with evals; adopt programmatic optimizers once you have labelled data in the hundreds |
+| Verbose instructions vs compressed prompts | Explicit edge-case handling                           | Lower TTFT and token cost                                           | Compress only after establishing an offline regression suite                                           |
+| Runtime fetch vs build-time bundle         | Instant rollbacks                                     | Zero external dependency at request time                            | Bundle fallback defaults in the image + poll config store asynchronously                               |
+| Offline gate only vs offline + canary      | Fast, cheap, no customer sees a bad version           | Catches what the fixed set lacks (return visits, new topics)        | Both for any prompt that drives actions; a canary needs enough traffic to beat its noise               |
 
 ## Production systems
 
-- **Langfuse & LangSmith Prompt Hub:** Store versioned prompt templates with model configurations, environment labels (`production`, `staging`), local SDK caching, and direct links from trace logs to the exact prompt version.
-- **Braintrust:** Links versioned prompts in code or UI directly to CI evaluation datasets and diff views across commits.
-- **DSPy (Stanford NLP):** Compiles declarative LM programs into optimized instructions and few-shot sets using metric-driven teleprompters/optimizers.
+Product facts checked against each vendor's docs on 16 November 2026.
+
+- **Langfuse:** Each save is a new numbered version. The `production` label is what an unlabelled fetch returns, `latest` follows the newest version automatically, and you can add your own labels such as `staging`. Rolling back is setting `production` on an earlier version. SDKs cache prompts client-side with a 60-second default TTL, serve the stale copy while refreshing in the background, and accept a fallback prompt for when the cache is empty and the API is down.
+- **LangSmith:** Every prompt change is a commit with a hash; commit tags point at one commit and can be moved, and `staging` and `production` environments keep a rollback history. When you save a prompt from the playground, the model and its configuration are stored with it.
+- **PromptLayer:** Each save creates a version with a commit message; release labels such as `prod` or `staging` choose which version the application gets at runtime, and important labels can require approval.
+- **Braintrust:** Prompts load by version or by environment, and the prompt ID and version are recorded on each trace span so traces can be filtered by version.
+- **OpenAI:** Reusable prompt objects and the `/v1/prompts` endpoint were deprecated on 3 June 2026 and are scheduled to shut down on 30 November 2026. OpenAI's advice is to keep prompt content in application code, which makes versioning your own job again.
+- **DSPy (Stanford NLP):** Compiles declarative LM programs into optimized instructions and few-shot sets using metric-driven optimizers (`BootstrapFewShot`, `MIPROv2`, `GEPA` and others).
 
 ## Failure modes & pitfalls
 
@@ -84,52 +194,84 @@ A production prompt management pipeline separates authoring and evaluation from 
 - **Inserting dynamic variables above cache breakpoints:** Placing `current_date` or `user_name` at the top of a template invalidates the entire prefix cache on every call.
 - **Leaking eval cases into few-shot templates:** Copy-pasting failing benchmark cases straight into the few-shot prompt inflates offline scores while masking real generalization gaps.
 - **Unpinned `latest` pointers in production:** Referencing `latest` means a draft save immediately hits customer traffic without passing regression checks.
+- **A fixed set that only has one kind of conversation:** Brightpost's 200 cases were all first messages, so a rule about "this conversation" looked safe. Sample fixed cases from every conversation shape production has: first visits, return visits, long threads, other languages.
+- **Rolling back the prompt but not its partners:** A prompt that calls a new tool field fails when the tool schema rolls back without it. Version and roll back the prompt, model snapshot and tool schemas as one bundle.
 
 ## Interview framework
 
 1. **Define the artifact:** A prompt version is an immutable bundle of template text, variable schema, few-shot IDs, model snapshot, and decoding parameters.
-2. **Walk the lifecycle:** Edit → CI schema & token check → offline eval gate → immutable publish → canary rollout → trace logging (`prompt_version_id`).
+2. **Walk the lifecycle:** Edit → CI schema & token check → offline eval gate → immutable publish → canary rollout with a live gate → trace logging (`prompt_version_id`) → rollback by label.
 3. **Explain runtime resilience:** In-memory SDK caching with async refresh and bundled fallback defaults so the registry never blocks inference.
 4. **Connect to cost and caching:** Keep static blocks first and dynamic slots last to preserve prefix-cache hits.
 5. **Cover systematic iteration:** Contrast manual rubric-driven edits with DSPy-style compilation when migrating across model families.
 
-**What interviewers listen for:** Immutability, decoupling prompt rollbacks from code deployments, local caching on the serving path, and evaluation gates before promotion.
+**What interviewers listen for:** Immutability, decoupling prompt rollbacks from code deployments, local caching on the serving path, evaluation gates before promotion, and a canary that can catch what the fixed set misses.
 
 **Red flags:** Storing prompts as unversioned database rows edited live in production, or making synchronous remote calls to a prompt server on every token request.
 
 ## Further reading
 
 - [DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines (Khattab et al., 2023)](https://arxiv.org/abs/2310.03714)
-- Related pages: [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control)
+- [DSPy optimizers: which one to use and how much data](https://dspy.ai/learn/optimization/optimizers/)
+- [Langfuse: prompt version control and labels](https://langfuse.com/docs/prompt-management/features/prompt-version-control) · [prompt caching in the SDKs](https://langfuse.com/docs/prompt-management/features/caching)
+- [LangSmith: manage prompts (commit tags and environments)](https://docs.langchain.com/langsmith/manage-prompts)
+- [PromptLayer: prompt registry](https://docs.promptlayer.com/features/prompt-registry/overview)
+- [OpenAI API deprecations (`/v1/prompts`, 2026)](https://developers.openai.com/api/docs/deprecations)
+- [Anthropic: prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+- Related pages: [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control) · [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) · [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you structure a prompt registry so teams can iterate safely?" category="Management" level="Mid">
+  <InterviewQuestion
+    question="How would you structure a prompt registry so teams can iterate safely?"
+    category="Management"
+    level="Mid"
+  >
     - **Immutable version bundles:** Store each revision as an append-only record containing the template, variable schema, model ID, decoding parameters, and offline benchmark score.
     - **Environment alias pointers:** Resolve logical names (such as `ticket_summarizer:prod`) to pinned version hashes via configuration flags rather than `latest`.
     - **CI evaluation gates:** Require schema validation, prompt-cache prefix checks, and regression benchmark runs before any version can be promoted to `prod`.
     - **End-to-end trace attribution:** Log the `prompt_version_id` and hash on every model call so cost, latency, and quality metrics join directly to the exact prompt revision.
   </InterviewQuestion>
-  <InterviewQuestion question="What architectural boundaries belong between templates and application code?" category="Architecture" level="Mid">
+  <InterviewQuestion
+    question="What architectural boundaries belong between templates and application code?"
+    category="Architecture"
+    level="Mid"
+  >
     - **Templates own presentation and model config:** Wording, section ordering, few-shot demonstrations, and model/temperature parameters live inside the versioned prompt artifact.
     - **Application code owns data and orchestration:** Services supply typed, validated slot values and manage retries, timeouts, permissions, and side effects.
     - **Local rendering via cached SDK:** Workers pull versioned bundles asynchronously into memory and render templates locally so prompt lookups add zero network latency.
   </InterviewQuestion>
-  <InterviewQuestion question="Describe a practical rollback strategy after a bad prompt deploy." category="Operations" level="Mid">
+  <InterviewQuestion
+    question="Describe a practical rollback strategy after a bad prompt deploy."
+    category="Operations"
+    level="Mid"
+  >
     - **Repoint the environment alias:** Flip the `prod` pointer back to the previous known-good version hash in the config store; SDK caches pick up the change within seconds without a code deploy.
     - **Capture failing traces:** Query observability logs by the bad `prompt_version_id` to extract the inputs and invalid completions that triggered the alert.
     - **Add to the regression suite:** Convert the failing production inputs into permanent offline test cases and verify the fix against both old and new versions before rolling forward.
   </InterviewQuestion>
-  <InterviewQuestion question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?" category="Optimization" level="Senior">
+  <InterviewQuestion
+    question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?"
+    category="Optimization"
+    level="Senior"
+  >
     - **Use programmatic optimization (DSPy)** when you have 100+ labeled examples, an automated scoring metric, multi-stage pipelines whose prompts interact, or frequent migrations across model families.
     - **Use hand-written iteration** when labeled data is scarce, success criteria are nuanced brand/tone judgements, or you are bootstrapping an initial prototype.
     - **Hybrid guardrails:** Always evaluate compiled prompts on a held-out test set and review the generated instructions to prevent overfitting to small dev splits.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you reduce LLM cost through prompt changes without wrecking quality?" category="Cost" level="Mid">
-    - **Protect prefix cache hits:** Place static instructions, tools, and few-shot examples first and volatile per-request context last to cut cached input token cost by up to 90%.
+  <InterviewQuestion
+    question="How do you reduce LLM cost through prompt changes without wrecking quality?"
+    category="Cost"
+    level="Mid"
+  >
+    - **Protect prefix cache hits:** Place static instructions, tools, and few-shot examples first and volatile per-request context last to cut cached input token cost by about 90 % (cache reads cost 0.1× the base input price on most Claude models).
     - **Prune redundant few-shot examples:** Ablate examples against the offline evaluation benchmark and remove demonstrations that do not improve accuracy or format compliance.
     - **Move reference bulk to retrieval:** Replace long static policy tables in the system prompt with targeted RAG chunks or progressive tool lookups, verifying end-to-end task resolution rate after each cut.
   </InterviewQuestion>
-  <InterviewQuestion question="What does an evaluation-driven iteration cadence look like in production?" category="Evaluation" level="Senior">
+  <InterviewQuestion
+    question="What does an evaluation-driven iteration cadence look like in production?"
+    category="Evaluation"
+    level="Senior"
+  >
     - **Pre-merge CI checks:** Every prompt PR runs deterministic schema/syntax tests and offline benchmark rubrics against the incumbent baseline.
     - **Canary and shadow traffic:** Promote passing versions to a 1–5% traffic slice (keyed by user or session ID) and monitor online guardrails (parse errors, latency, user feedback).
     - **Continuous dataset flywheel:** Cluster production failures and thumbs-down traces weekly, promote representative cases into the golden evaluation set, and retire stale tests.

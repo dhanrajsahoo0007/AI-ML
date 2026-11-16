@@ -384,61 +384,51 @@ Three things to take from it:
     category="Concepts"
     level="Junior"
   >
-    - A fooled chatbot says something wrong; a fooled agent calls a tool, so the harm is an action such as a refund, an
-    email or a deleted file. - An agent also has more ways in: besides the user's message, any text it retrieves, any
-    tool result, every tool description and the credentials it holds. - All of that text meets in one context window,
-    where the model cannot reliably tell data from instructions. - So the defences that matter limit what tools can do,
-    in code, rather than trying to filter every attack out.
+    - A fooled chatbot says something wrong; a fooled agent calls a tool, so the harm is an action such as a refund, an email or a deleted file.
+    - An agent also has more ways in: besides the user's message, any text it retrieves, any tool result, every tool description and the credentials it holds.
+    - All of that text meets in one context window, where the model cannot reliably tell data from instructions.
+    - So the defences that matter limit what tools can do, in code, rather than trying to filter every attack out.
   </InterviewQuestion>
   <InterviewQuestion question="What is the lethal trifecta, and how do you break it?" category="Concepts" level="Mid">
-    - Simon Willison's name for an agent with access to private data, exposure to untrusted content and a way to send
-    data out. - With all three, one injected instruction can read the data and send it to the attacker; the Supabase and
-    GitHub MCP demonstrations in 2025 had exactly this shape. - Break it by removing a leg for that agent: restrict
-    outbound channels (emails only to the user's own address, no external links or images in output), keep untrusted
-    text away from agents that hold secrets, or split the work across agents with different access. - A filter that
-    catches most injections is not enough, because attackers retry.
+    - Simon Willison's name for an agent with access to private data, exposure to untrusted content and a way to send data out.
+    - With all three, one injected instruction can read the data and send it to the attacker; the Supabase and GitHub MCP demonstrations in 2025 had exactly this shape.
+    - Break it by removing a leg for that agent: restrict outbound channels (emails only to the user's own address, no external links or images in output), keep untrusted text away from agents that hold secrets, or split the work across agents with different access.
+    - A filter that catches most injections is not enough, because attackers retry.
   </InterviewQuestion>
   <InterviewQuestion
     question="How would you give an agent access to a company database safely?"
     category="Architecture"
     level="Senior"
   >
-    - Prefer narrow, parameterised tools such as `get_order(order_id)` over raw SQL, with the user's identity taken from
-    the session, never from the model's arguments. - If text-to-SQL is needed, use a read-only role on approved views,
-    row-level security keyed to the signed-in user, and never a superuser, owner or `BYPASSRLS` role such as Supabase's
-    `service_role`. - Issue short-lived credentials from a secrets manager, add statement timeouts and row limits, mask
-    sensitive columns and log every query. - Route writes through specific, permission-checked actions with approval for
-    large or irreversible changes, and make sure the agent that reads untrusted text (tickets, reviews) has no way to
-    send data out.
+    - Prefer narrow, parameterised tools such as `get_order(order_id)` over raw SQL, with the user's identity taken from the session, never from the model's arguments.
+    - If text-to-SQL is needed, use a read-only role on approved views, row-level security keyed to the signed-in user, and never a superuser, owner or `BYPASSRLS` role such as Supabase's `service_role`.
+    - Issue short-lived credentials from a secrets manager, add statement timeouts and row limits, mask sensitive columns and log every query.
+    - Route writes through specific, permission-checked actions with approval for large or irreversible changes, and make sure the agent that reads untrusted text (tickets, reviews) has no way to send data out.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your agent runs code it writes. Container, gVisor or microVM?"
     category="Trade-offs"
     level="Senior"
   >
-    - A container's walls are features of the host kernel, so one kernel or runtime bug reaches the host, as runc's
-    CVE-2024-21626 showed in 2024. - gVisor puts a user-space kernel in between that handles every system call, at some
-    cost on syscall-heavy work and with gaps in compatibility. - A Firecracker microVM gives each sandbox its own guest
-    kernel behind KVM and boots in under 125 ms with under 5 MiB of overhead, so one per task is affordable. - For code
-    shaped by untrusted input I would pick a microVM or gVisor, and in every case add an egress allow-list, a file fence
-    and no real credentials inside.
+    - A container's walls are features of the host kernel, so one kernel or runtime bug reaches the host, as runc's CVE-2024-21626 showed in 2024.
+    - gVisor puts a user-space kernel in between that handles every system call, at some cost on syscall-heavy work and with gaps in compatibility.
+    - A Firecracker microVM gives each sandbox its own guest kernel behind KVM and boots in under 125 ms with under 5 MiB of overhead, so one per task is affordable.
+    - For code shaped by untrusted input I would pick a microVM or gVisor, and in every case add an egress allow-list, a file fence and no real credentials inside.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you secure third-party tools and MCP servers?"
     category="Failure modes"
     level="Senior"
   >
-    - Treat them as dependencies that run with your credentials: check the publisher and the source, then pin exact
-    versions with hashes. - Review every update as a diff of code and of tool descriptions; the postmark-mcp backdoor in
-    2025 was one added line in version 1.0.16 that BCC'd every email out. - Run each server with its own scoped token,
-    in its own sandbox, with egress limited to the API it wraps, and keep an inventory per agent. - Keep the host's
-    per-call checks too, but know they cannot see what happens inside a server you chose to trust.
+    - Treat them as dependencies that run with your credentials: check the publisher and the source, then pin exact versions with hashes.
+    - Review every update as a diff of code and of tool descriptions; the postmark-mcp backdoor in 2025 was one added line in version 1.0.16 that BCC'd every email out.
+    - Run each server with its own scoped token, in its own sandbox, with egress limited to the API it wraps, and keep an inventory per agent.
+    - Keep the host's per-call checks too, but know they cannot see what happens inside a server you chose to trust.
   </InterviewQuestion>
   <InterviewQuestion question="How would you red-team an agent before launch?" category="Evaluation" level="Mid">
-    - Write attacks for each way in: the user's message, retrieved documents, tool results, tool descriptions and leaked
-    credentials. - Run them against the full agent with real tools in a test environment, and score whether a harmful
-    tool call happened, not whether the reply sounded bad. - Track attack success rate alongside normal task success, so
-    a defence that blocks legitimate work also shows up. - Keep every attack and incident as a regression test, re-run
-    on every model, prompt, tool or server change; public suites such as AgentDojo are a starting point.
+    - Write attacks for each way in: the user's message, retrieved documents, tool results, tool descriptions and leaked credentials.
+    - Run them against the full agent with real tools in a test environment, and score whether a harmful tool call happened, not whether the reply sounded bad.
+    - Track attack success rate alongside normal task success, so a defence that blocks legitimate work also shows up.
+    - Keep every attack and incident as a regression test, re-run on every model, prompt, tool or server change; public suites such as AgentDojo are a starting point.
   </InterviewQuestion>
 </InterviewQuestions>
