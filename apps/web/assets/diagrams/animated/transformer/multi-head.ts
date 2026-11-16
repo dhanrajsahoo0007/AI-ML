@@ -11,6 +11,8 @@ import { ROLE_TONE, block } from "@/components/diagrams/presets/transformer";
 // - §3.2.2: h = 8 parallel heads; d_k = d_v = d_model / h = 512 / 8 = 64. So each projection maps 512 → 64.
 // - §3.2.2: W^O ∈ R^(h·d_v × d_model) = R^(512 × 512): the concat is 8 × 64 = 512 wide and the output is 512.
 // - §3.2.2: "the total computational cost is similar to that of single-head attention with full dimensionality".
+// - Weights per attention layer (no biases), whatever h is: W^Q, W^K, W^V are h slices of 512 × 64 = one 512 × 512 each,
+//   and W^O is 512 × 512, so 4 × 512 × 512 = 1,048,576 ≈ 1.05M. With h = 1 the same four 512 × 512 matrices exist.
 
 const STACK = 10; // offset of each copy behind the front one: up and to the right, as in the paper
 const COPIES = 3;
