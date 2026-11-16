@@ -48,8 +48,8 @@ export function MermaidSvg({
         <div
           role="img"
           aria-label={alt ?? caption ?? "Architecture diagram"}
-          style={{ minWidth }}
-          className="flex min-h-[200px] items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          style={{ minWidth, maxWidth: Math.max(minWidth, 960) }}
+          className="flex min-h-[200px] w-full items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
         >
           <div className="w-full dark:hidden" dangerouslySetInnerHTML={{ __html: light }} />
           <div className="hidden w-full dark:block" dangerouslySetInnerHTML={{ __html: dark }} />

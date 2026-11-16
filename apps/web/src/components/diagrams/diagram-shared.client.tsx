@@ -169,7 +169,10 @@ export function DiagramFigure({
         </div>
       )}
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div style={{ minWidth }} className="relative rounded-xl border border-hairline bg-paper p-3 sm:p-5">
+        <div
+          style={{ minWidth, maxWidth: Math.max(minWidth, Math.min(1040, Math.max(width + 48, 880))) }}
+          className="relative w-full rounded-xl border border-hairline bg-paper p-3 sm:p-5"
+        >
           {!reduced && (
             <button
               type="button"

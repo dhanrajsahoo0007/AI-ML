@@ -13,7 +13,7 @@ export function ContentShell({ navTree, children }: ContentShellProps) {
   // A shell that shows one section takes that section's tint (globals.css, [data-tone]).
   const tone = navTree.length === 1 ? navTree[0].tone : undefined;
   return (
-    <div data-content-shell data-tone={tone} className="mx-auto flex w-full max-w-[1600px] items-start">
+    <div data-content-shell data-tone={tone} className="flex w-full items-start">
       <ContentShellSidebar navTree={navTree} />
       <div className="relative flex min-w-0 flex-1 flex-col @container">
         <div className="flex-1">{children}</div>

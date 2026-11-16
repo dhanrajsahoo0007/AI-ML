@@ -46,7 +46,7 @@ export function SubsectionView({
   const questions = getQuestions({ category: category.slug, subcategory: subsection.slug });
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <JsonLd data={subsectionSeo(found).jsonLd} />
       <Breadcrumb
         items={[

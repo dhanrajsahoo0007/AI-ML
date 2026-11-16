@@ -24,10 +24,11 @@ function clampSidebarWidth(target: number) {
 export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
-  const [width, setWidth] = React.useState(SIDEBAR_DEFAULT);
+  const [customWidth, setCustomWidth] = React.useState<number | null>(null);
+  const sidebarRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const onResize = () => setWidth((w) => clampSidebarWidth(w));
+    const onResize = () => setCustomWidth((w) => (w === null ? null : clampSidebarWidth(w)));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -36,8 +37,8 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startW = width;
-      const onMove = (ev: MouseEvent) => setWidth(clampSidebarWidth(startW + (ev.clientX - startX)));
+      const startW = customWidth ?? sidebarRef.current?.offsetWidth ?? SIDEBAR_DEFAULT;
+      const onMove = (ev: MouseEvent) => setCustomWidth(clampSidebarWidth(startW + (ev.clientX - startX)));
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
@@ -49,18 +50,21 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     },
-    [width]
+    [customWidth]
   );
+
+  const sidebarWidth = collapsed ? 0 : (customWidth ?? "var(--sidebar-w)");
 
   return (
     <>
       {/* Desktop: pinned below the header, scrolls on its own; the page scrolls normally so the footer follows the content */}
       <div
-        className="sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out lg:block min-[1601px]:border-l"
-        style={{ width: collapsed ? 0 : width, overflow: "hidden" }}
+        ref={sidebarRef}
+        className="sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out [--sidebar-w:280px] lg:block min-[1440px]:[--sidebar-w:340px] min-[1600px]:[--sidebar-w:380px] min-[1920px]:[--sidebar-w:430px]"
+        style={{ width: sidebarWidth, overflow: "hidden" }}
       >
         {!collapsed && (
-          <div className="flex h-full flex-col" style={{ width }}>
+          <div className="flex h-full flex-col" style={{ width: sidebarWidth }}>
             <div className="flex h-11 items-center justify-between border-b border-hairline px-4">
               <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Contents</span>
               <button
