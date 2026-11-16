@@ -1,0 +1,14 @@
+title: One noisy caller drains a shared pool; bulkheads cap it
+alt: >-
+  Thread-pool meters built in two steps. Step 1: one shared pool of 200 threads serves checkout, product pages and a
+  partner price feed. The orange partner feed alone needs 200 threads and fills the pool; the 106 threads that checkout
+  (60) and product pages (46) need sit past the limit in red, so they have nowhere to run. Step 2: the same 200 threads
+  are split into three bulkheads. The green checkout pool uses 60 of its 100 threads and the green product pages pool
+  46 of its 80. The partner feed pool has 20 threads; the feed's demand of 200 overflows it by 180 in red, so the feed
+  is served at 40 updates a second and the other 360 a second are rejected at once with a 429, while checkout is
+  untouched.
+caption: >-
+  In one shared pool the noisy partner feed takes every thread; as three bulkheads, it overflows only its own 20.
+tags: [patterns, bulkheads, thread-pools, noisy-neighbour]
+source: original
+created: 2026-11-16

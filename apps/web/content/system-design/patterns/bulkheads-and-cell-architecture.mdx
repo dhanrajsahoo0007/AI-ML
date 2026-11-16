@@ -2,10 +2,260 @@
 title: "Bulkheads, Shuffle Sharding and Cell Architecture"
 description: "Isolated pools, shuffle shards and cells that cap the blast radius."
 icon: shield-check
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+One partner's runaway price feed fills the shared thread pool, and checkout fails for every shopper. One bad deploy goes everywhere at once, and so does the outage.
 
-**What it will cover:** isolated pools, shuffle shards and cells that cap the blast radius.
+- Interviewers ask about bulkheads and cells to see whether you can cap an outage to a known fraction of customers, and name that fraction, before anything has gone wrong.
+
+## Overview
+
+- **Shared fate:** when every caller shares one pool, one fleet or one database, one bad caller or one bad deploy reaches everyone.
+- A **bulkhead** gives each dependency or tenant its own pool of threads, connections or workers, so one can fill its own pool and no other.
+- **Shuffle sharding** gives each customer a random small set of workers. Two customers rarely share the whole set, so a poison request takes out one customer's shard, not a whole shard of customers.
+- A **cell** is a full copy of the stack serving a fixed slice of customers behind a **thin router**. A failure or a bad deploy stays inside one cell: with 10 cells, 10 % of customers.
+- The **control plane** changes the system (adds cells, moves customers); the **data plane** serves requests. **Static stability** means the data plane keeps serving when the control plane is down.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Add circuit breakers and autoscale the fleet."
+  - **Why the interviewer pushes back:** "One tenant's poison request kills every worker it reaches. Retries spread it, and new instances die too."
+  - **The answer that stands out:** shuffle-shard the workers so each tenant reaches 2 of 8 (one of 28 combinations), and split the stack into cells behind a thin router, deployed one cell at a time. Name the fraction hit (1 in 28, or 1 in 10) and the cost: more fleets to run and spare capacity in every cell.
+</Callout>
+
+## Mental model
+
+- A ship's hull is split into watertight compartments. A hole floods one compartment and the ship stays afloat.
+- A hull with no walls floods from one hole. A bigger pump (autoscaling) does not help when the water arrives faster than it pumps.
+- A bulkhead is a wall inside one service; a cell is a whole compartment with its own engine; shuffle sharding is giving each passenger cabins in two random compartments.
+- The question is always the same: when one compartment floods, what fraction of passengers get wet?
+
+## Core concepts
+
+- The running example is Brightpost: **2,000,000 shoppers a day**, **2,300 reads/s** at peak, **300 orders/s** on sale day and **40 app servers** in London.
+
+### Shared fate and bulkheads
+
+- A thread held by a slow call is a thread nobody else can use. **Little's law** gives the threads busy: arrivals per second × seconds each request holds a thread.
+- A **bulkhead** splits the pool: a fixed number of threads, connections or queue slots per dependency or per tenant. Size each from its own demand; when one fills, its callers get a fast error and the others never notice.
+
+The figure follows Brightpost's app servers when a partner's price feed bursts.
+
+<AnimatedDiagram spec="animated/patterns/cell-shared-fate" stepper caption="In one shared pool the noisy partner feed takes every thread; as three bulkheads, it overflows only its own 20." />
+
+<StepCards>
+  <StepCard n={1} title="One shared pool">
+    One pool of 200 threads (illustrative) serves every caller. The orange partner feed alone needs all 200, so the 106 threads checkout and product pages need sit red past the limit.
+  </StepCard>
+  <StepCard n={2} title="A bulkhead per caller">
+    The same 200 threads become three pools. Checkout and product pages keep spare threads; the feed overflows only its own 20 and is turned away fast.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Checkout: 300 orders/s × 0.2 s = 60 threads. Product pages: 2,300 reads/s × 0.02 s = 46 threads (both hold times illustrative).
+- Partner feed burst: 400 updates/s × 0.5 s = 200 threads (illustrative). Demand 306 against a pool of 200.
+- With a 20-thread bulkhead the feed gets 20 ÷ 0.5 s = 40 updates/s, and the other 360/s get an immediate `429`.
+
+<PremiumBreak />
+
+### Shuffle sharding
+
+- **Plain sharding** splits 8 workers into 4 shards of 2. A **poison request** (one that crashes whatever runs it) kills both workers of its shard, so 1 customer in 4 is down.
+- **Shuffle sharding** gives each customer its own random pair from the same 8 workers. There are 8 × 7 ÷ 2 = **28** pairs.
+- The poison request kills only its own customer's 2 workers. Every other pair shares at most one of them, so its clients retry on the other worker.
+- The pairs overlap, so this needs clients that retry on another worker in their shard, and requests that any worker in the shard can serve.
+
+<AnimatedDiagram spec="animated/patterns/cell-shuffle" stepper caption="On the same 8 workers, plain sharding loses 1 shopper in 4 to a poison request; shuffle sharding loses 1 in 28." />
+
+<StepCards>
+  <StepCard n={1} title="Plain sharding: 4 shards">
+    The 8 workers form four fixed pairs. Shopper A's poison request kills W1 and W2, and every shopper on that pair goes down with A.
+  </StepCard>
+  <StepCard n={2} title="Shuffle sharding: 28 shards">
+    Each square of the triangle is one possible pair. A is on W1 + W4 (red); neutral squares share one worker with A and retry on the other; green squares share none.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Shards that include W1 or W4: 7 + 7 − 1 = 13. One is A's; 12 lose one worker; 28 − 13 = 15 lose none.
+- Fully down: 1 ÷ 4 = 25 % with plain sharding, 1 ÷ 28 = 3.6 % with shuffle sharding: 7 times fewer.
+
+### Cells
+
+- A **cell** is a complete, independent copy of the workload (app servers, caches, database) that shares no state with other cells.
+- A **partition key** (shopper id, tenant id) decides the cell. A **cell router** maps the key to a cell and does nothing else: no business logic.
+- Each cell has a **maximum size**, tested at full load. When cells are full, add a cell; never grow one past what was tested.
+- Deploys go out **in waves**, one cell first, then more, with a pause to watch alarms between waves.
+
+### Control plane, data plane and static stability
+
+- The **control plane** makes changes: provisioning cells, moving customers, writing the cell map. It is complex and changes often.
+- The **data plane** does the work: routing and serving requests. It must be simple and always up.
+- **Static stability:** the data plane keeps working on what it already has when the control plane fails. The router serves from its own copy of the map.
+- Provision capacity ahead of time instead of launching it during an outage: a recovery that needs the control plane fails when the control plane is the thing that broke.
+
+The figure shows the control plane failing while shoppers keep shopping.
+
+<AnimatedDiagram spec="animated/patterns/cell-planes" stepper caption="When the control plane fails, nothing changes, but nothing stops: the router serves from its last copy of the map." />
+
+<StepCards>
+  <StepCard n={1} title="Two planes">
+    The control plane provisions cells, moves shoppers and writes the cell map, which it pushes to the router. The router keeps its own copy.
+  </StepCard>
+  <StepCard n={2} title="The control plane is down">
+    No new cells and no moves until it returns. Every request still finds its cell, because the router never asks the control plane.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- All 2,300 reads/s and 300 orders/s run in the data plane, and none of them calls the control plane.
+
+<Callout tone="red" title="What breaks">
+  A router that asks the control plane's database for every request turns a control-plane outage into a full outage. Keep the map in the router's memory and refresh it in the background.
+</Callout>
+
+### Tenant isolation models
+
+- **Silo** (AWS SaaS Lens terms): a tenant gets dedicated resources, from its own database to a whole stack. Strongest isolation, highest cost per tenant.
+- **Pool:** tenants share the same compute, storage and queues. Cheapest and easiest to run; a noisy neighbour needs per-tenant limits and bulkheads.
+- **Bridge:** a mix per layer or per service. The SaaS Lens example pools the web tier and silos each tenant's application tier and storage.
+
+## Architecture
+
+Brightpost splits its stack into ten cells behind a thin router, step by step.
+
+<AnimatedDiagram spec="animated/patterns/cell-cells" stepper caption="Each cell is a full copy of the stack behind a router that only routes; a bad deploy in wave 1 reaches one cell in ten." />
+
+<StepCards>
+  <StepCard n={1} title="Ten cells behind a thin router">
+    The router hashes the shopper id to one of ten cells, each a full stack serving 200,000 shoppers a day. The router holds the map and nothing else. Without cells, every shopper shares one stack and one fate.
+  </StepCard>
+  <StepCard n={2} title="A bad deploy reaches one cell">
+    Version 2 goes to cell 1 alone as the first wave. Its error rate rises, the pipeline stops and rolls back. 10 % of shoppers saw errors for a few minutes; 90 % saw nothing.
+  </StepCard>
+  <StepCard n={3} title="A new cell for new shoppers">
+    The cells reach their tested maximum size. The control plane provisions cell 11 and updates the router's map, so new shoppers land there and nobody already placed moves.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Choosing the partition key
+
+- Pick the key most requests already carry and that rarely needs two cells: shopper id for a shop, tenant id for SaaS.
+- Requests that span keys (a seller's view of all orders) need a separate path or a copy of the data, not a cross-cell call.
+- A tenant bigger than one cell needs its own cell or its own split; plan for it before it arrives.
+
+### Routing and moving customers
+
+- The router uses a **mapping table** (key → cell), not plain hashing, so one customer can move without reshuffling the rest.
+- Moving a customer is a control-plane job: copy the data, freeze writes briefly, flip the map entry, then delete the old copy.
+
+### Worked example: a bad deploy and a poison basket
+
+Follow the Architecture figure through one bad afternoon at Brightpost.
+
+1. **Routing.** Shopper ids map to ten cells of 200,000 shoppers a day each, and 4 of the 40 app servers each.
+2. **Bad deploy.** Version 2 has a bug that fails checkout. It reaches cell 1 only; alarms fire and the pipeline rolls back.
+3. **Poison basket.** Inside cell 2, one shopper's basket crashes every worker that loads it. Cell 2's 8 basket workers (illustrative) are shuffle-sharded in pairs, so it kills 2 workers and only that shopper's shard is down.
+4. **New cell.** The control plane adds cell 11 for new sign-ups; the router keeps serving from its map even while the control plane works.
+
+**The numbers:**
+
+- Bad deploy: 1 cell of 10 = 10 % of shoppers, 200,000 a day, instead of all 2,000,000.
+- Poison basket: 8 choose 2 = 28 shards in the cell, so 1 in 28 of cell 2's shoppers lose both workers: 0.36 % of all shoppers.
+- At a larger scale: 100 workers, shards of 5 → 75,287,520 combinations, so two shoppers share all five workers with odds of 1 in 75 million.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| One shared pool | Best utilisation; simplest | One caller can starve all | Small systems, trusted callers |
+| Bulkhead per dependency or tenant | Caps one caller; cheap | Idle threads in each pool; sizes to tune | Any service with several downstreams or noisy tenants |
+| Shuffle sharding | Impact drops to 1 combination | Clients must retry within the shard; harder to reason about | Multi-tenant fleets exposed to poison requests |
+| Cells | Caps deploys and whole-stack failures to 1 ÷ N | N stacks to run; a router and control plane to build | Large services where a full outage is unacceptable |
+| Silo per tenant | Strongest isolation | Highest cost per tenant | Regulated or very large tenants |
+
+## Production systems
+
+- **Amazon Route 53** (AWS Builders' Library, 2019): 2,048 virtual name servers, each domain on a shuffle shard of 4, about 730 billion possible shards; no two domains share more than two name servers.
+- **Amazon EC2** (Builders' Library, "Static stability using Availability Zones"): existing instances keep running when the EC2 control plane is impaired. Services across three zones run 50 % spare capacity, about 66 % load each, so losing a zone needs no new instances.
+- **Slack** (engineering blog, August 2023): treats each availability zone as a cell and aims to drain one in 5 minutes, shifting Envoy weights in 1 % steps from its own control plane.
+- **Netflix Hystrix**: per-dependency thread pools; Netflix's API ran 40+ pools of 5 to 20 threads, most at 10. As of November 2026 Hystrix is in maintenance mode and Netflix recommends resilience4j.
+- **Used in our case studies:** [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt)
+
+## Failure modes & pitfalls
+
+- **A fat router.** Business logic in the router makes it the one shared thing that fails for everyone. Keep it to a key lookup and a forward.
+- **Shared state between cells.** One global database or cache behind ten cells is still one failure. Give each cell its own data; share only the router.
+- **Deploying all cells at once.** Cells only cap a bad deploy when deploys go out in waves. Start with one cell and wait for its alarms.
+- **Recovery that needs the control plane.** Autoscaling during an outage fails when the control plane is down. Provision spare capacity ahead of time.
+- **Retries that cross the wall.** A client that retries a poison request on every worker in the fleet undoes shuffle sharding. Retry only within the shard, with a budget.
+
+## Interview framework
+
+1. Name the shared fate: which pool, fleet or database every request depends on.
+2. Add bulkheads per dependency or tenant, sized with Little's law, rejecting fast when full.
+3. Shuffle-shard multi-tenant workers and give the combinations: 8 choose 2 = 28.
+4. Split into cells behind a thin router; give the cell count, the fraction one failure reaches and the deploy waves.
+5. Separate control plane from data plane and say what keeps serving when the control plane is down.
+
+**What interviewers listen for:** a fraction of customers hit (1 in 28, 1 in 10) stated before the failure happens.
+
+**Red flags:** "autoscaling will absorb it", or a cell design with one shared database behind it.
+
+## Further reading
+
+- [Workload isolation using shuffle-sharding (AWS Builders' Library)](https://builder.aws.com/content/3F06NpJ8YeoIGP8VHTw4n81pFn8/workload-isolation-using-shuffle-sharding)
+- [Static stability using Availability Zones (AWS Builders' Library)](https://builder.aws.com/content/3K9SiqiJ369TGkkGzqPM95BuYWI/static-stability-using-availability-zones)
+- [Reducing the Scope of Impact with Cell-Based Architecture (AWS Well-Architected)](https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html)
+- [Silo, Pool, and Bridge Models (AWS SaaS Lens)](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/silo-pool-and-bridge-models.html)
+- [Slack's Migration to a Cellular Architecture (Slack Engineering, 2023)](https://slack.engineering/slacks-migration-to-a-cellular-architecture/)
+- Related pages: [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Load Balancing](/system-design/patterns/load-balancing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a bulkhead, and what does it protect against?" category="Concepts" level="Junior">
+    - A bulkhead is a separate, fixed-size pool of threads, connections or workers for one dependency or one tenant.
+    - It stops one slow dependency or noisy tenant from taking every thread in a shared pool.
+    - When a bulkhead is full, its callers get a fast error and the other pools carry on.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain shuffle sharding with numbers." category="Concepts" level="Mid">
+    - Instead of fixed shards, each customer gets a random small set of workers: with 8 workers and pairs, 28 possible shards.
+    - A poison request from one customer kills its own two workers; every other shard shares at most one of them.
+    - Fully down: 1 in 28 (3.6 %) against 1 in 4 (25 %) for four plain shards of two.
+    - It needs clients that retry on the other worker in their shard.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a cell, and what makes a cell router thin?" category="Architecture" level="Mid">
+    - A cell is a full, independent copy of the stack, including its data, serving a fixed slice of customers.
+    - The router maps a partition key such as shopper id to a cell and forwards the request; it has no business logic.
+    - Thin matters because the router is the one shared component: the less it does, the less it can break.
+  </InterviewQuestion>
+  <InterviewQuestion question="One tenant's request crashes every worker that handles it. Circuit breakers are in place. Why is the fleet still down, and what do you change?" category="Failure modes" level="Senior">
+    - Circuit breakers protect callers from a failing dependency; they do not stop a poison request from reaching new workers.
+    - Retries and the load balancer spread the request across the fleet, and autoscaled instances die as they start.
+    - Shuffle-shard the workers so the tenant only ever reaches its own few, and retry only within the shard.
+    - Wrap the fleet in cells so even a missed case stays within one cell, and quarantine the request once detected.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost moves to ten cells. What does a bad deploy cost now, and what does the move cost?" category="Trade-offs" level="Senior">
+    - Deployed one cell first, a bad build reaches 10 % of shoppers (200,000 a day) instead of all 2,000,000.
+    - The cost: ten stacks to deploy and monitor, spare capacity in each cell, a router and a control plane to build.
+    - Cross-cell features, such as reports across all shoppers, need a separate path.
+    - It need not mean more servers: 40 app servers become 10 cells of 4.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is static stability, and how does it change a recovery plan?" category="Failure modes" level="Senior">
+    - A statically stable system keeps working on what it already has when a dependency, often the control plane, fails.
+    - The data plane must not call the control plane per request: the router serves from its own copy of the cell map.
+    - Recovery must not need new resources either: AWS services across three zones run 50 % spare so losing one needs no launches.
+  </InterviewQuestion>
+  <InterviewQuestion question="Silo, pool or bridge: how do you choose a tenant isolation model?" category="Trade-offs" level="Senior">
+    - Silo gives a tenant dedicated resources: strongest isolation, highest cost; for regulated or very large tenants.
+    - Pool shares everything: cheapest, but needs per-tenant limits and bulkheads against noisy neighbours.
+    - Bridge mixes them per layer, such as a pooled web tier with siloed storage per tenant.
+    - Many SaaS products pool small tenants and silo the few that pay for it or must have it.
+  </InterviewQuestion>
+</InterviewQuestions>
