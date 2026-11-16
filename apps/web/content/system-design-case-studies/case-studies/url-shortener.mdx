@@ -1,13 +1,643 @@
 ---
 title: "Design a URL Shortener"
-description: "ID generation, redirects, caching and analytics."
+description: "Short codes without collisions, redirects from a cache in milliseconds, and click analytics that never slow a redirect."
 logo: systems/url-shortener
 modelledOn: [systems/bitly]
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a URL shortener: turn a long URL into a seven-character link, and send billions of clicks to the right place in milliseconds.
+The hard parts are making codes that never collide, serving a read path 100 times busier than the write path, and counting every click without making the click wait.
 
-**What it will cover:** iD generation, redirects, caching and analytics.
+- Interviewers use this question to see whether you can pick an id scheme and defend it, build a read path around a cache, and say why every store and status code was chosen.
 
-**Patterns used:** [Caching](/system-design/patterns/caching) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) · [Unique ID Generation](/system-design/patterns/unique-id-generation)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a URL shortener: turn a long URL into a seven-character link, and redirect billions of clicks to the right place, fast."
+  level="Mid"
+  minutes={45}
+  bankId="design-url-shortener"
+  tests={[
+    "Generating short codes that never collide, and saying why",
+    "A read path built around a cache, with a hot-key plan",
+    "The redirect status code and what it does to analytics",
+    "Partitioning, expiry and recovery for billions of small rows",
+  ]}
+  clarify={[
+    { q: "How many new links and how many clicks?", a: "100 million new links and 10 billion redirects a month: 100 reads per write." },
+    { q: "How long is a code, and which characters?", a: "Seven characters from a to z, A to Z and 0 to 9 (base 62)." },
+    { q: "Can a creator pick the code?", a: "Yes: custom aliases, first come first served." },
+    { q: "Do links expire?", a: "Only when the creator sets an expiry; otherwise they live for ever." },
+    { q: "What analytics?", a: "Clicks per link per hour and per day, a few minutes behind." },
+    { q: "Does the same long URL get the same code twice?", a: "No: each create gets a new code, so each campaign has its own counts." },
+  ]}
+  outOfScope={["User accounts and sign-up", "Billing and plans", "Link-in-bio pages", "Editing a link's destination"]}
+/>
+
+## Overview
+
+- Each create takes an **id** from a **block of 1,000** that the link server reserved with one call to a **counter**, **scrambles** it and writes it in **base 62**: seven characters, never a collision.
+- Every write to the link store is **insert if absent**, so a code maps to one URL for ever, and custom aliases share the same rule.
+- Links live in a **key-value store partitioned by code**: one lookup per redirect, 3 TB over five years.
+- Redirects read a **shared cache** first and each server's **memory** for the hottest codes; the store only sees misses.
+- The redirect answers **302**, so every click reaches us; the click goes to a **log** after the response, and a stream job counts it.
+- Expiry is a timestamp checked on every read and a **TTL** in the store; codes are never reused.
+
+<Numbers
+  items={[
+    { value: "100 : 1", label: "redirects for every new link", hint: "3,900/s against 40/s" },
+    { value: "3.5 T", label: "seven-character codes", hint: "62^7" },
+    { value: "3 TB", label: "five years of links", hint: "6 B rows × 500 B" },
+    { value: "95 %", label: "of clicks answered by a 12.5 GB cache", hint: "assumed hit ratio" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Create a short link", notes: "A long URL in, a seven-character code out." },
+    { id: "F2", requirement: "Redirect", notes: "A click on the short link lands on the long URL." },
+    { id: "F3", requirement: "Custom aliases", notes: "The creator picks the code; first come first served." },
+    { id: "F4", requirement: "Expiry and disabling", notes: "A link stops working at its expiry time or when disabled." },
+    { id: "F5", requirement: "Click analytics", notes: "Clicks per link per hour and per day." },
+  ]}
+/>
+
+- Out of scope: user accounts, billing, link-in-bio pages, changing a link's destination.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Uniqueness", target: "0 codes pointing at two URLs, ever", why: "A wrong redirect sends a reader to someone else's page." },
+    { id: "N2", property: "Redirect latency", target: "p99 under 20 ms inside our servers", why: "The redirect is a hop before the page the reader wants." },
+    { id: "N3", property: "Redirect availability", target: "99.99 % (about 4 minutes a month)", why: "Links are printed, posted and emailed; a dead link is a broken campaign." },
+    { id: "N4", property: "Durability", target: "0 acknowledged links lost", why: "A lost link is a broken link for ever." },
+    { id: "N5", property: "Analytics", target: "Counts within 5 minutes; 99.9 % of clicks counted", why: "Creators watch a campaign as it runs." },
+    { id: "N6", property: "Unguessable codes", target: "No way to list links by counting", why: "Private links must not be found by walking the code space." },
+    { id: "N7", property: "Abuse", target: "Known bad destinations refused; a disabled link dead within 1 minute", why: "Short links hide where they go." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Creates", assumption: "100 M a month ÷ 2,592,000 s", result: "≈ 39/s, call it 40/s; peak 5 × = 200/s" },
+    { quantity: "Redirects", assumption: "10 B a month ÷ 2,592,000 s", result: "≈ 3,900/s; peak 10 × ≈ 40,000/s" },
+    { quantity: "Read to write", assumption: "3,900 ÷ 39", result: "100 to 1" },
+    { quantity: "Code space", assumption: "62^7", result: "≈ 3.5 trillion codes" },
+    { quantity: "Links kept", assumption: "100 M × 12 months × 5 years", result: "6 billion: 0.17 % of the code space" },
+    { quantity: "Link store", assumption: "6 B rows × 500 bytes", result: "3 TB; 9 TB with three replicas" },
+    { quantity: "Link cache", assumption: "50 M recently clicked codes × 250 bytes", result: "12.5 GB" },
+    { quantity: "Store reads", assumption: "3,900/s × 5 % misses (95 % hits, assumed)", result: "≈ 195/s; ≈ 2,000/s at peak" },
+    { quantity: "A viral link", assumption: "Given: one code at 10,000 clicks/s", result: "25 % of the peak on one key" },
+    { quantity: "Click events", assumption: "10 B a month × 100 bytes ÷ 30 days", result: "≈ 33 GB a day into the log" },
+  ]}
+  note="The data is small and the writes are rare; the read path and one hot key decide the design."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 3,900 redirects/s against 40 creates/s: 100 to 1, the defining driver | Separate read and write services; a cache in front of the store |
+| D2 | Peak against average | 10 × on the read path when a link goes viral; creates peak at 5 × | Cache tiers sized for the peak; the store sized for misses only |
+| D3 | Consistency per operation | A code maps to one URL for ever (strong); a click right after create must work (read-your-writes); analytics eventual | Insert if absent on the write; read the store on a cache miss; count in a stream |
+| D4 | Latency target | Redirect p99 under 20 ms (N2) | One key lookup, no join; nothing on the redirect path waits for analytics |
+| D5 | Durability | No acknowledged link lost (N4); a few clicks lost in a crash is tolerable (N5) | Three replicas before the create returns; click events buffered, not synchronous |
+| D6 | Ordering | Not a driver here: links are independent and click counts add up in any order | No ordering beyond one partition of the click log |
+| D7 | Duplicates | A retried create must not make two links (annoying); a duplicated click event overcounts (annoying) | An `Idempotency-Key` on create; event ids removed in the counter job |
+| D8 | Data size and growth | 500 bytes a row, 100 M rows a month, kept for ever; most rows are cold | A store that grows by adding nodes; caching by recent clicks, not by age |
+| D9 | Fan-out shape | One link posted once, clicked by millions: one to millions on a single key | Hot codes in each server's memory; one cache fill per miss |
+| D10 | Contention | None on links (each code is written once); severe on a click counter for a viral link | No counter rows in the link store; counts summed in a stream |
+| D11 | Geography | Clicks from every continent; creates are few | Redirect servers and caches in each region; one home region for creates |
+| D12 | Availability and degradation | 99.99 % for redirects (N3); creates and analytics may pause | Under stress shed analytics first, then creates; redirects keep serving from cache |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/links` | Creator, with an API key | Create a link, with an optional alias and expiry |
+| `GET /{code}` | Any browser | Every click; answers `302` with `Location` |
+| `GET /v1/links/{code}` | Creator | Read a link's destination, expiry and status |
+| `PATCH /v1/links/{code}` | Creator, abuse team | Change the expiry or disable the link |
+| `GET /v1/links/{code}/stats` | Creator | Clicks per hour or day for a time range |
+
+```http
+POST /v1/links
+Authorization: Bearer <api key>
+Idempotency-Key: 9c2e41d0
+{ "long_url": "https://shop.example/p/kettle", "alias": null, "expires_at": "2027-11-17T00:00:00Z" }
+
+201 Created   { "code": "FkFnj3r", "short_url": "https://s.example/FkFnj3r" }
+409 Conflict  { "error": "alias_taken" }
+
+GET /FkFnj3r
+302 Found     Location: https://shop.example/p/kettle   Cache-Control: no-store
+```
+
+- **Idempotency:** `POST /v1/links` takes an `Idempotency-Key`; a retry within 24 hours returns the first code instead of making a second link.
+- **Errors:** `404` unknown code; `410` expired or disabled; `409` alias taken; `422` destination refused by the abuse check; `429` over the API key's limit.
+- **Pagination:** only the stats call, by time range and cursor.
+- **Two hosts:** redirects are served from the short domain with no `/v1` prefix, so a link stays seven characters after the slash.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Links | Wide-column key-value store (<TechIcon id="oss/apache-cassandra" /> Cassandra, or DynamoDB) | One lookup by code, 6 B rows growing for ever (D1, D8); insert if absent (D3) | `code` | Conditional insert; quorum reads in the home region | Sharded PostgreSQL: works, but resharding 3 TB is ours to build |
+| Link cache | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | 3,900 reads/s at about 1 ms (D1, D4) | `code` (hash slots) | Stale until TTL or delete | Read replicas: a disk lookup and a replication lag on every click |
+| Id counter | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | One durable row, one atomic update per 1,000 ids (D3, D5) | None: one row | Strong, synchronous replica | Redis `INCRBY`: a failover can hand out the same block twice |
+| Click events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | 3,900 events/s, kept 7 days for replay (D2, D5) | `code` | At least once, ordered per partition | A counter per link in the link store: a hot row (D10) |
+| Click counts | Column store (<TechIcon id="oss/clickhouse" /> ClickHouse) | Sums over code and time range (F5) | Sorted by `(code, hour)` | A few minutes behind (N5) | The link store: no range scans or sums worth the name |
+
+```sql
+-- Link store (CQL). One partition per code: 7 characters spread evenly over the ring.
+CREATE TABLE links (
+  code       text PRIMARY KEY,   -- partition key
+  long_url   text,
+  owner_id   bigint,
+  created_at timestamp,
+  expires_at timestamp,          -- null: never expires
+  status     text                -- 'active' | 'disabled'
+);
+-- Create: INSERT INTO links (...) VALUES (...) IF NOT EXISTS USING TTL <seconds until expires_at>;
+```
+
+```sql
+-- Id counter (PostgreSQL). One row; each call reserves a block of 1,000 ids.
+CREATE TABLE id_counter (name text PRIMARY KEY, next_id bigint NOT NULL);
+UPDATE id_counter SET next_id = next_id + 1000 WHERE name = 'links' RETURNING next_id - 1000 AS block_start;
+```
+
+```sql
+-- Click counts (ClickHouse). Hourly rows, summed on merge; sorted so one link's range is one scan.
+CREATE TABLE clicks_hourly (code String, hour DateTime, clicks UInt64)
+ENGINE = SummingMergeTree ORDER BY (code, hour);
+```
+
+- **Redirect:** read `links` by `code`; a row past `expires_at` or `disabled` answers `410`.
+- **Create:** reserve a block when the last one runs low, take the next id, scramble, encode, insert if absent.
+- **Stats:** sum `clicks_hourly` for one `code` between two hours.
+
+Seven base-62 characters hold far more codes than five years of links need.
+
+<AnimatedDiagram spec="animated/patterns/id-base62" caption="Seven base62 characters hold about 3.5 trillion codes; a 64-bit Snowflake id needs up to eleven." />
+
+**How to read it:**
+
+- Left: a number becomes a code by dividing by 62 and keeping the remainders, each one a character.
+- Right: the codes each length holds; the green row is seven characters.
+
+**The numbers:** 6 billion links over five years use 6 × 10^9 ÷ 3.5 × 10^12 = 0.17 % of the seven-character space; at 1.2 billion links a year it lasts about 2,900 years.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Create and redirect on one database (F1, F2)
+
+The smallest design: a link service writes codes, a redirect service reads them, both on one store.
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={1} caption="Step 1: the link service inserts a random code if it is absent; the redirect service reads the code and answers 302." />
+
+- **Adds:** the creator and clicker, a CDN for the web app, the API gateway, a layer-7 load balancer, the link service, the redirect service, the link store.
+- **Flow:**
+  1. The creator posts a long URL; the link service picks seven random base-62 characters.
+  2. It inserts the row only if the code is absent; if the code exists, it picks again.
+  3. A click reaches the redirect service, which reads the code and answers `302` with the long URL.
+- **Why this and not that:** two services from the start, because reads outnumber writes 100 to 1 and scale on their own (D1). Random codes work today: at 0.17 % fill, about 1 insert in 590 retries once.
+- **The gap:** correctness rests on the store's insert-if-absent, and every create pays a check against 6 billion rows.
+
+<PremiumBreak />
+
+### Step 2: Codes from one counter (F1, N1)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={2} caption="Step 2: every create takes the next id from one counter and writes it in base 62: no collisions, no retries." />
+
+- **Adds:** the **counter database**: one row holding the next id.
+- **Flow:**
+  1. The link service increments the counter and gets id 1,000,000.
+  2. It writes the id in base 62 and inserts the row.
+- **Why this and not that:** a counter hands each id out once, so codes cannot collide (N1). Insert if absent stays as a safety net for aliases and bugs.
+- **The gap:** every create is a round trip to one row, a single point of failure for creates; and consecutive codes are guessable (N6).
+
+### Step 3: A block of ids per server, and custom aliases (F1, F3)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={3} caption="Step 3: the ID allocator reserves 1,000 ids per call; each link server hands them out from memory." />
+
+- **Adds:** the **ID allocator**; the per-create counter call goes away.
+- **Flow:**
+  1. A link server reserves ids 1,000,000 to 1,000,999 with one `UPDATE … RETURNING`.
+  2. Each create takes the next id from memory, scrambles it with a keyed permutation, and writes it in base 62.
+  3. A custom alias skips the id and is inserted if absent; `409` if taken.
+- **Why this and not that:** at 40 creates/s the counter sees 40 ÷ 1,000 = 0.04 calls/s, and a server holds 250 s of ids, so the counter can be down for minutes (D12). The scramble is a bijection, so codes stay unique and stop being guessable (N6).
+- **The gap:** every click still reads the store: 3,900 reads/s, 40,000 at peak.
+
+### Step 4: A cache on the read path (F2, N2)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={4} caption="Step 4: the redirect service reads the link cache first and the link store only on a miss." />
+
+- **Adds:** the **link cache**; the redirect service also keeps the hottest 10,000 codes in its own memory for 5 s.
+- **Flow:**
+  1. The redirect service checks its memory, then the shared cache.
+  2. On a miss it reads the store, fills the cache with a TTL no later than the link's expiry, and answers.
+  3. The store, partitioned by `code`, sees about 195 reads/s.
+- **Why this and not that:** a cache hit takes about 1 ms against about 5 ms for a store read, and cuts store reads 20 times (D1, D4). Server memory answers a viral link with no network hop (D9).
+- **The gap:** a redirect leaves no trace, so there are no analytics (F5).
+
+### Step 5: Clicks as events (F5, N5)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={5} caption="Step 5: each redirect hands a click event to the click log after answering; a counter job rolls clicks up per minute." />
+
+- **Adds:** the **click log**, the **click counter** job, the **click store** and the **stats API**.
+- **Flow:**
+  1. The redirect service answers `302`, then appends a click event (code, time, referrer, country) to an in-memory batch.
+  2. Batches go to the click log every 100 ms; the counter job sums clicks per code per minute and writes rollups.
+  3. The stats API reads the click store.
+- **Why this and not that:** `302` because a `301` may be kept by the browser and the repeat click never reaches us (Deep dive 2). Counting in a stream keeps 10,000 increments/s off one row (D10, D4).
+- **The gap:** an expired or disabled link can still be served from a cache.
+
+### Step 6: Expiry and disabling (F4)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={6} caption="Step 6: on expiry or disable, the link service deletes the cached entry; the store's TTL removes expired rows." />
+
+- **Adds:** the **delete key** path from the link service to the cache.
+- **Flow:**
+  1. The redirect service checks `expires_at` and `status` on every read, so an expired link answers `410` even before cleanup.
+  2. The store's TTL deletes the row at its expiry; a cache entry's TTL never runs past it.
+  3. A disable writes `status = 'disabled'` and deletes the cache key; server memory forgets it within 5 s.
+- **Why this and not that:** a lazy check is exact; a sweeper would only decide how fast storage is freed (F4, N7). Codes are never reused: a printed link must never point somewhere new (N1).
+- **The gap:** anyone can shorten a phishing page.
+
+### Step 7: Abuse checks (N7)
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" step={7} caption="Step 7: every new destination is checked against a blocklist before the code is written." />
+
+- **Adds:** the **abuse check**; the gateway already limits creates per API key.
+- **Flow:**
+  1. The link service asks the abuse check about the destination's domain and URL.
+  2. A Bloom filter in memory answers "not listed" for most; a "maybe" is confirmed against the exact blocklist.
+  3. A link reported later is disabled through Step 6's path.
+- **Why this and not that:** a remote lookup per create is cheap at 40/s, but a filter in memory keeps creates fast at the 200/s peak and costs about 1.2 MB per million listed URLs at a 1 % false-positive rate (N7).
+- **The gap:** none for the core design; see "Same design, other systems" for variants.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/url-shortener/architecture" stepper caption="URL shortener: codes from blocks of a counter, redirects from a cache, and clicks counted off the hot path." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Creator (web app or API), clicker (any browser) | Make links; follow them |
+| **Edge** | Load balancer, API gateway, CDN | Route clicks to redirects; keys and limits on the API; static files |
+| **Redirect path** | Redirect service | Memory, cache, store; answer `302`; hand off the click |
+| **Application services** | Link service, ID allocator, abuse check, stats API | Create, alias, expire; reserve id blocks; refuse bad URLs; serve counts |
+| **Async pipeline** | Click log, click counter | Carry and count every click off the hot path |
+| **Storage** | Link store, link cache, click store, counter DB | Links (partitioned by code), hot codes, counts, the next id |
+
+One link, from creation to its first click:
+
+1. The creator posts `https://shop.example/p/kettle`; the gateway checks the API key and its limit.
+2. The link service checks the destination, takes id 1,000,000 from its block, scrambles it to `FkFnj3r` and inserts it if absent.
+3. A reader clicks `s.example/FkFnj3r`; the load balancer sends the path to a redirect server.
+4. Memory and cache miss, the store answers in about 5 ms, the cache is filled, and the browser gets `302`.
+5. After the response, the click event joins a batch, reaches the click log, and shows in the stats within a minute or two.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for links, a plain HTTP redirect for clicks
+
+- **Choice:** REST over HTTPS for create, read, update and stats; the click is a bare `GET /{code}` answered with `302` and a `Location` header.
+- **Why:** every browser, chat app and email client follows a redirect with no code on our side (F2); the API is a few request-and-response calls (F1, F3, F4).
+- **Why not GraphQL:** four fixed shapes, nothing to compose, and the redirect cannot be a query.
+- **Why not gRPC:** creators call from browsers and scripts; gRPC needs a proxy in a browser and gains nothing for 40 calls/s.
+- **Why not a page with a JavaScript redirect:** a full page load per click, and it fails where scripts do not run.
+
+### Load balancer: layer 7, routing by host and path
+
+- **Choice:** an HTTP (layer-7) load balancer: the short domain to the redirect service, `/v1/*` to the API gateway, with health checks and least outstanding requests.
+- **Why:** the two paths differ 100 to 1 in traffic and need separate fleets (D1); requests are short HTTP, with no long connections to pin.
+- **Why not layer 4:** it cannot route by host or path, so reads and writes would share one fleet.
+- **Why not DNS round robin alone:** clients cache DNS answers, so a dead server keeps getting clicks; we keep geographic DNS only to pick the region (D11).
+
+### API gateway: on the create path only
+
+- **Choice:** API keys, a per-key rate limit on creates, request size limits; the redirect path skips it.
+- **Why:** creates are where abuse starts, and limits per key stop one script from minting millions of links (N7).
+- **Why not put redirects behind it:** a gateway hop on 40,000 clicks/s adds latency and a failure point for no check we need (D4, D12).
+
+### CDN: static files only, never the redirect
+
+- **Choice:** a CDN serves the creator web app, scripts and images; redirect responses carry `Cache-Control: no-store`.
+- **Why:** the web app is the same file for every creator and costs the origin nothing when the edge serves it.
+- **Why not cache redirects at the edge:** a click answered by the edge never reaches the redirect service, so it is never counted (F5).
+- **Revisit when:** redirect latency abroad matters more than counting at the server; then count from the CDN's request logs instead.
+
+### Redirect service: stateless, with the hottest codes in memory
+
+- **Choice:** a stateless fleet, about 20 servers at peak (40,000/s at an assumed 2,000/s each), each with a 10,000-entry memory cache of 5 s and single flight on misses.
+- **Why:** the read path must stay up when everything else is down (N3); memory absorbs a viral link (D9) and single flight turns a burst of misses into one store read.
+- **Why not a cache in memory only:** 20 servers would each warm their own copy of 50 M entries; the shared cache warms once.
+- **Why not serverless functions:** cold starts land on the p99 the clicker feels (N2).
+
+### Link cache: an in-memory key-value store (Redis)
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, cache-aside, about 12.5 GB of `code → (URL, expiry, status)`, LRU eviction, TTL = min(1 hour, expiry).
+- **Why:** 3,900 reads/s with a 95 % assumed hit ratio leaves the store about 195 reads/s (D1, D4); entries never change, so staleness only matters on expiry and disable, which delete the key (F4).
+- **Why not Memcached:** it would work as well; Redis adds built-in replication and failover, so losing a node does not send its share of 3,900 reads/s to the store.
+- **Why not read replicas of the store:** each click is still a disk lookup, and replica lag can hide a link created a second ago (D3).
+- **Why not write-through on create:** most new links are clicked rarely or never, so caching on write fills memory with cold codes (D8).
+
+### Link store: a wide-column key-value store (Cassandra or DynamoDB)
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra (or DynamoDB as the managed equivalent), partitioned by `code` on a consistent-hash ring, three replicas; creates use a conditional insert.
+- **Why:** one access pattern (get by code), 6 billion rows and 3 TB growing for ever (D1, D8); a random-looking code spreads load evenly over the ring, and capacity grows by adding nodes.
+- **Why not sharded PostgreSQL or MySQL:** it can hold 3 TB, but we would build sharding, resharding and failover ourselves for a table with no joins and no transactions.
+- **Why not MongoDB:** documents add nothing to a two-column lookup, and sharding it is as much work as the wide-column store.
+- **Cost we accept:** a conditional insert runs consensus with several round trips; at 40 creates/s that is cheap (D3).
+
+### ID allocator and counter DB: one row in PostgreSQL
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL, one row per sequence, a synchronous replica, `next_id = next_id + 1000` per call.
+- **Why:** 0.04 calls/s needs no scale, only durability and atomicity: a block handed out twice would mean two links per code (N1, D5).
+- **Why not Redis `INCRBY`:** asynchronous replication can lose the last increments on failover and hand the same block out again.
+- **Why not ZooKeeper or etcd:** they would work; a second consensus system to run for one row is not worth it here.
+- **Why not Snowflake-style ids on each server:** no coordination at all, but a 64-bit id needs up to 11 base-62 characters, not 7 (F1).
+
+### Click log: a Kafka-style durable log
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `code`, three replicas, 7 days of retention; redirect servers batch events for 100 ms.
+- **Why:** 3,900 events/s, 40,000 at peak, absorbed without slowing a redirect (D2, D4); several readers (counts, abuse signals, a data lake) read the same events and can replay after a bug (D5).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is deleted, so a second reader or a replay is impossible.
+- **Why not write counts straight to a database:** 10,000 increments/s on one viral row (D10).
+
+### Click counter and click store: a stream job into a column store
+
+- **Choice:** a stream job (<TechIcon id="oss/apache-flink" /> Flink) sums clicks per code per minute, drops duplicate event ids, and writes hourly rows into <TechIcon id="oss/clickhouse" /> ClickHouse.
+- **Why:** creators ask for sums over time ranges (F5); a column store scans and sums millions of rows per query, and the stream job turns 10,000 events/s on one code into one row a minute (D10).
+- **Why not counters in Redis:** fast, but the counts are not durable and cannot answer "clicks per hour last week".
+- **Why not a nightly batch job:** counts would be a day late (N5).
+
+### Abuse check: a Bloom filter in front of a blocklist
+
+- **Choice:** each abuse-check server holds a Bloom filter of listed URLs and domains from a threat feed, refreshed every few minutes; a "maybe" is confirmed against the exact list.
+- **Why:** most destinations are clean, and a filter answers "not listed" from memory with no false negatives (N7).
+- **Why not check only at click time:** the bad link would already be shared; refuse it at create, and disable later reports through the cache delete (F4).
+
+## Deep dives
+
+### Generating the code: hash, counter or clock
+
+- **Hash and retry:** hash the long URL with a salt, keep seven base-62 characters, and insert if absent; a clash means a new salt and another try. A hash cut to seven characters behaves like a random code: at 6 billion links, 1 insert in 590 retries once.
+- **Counter with blocks:** a link server reserves 1,000 ids in one atomic update and hands them out from memory. Ids never repeat, so codes never collide, and the counter sees 0.04 calls/s.
+- **Time-based ids (Snowflake-style):** each server makes 64-bit ids from time, a node number and a sequence, with no coordination. A 64-bit id needs up to 11 base-62 characters, which breaks the seven-character requirement (F1).
+- **Guessable codes:** a raw counter gives `…0001`, `…0002`, so anyone can walk every link (N6). Run the id through a keyed permutation of 0 to 62^7 − 1 (a small block cipher over that range) before encoding; it is one-to-one, so codes stay unique.
+- **One-to-one, for ever:** every write is insert if absent, aliases included; a generated code that hits an existing alias fails the insert, and the server takes the next id. Codes are never reused after expiry.
+
+The three generators compared on the same five questions.
+
+<AnimatedDiagram spec="animated/url-shortener/code-options" caption="Each generator pays somewhere: a retry, a counter to protect, or four extra characters." />
+
+**How to read it:**
+
+- One column per generator; red cells are where each one fails.
+- The highlighted column is this design's choice; its weakness, a counter rolled back, is caught by insert if absent.
+
+**The numbers:**
+
+- A random code at 0.17 % fill retries 1 time in 590; 62^7 codes at 1.2 billion a year last about 2,900 years.
+- A 64-bit id needs up to 11 characters, because 62^10 ≈ 8.4 × 10^17 is less than 2^63 ≈ 9.2 × 10^18.
+
+How a block of ids is reserved and spent, and what a crash costs.
+
+<AnimatedDiagram spec="animated/url-shortener/range-alloc" stepper caption="One counter call buys 1,000 creates; a crash wastes the rest of a block but never hands out an id twice." />
+
+<StepCards>
+  <StepCard n={1} title="Each server takes its own block">
+    Servers A and B each add 1,000 to the counter in one atomic update. A gets 1,000,000 to 1,000,999 and B gets 1,001,000 to 1,001,999, so their ids never overlap.
+  </StepCard>
+  <StepCard n={2} title="A create costs no counter call">
+    Server A takes id 1,000,000 from memory, scrambles it to FkFnj3r, and inserts it only if absent. The counter is not touched again for 999 creates.
+  </StepCard>
+  <StepCard n={3} title="A crash leaves a gap, never a repeat">
+    Server A crashes and a create times out. On restart it reserves a new block from 1,002,000; the 999 ids it never used are skipped for ever.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 40 creates/s over 10 link servers is 4/s each, so a block lasts 1,000 ÷ 4 = 250 s.
+- 10 restarts a day waste at most 10,000 ids, against 1.2 billion ids used a year.
+- The figure's scramble is a multiply-add for readability; two consecutive codes reveal its step, so production uses a keyed cipher.
+
+<Callout tone="red" title="What breaks">
+  Restore the counter database from an old backup and it hands out blocks it already gave away. Insert if absent turns that into failed creates instead of hijacked links; alert on any generated code that already exists, and move the counter past the highest id in the store.
+</Callout>
+
+### 301 or 302: the redirect decides what you can count
+
+- **What the standard says:** a `301` or `308` may be kept by caches, browsers included, unless headers say otherwise; a `302` or `307` is not kept by default (see "How real systems do it").
+- **`302` here:** every click reaches the redirect service, so it is counted (F5), an expired link answers `410` on time (F4), and a disabled phishing link stops within a minute (N7).
+- **`301`:** a browser that kept the answer goes straight to the destination next time; that click is never counted and never stopped. It saves load only for repeat clicks from the same browser.
+- **`307` and `308`:** they promise to keep the request method; clicks are always `GET`, so they add nothing here.
+- **The click event:** written after the response, batched for 100 ms, at least once; the counter job drops duplicate event ids (D7).
+
+One click, with a cache hit, a cache miss, and the same link answered with `301`.
+
+<AnimatedDiagram spec="animated/url-shortener/redirect-path" stepper caption="A 302 brings every click back to us to be counted; a 301 lets the browser keep the answer, and the click is lost." />
+
+<StepCards>
+  <StepCard n={1} title="Cache hit: answer, then log the click">
+    The redirect server finds FkFnj3r in the cache in about 1 ms and answers 302. Only then does the click event go to the log, so analytics never delay a click.
+  </StepCard>
+  <StepCard n={2} title="Cache miss: read the store, fill the cache">
+    The cache misses, the store answers in about 5 ms, and the entry is cached until the earlier of an hour and the link's expiry. The answer and the click event follow as before.
+  </StepCard>
+  <StepCard n={3} title="A 301: the next click is never counted">
+    With 301 the browser may keep the redirect. Its next click goes straight to the shop and never reaches us: no count, and no way to stop it if the link is later disabled.
+  </StepCard>
+</StepCards>
+
+**The numbers:** at a 95 % hit ratio a redirect costs about 0.95 × 1 + 0.05 × 6 ≈ 1.3 ms inside our servers on average, far under the 20 ms p99 target (N2).
+
+<Callout tone="red" title="What breaks">
+  A redirect that answers 301 for a link that may later be disabled keeps sending browsers to the bad page with no request we can refuse. Use 302 for every link that can expire or be disabled.
+</Callout>
+
+### The long tail: what to cache and what to expire
+
+- **Assume a long tail:** clicks cluster on links shared recently; most links are clicked rarely after their first days (see Google's figure under "How real systems do it").
+- **Cache by recent clicks:** fill on miss and evict the least recently used; caching on create fills memory with links that will never be clicked (D8).
+- **Keep cold rows in the store:** 3 TB is small for a store that grows by adding nodes; a cheaper cold tier would add a second miss path for little saving.
+- **Expire exactly, delete lazily:** the read checks `expires_at`; the store's TTL frees the row; a cache TTL never outlives the link.
+- **Cache the misses too:** scanners request random codes; remembering "not found" for 60 s and limiting `404`s per IP keeps them off the store.
+- **Hot keys:** a viral link lives in every redirect server's memory for 5 s, and single flight lets one request per server refill it (D9).
+
+Where a redirect is answered, and what each tier costs.
+
+<AnimatedDiagram spec="animated/url-shortener/long-tail" caption="A few gigabytes of cache answer almost every click; the 3 TB store only sees the misses." />
+
+**How to read it:**
+
+- Left to right is the order a redirect tries; an arrow is a miss.
+- Under each tier: its size, the share of clicks it answers, and its expiry rule.
+
+**The numbers:** the 50 M cached codes are 50 M ÷ 6 B = 0.8 % of all links; at an assumed 95 % hit ratio they leave the store 3,900 × 0.05 ≈ 195 reads/s, about 2,000/s at the 40,000/s peak.
+
+### Worked example: a link goes viral
+
+1. 12:00: a link posted to a large audience reaches 10,000 clicks/s within a minute: a quarter of the peak on one code.
+2. Each of 20 redirect servers sees 10,000 ÷ 20 = 500 clicks/s; after its first miss, every one of them is a memory hit.
+3. Memory entries live 5 s, so the shared cache sees 20 ÷ 5 = 4 reads/s for this code, and the store sees none.
+4. The click log takes 10,000 events/s × 100 bytes = 1 MB/s on the code's partition; the counter job writes one row a minute.
+5. At 12:20 the creator disables the link: the cache key is deleted at once, and server memory forgets it within 5 s (N7).
+
+**The numbers:** without server memory, 10,000 reads/s would land on one cache node; without the cache, on one store partition's three replicas.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Code generation | Hash and retry, counter with blocks, time-based ids | Counter with blocks of 1,000 | D3, N1, F1 | A counter DB to protect; gaps after crashes | Creates in many regions with no shared counter: hash and retry |
+| Guessability | Raw sequence, keyed permutation, random | Keyed permutation of the id | N6 | Codes no longer show creation order | Never for private links |
+| Link store | Relational, wide-column key-value | Wide-column, partitioned by code | D1, D8 | No ad hoc queries or joins on links | Owners need rich listing: add a table keyed by owner |
+| Redirect status | 301, 302, 307, 308 | 302 for every link | F4, F5, N7 | Every click is our load | Links that never expire and need no counts |
+| Cache fill | Write-through on create, fill on miss | Fill on miss, LRU | D8, D1 | Each link's first click reads the store | Links that get most clicks in their first second |
+| Hot keys | Shared cache only, server memory too | 5 s server memory + single flight | D9, D2 | A disable takes up to 5 s more | Disables must be instant: push deletes to servers |
+| Analytics path | Increment per click, events through a log | Events through a log, counted in a stream | D4, D10, N5 | Counts minutes late; a crash may lose a batch | Billing per click needs every event: wait for the log ack |
+| Same long URL twice | Reuse the code, a new code | A new code per create | D7, F5 | A duplicate row per repeat | Storage cost per row starts to matter |
+| Reusing expired codes | Reuse, never reuse | Never reuse | N1 | Codes are spent for ever | The code space passes half full: add an eighth character |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | Counter blocks, base 62, the scramble | Seven characters, no collisions, no guessing |
+| [Caching](/system-design/patterns/caching) | Link cache and server memory, cache-aside | 100 reads per write |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Link store by `code`, click log by `code` | 6 billion rows; 40,000 reads/s at peak |
+| [Consistent Hashing](/system-design/patterns/consistent-hashing) | The link store's ring, the cache's slots | Adding a node moves a small share of codes |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Server memory and single flight | One viral link at 10,000 clicks/s |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The click log | Clicks leave the hot path; many readers, replay |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | The click counter | Per-minute counts with duplicates removed |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | Creates per API key, `404`s per IP | Stop mass link minting and code scanning |
+| [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) | The abuse check | A blocklist check from memory |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A paste service | Codes from counter blocks, a cached read path, expiry | Content is kilobytes to megabytes: a blob store and a CDN, cache by size |
+| QR codes for print | The short link, `302`, analytics | Printed codes live for years and destinations change: an editable destination and cache deletes on edit |
+| Deep links into an app | Codes, cache, click events | The answer depends on the device: app installed or store page, so no single cached `Location` |
+| Coupon codes | Unique, unguessable codes from a scrambled counter | Redemption is a contended write: one conditional update per code, and longer codes against guessing |
+
+## How real systems do it
+
+- **Bitly (engineering talk slides, undated; read 2026):** about 230 million redirects and 20 million shortens a day on about 400 servers in two data centres: about 11.5 redirects per shorten. The talk lists events over commands and asynchronous over synchronous among its lessons.
+- **Flickr, 2010:** "ticket servers" make unique ids: a one-row MySQL table advanced with `REPLACE INTO`, in production since 2006. Two servers hand out odd and even ids for availability, and GUIDs were rejected because they index badly in MySQL.
+- **Twitter Snowflake, 2010:** 64-bit ids from a 41-bit millisecond timestamp, a 10-bit machine id and a 12-bit sequence, roughly time-sorted, with no coordination between machines and at least 10,000 ids a second per process.
+- **Google, 2024:** more than 99 % of goo.gl links had no activity in the month before the announcement. The service stopped making links in 2018; a 2025 update kept most existing links working.
+- **RFC 9110, 2022 (the HTTP standard):** `301` and `308` responses are cacheable by default unless headers say otherwise; `302` and `307` are not.
+- **Where this design differs:** the Bitly talk does not say how it makes codes, so the code generator here follows Flickr's and Twitter's published id designs. Bitly's ratio was about 11.5 to 1, not 100 to 1; at that ratio the cache still pays and 20 million creates a day (230/s) are still far within what one counter row serves in blocks.
+
+## Failure modes & pitfalls
+
+- **Counter rolled back:** generated codes already exist; alert on failed generated inserts; move `next_id` past the highest id in the store, and never restore the counter alone.
+- **Cache cluster lost:** store reads jump from 195/s toward 3,900/s; watch store p99 and cache hit ratio; replicas in the cache, server memory and single flight, and shed analytics first.
+- **Code scanning:** a flood of `404`s from a few IPs; watch the `404` rate; cache "not found" for 60 s, limit `404`s per IP, and scramble codes.
+- **A 301 shipped by mistake:** clicks fall with no errors anywhere; compare redirects served with clicks counted; test the status code in deployment checks.
+- **Click log down:** events pile up in server memory; watch the buffer size; drop and count the overflow instead of blocking a redirect (N5 allows 0.1 %).
+- **Expired link still served:** a cache TTL longer than the expiry; find expired codes in redirect logs; TTL = min(1 hour, expiry) and the check on every read.
+- **Phishing on a trusted domain:** reports arrive after the link spread; watch time from report to disable; disable deletes the cache key, and server memory expires in 5 s.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify scale, code length, aliases, expiry and analytics; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 40 creates/s, 3,900 redirects/s, 100 to 1, 62^7 ≈ 3.5 trillion, 3 TB.
+3. **Minutes 10 to 15:** API and the links table; name the store and the partition key.
+4. **Minutes 15 to 25:** Steps 1 to 3: random codes, a counter, blocks; say why each fails or wins.
+5. **Minutes 25 to 35:** Steps 4 to 7: the cache, `302` and click events, expiry, abuse.
+6. **Minutes 35 to 45:** one deep dive: code generation, `301` against `302`, or the viral link; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** base 62 and the code-space arithmetic, a cache on the read path, a key-value store by code.
+- **Senior:** counter blocks against hashing with numbers, `302` for analytics, clicks off the hot path, hot-key handling.
+- **Staff:** guessability and a keyed permutation, what degrades first, multi-region creates, abuse and code reuse.
+
+**Red flags:** hashing with no plan for collisions; a counter call per create at scale; `301` with analytics required; counting clicks with a database increment; reusing expired codes.
+
+## Further reading
+
+- [Lessons Learned Building Distributed Systems at Bitly](https://www.slideshare.net/slideshow/lessons-learned-with-distributed-systems-at-bitly/41565937) (Bitly engineering talk, undated)
+- [Ticket Servers: Distributed Unique Primary Keys on the Cheap](https://code.flickr.net/2010/02/08/ticket-servers-distributed-unique-primary-keys-on-the-cheap/) (Flickr, 2010)
+- [Snowflake](https://github.com/twitter-archive/snowflake/tree/snowflake-2010) (Twitter, 2010)
+- [Google URL Shortener links will no longer be available](https://developers.googleblog.com/en/google-url-shortener-links-will-no-longer-be-available/) (Google for Developers, 2024, updated 2025)
+- [RFC 9110: HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110.html), sections 15.1 and 15.4 (IETF, 2022)
+- Related pages: [Design a Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [Design a Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [Caching](/system-design/patterns/caching) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which hashing or encoding technique would you use to generate the short code?" category="Concepts" level="Mid">
+  - Encode a number in base 62 (a to z, A to Z, 0 to 9): seven characters hold 62^7 ≈ 3.5 trillion codes.
+  - Get the number from a counter, reserved in blocks of 1,000 per server, so codes never collide.
+  - Scramble the id with a keyed permutation before encoding, so codes cannot be guessed.
+  - Hashing the URL also works, but needs insert if absent and a retry on every clash.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you guarantee that one short code maps to exactly one long URL?" category="Architecture" level="Mid">
+  - Hand each id out once: a counter with blocks never repeats, and the scramble is one-to-one.
+  - Make every write insert if absent, generated codes and aliases alike, so a clash fails instead of overwriting.
+  - Never reuse a code after expiry: a printed link must never point somewhere new.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not take the first seven characters of an MD5 hash of the long URL?" category="Trade-offs" level="Senior">
+  - Seven characters keep about 41 bits of the hash, so different URLs clash: about 1 insert in 590 at 6 billion links.
+  - Every create then needs a check and a retry with a salt, and correctness rests on the store's insert if absent.
+  - The same URL always gives the same code, which merges campaigns that wanted separate counts unless you add a salt anyway.
+  - It wins when creates happen in many regions with no shared counter.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you answer the redirect with 301 or 302?" category="Trade-offs" level="Senior">
+  - 302: a 301 may be kept by the browser, so repeat clicks never reach us and are never counted.
+  - With 302 an expired link answers 410 on time, and a disabled phishing link stops within a minute.
+  - 301 saves load only for repeat clicks from one browser; choose it only for links that never change and need no counts.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do links expire, and can an expired code be given to a new link?" category="Architecture" level="Mid">
+  - Store `expires_at` on the row and check it on every read, so expiry is exact even before cleanup.
+  - Let the store's TTL delete the row, and never let a cache entry live past the expiry.
+  - Do not reuse the code: old copies of the link would land on someone else's page, and at 0.17 % fill nothing is gained.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you partition the data, and how do you recover when a node fails?" category="Scaling" level="Senior">
+  - Partition the link store by `code` on a consistent-hash ring; scrambled codes spread load evenly.
+  - Keep three replicas and write with a quorum, so one node can fail with no lost link.
+  - A replacement node streams its ranges from replicas; reads go to the other replicas meanwhile.
+  - The cache is rebuilt by misses; server memory and single flight keep the store calm while it warms.
+  </InterviewQuestion>
+  <InterviewQuestion question="One link goes viral at 10,000 clicks per second. What happens?" category="Scaling" level="Senior">
+  - Each redirect server keeps the code in memory for 5 s, so 20 servers serve 500 clicks/s each with no network hop.
+  - Single flight lets one request per server refill it: about 4 cache reads/s and no store reads.
+  - Click events are about 1 MB/s on one log partition, and the counter job writes one row a minute.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you count clicks without slowing down redirects?" category="Architecture" level="Mid">
+  - Answer the redirect first, then put a click event in an in-memory batch sent to a log every 100 ms.
+  - A stream job counts per code per minute and drops duplicate event ids; a column store serves the sums.
+  - Never increment a counter row per click: a viral link would put 10,000 writes/s on one row.
+  </InterviewQuestion>
+  <InterviewQuestion question="The counter database goes down. What happens to new links?" category="Failure modes" level="Senior">
+  - Nothing at first: each link server holds up to 1,000 ids, about 250 s of creates.
+  - Reserve the next block when half the current one is used, so a short outage is never seen.
+  - Redirects are not affected at all; if the outage lasts, creates fail with 503 while clicks keep working.
+  - After a restore from backup, move the counter past the highest id in the store before handing out blocks.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should short codes be guessable, and how do you stop someone walking through them?" category="Concepts" level="Senior">
+  - No: sequential codes let anyone list every link, including private ones.
+  - Run the id through a keyed permutation of 0 to 62^7 − 1 before encoding; it stays one-to-one, so uniqueness holds.
+  - Limit `404`s per IP and cache "not found", so scanning random codes is slow and never reaches the store.
+  </InterviewQuestion>
+</InterviewQuestions>
