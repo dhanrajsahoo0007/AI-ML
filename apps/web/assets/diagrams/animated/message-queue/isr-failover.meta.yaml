@@ -1,0 +1,14 @@
+title: The in-sync set shrinks, the leader dies, a new leader comes from the set
+alt: >-
+  A sequence diagram in three steps with five lanes: an orange producer, three violet brokers (leader B1, followers B2
+  and B3) and a green controller. Step 1: the producer appends with acks=all, both followers fetch from offset 1,000,
+  and the leader acknowledges. Step 2: follower B3 sends no fetch for 30 seconds, drawn as a red timeout; the leader
+  asks the controller to shrink the in-sync set to B1 and B2, and the next append is acknowledged with two copies.
+  Step 3: the controller misses B1's heartbeat, drawn red, and makes B2 leader with epoch 8; B2 refuses an append
+  while only one copy is in sync, B3 catches up and rejoins, and the retried append is acknowledged at offset 1,002.
+caption: >-
+  A slow follower leaves the in-sync set, the leader dies, and the controller picks the new leader from the set, so
+  no acknowledged message is lost.
+tags: [case-studies, message-queue, replication, failover]
+source: original
+created: 2026-11-17
