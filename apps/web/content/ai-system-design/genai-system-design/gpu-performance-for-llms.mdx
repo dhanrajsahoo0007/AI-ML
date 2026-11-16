@@ -136,6 +136,17 @@ How to reason about any serving question:
   caption="Weights scale with parameters × bytes per parameter and the KV cache with tokens in flight: 4-bit weights fit a 70B model on one 80 GB GPU, until one full-length request fills it."
 />
 
+**How to read it:**
+
+- The ruler at the top is three 80 GB GPUs on the same scale as the bars, and the dashed lines mark where one GPU ends.
+- Each bar is violet weights followed by teal KV cache. Quantising the weights shortens the violet part by four times; a single long request makes the teal part longer than all sixteen short ones.
+
+**The numbers:**
+
+- 16-bit: 70 B × 2 bytes = 140 GB of weights, plus 16 × 4,096 = 65,536 tokens × 327,680 B = 21.5 GB of KV cache, so 161.5 GB: at least 3 GPUs by memory, 4 in practice because 3 does not divide 64 query heads or 8 KV heads.
+- 4-bit: 70 B × 0.5 bytes = 35 GB, plus the same 21.5 GB, so 56.5 GB on one GPU.
+- One 131,072-token request: 131,072 × 327,680 B = 42.9 GB, so 35 + 42.9 = 77.9 GB, 97 % of one GPU.
+
 ### Worked example: Brightpost's 70B support model on H100s
 
 Brightpost's budget is 400 ms to the first token and 1,500 ms for 250 tokens, so 4.4 ms per decoded token. Peak traffic is 12 requests a second.

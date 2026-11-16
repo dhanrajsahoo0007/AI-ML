@@ -18,6 +18,8 @@ A reasoning model writes a long, often hidden, chain of thought before it answer
 - **Thinking tokens are billed as output tokens** and the user waits for all of them, even when the API shows only a summary. Use reasoning for **multi-step problems**, not lookups or latency-bound UX.
 - The visible chain of thought is **not a faithful log** of why the model answered: biased prompts cut accuracy by **up to 36%** while the explanations failed to mention the bias (Turpin et al., 2023).
 
+<KeyIdea>Test-time compute buys accuracy on multi-step problems by spending more thinking tokens or samples per question, with diminishing returns, so route by difficulty, verify where you can, and pay for thinking only where it helps.</KeyIdea>
+
 ## Mental model
 
 - Think of a math exam. A student who writes the answer straight away is fast but makes slips on long problems.
@@ -154,12 +156,17 @@ Every thinking token is an output token: you pay for it and you wait for it.
 
 - **Billing.** OpenAI, Anthropic and Google all document that thinking tokens are billed as output tokens, including when the API returns only a summary or nothing. The usage object reports them separately (at OpenAI, for example, the `reasoning_tokens` field inside `output_tokens_details`), so log that field. On later turns, some APIs keep earlier thinking in the context and bill it again as input.
 - **Latency.** The answer cannot start until thinking ends, so time to first visible token grows with the thinking length. Stream a thinking summary or progress notes if users watch the screen (see [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)).
-- **Truncation.** The output limit covers thinking plus answer. If thinking uses it up, the response ends before any answer, and you still pay. OpenAI suggests reserving at least 25,000 tokens for reasoning and output when you start.
+
+<Callout tone="red" title="What breaks">
+  Truncation. The output limit covers thinking plus answer. If thinking uses it up, the response ends before any answer, and you still pay. OpenAI suggests reserving at least 25,000 tokens for reasoning and output when you start.
+</Callout>
 
 - **Where reasoning helps:** competition math, code that must pass tests, multi-step planning, agent steps that choose among tools, and any task where an answer can be checked.
 - **Where it does not:** lookups, classification and extraction, short rewrites, autocomplete and voice turns with a latency budget of a second or two.
-- **Overthinking** is real: in the s1 paper's ablations, a prompt asking for a long amount of thinking raised average thinking from 6,109 to 9,651 tokens on AIME 2024 yet lowered accuracy from 50.0% to 36.7%.
-- More thinking is not always better thinking; measure it on your own tasks.
+
+<Callout tone="red" title="What breaks">
+  Overthinking. In the s1 paper's ablations, a prompt asking for a long amount of thinking raised average thinking from 6,109 to 9,651 tokens on AIME 2024 yet lowered accuracy from 50.0% to 36.7%. More thinking is not always better thinking; measure it on your own tasks.
+</Callout>
 
 ### Prompting reasoning models differently
 
@@ -172,6 +179,8 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 
 ## Trade-offs
 
+<Compare caption="Ways to spend test-time compute: accuracy gained against cost, latency and what each needs.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Standard model, direct answer | Lowest cost and latency | Slips on multi-step problems | Lookups, extraction, classification, chat |
@@ -181,6 +190,8 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 | Self-consistency (k samples + vote) | No extra model, parallel, simple | k times the cost; needs comparable answers; popular mistakes win | Short exact answers: numbers, choices |
 | Best-of-N + verifier | Beats voting when the verifier is good | Verifier to build or train; can be gamed | Code with tests, math with checkers |
 | Tree search (ToT, PRM-guided beam) | Explores and backtracks | Many calls, complex control, high latency | Puzzles and planning where steps can be scored |
+
+</Compare>
 
 ## Production systems
 

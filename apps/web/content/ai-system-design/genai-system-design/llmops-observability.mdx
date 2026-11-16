@@ -15,32 +15,40 @@ LLMOps is MLOps for systems shaped by prompts, retrieved data, tools and third-p
 - Watch for **drift**: changing user queries, changing data, and provider model updates.
 - **Release safely** with canaries, A/B tests, feature flags and fast rollback.
 
+The running example is Brightpost's support assistant. It answers 200,000 requests a day, reading 440 M and writing 50 M tokens; at the shared illustrative price each answer costs \$0.0069, or \$1,380 a day. Nobody can read those answers one by one, so the system has to say when quality, speed or cost moves, and why.
+
+This page maps two groups: Observability says what is happening, and Release pipelines decide what may change. Each section links the deeper page.
+
+<KeyIdea>LLMOps is a closed loop: every request leaves a trace tagged with its prompt and model versions, sampled traces are scored, failures become test cases, and no change ships until it passes them.</KeyIdea>
+
 ## Mental model
 
-- Running an LLM app without observability is like running a restaurant without receipts or customer feedback:
+Running an LLM app without observability is like running a restaurant without receipts or customer feedback:
 
 - **Tracing:** The receipt for every order, recording every step and cost.
 - **Offline evaluations:** Taste tests run before a new menu goes live.
 - **Online feedback:** Customer reviews on live orders.
 - **Versioning:** Keeping every past recipe so you can return to yesterday's when today's goes wrong.
 
+A receipt says when the dish left the kitchen and what it cost; only the review says it was the wrong dish. You need both, joined by the order number. And a hosted model is an ingredient someone else makes: its recipe can change without a note on the box.
+
 ## Core concepts
 
-1. **Tracing.** Each request becomes a trace with spans for retrieval, each model call and each tool call, recording inputs, outputs, timing and token counts. Open standards such as OpenTelemetry's GenAI conventions help.
+1. **Tracing.** Each request becomes a trace with spans for retrieval, each model call and each tool call, recording inputs, outputs, timing and token counts. Open standards such as OpenTelemetry's GenAI conventions help. They fix attribute names such as `gen_ai.usage.input_tokens` ([Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging)).
 
-2. **Prompt management.** Prompts in version control or a registry, linked to evaluation results, reviewed and deployed like code.
+2. **Prompt management.** Prompts in version control or a registry, linked to evaluation results, reviewed and deployed like code. The link that matters is on the trace: the conventions define `gen_ai.prompt.name` and `gen_ai.prompt.version`, so every span says which prompt produced it.
 
-3. **Offline evaluation.** Fixed test sets with graders run in CI on every change to prompts, models, retrieval or tools.
+3. **Offline evaluation.** Fixed test sets with graders run in CI on every change to prompts, models, retrieval or tools. Brightpost's golden set is 200 real tickets with reference answers ([Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)).
 
-4. **Online evaluation.** LLM-judge scoring on sampled production traffic, user feedback (thumbs, edits, retries), task success signals, and human review queues.
+4. **Online evaluation.** LLM-judge scoring on sampled production traffic, user feedback (thumbs, edits, retries), task success signals, and human review queues. A judge is a model grading answers against a rubric, calibrated against people ([LLM-as-Judge](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
 
 5. **Feedback loop.** Failures and negative feedback become new test cases and training or prompt improvements.
 
-6. **Drift.** Query distributions change, documents change, and hosted models get updated. Monitor input topics, retrieval scores and quality metrics over time.
+6. **Drift.** Query distributions change, documents change, and hosted models get updated. Monitor input topics, retrieval scores and quality metrics over time ([Drift Detection](/ai-system-design/genai-system-design/drift-detection)).
 
-7. **Cost and latency tracking.** Per feature, customer and model; alerts on spikes.
+7. **Cost and latency tracking.** Per feature, customer and model; alerts on spikes. Latency is read as percentiles and time to first token, not as a mean ([Latency & Token Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring)); cost is read per outcome, not per request ([Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution)).
 
-8. **Release practices.** Feature flags, canary rollouts, A/B tests, pinned model versions, and quick rollback.
+8. **Release practices.** Feature flags, canary rollouts, A/B tests, pinned model versions, and quick rollback. A canary tries the new version on a small share of traffic first ([CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines)).
 
 ## Architecture
 
@@ -71,6 +79,8 @@ The operating loop:
 3. Sampled traces and feedback are scored and reviewed.
 4. Failures become test cases in versioned datasets.
 5. Every change runs offline evals in CI, then rolls out gradually with flags.
+
+The trace store is the hinge. Without it the build path tests against tickets someone picked last quarter, and the serving path produces answers nobody grades. With it, a bad answer on Tuesday is a test case by Wednesday and a gate on the next release. Each trace carries the version of every part that shaped the answer, so a dashboard can split any metric by version and a rollback knows what to return to.
 
 ## Technical mechanics
 
@@ -123,11 +133,27 @@ The three classic signals each answer a different question, joined by the same t
 - **Feedback:** Captures what the customer thought (thumbs, edits, retries, escalations).
 - **Unified trace view:** Both attach to the trace id so one search shows the request, its cost and its quality (for the general case see [Observability on the Cloud](/cloud/operations/observability-on-the-cloud)).
 
+### Versioning the release bundle
+
+In LLMOps the release is a bundle, and any part can change the answer: the prompt template's name and version, the model as a dated snapshot rather than a moving alias, the retrieval settings (index build, embedding model, 5 chunks for Brightpost), tool schemas and guardrail rules, and the evaluation set it passed.
+
+Give the bundle one id and write it on the root span. Two model fields then catch a silent change: `gen_ai.request.model` is the name you asked for, and `gen_ai.response.model` is the name the provider says answered. If the second changes while the first stays the same, the provider moved the model under you. [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control) and [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance) cover storing and approving bundles.
+
+### Online evaluation: what to score
+
+Offline evaluation asks whether the new version is as good on known cases; online evaluation asks whether the live version is good on today's. Three signals feed it, cheapest first:
+
+- **Implicit feedback:** retries, edits, escalations, reopened tickets. Free on every request, but noisy.
+- **Explicit feedback:** thumbs and comments. Clear, but sparse.
+- **Judge scores and human review:** a judge grades a sample; people review a smaller one to keep the judge honest ([Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation), [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback)).
+
+Every score is written against the trace id, so a drop for one prompt version and not the others points at the change.
+
 ### Worked example: a bad refund answer, found and fixed
 
 At 200,000 requests a day Brightpost cannot read every trace:
 
-- **Sampling and retention:** Brightpost keeps all traces for a few days, scores a sample with a judge (a 1 % sample is 2,000 traces a day; illustrative), and always keeps slow or failed ones.
+- **Sampling and retention:** Brightpost keeps all traces for a few days, scores a sample with a judge (a 1 % sample is 2,000 traces a day; illustrative), and always keeps slow or failed ones. If 2 % of requests are slow or failed (4,000 a day, illustrative), a plain 1 % sample would keep only 40 of them; keeping all of them plus 1 % of the rest stores 5,960 traces a day, 2.98 % of traffic.
 - **Triggering feedback:** A customer replies "that is not what I was told" to an answer about order 4471 (a £42 kettle), and that feedback attaches to the trace.
 - **Root cause in trace:** The trace shows the retrieved article was the old returns policy, proving the fault is in retrieval rather than the model.
 - **Close the loop:** The team adds the case to the golden set (now 201), fixes the index, runs the whole suite in CI before the canary starts, and confirms the pass rate holds in next week's drift check (covering trace, evaluation, data, registry and rollout).
@@ -147,7 +173,11 @@ At 200,000 requests a day Brightpost cannot read every trace:
 | Cost | Tokens and cost per request, per successful task, per customer |
 | Drift | Query topic distribution, retrieval scores, no-answer rate |
 
+Two rows hide traps. Brightpost's illustrative latency has a mean of 1,700 ms but a p99 of 4,800 ms, and the mean hides the 2,000 customers a day beyond the p99 ([Latency & Token Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring)). On cost, a model at a tenth of the price that resolves 55 % of tickets instead of 70 % sends more to a person, raising the all-in cost per ticket from \$1.211 to \$1.801 (illustrative; [Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution)). Alert on customer-facing symptoms and chart the causes ([Alerting & Dashboards](/ai-system-design/genai-system-design/alerting-dashboards)).
+
 ## Trade-offs
+
+<Compare caption="Four LLMOps decisions: what each side buys, and the usual answer.">
 
 | Decision | Option A | Option B | Guidance |
 | --- | --- | --- | --- |
@@ -156,19 +186,29 @@ At 200,000 requests a day Brightpost cannot read every trace:
 | LLM judge vs human review | Scale | Accuracy | Judge for coverage, humans for calibration and high-stakes |
 | Build vs buy observability | Control | Speed | Use open standards to avoid lock-in |
 
+</Compare>
+
+The rows share one pattern: the cheap, wide option for coverage and the expensive, narrow one for truth. Numbers-only spans on all 200,000 requests, content on a gated sample; a judge on 2,000 traces a day, people on a slice of those. For build versus buy, if the app emits OpenTelemetry spans, changing backend is a collector setting, not a rewrite.
+
 ## Production systems
 
 - OpenTelemetry defines semantic conventions for generative AI spans and metrics.
-- Many LLM observability platforms provide tracing, evaluation datasets and prompt management.
+- As of November 2026 the GenAI conventions live in their own repository and every document is marked **Development**, so pin a version. They cover spans for inference, embeddings, retrieval, tool calls and agents, token counters, and server metrics for time to first token.
+- Instrumentations should not capture prompts and outputs by default; for production the conventions recommend storing content externally with a reference on the span.
+- Many LLM observability platforms provide tracing, evaluation datasets and prompt management. As of November 2026, Langfuse compares latency, cost and scores per prompt version; LangSmith runs online evaluators on a set sampling rate; Arize Phoenix runs evaluations on production traces.
 - The classic "Hidden Technical Debt in Machine Learning Systems" paper warned that ML systems accumulate maintenance debt in data dependencies and configuration, which applies even more to LLM apps.
 
 ## Failure modes & pitfalls
 
-- No link between a response and the prompt or model version that produced it.
-- Evaluating only before launch, never in production.
+- No link between a response and the prompt or model version that produced it. A quality drop cannot be pinned on any change, and rollback is a guess.
+- Evaluating only before launch, never in production. The golden set ages as questions change.
 - Silent provider model updates changing behavior.
 - Tracking total cost but not cost per successful task.
-- Storing sensitive prompts and outputs without access control or retention rules.
+- Storing sensitive prompts and outputs without access control or retention rules ([Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)).
+
+<Callout tone="red" title="What breaks">
+  A provider updates the model behind an alias. Your code is unchanged, latency and errors stay green, and refund answers start skipping the £30 approval rule. Fix: call a dated snapshot, alert when `gen_ai.response.model` changes, and run the golden set against production on a schedule, not only in CI ([Drift Detection](/ai-system-design/genai-system-design/drift-detection)).
+</Callout>
 
 ## Interview framework
 
@@ -178,13 +218,16 @@ At 200,000 requests a day Brightpost cannot read every trace:
 4. Cover drift, cost tracking and alerts.
 5. Describe safe rollout and rollback.
 
+Carry one example through: a trace per request with the bundle id, the golden set of 200 in CI, a 1 % judge sample plus every slow or failed trace, an alert when the response model changes, and a canary. Then walk one failure round the loop, as the refund example does.
+
 **What interviewers listen for:** a closed loop from production data to tests to safe releases.
 
 **Red flags:** "we check the outputs manually sometimes".
 
 ## Further reading
 
-- [OpenTelemetry semantic conventions for generative AI](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+- [OpenTelemetry semantic conventions for generative AI (GitHub)](https://github.com/open-telemetry/semantic-conventions-genai): spans, metrics and content capture; all marked Development as of November 2026.
+- [Link prompts to traces (Langfuse docs)](https://langfuse.com/docs/prompt-management/features/link-to-traces) · [Online evaluations (LangSmith docs)](https://docs.langchain.com/langsmith/online-evaluations) · [LLM evals (Arize Phoenix docs)](https://arize.com/docs/phoenix/evaluation/llm-evals)
 - [Hidden Technical Debt in Machine Learning Systems (Sculley et al., 2015)](https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems)
 - [Judging LLM-as-a-Judge (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
 - [RAGAS (Es et al., 2023)](https://arxiv.org/abs/2309.15217)

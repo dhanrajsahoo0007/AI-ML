@@ -17,6 +17,8 @@ A support answer touches a gateway, a cache, a vector search, a model and a guar
 - A log line says that something happened; a trace says **where** and **in what order**. Log the trace ID on every line so the two join.
 - Generic tracing keeps you in your SRE tools. An LLM-native platform adds prompt versions, scores and review queues. Many of them take OTel, so the choice is not all or nothing.
 
+<KeyIdea>Make each request one trace of timed spans, put its trace ID on every log line, redact before anything is stored, and tail-sample so every slow or failed trace is kept.</KeyIdea>
+
 ## Mental model
 
 - Think of a parcel with a tracking number. Each depot scans it on arrival and departure, so when it is late you do not ask "where is the parcel?" but "which depot sat on it for two days?".
@@ -113,6 +115,10 @@ The span tree is the picture to know. One Brightpost request has a root span and
 - **Gate the rest**: raw content, where you truly need it, goes to a separate short-lived store with its own access list.
 - The privacy rules themselves are on [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling).
 
+<Callout tone="red" title="What breaks">
+  Logging raw prompts to a plain log file. Everyone with log access can now read customers' emails and cards. Fix: redact before the write.
+</Callout>
+
 ### Sampling: keep the slow and the failed
 
 At 200,000 requests a day you will not store every trace with its context. Which ones you keep matters more than how many.
@@ -134,6 +140,10 @@ At 200,000 requests a day you will not store every trace with its context. Which
 - A common recipe is: keep every error, keep every trace slower than a threshold, keep every trace with a low evaluation score, and 1 % of the rest.
 - Head sampling is cheaper and good when traffic is uniform and failures are not rare.
 
+<Callout tone="red" title="What breaks">
+  Head sampling for a rare failure. At 1 %, a failure that happens 4,000 times keeps 40 traces, and the one you needed is not among them. Fix: tail sampling, which keeps all 4,000.
+</Callout>
+
 ### Worked example: finding a slow answer
 
 On sale day a customer waits 4.8 seconds for a refund answer about order 4471, a cracked kettle at £42.
@@ -153,6 +163,8 @@ Without the trace the team would have had one number, "p99 is up", and a guess.
 
 ## Trade-offs
 
+<Compare caption="Backend, sampling and content: what each choice buys, what it costs, and when to use it.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Generic tracing (Jaeger, Tempo, an APM) | Joins with existing SRE dashboards and alerts | You build prompt versioning and score views yourself | The team already runs one APM and has strict data-residency rules |
@@ -161,6 +173,8 @@ Without the trace the team would have had one number, "p99 is up", and a guess.
 | Tail sampling | Keeps every slow or failed trace | Memory in the collector, routing by trace ID | Failures are rare and each one matters |
 | Store content | Full replay of a bad answer | Privacy risk, retention duty | A gated, short-lived store for sampled or flagged traces |
 | Store numbers only | Safe and cheap | Cannot read what the model said | Default for all traffic |
+
+</Compare>
 
 ## Production systems
 
@@ -172,9 +186,7 @@ Without the trace the team would have had one number, "p99 is up", and a guess.
 
 ## Failure modes & pitfalls
 
-- **Logging raw prompts to a plain log file.** Everyone with log access can now read customers' emails and cards. Redact before the write.
 - **Broken propagation.** A queue or a thread pool drops the trace context and the tree splits into orphan spans. Test with a request that crosses every hop.
-- **Head sampling for a rare failure.** At 1 %, a failure that happens 4,000 times keeps 40 traces, and the one you needed is not among them.
 - **Counting cached tokens twice.** The OTel input total includes the cache read; some provider fields do not. Know which one you are summing.
 - **High-cardinality span names.** Put the order ID in an attribute, not the name, or the backend creates a new series for every request.
 - **No retention rule.** Traces that hold content need a short life and a named owner.
