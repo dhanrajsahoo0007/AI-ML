@@ -1,0 +1,15 @@
+title: Polling relay against log-tailing relay
+alt: >-
+  A comparison of two outbox relays on five questions. The teal polling publisher queries the outbox table every
+  second for up to 500 unsent rows, so a row waits 0.5 s on average; at the sale-day peak each query returns 300 rows
+  and the relay runs 86,400 queries a day whether or not orders arrive; if the relay is down for six hours the rows wait
+  in the table and are caught up when it restarts; sent rows are marked and deleted nightly, with an index on the
+  unsent rows. The green log-tailing relay, highlighted, reads the write-ahead log through a replication slot, with a
+  lag of tens of milliseconds (illustrative) and no queries on the table; if it is down for six hours the slot keeps
+  all write-ahead log and pg_wal grows until the disk fills, the one cell drawn in red; rows can be deleted in the same
+  transaction because the log keeps the insert.
+caption: >-
+  Log tailing is faster and lighter, but a stopped reader makes the database keep its log; polling fails gently.
+tags: [patterns, outbox, cdc, postgresql, comparison]
+source: original
+created: 2026-11-16

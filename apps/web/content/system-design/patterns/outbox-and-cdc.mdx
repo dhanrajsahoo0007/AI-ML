@@ -1,11 +1,279 @@
 ---
 title: "Transactional Outbox and Change Data Capture"
-description: "One transaction, then a log-tailed relay, so no event is lost."
+description: "One transaction, then a log-tailed relay, so no event is lost: the outbox table, polling against log tailing, ordering, duplicates and CDC."
 icon: database
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+A service saves an order and then tells the rest of the system about it. If the process dies between those two writes, the order exists and nobody hears about it.
 
-**What it will cover:** one transaction, then a log-tailed relay, so no event is lost.
+- Interviewers ask about the outbox to see whether you notice that "save, then publish" is two writes with no transaction around them, and whether you can close that gap without a distributed transaction.
+
+## Overview
+
+- The **dual-write problem**: a service writes to its database and to a message broker. The two writes cannot commit together, so a crash between them loses one.
+- The **transactional outbox** writes the event as a row in an **outbox table**, in the **same database transaction** as the business change. Both commit or neither does.
+- A separate **relay** moves outbox rows to the broker. It either **polls** the table or **tails the database's log** (change data capture, **CDC**).
+- The relay can publish an event **more than once** (it crashes after sending, before recording that it sent). Delivery is **at least once**, so consumers must be **idempotent**.
+- Keying each message by the **aggregate id** (the order id) keeps one order's events **in order** on one partition.
+- CDC on the business tables with no outbox works too, but it makes **your table layout the event contract** that every consumer depends on.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "The order service saves the order and then publishes an OrderPlaced event to Kafka."
+  - **Why the interviewer pushes back:** "What happens if the process dies after the commit and before the publish? Or the publish works and the commit fails?"
+  - **The answer that stands out:** write the event to an outbox table in the same transaction, let a relay tail the database log and publish keyed by order id, and make every consumer drop event ids it has already handled. Name the cost: a relay to run and a log slot to watch.
+</Callout>
+
+## Mental model
+
+- Think of a shop till that prints two copies of every receipt: one for the customer, one dropped into a box under the counter.
+- At the end of the day a clerk walks the box to head office. If the clerk is ill, the receipts wait in the box; nothing is lost.
+- The clerk may sometimes deliver the same receipt twice, so head office checks receipt numbers before it books one.
+- The outbox table is the box, the relay is the clerk, and the consumers are head office.
+
+## Core concepts
+
+- The running example is Brightpost's order service: **200,000 orders a day** on a normal day and a peak of **300 orders/s** on sale day.
+- Each order produces one `OrderPlaced` event. Three teams consume it: the search index, the product cache and the email sender.
+
+### The dual-write problem
+
+- The order service owns a database (the orders table) and publishes to a broker (Kafka, for example).
+- There is no transaction that spans both. Each write can succeed while the other fails.
+- Retrying the second write does not help when the process that would retry is the one that died.
+- A two-phase commit across the database and the broker would close the gap, but most brokers do not take part in one, and it blocks when the coordinator fails (see [Saga and Distributed Transactions](/system-design/patterns/saga)).
+
+<AnimatedDiagram spec="animated/patterns/outbox-dual-write" stepper caption="Whichever write goes first, a crash or a rollback between the two leaves the database and the broker disagreeing." />
+
+<StepCards>
+  <StepCard n={1} title="Save, then publish: the publish is lost">
+    The service inserts order 4471 and the commit succeeds. Before it publishes `OrderPlaced`, the process is killed by a deploy. The order is real, but the customer gets no email and the order never reaches the search index.
+  </StepCard>
+  <StepCard n={2} title="Publish, then save: the save is lost">
+    Swapping the order of the writes swaps the failure. The event goes out first and the email service confirms the order; then the insert rolls back because the last kettle sold a moment earlier. The customer holds a confirmation for an order that does not exist.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- At 300 orders/s, 50 ms of work in flight is 300 × 0.05 = 15 orders. A deploy that kills the process in that window can leave all 15 without an event.
+- A loss rate of 1 in 100,000 still means 200,000 ÷ 100,000 = 2 silent orders a day, every day.
+
+<PremiumBreak />
+
+### The outbox table
+
+- The outbox is an ordinary table in the **same database** as the business data, so one local transaction covers both inserts.
+- One row per event. The usual columns, as Debezium's outbox router expects them:
+  - `id`: a unique event id (a UUID). Consumers deduplicate on it.
+  - `aggregatetype`: what kind of thing changed (`order`); it picks the topic.
+  - `aggregateid`: which one (`4471`); it becomes the **message key**.
+  - `type`: what happened (`OrderPlaced`).
+  - `payload`: the event body, as JSON.
+- The payload is a **designed event**, not a copy of the row. Consumers depend on its shape, so you version it like an API.
+
+The table and the order transaction, in PostgreSQL:
+
+```sql
+CREATE TABLE outbox (
+  id            uuid PRIMARY KEY,
+  aggregatetype text  NOT NULL,  -- routes to topic outbox.event.order
+  aggregateid   text  NOT NULL,  -- message key: one order, one partition
+  type          text  NOT NULL,  -- OrderPlaced
+  payload       jsonb NOT NULL
+);
+
+BEGIN;
+INSERT INTO orders (id, item, total) VALUES (4471, 'kettle', 42.00);
+INSERT INTO outbox VALUES (gen_random_uuid(), 'order', '4471', 'OrderPlaced',
+  '{"orderId": 4471, "item": "kettle", "total": 42.00}');
+COMMIT;
+```
+
+### The relay: polling or log tailing
+
+- A **polling publisher** runs a query on a timer: select unsent rows in id order, publish them, mark them sent.
+- A **log-tailing relay** reads the database's <Term id="wal">write-ahead log</Term> (in PostgreSQL, through a logical replication slot) and picks out inserts into the outbox table. Debezium is the common choice.
+- Both are at least once: a relay that crashes after publishing and before recording its position publishes the same rows again.
+
+<AnimatedDiagram spec="animated/patterns/outbox-polling-vs-log" caption="Log tailing is faster and lighter, but a stopped reader makes the database keep its log; polling fails gently." />
+
+**How to read it:**
+
+- Each row asks one question of both relays; the green column is the one this page recommends at Brightpost's scale.
+- The red cell is the operational risk of log tailing: the database keeps every log segment the slot has not confirmed.
+
+**The numbers:**
+
+- Polling every 1 s: a row waits 0.5 s on average. At the peak each query finds 300 rows, inside a 500-row batch, so one relay keeps up.
+- The poller runs 86,400 ÷ 1 = 86,400 queries a day, including the quiet hours. Kafka Connect's JDBC source connector polls every 5 s by default.
+- Log tailing reads changes as they are committed; its lag is usually tens of milliseconds (illustrative: it depends on the connector and the broker).
+
+<Callout tone="red" title="What breaks">
+  A replication slot keeps every write-ahead log segment its reader has not confirmed, for the whole database, not only the outbox table. PostgreSQL's own docs warn that slots "can cause the server to retain so many WAL segments that they fill up" the disk. Set `max_slot_wal_keep_size` (PostgreSQL 13 and later; the default `-1` means no limit) and alert on slot lag.
+</Callout>
+
+## Architecture
+
+Brightpost's order path with an outbox, one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/outbox-flow" stepper caption="The order row and the outbox row commit together; the relay reads the log, never the request path, and consumers deduplicate." />
+
+<StepCards>
+  <StepCard n={1} title="The order service saves the order">
+    The shopper checks out and the service inserts order 4471. This is the system without the pattern: nothing else hears about the order unless the service makes a second write that can fail on its own.
+  </StepCard>
+  <StepCard n={2} title="Add an outbox row in the same transaction">
+    The service inserts an `OrderPlaced` row into the outbox table in the same transaction. Either both rows exist or neither does. Nothing has reached the broker yet.
+  </StepCard>
+  <StepCard n={3} title="A relay tails the write-ahead log">
+    The commit lands in the write-ahead log. The relay reads the log and keeps only inserts into the outbox table. The checkout request has already returned: the relay is off the request path.
+  </StepCard>
+  <StepCard n={4} title="Publish to the broker, keyed by order id">
+    The relay publishes the event with key 4471. Every event for order 4471 lands on the same partition, so consumers see `OrderPlaced` before `OrderShipped`.
+  </StepCard>
+  <StepCard n={5} title="Consumers update search, cache and email">
+    The search index adds the order to the customer's history, the cache drops the kettle's stock count and the email sender writes the confirmation. Each consumer reads at its own pace.
+  </StepCard>
+  <StepCard n={6} title="A redelivery is dropped by the consumer">
+    The relay restarted and sent the event again. The email sender looks up the event id in its processed-ids table, finds it and skips the second email.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Ordering per aggregate
+
+- Order matters only within one aggregate: order 4471's events must arrive in order; order 4471 and order 4472 need no order between them.
+- The relay publishes with `aggregateid` as the message key. The broker sends one key to one partition, and a partition is read in order.
+- Two pollers working the same table can break this: each grabs a batch and they publish out of order. Run one active poller per table (a lease), or let the log decide the order.
+
+### Duplicates and idempotent consumers
+
+- At-least-once delivery is the price of never losing an event. Exactly-once delivery across a database and a broker is not on offer.
+- Each consumer makes its effect idempotent instead:
+  - Record the event `id` in a **processed-ids** table in the same transaction as the consumer's own write, and skip ids already there.
+  - Or make the write naturally idempotent: "set stock to 37" can run twice; "subtract 1" cannot.
+- See [Idempotency](/system-design/patterns/idempotency) for keys and expiry of the processed-ids table.
+
+### CDC without an outbox table
+
+- A CDC connector can stream changes from the `orders` table itself. No outbox, no extra insert.
+- What it leaks: every consumer now depends on your column names and types. Renaming a column breaks search, cache and email at once.
+- It also leaks intent. A row update says "status changed from 2 to 3"; an outbox event says `OrderShipped`.
+- Use raw CDC to copy data between your own stores (a search index, a warehouse, see [Polyglot Persistence](/system-design/databases/polyglot-persistence)); use an outbox for events other teams build on.
+
+### Cleaning up sent rows
+
+- **Polling:** mark rows sent and delete them on a schedule. Keep a partial index on the unsent rows, or the poll query slows as the table grows.
+- **Log tailing:** the relay never reads the table, so the service can delete the row **in the same transaction** that inserted it. The log still carries the insert; Debezium's outbox router ignores the delete.
+
+### Worked example: order 4471 at the sale-day peak
+
+At 12:00 on sale day Brightpost takes 300 orders a second. Follow order 4471 through the Architecture figure.
+
+1. **Transaction (step 2).** The service inserts the order row and the outbox row and commits. The shopper sees "order placed".
+2. **Log (step 3).** The commit reaches the write-ahead log; the relay reads it a few tens of milliseconds later.
+3. **Publish (step 4).** The relay sends `OrderPlaced` with key 4471 and records its log position.
+4. **Consume (step 5).** Search, cache and email each read the event and apply it.
+5. **Crash and redelivery (step 6).** The relay is killed just after the publish, before recording its position. It restarts from the older position and sends 4471 again. Email finds the id in processed-ids and skips it.
+
+**The numbers:**
+
+- Outbox rows on a normal day: 200,000 orders × 1 event = 200,000 rows. At 1 KB a row (illustrative), 200 MB a day.
+- An hour at the 300/s peak is 300 × 3,600 = 1,080,000 rows. A poller with a 500-row batch every 1 s caps out at 500/s, so it has 500 − 300 = 200/s of headroom.
+- A polling setup that deletes sent rows nightly removes about 200,000 rows a night; with log tailing and a same-transaction delete, the table stays empty.
+- If the relay is down for 6 hours and the whole database writes 2 GB of log an hour (illustrative), the slot holds back 6 × 2 = 12 GB of log until the relay catches up.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Outbox + polling relay | Any database; no log access; a stopped relay only delays events | Lag of about half the poll interval; constant queries; table cleanup | Modest event rates, managed databases without logical replication |
+| Outbox + log-tailing relay | Low lag; no queries on the table; row deleted in the same transaction | A connector and a replication slot to run; slot lag can fill the disk | High event rates, teams already running Kafka Connect or Debezium |
+| CDC on business tables | No change to the service code | Table layout becomes the contract; no event names | Copying data into your own search index or warehouse |
+| Publish after commit (no outbox) | Simplest code | Loses events on every crash between the writes | Never for events other systems depend on |
+
+## Production systems
+
+- **Debezium outbox event router** (as of November 2026): reads outbox inserts from the log, routes to `outbox.event.<aggregatetype>` by default and uses `aggregateid` as the Kafka key; it filters out deletes on the outbox table.
+- **PostgreSQL logical replication slots**: the log source for Debezium on PostgreSQL. A slot retains log until its reader confirms it; `max_slot_wal_keep_size` (PostgreSQL 13+) caps that.
+- **Kafka Connect JDBC source connector**: the polling route. Modes `incrementing`, `timestamp` and `timestamp+incrementing` find new rows; `poll.interval.ms` defaults to 5,000.
+- **DynamoDB Streams**: CDC built into the database. Each stream record appears exactly once, in order per item, and is kept for 24 hours, so a consumer that is down longer loses changes.
+- **Used in our case studies:** [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments)
+
+## Failure modes & pitfalls
+
+- **Publishing inside the transaction.** Calling the broker before `COMMIT` keeps a database transaction open across a network call and still publishes events for rolled-back orders. Write the outbox row; let the relay publish.
+- **A forgotten replication slot.** A connector is removed but its slot stays, and the log grows until the disk fills. Alert on slot lag and set `max_slot_wal_keep_size`.
+- **Non-idempotent consumers.** "Send email" or "subtract 1 from stock" runs twice on a redelivery. Deduplicate on the event id.
+- **Several pollers on one table.** Events for one order publish out of order. Use one leased poller per table or a log-tailing relay.
+- **Raw CDC as a public API.** A column rename breaks other teams. Publish designed events from an outbox.
+- **No cleanup.** A polled outbox table with a year of sent rows makes every poll slow. Delete sent rows on a schedule.
+
+## Interview framework
+
+1. Spot the dual write: the moment a design says "save, then publish", ask what happens if the process dies in between.
+2. Put the event in an outbox table in the same transaction as the business write.
+3. Choose the relay: polling for simplicity, log tailing for lag and load, and say what each costs.
+4. State the delivery guarantee: at least once, with consumers that deduplicate on the event id, and ordering per aggregate through the message key.
+5. Cover operations: slot lag alerts, a WAL cap, cleanup of sent rows.
+
+**What interviewers listen for:** the dual-write gap named unprompted, at-least-once with idempotent consumers, and the replication-slot risk of log tailing.
+
+**Red flags:** "Kafka transactions solve it" (they cover Kafka, not your database), or a design that publishes before it commits.
+
+## Further reading
+
+- [Pattern: Transactional outbox (microservices.io)](https://microservices.io/patterns/data/transactional-outbox.html) · [Transaction log tailing](https://microservices.io/patterns/data/transaction-log-tailing.html) · [Polling publisher](https://microservices.io/patterns/data/polling-publisher.html)
+- [Outbox event router (Debezium docs)](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)
+- [Reliable microservices data exchange with the outbox pattern (Debezium blog, 2019)](https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/)
+- [Replication slots (PostgreSQL docs)](https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION-SLOTS) · [max_slot_wal_keep_size](https://www.postgresql.org/docs/current/runtime-config-replication.html)
+- [Change data capture for DynamoDB Streams (AWS docs)](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
+- Related pages: [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Idempotency](/system-design/patterns/idempotency) · [Saga and Distributed Transactions](/system-design/patterns/saga) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Polyglot Persistence](/system-design/databases/polyglot-persistence)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the dual-write problem?" category="Concepts" level="Junior">
+    - A service has to change its database and send a message, and the two writes cannot commit together.
+    - If the process dies after the commit and before the publish, the change exists and nobody is told; publish first and a rolled-back change has already been announced.
+    - Retries do not fix it, because the process that would retry is the one that died.
+    - The transactional outbox fixes it by turning the message into a row written in the same database transaction.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you use a polling relay or log tailing for the outbox, and when?" category="Trade-offs" level="Mid">
+    - Polling works on any database and fails gently: if the relay stops, rows wait in the table.
+    - It costs a lag of about half the poll interval and a query on every tick, busy or quiet, plus cleanup of sent rows.
+    - Log tailing reads the write-ahead log, so lag drops to tens of milliseconds and the table sees no queries, and the row can be deleted in the same transaction.
+    - Its cost is a connector and a replication slot to operate, and a stopped reader makes the database keep its log. Pick polling for modest rates or managed databases without logical replication; log tailing at high rates.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep events for one order in order?" category="Architecture" level="Mid">
+    - Only events for the same aggregate need an order; different orders can interleave.
+    - Publish with the aggregate id (the order id) as the message key, so the broker sends every event of one order to one partition, which is read in order.
+    - Keep one relay publishing per table: two pollers grabbing batches in parallel can publish an order's events out of sequence.
+    - Consumers should also process one partition sequentially.
+  </InterviewQuestion>
+  <InterviewQuestion question="A consumer sees the same event twice. Where do you fix it?" category="Failure modes" level="Mid">
+    - In the consumer: duplicates are expected, because the relay delivers at least once.
+    - Store each handled event id in a processed-ids table in the same transaction as the consumer's own write, and skip an id that is already there.
+    - Or make the effect idempotent by design, such as setting a value instead of incrementing it.
+    - Trying to make the relay exactly once moves the problem; it can always crash between publishing and recording its position.
+  </InterviewQuestion>
+  <InterviewQuestion question="The CDC connector is down for six hours. What happens to the database?" category="Failure modes" level="Senior">
+    - The replication slot keeps every write-ahead log segment the connector has not confirmed, for the whole database, not only the outbox table.
+    - At an illustrative 2 GB of log an hour, six hours holds back about 12 GB, and the disk can fill and stop all writes.
+    - Guard against it with `max_slot_wal_keep_size` (PostgreSQL 13+) and an alert on slot lag; past the cap the slot is lost and the connector must re-snapshot.
+    - When the connector returns it replays from its last confirmed position, so consumers see a burst and some duplicates.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use an outbox table instead of streaming changes from the orders table with CDC?" category="Trade-offs" level="Senior">
+    - Raw CDC needs no code change, but it makes the table's columns the contract that every consumer reads.
+    - A column rename or a split table breaks other teams, and a row diff says "status 2 to 3" rather than "OrderShipped".
+    - The outbox publishes designed, versioned events while still riding the same transaction.
+    - Raw CDC still fits for copying data into your own derived stores, such as a search index or a warehouse.
+  </InterviewQuestion>
+  <InterviewQuestion question="Size the outbox for Brightpost's sale day at 300 orders a second." category="Scaling" level="Senior">
+    - One event per order gives 300 rows a second at the peak and 200,000 on a normal day, about 200 MB a day at an illustrative 1 KB a row.
+    - A poller every second with a 500-row batch keeps up with 200 rows a second of headroom; log tailing has no batch limit and lag of tens of milliseconds.
+    - Partition the topic by order id so consumers can scale out while each order stays in order.
+    - With log tailing, delete rows in the same transaction so the table stays empty; with polling, delete sent rows nightly and index the unsent ones.
+  </InterviewQuestion>
+</InterviewQuestions>
