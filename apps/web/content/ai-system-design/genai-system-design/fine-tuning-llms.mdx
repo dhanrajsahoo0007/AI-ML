@@ -108,6 +108,17 @@ Full fine-tuning updates every weight. LoRA freezes them and trains small adapte
   caption="Only the orange pair is trained. The frozen matrix holds 16,777,216 numbers; the pair holds 65,536, and because B starts at zero the model begins exactly where the base model was."
 />
 
+**How to read it:**
+
+- Step 1 is the frozen weight on its own: the input x runs through W to the output h.
+- Step 2 adds a second path through the two orange matrices, A then B, whose result is scaled by α ÷ r and added to W's output at the plus sign.
+- Step 3 counts what is trained. The pair is drawn to shape, not to scale: a rank of 8 is 1/512 of 4,096.
+
+**The numbers:**
+
+- W: 4,096 × 4,096 = 16,777,216 frozen numbers. A: 8 × 4,096 = 32,768; B: 4,096 × 8 = 32,768; together 65,536 trained.
+- 65,536 ÷ 16,777,216 = 0.39 % of the matrix, with a scale of α ÷ r = 16 ÷ 8 = 2 (α = 16 is illustrative).
+
 The full treatment (rank, alpha, QLoRA memory, merge or swap) is on [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft).
 
 ### What one training example looks like
