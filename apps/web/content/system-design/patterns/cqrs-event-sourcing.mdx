@@ -1,90 +1,200 @@
 ---
 title: "CQRS and Event Sourcing"
-description: "Separating write and read models, and storing state as an append-only log of events."
+description: "Separating write and read models, storing state as an append-only log of events, and paying for it with lag and versioning."
+icon: scroll-text
+updated: 2026-11-16
 ---
 
-Some systems read and write in very different shapes, or need a full audit trail. CQRS and event sourcing address those cases, at a real cost in complexity.
+Some systems read and write in very different shapes, or must explain every change they ever made.
 
-## TL;DR
+- CQRS and event sourcing address those cases, at a real cost in complexity. Interviewers ask about them to see whether you can justify the cost, and whether you know what eventual consistency between the two sides means for the user.
 
-- **CQRS:** use one model for commands (writes) and another for queries (reads).
-- **Event sourcing:** store every state change as an immutable event; current state is a replay.
-- Read models are **projections**, usually eventually consistent.
-- Gives audit, replay and tailored read stores; adds complexity.
-- Use selectively, not by default.
+## Overview
 
-## The idea in plain English
+- **CQRS** (command query responsibility segregation): one model for **commands** (writes) and another for **queries** (reads).
+- **Event sourcing:** store every state change as an **immutable event**; current state is a **replay** (a fold) of the events.
+- Read models are **projections** built from events, usually **eventually consistent** with the write side.
+- They give an audit trail, replay and read stores shaped for each page; they add moving parts, lag and event versioning.
+- Use them **selectively**, for the parts of a system that need them, not by default.
 
-A bank keeps a ledger of transactions (events). Your balance is a summary computed from the ledger and cached on a statement (a read model).
+## Mental model
+
+- A bank keeps a ledger of transactions; your balance is a summary computed from the ledger.
+- The statement that arrives each month is a read model: shaped for reading, a little behind, and rebuilt from the ledger if lost.
+- Nobody edits a past ledger line. A mistake is fixed with a new, correcting line.
 
 ## Core concepts
 
-1. **Command side.** Validates and appends events.
-2. **Event store.** Append-only, ordered per aggregate.
-3. **Projections.** Consumers build read-optimised views (SQL tables, search indexes, caches).
-4. **Snapshots.** Periodic state checkpoints so replay stays fast.
-5. **Replay.** Rebuild or add a new read model from history.
-6. **Schema evolution.** Events live forever, so version them carefully.
+- The running example is **order 4471** and its six events, from `OrderPlaced` to `RefundIssued`, on a shop taking **200,000 orders a day**.
+
+### CQRS: two models
+
+- The **command side** validates a request and changes the write model: normalised tables, or an event stream.
+- The **query side** serves reads from views shaped for each page: "my orders" as one row per order, a search index, a cache.
+- The two scale and change independently. The cost is that a view lags the write by the time it takes an event to arrive.
+
+### Event sourcing: state as a fold
+
+- The **event store** is append-only and ordered per aggregate (here, per order).
+- To load an order, read its events in order and apply each one to the state.
+- **Snapshots** store the state at a version, so a reload replays only the newer events.
+
+<AnimatedDiagram spec="animated/patterns/es-replay" stepper caption="State is a fold over the events; a snapshot lets a reload skip the events it already summarises." />
+
+<StepCards>
+  <StepCard n={1} title="The event stream, append only">
+    Order 4471 has six events, versions 1 to 6. None is ever changed or deleted; a mistake is corrected by a new event.
+  </StepCard>
+  <StepCard n={2} title="Fold each event into the state">
+    Applying the events in order gives the order's state after each one: placed, paid, reserved, shipping, a damage claim, refunded.
+  </StepCard>
+  <StepCard n={3} title="Snapshot at v4: replay only two events">
+    A snapshot stores the state at version 4. A reload loads it and replays versions 5 and 6, instead of all six.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 200,000 orders × about 6 events = 1,200,000 events a day.
+- An order has only about 6 events, so it needs no snapshot. A long-lived aggregate, such as a wallet with 10,000 events, snapshotted every 100 events, replays at most 99.
+
+<PremiumBreak />
+
+### Projections and replay
+
+- Consumers read the events and build views: SQL tables, a search index, a cache.
+- A new view is built by replaying history from the first event, without touching the write side.
+- A broken view can be dropped and rebuilt the same way. Building views in depth: [Materialized Views and Read Projections](/system-design/patterns/materialized-views).
+
+### Event design and versioning
+
+- Events record **intent**: `RefundIssued` with an amount, not "status changed from 5 to 6".
+- Events live forever, so their schema must evolve without rewriting them: readers ignore unknown fields, events carry a version, and **upcasters** convert old versions when they are read.
+- Personal data in an immutable log conflicts with the right to be forgotten: keep it outside the events and reference it by id, or encrypt it per person and delete the key.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    CMD["Command"] --> AGG["Aggregate / validation"]
-    AGG --> ES[("Event store")]
-    ES --> BUS[("Event stream")]
-    BUS --> P1["Projection: SQL view"]
-    BUS --> P2["Projection: search index"]
-    Q["Query"] --> P1
-```
+Brightpost's order service, split into writes and reads one part at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/cqrs-split" stepper caption="Commands change the write model; events carry the change; a projector shapes a view for each kind of read." />
+
+<StepCards>
+  <StepCard n={1} title="One model serves writes and reads">
+    The order service places orders and lists them from the same normalised tables. The "my orders" page joins five tables on every load, and its reads compete with checkout's writes.
+  </StepCard>
+  <StepCard n={2} title="Every write publishes an event">
+    Each committed write publishes an order event to a topic, through an outbox so no event is lost.
+  </StepCard>
+  <StepCard n={3} title="A projector builds a read model">
+    A projector turns events into rows of a "my orders" view, one row per order with everything the page shows.
+  </StepCard>
+  <StepCard n={4} title="Queries read the view">
+    The page reads the view through a query API. The write tables only take writes, and the view can live in a different store if that suits the reads better.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
 
 ### Eventual consistency in the UI
 
-After a command the read model may lag. Return the new state from the command response, or poll until the version appears.
+- After a command, the read model may lag by the time it takes the event to reach the projector.
+- Return the new state from the command response, so the page that follows the command shows it without reading the view.
+- Or return the event's version and have the page wait until the view has reached it (read-your-writes, see [Consistency Models](/system-design/patterns/consistency-models)).
+
+### Concurrency on the write side
+
+- Two commands can load the same order at version 4 and both try to append version 5.
+- The event store accepts an append only if the stream is still at the expected version; the loser reloads and retries (optimistic concurrency).
 
 ### When not to use it
 
-Simple CRUD with no audit or replay needs does not benefit; the extra moving parts cost more than they save.
+- Simple CRUD with no audit or replay needs does not benefit; the extra moving parts cost more than they save.
+- Fowler's note on CQRS warns that for most systems it adds risky complexity; apply it to the parts that need it, such as a payment ledger, and keep the rest CRUD.
+
+### Worked example: order 4471 from events
+
+Order 4471's stream holds six events. Follow a reload and a new read model.
+
+1. **Reload the order.** Read events 1 to 6 and fold them: the order is "refunded £42".
+2. **The "my orders" view** received the same six events and updated its row each time; it shows "refunded" about a second after the refund (illustrative lag).
+3. **A new "damage claims by product" view** is needed. It is built by replaying two years of events into a new table, then kept up to date from the live stream.
+
+**The numbers:**
+
+- Reload: 6 events read and applied, a fraction of a millisecond in memory.
+- Rebuild: 146,000,000 orders × 6 events ≈ 876,000,000 events. At an illustrative 50,000 events a second, 876,000,000 ÷ 50,000 = 17,520 s, about 4.9 hours.
+- The write side carries on during the rebuild; the new view goes live when it has caught up.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| CQRS | Independent scaling and shapes | Sync lag, more components |
-| Event sourcing | Audit, replay, new views | Versioning, learning curve |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| CQRS | Reads and writes scale and change independently | Sync lag; more components | Read and write shapes differ a lot |
+| Event sourcing | Full audit; replay; new views from history | Versioning; replay cost; learning curve | Ledgers, orders, anything that must explain its history |
+| Snapshots | Fast reloads of long streams | Another thing to store and invalidate | Aggregates with hundreds of events or more |
+| Plain CRUD | Simple; strongly consistent reads | No history; one shape for all reads | Most services |
 
-## Real-world examples
+## Production systems
 
-- Ledgers and payments: [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments).
-- Search and read-optimised views next to a primary store: [Typeahead](/system-design-case-studies/case-studies/typeahead), [Zillow](/system-design-case-studies/case-studies/zillow).
-- Log-centric telemetry: [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging).
+- **Azure Architecture Center** (as of November 2026), Event Sourcing pattern: events are immutable and append-only; entities are rebuilt by replaying their stream; snapshots every N events limit the replay; message brokers such as Kafka distribute events but are not a substitute for an event store, because they lack per-entity streams and optimistic concurrency.
+- **Martin Fowler** on CQRS: suited to a small minority of complex domains, and for most systems it adds risky complexity.
+- Ledgers and payments: [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments). Search and read-optimised views next to a primary store: [Typeahead](/system-design-case-studies/case-studies/typeahead), [Zillow](/system-design-case-studies/case-studies/zillow). Log-centric telemetry: [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging).
+- **Used in our case studies:** [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Applying it to every service.
-- Unversioned events.
-- Projections that cannot be rebuilt.
+- **Applying it to every service.** Each service pays the lag and the versioning. Use it where history or read shapes justify it.
+- **Unversioned events.** A field rename breaks every replay. Version events and upcast old ones.
+- **Projections that cannot be rebuilt.** A view with logic that is no longer in the code. Keep projectors replayable from the first event.
+- **Non-idempotent projectors.** A redelivered event is applied twice. Track the last version applied per aggregate.
+- **State-shaped events.** "Status changed to 6" loses intent. Name events after what happened.
 
-## How to answer in an interview
+## Interview framework
 
-Justify it with an audit or read/write mismatch need, show the write path, the stream and projections, and explain lag handling.
+1. Justify it with a need: an audit trail, replay, or reads and writes of very different shapes.
+2. Show the write path: command, validation, append (with an expected version).
+3. Show the stream and the projections, and how a new view is built from history.
+4. Explain the lag and how the UI handles it.
+5. Cover versioning, snapshots and personal data.
 
-## Related patterns
+**What interviewers listen for:** a reason to use it, the lag handled in the UI, and events that record intent.
 
-[Message Queues](/system-design/patterns/message-queues) · [Saga](/system-design/patterns/saga) · [Consistency Models](/system-design/patterns/consistency-models) · [Polyglot Persistence](/system-design/databases/polyglot-persistence) · [Analytical Databases](/system-design/databases/analytical-databases)
+**Red flags:** event sourcing for a simple CRUD service, or "we will edit the event if it was wrong".
 
 ## Further reading
 
 - [CQRS (Martin Fowler)](https://martinfowler.com/bliki/CQRS.html)
 - [Event Sourcing (Martin Fowler)](https://martinfowler.com/eaaDev/EventSourcing.html)
+- [Event Sourcing pattern (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing)
+- Related pages: [Message Queues](/system-design/patterns/message-queues) · [Saga](/system-design/patterns/saga) · [Consistency Models](/system-design/patterns/consistency-models) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views) · [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation) · [Polyglot Persistence](/system-design/databases/polyglot-persistence) · [Analytical Databases](/system-design/databases/analytical-databases)
 
 <InterviewQuestions>
   <InterviewQuestion question="What problem does CQRS solve?" category="Concepts" level="Mid">
-    It lets reads and writes use different models and stores, so each can be optimised and scaled independently, at the cost of eventual consistency between them.
+    - It lets reads and writes use different models and stores.
+    - Each side can be optimised and scaled independently.
+    - The cost is eventual consistency between them.
   </InterviewQuestion>
-  <InterviewQuestion question="How do snapshots help event sourcing?" category="Design" level="Senior">
-    Replaying a long history is slow; a snapshot stores state at a version so you replay only newer events.
+  <InterviewQuestion question="How do snapshots help event sourcing?" category="Architecture" level="Senior">
+    - Replaying a long history is slow.
+    - A snapshot stores the state at a version, so you replay only newer events.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is event sourcing, in one sentence and one example?" category="Concepts" level="Junior">
+    - State is stored as the list of events that changed it, and the current state is computed by applying them in order.
+    - Order 4471 is stored as OrderPlaced, PaymentTaken, StockReserved, CourierBooked, DamageReported, RefundIssued, and folds to "refunded £42".
+  </InterviewQuestion>
+  <InterviewQuestion question="A shopper places an order and the My orders page does not show it. Why, and what do you do?" category="Failure modes" level="Mid">
+    - The page reads a projection that lags the write by the time the event takes to arrive.
+    - Return the new order in the command's response and show it directly, or pass the event's version and wait until the view reaches it.
+    - Alert when projection lag grows, because users notice it first.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you change an event's schema when old events can never be rewritten?" category="Trade-offs" level="Senior">
+    - Make readers tolerant: ignore unknown fields and default missing ones.
+    - Put a version on every event and upcast old versions to the current one when they are read.
+    - Rewriting stored events is a last resort, because it breaks the audit trail.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you not use event sourcing?" category="Trade-offs" level="Senior">
+    - For simple CRUD with no need for history, replay or audit.
+    - For short-lived products and prototypes, where the up-front design cost never pays back.
+    - Where every read must be strongly consistent with the latest write, since projections lag.
   </InterviewQuestion>
 </InterviewQuestions>
