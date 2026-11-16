@@ -38,7 +38,6 @@ export const RAG_TONE = {
   infra: "neutral",
 } as const satisfies Record<string, LayoutTone>;
 
-
 // ── The running example: Brightpost's help centre ───────────────────────────────────────────────────────────────
 
 /**
