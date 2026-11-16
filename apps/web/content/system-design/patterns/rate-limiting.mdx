@@ -1,96 +1,254 @@
 ---
 title: "Rate Limiting"
 description: "Capping request rates per user, key or service: token bucket, leaky bucket, sliding window and distributed counters."
+icon: timer
+updated: 2026-11-16
 ---
 
-Rate limiting protects services from abuse, bugs and bursts, and enforces fair use and pricing tiers.
+Rate limiting protects services from abuse, bugs and bursts, and enforces fair use and pricing tiers. Without it, one script on one API key can take the capacity that every other customer needs.
 
-## TL;DR
+- Interviewers ask about rate limiting to see whether you can pick the key and the algorithm, say where the counter lives, and keep it correct when many servers share it.
+
+## Overview
 
 - Limit requests per **identity** (user, API key, IP) over a **window**.
 - Algorithms: **fixed window**, **sliding window**, **token bucket**, **leaky bucket**.
-- Token bucket is the common default: allows bursts, enforces an average.
+- Token bucket is the common default: it allows bursts and enforces an average.
 - Distributed limiting needs a shared counter (Redis with atomic scripts) or local approximations.
 - Respond `429 Too Many Requests` with `Retry-After` and rate-limit headers.
 
-## The idea in plain English
+## Mental model
 
-A bucket gains one token per second up to a maximum. Each request spends a token; no tokens, no service. Idle users build up a small burst allowance.
+- A bucket gains one token per second up to a maximum. Each request spends a token; no tokens, no service.
+- Idle users build up a small burst allowance, never more than the bucket holds.
+- One bucket is one key's allowance: the drip is the **average rate**, the bucket size is the **burst** you accept.
+- One bucket per shopper, kept somewhere every server can reach, is the whole distributed problem.
 
 ## Core concepts
 
-1. **Fixed window counter.** Count per minute. Simple, but allows 2x bursts at window edges.
-2. **Sliding window log / counter.** Accurate, costs more memory (log) or approximates (counter).
-3. **Token bucket.** Capacity and refill rate; cheap (two numbers per key).
-4. **Leaky bucket.** Requests drain at a constant rate; smooths output.
-5. **Where to enforce.** Gateway, service middleware, or both.
-6. **Limit keys and tiers.** Per user, per endpoint, per tenant; different limits for free and paid.
-7. **Distributed state.** Central store, sticky routing, or per-node quota slices that sync periodically.
+- The running example is Brightpost's API: **2,000,000 shoppers a day**, **2,300 requests/s** at peak, **40 app servers**, and a limit of **100 requests a minute per key** (the limit is illustrative).
+
+### The algorithms
+
+- **Fixed window counter.** Count per minute. Simple, but allows 2x bursts at window edges.
+- **Sliding window log.** Keep a timestamp per request and count the last 60 s. Accurate, but memory grows with the limit.
+- **Sliding window counter.** Keep this minute's and last minute's counts, and weight last minute's by how much of it still overlaps the window. Two numbers, a close approximation.
+- **Token bucket.** Capacity and refill rate; cheap (two numbers per key: tokens left and the last refill time).
+- **Leaky bucket.** Requests drain at a constant rate; it smooths output instead of allowing bursts.
+
+The same two bursts, 100 requests either side of 1:00, through three of them.
+
+<AnimatedDiagram spec="animated/patterns/rl-algorithms" stepper caption="A fixed window forgets everything at the boundary and lets twice the limit through; the sliding counter and the token bucket still remember the first burst." />
+
+**How to read it:**
+
+- Blue requests are allowed, lime ones rejected; the dashed line is the 1:00 window boundary.
+- Red marks the fixed window's failure: a fresh counter at 1:00 lets the second 100 straight through.
+- The left column is the state each algorithm keeps per key.
+
+**The numbers:**
+
+- Fixed window: 100 before 1:00 plus 100 after = 200 allowed in 2 s, twice the limit.
+- Sliding window counter at 1:01: 100 × 59/60 + 0 = 98.3 counted, so 1 more fits and 99 are rejected.
+- Token bucket of 100, refilled at 100 ÷ 60 = 1.67 tokens a second: 1 token is back by 1:01, then one every 0.6 s.
+
+<PremiumBreak />
+
+Try it: move the burst and the limit, and switch algorithms.
+
+<RateLimiterSim algorithm="fixed-window" limit={5} bucketSize={5} steadyRps={3} burst={12} />
+
+### Keys, tiers and placement
+
+- **Limit keys and tiers.** Per user, per endpoint, per tenant; different limits for free and paid.
+- **Where to enforce.** Gateway, service middleware, or both.
+- Limiting by IP alone is weak: many users share one address behind a NAT, and one attacker can rotate addresses.
+- An authenticated key (API key, shopper id) is the fairest key; fall back to IP only for anonymous traffic.
+
+### Telling the client
+
+- **HTTP 429** (RFC 6585) means "too many requests in a given amount of time"; it MAY carry `Retry-After`, and a cache MUST NOT store it.
+- **`Retry-After`** is either a date or a number of seconds (RFC 9110): `Retry-After: 120` means wait 2 minutes.
+- The IETF draft **RateLimit header fields** (draft 11, May 2026, not yet an RFC) adds `RateLimit-Policy` (quota `q`, window `w`) and `RateLimit` (remaining `r`, seconds `t`).
+- When both are sent, the draft says `Retry-After` takes precedence.
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+RateLimit-Policy: "default";q=100;w=60
+RateLimit: "default";r=0;t=30
+```
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    C["Client"] --> GW["API gateway / limiter"]
-    GW -->|"INCR / token script"| R[("Redis counters")]
-    GW -->|"allowed"| SVC["Service"]
-    GW -->|"429 + Retry-After"| C
-    CFG[("Rules config")] --> GW
+Brightpost's API, with the limiter added one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/rl-placement" stepper caption="The gateway turns away excess per key before it costs anything; the service keeps its own limit in case the gateway is bypassed." />
+
+<StepCards>
+  <StepCard n={1} title="No limit: one key takes the capacity">
+    Shoppers and a scraper bot reach the 40 app servers directly. The bot's 1,000 requests a minute on one API key are served like everyone else's, so its share grows until shoppers time out.
+  </StepCard>
+  <StepCard n={2} title="A limiter at the gateway">
+    Every request passes a limiter that allows 100 a minute per key. It runs one atomic script against a shared counter store, forwards allowed requests and answers the rest with 429 and Retry-After.
+  </StepCard>
+  <StepCard n={3} title="Rules per key and tier">
+    The limits come from a rules store: per key, per endpoint, per tier, so a paid partner can get more than a free key. Rules change without a deploy.
+  </StepCard>
+  <StepCard n={4} title="A second limit inside the service">
+    Each app server caps requests in flight per key, 20 here. The service still protects itself if the gateway is bypassed, misconfigured or failing open.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Distributed counters and atomicity
+
+- **Distributed state.** Central store, sticky routing, or per-node quota slices that sync periodically.
+- Read-modify-write races let bursts through: two gateways read 99, both allow, both write 100.
+- Use a single Lua script (or `INCR` with `EXPIRE`) so check and update are atomic.
+- Redis runs a script atomically: all other server activity is blocked while it runs, so two scripts never interleave.
+- Redis's own rate-limiter pattern warns that a client that runs `INCR` but never `EXPIRE` leaks the key; a script fixes that race.
+
+<AnimatedDiagram spec="animated/patterns/rl-distributed" stepper caption="Read-then-write lets both gateways see the same 99; one atomic script makes the store hand out 100 and 101, so exactly one request is turned away." />
+
+**How to read it:**
+
+- Step 1: both gateways read 99 before either writes, so both allow and the stored count ends at 100 after 101 requests.
+- Step 2: each gateway sends one script; the store runs them one after the other, so the second sees 101 and rejects.
+
+**The numbers:**
+
+- Read-then-write: 101 requests allowed, count 100; under a burst from many gateways the overshoot grows with the number of racers.
+- Script: count 101, exactly one rejected, one round trip per request instead of two.
+
+The script, with every key passed in `KEYS` so it also works on a Redis Cluster:
+
+```lua
+-- KEYS[1] = rl:k42:1200   ARGV[1] = limit   ARGV[2] = window in seconds
+local current = redis.call("INCR", KEYS[1])
+if current == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[2])
+end
+if current > tonumber(ARGV[1]) then
+  return {0, redis.call("TTL", KEYS[1])}  -- reject; seconds to wait
+end
+return {1, tonumber(ARGV[1]) - current}   -- allow; remaining
 ```
 
-## Deep dive
+### Local limits and the store failing
 
-### Atomicity in Redis
+- A **local token bucket** on each proxy absorbs large bursts with no network call; a **global** limit in a shared store is exact per key.
+- Envoy runs both: the coarse local bucket first, then the global service, which cuts load on the global service.
+- If the limiter store is down, **fail open** (allow) for availability or **fail closed** for protection.
+- Decide per endpoint: payments might fail closed, reads open. A local fallback limiter keeps a coarse cap while the store is away.
 
-Read-modify-write races let bursts through. Use a single Lua script (or `INCR` with `EXPIRE`) so check and update are atomic.
+### Worked example: 100 requests a minute for 2 M shoppers
 
-### Failure mode
+Follow the four steps of the Architecture figure for one shopper's request.
 
-If the limiter store is down, **fail open** (allow) for availability or **fail closed** for protection. Decide per endpoint; payments might fail closed, reads open.
+1. The request reaches the gateway with shopper id k42; the bot's requests carry their own API key.
+2. The gateway runs the script on key `rl:k42:1200` (the shopper and the minute); the key expires after 60 s.
+3. The rules store says this tier gets 100 a minute; count 37 is allowed with `RateLimit: "default";r=63;t=…`, count 101 gets 429 with `Retry-After` set to the seconds left in the minute.
+4. On the app server, the local limit checks that k42 has fewer than 20 requests in flight.
+
+**The numbers:**
+
+- Store load: one script call per request, so 2,300 calls a second at peak across the fleet.
+- Keys: at most one per shopper active in the current minute. Worst case, all 2,000,000 in the same minute.
+- Fixed window, about 100 bytes per counter key with its expiry (illustrative; measure with `MEMORY USAGE`): 2,000,000 × 100 B = 200 MB.
+- Sliding window counter: two counters per shopper, 400 MB. Token bucket: one small hash of two numbers, the same order.
+- Sliding window log: up to 100 timestamps per shopper at about 64 B each (illustrative) = 6.4 KB, × 2,000,000 = 12.8 GB, 64 times the fixed window.
+- Flash sale at 12:00: 500,000 shoppers active in one minute = 500,000 keys, 50 MB for fixed-window counters.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Central counter | Accurate | Extra hop, single dependency |
-| Local counters | Fast, resilient | Approximate limits |
-| Token bucket | Bursts allowed | Slightly more state than fixed window |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Central counter | Accurate | Extra hop, single dependency | Paid quotas, per-key fairness |
+| Local counters | Fast, resilient | Approximate limits | Coarse burst protection on every proxy |
+| Fixed window | One counter, simplest | 2x bursts at the boundary | Long windows where a double burst is harmless |
+| Token bucket | Bursts allowed, average enforced | Slightly more state than fixed window | The default for APIs |
+| Sliding window counter | Close to exact, two numbers | An approximation, assumes even spread | Large scale, per-second or per-minute limits |
+| Fail open | API stays up when the store fails | No protection during the outage | Reads and low-risk endpoints |
 
-## Real-world examples
+## Production systems
 
-- The full design: [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter).
-- Per-key API limits: [URL Shortener](/system-design-case-studies/case-studies/url-shortener).
-- Per-user and per-host limits: [Web Crawler](/system-design-case-studies/case-studies/web-crawler).
-- Per-user quotas for model calls: [ChatGPT](/system-design-case-studies/case-studies/chatgpt).
+- **Stripe** ("Scaling your API with rate limiters"): uses the token bucket in Redis, and runs four limiters: request rate, concurrent requests, a fleet usage load shedder and a worker utilisation load shedder.
+- **Stripe** also catches limiter exceptions so a bug or a Redis outage fails open, and dark-launches each limiter to see what it would block before enforcing it.
+- **Cloudflare** ("How we built rate limiting capable of scaling to millions of domains", 2017): a sliding window counter with two numbers per counter; on 400 million requests from 270,000 sources, 0.003 % were wrongly allowed or limited.
+- **GitHub REST API** (as of November 2026): 60 requests an hour per IP unauthenticated, 5,000 an hour with a personal access token; `x-ratelimit-*` headers on every response, and 403 or 429 once exceeded.
+- **Envoy**: a local token bucket per proxy plus a global gRPC rate limit service, whose reference implementation is written in Go on Redis.
+- **Used in our case studies:** [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [URL Shortener](/system-design-case-studies/case-studies/url-shortener)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Limiting by IP only (shared NATs, spoofing).
-- Non-atomic counter updates.
-- No rate-limit headers, so clients cannot back off.
-- Retrying clients without jitter after a 429.
+- **Limiting by IP only.** Shared NATs block innocent users and spoofing or rotation escapes the limit. Key on the authenticated identity.
+- **Non-atomic counter updates.** Racing gateways let bursts through. One script per check.
+- **No rate-limit headers.** Clients cannot back off and keep hammering. Send `Retry-After` and the `RateLimit` fields.
+- **Retrying clients without jitter after a 429.** Every client returns at the same second and trips the limit again. Back off with jitter (see [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)).
+- **Fixed window at the boundary.** Twice the limit in 2 s. Use a token bucket or a sliding window counter.
+- **The limiter store as a single point of failure.** Decide fail open or closed per endpoint, and keep a local fallback.
 
-## How to answer in an interview
+## Interview framework
 
-Choose the key and algorithm, say where it runs and where state lives, handle atomicity and store failure, and describe the client-facing response.
+1. Choose the key (user, API key, IP) and the limit per tier and endpoint.
+2. Choose the algorithm: token bucket by default, sliding window counter at scale, and say why not a fixed window.
+3. Say where it runs (gateway, middleware or both) and where state lives (shared store, local, or both).
+4. Handle atomicity (one script) and store failure (open or closed per endpoint).
+5. Describe the client-facing response: `429`, `Retry-After`, `RateLimit` headers, and jittered retries.
 
-## Related patterns
+**What interviewers listen for:** the race between two servers and the atomic fix, and memory per key times active keys.
 
-[Back Pressure](/system-design/patterns/back-pressure) · [Load Balancing](/system-design/patterns/load-balancing) · [Caching](/system-design/patterns/caching)
+**Red flags:** "count in each server's memory" with 40 servers and no word on how the limit adds up.
 
 ## Further reading
 
 - [Stripe: Scaling your API with rate limiters](https://stripe.com/blog/rate-limiters)
+- [Cloudflare: How we built rate limiting capable of scaling to millions of domains](https://blog.cloudflare.com/counting-things-a-lot-of-different-things/)
+- [Redis: INCR and the rate limiter pattern](https://redis.io/docs/latest/commands/incr/)
+- [RFC 6585 §4: 429 Too Many Requests](https://www.rfc-editor.org/rfc/rfc6585#section-4) and the [RateLimit header fields draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/)
 - [Token bucket (Wikipedia)](https://en.wikipedia.org/wiki/Token_bucket)
+- Related pages: [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Load Balancing](/system-design/patterns/load-balancing) · [Caching](/system-design/patterns/caching) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture)
 
 <InterviewQuestions>
   <InterviewQuestion question="Token bucket vs fixed window?" category="Concepts" level="Junior">
-    Token bucket allows controlled bursts and smooths the rate; fixed window is simpler but can allow double the limit across a window boundary.
+    - Token bucket allows controlled bursts up to its size and smooths the rate to the refill rate.
+    - Fixed window is simpler: one counter per key per window.
+    - Fixed window can allow double the limit across a window boundary: 100 in the last second before 1:00 and 100 in the first second after.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you rate limit across many servers?" category="Design" level="Mid">
-    Keep counters in a shared store such as Redis using atomic operations, or give each node a slice of the quota and reconcile periodically when slight inaccuracy is acceptable.
+  <InterviewQuestion question="How do you rate limit across many servers?" category="Architecture" level="Mid">
+    - Keep counters in a shared store such as Redis, updated with atomic operations (one script per check).
+    - Or give each node a slice of the quota and reconcile periodically, when slight inaccuracy is acceptable.
+    - Sticky routing by key is a third option: each key's counter lives on one server.
+    - Many systems combine a coarse local bucket on each node with an exact global limit.
   </InterviewQuestion>
-  <InterviewQuestion question="What happens if the limiter's store fails?" category="Reliability" level="Senior">
-    Choose fail-open or fail-closed per endpoint: open keeps the product available but unprotected, closed protects backends but rejects legitimate traffic. Often add a local fallback limiter.
+  <InterviewQuestion question="What happens if the limiter's store fails?" category="Failure modes" level="Senior">
+    - Choose fail-open or fail-closed per endpoint.
+    - Open keeps the product available but unprotected; closed protects backends but rejects legitimate traffic.
+    - Often add a local fallback limiter, so a coarse cap holds while the store is away.
+    - Stripe's guidance is to catch limiter errors and fail open, so the API keeps working.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should a client do when it gets a 429?" category="Concepts" level="Junior">
+    - Stop and wait for the time in `Retry-After` (seconds or a date).
+    - Without it, back off exponentially with jitter, and cap the number of retries.
+    - Read the rate-limit headers on successful responses and slow down before reaching zero.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two gateways check the same key at the same moment. How can both requests get through when only one should?" category="Failure modes" level="Senior">
+    - Each gateway reads the count (99), decides there is room, then writes 100: a read-modify-write race.
+    - Both allow, so 101 requests pass and the stored count says 100.
+    - Fix it by making check and update one atomic step: `INCR` returns the new count, or a Lua script that also sets the expiry.
+    - Redis runs a script with all other activity blocked, so the second caller sees 101 and is rejected.
+  </InterviewQuestion>
+  <InterviewQuestion question="Limit 2 million shoppers to 100 requests a minute each. How much memory does the counter store need?" category="Scaling" level="Senior">
+    - Count keys, not shoppers: one key per shopper active in the current minute, expiring after 60 s.
+    - Worst case 2,000,000 keys at about 100 bytes each: about 200 MB for fixed-window counters.
+    - A sliding window counter doubles that; a sliding window log of up to 100 timestamps each needs about 12.8 GB.
+    - Load is one atomic call per request: 2,300 a second at peak, one round trip each.
+  </InterviewQuestion>
+  <InterviewQuestion question="Rate limiting vs load shedding?" category="Trade-offs" level="Mid">
+    - Rate limiting caps each key at its fair share, whatever the server's load.
+    - Load shedding drops work when the server itself is overloaded, whoever sent it.
+    - A key under its limit can still be shed during an overload; use both.
   </InterviewQuestion>
 </InterviewQuestions>

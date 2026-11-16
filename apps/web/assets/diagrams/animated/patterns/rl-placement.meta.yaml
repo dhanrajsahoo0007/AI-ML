@@ -1,0 +1,15 @@
+title: Where Brightpost's rate limiter sits
+alt: >-
+  An architecture diagram built in four steps. Step 1: orange shoppers, at 2,300 requests a second at peak, and an
+  orange scraper bot sending 1,000 requests a minute on one API key go straight to 40 teal app servers, so the bot
+  takes capacity the shoppers need. Step 2: a green gateway limiter, drawn as the solid accent, sits in front of the
+  app servers and allows 100 requests a minute per key; for each request it runs one INCR script against a violet
+  counter store with a 60-second TTL, passes allowed requests on, and answers the bot with a dashed 429 and
+  Retry-After. Step 3: a violet rules store feeds the limits per key, endpoint and tier to the gateway. Step 4: a green
+  local limit inside the app servers caps each key at 20 requests in flight.
+caption: >-
+  The gateway turns away excess per key before it costs anything; the service keeps its own limit in case the gateway
+  is bypassed.
+tags: [patterns, rate-limiting, api-gateway, redis]
+source: original
+created: 2026-11-16
