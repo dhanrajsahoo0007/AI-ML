@@ -1,0 +1,16 @@
+title: "The put path: bytes first, the record last"
+alt: >-
+  A sequence diagram in three steps with six lanes: an orange client, a teal front end, a violet index cache, a green
+  witness, a violet metadata index and violet storage nodes. Step 1: the client puts cat.jpg with a checksum; the
+  front end writes ten data and five parity shards, each with a checksum, waits until all fifteen are flushed to disk,
+  then commits the metadata record, which gets version v7 and tells the witness; only then does the client get 200
+  with the ETag. Step 2: a read right after: the index cache still holds v6, asks the witness whether v6 is current,
+  hears v7, reads the record from the index and the client gets v7. Step 3: a second put writes its shards, but the
+  front end crashes before the commit, drawn red; a reader still gets the whole of v7, and a note says garbage
+  collection deletes the orphan shards after 24 hours with no record.
+caption: >-
+  Bytes first, the record last, and a cache that asks the witness before it answers: a reader sees the latest write,
+  and a crash leaves orphans, never half an object.
+tags: [case-studies, s3, durability, consistency]
+source: original
+created: 2026-11-17

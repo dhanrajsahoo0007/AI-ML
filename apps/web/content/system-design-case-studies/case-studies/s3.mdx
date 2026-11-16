@@ -1,12 +1,658 @@
 ---
 title: "Design S3"
-description: "Object storage: metadata, data placement, durability and erasure coding."
+description: "Object storage at exabyte scale: metadata apart from data, erasure coding, durability arithmetic, strong consistency and large uploads."
 logo: systems/aws
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design an object store: put and get an object of any size by bucket and key, list keys by prefix, and never lose a byte that was acknowledged.
+The hard parts are durability over years on drives that fail every day, paying for it with as few extra drives as possible, and strong reads over metadata spread across thousands of machines.
 
-**What it will cover:** object storage: metadata, data placement, durability and erasure coding.
+- Interviewers use this question to see whether you can separate metadata from data, do the durability arithmetic out loud, and explain where consistency comes from.
 
-**Patterns used:** [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) · [Zero-Downtime Migrations: Dual Writes, Backfill and Cutover](/system-design/patterns/online-migrations)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design an object storage service like Amazon S3: put and get an object of any size by key, and never lose one."
+  level="Senior"
+  minutes={45}
+  bankId="design-object-store"
+  tests={[
+    "Separating metadata from data, and why the two scale differently",
+    "Durability arithmetic: copies against erasure coding, and repair time",
+    "Strong read-after-write over a partitioned, cached metadata tier",
+    "Partial uploads, races on one key, and when bytes may be deleted",
+  ]}
+  clarify={[
+    { q: "How big are objects?", a: "0 bytes to 10 TB. Most objects are under 1 MB; most bytes are in objects over 100 MB." },
+    { q: "What does never lose one mean?", a: "Designed for eleven nines a year per object, and an acknowledged write survives the loss of a whole zone." },
+    { q: "Must a read see the latest write?", a: "Yes: read-after-write for put, get, delete and list." },
+    { q: "How much data and traffic?", a: "1 EB in 100 billion objects; 1,000,000 requests a second on average, twice that at peak." },
+    { q: "One region or many?", a: "One region with three zones; copies to other regions are out of scope." },
+    { q: "Versions and cheaper tiers?", a: "In scope: keep old versions, and move cold objects to a cheaper tier by rule." },
+  ]}
+  outOfScope={["Access policies and IAM", "Event notifications", "Cross-region replication", "Static website hosting"]}
+/>
+
+## Overview
+
+- A **metadata index** maps bucket and key to a version, a checksum and the drives that hold the bytes; the **storage nodes** hold only bytes.
+- The bytes go first and the metadata record last: **the record is the commit point**, so a crash leaves orphan bytes for garbage collection, never half an object.
+- Objects are **erasure-coded** as 10 data shards plus 5 parity shards, **5 per zone**: 1.5 × the stored bytes, and a whole zone can be lost.
+- The index is cut into **key ranges**, each a three-replica consensus group, so listing by prefix is one ordered scan; a hot range splits.
+- A **per-zone index cache** serves lookups, and a **witness** tells it whether its entry is still the latest, so reads stay strong.
+- **Background workers** scrub every shard every 14 days, rebuild lost shards across the whole fleet in minutes, and move or expire old data by rule.
+
+<Numbers
+  items={[
+    { value: "1.5 ×", label: "raw bytes per stored byte", hint: "10 + 5 shards" },
+    { value: "100,000", label: "drives for 1 EB", hint: "3 copies: 200,000" },
+    { value: "5.5", label: "drives fail a day", hint: "2 % a year × 100,000" },
+    { value: "13 min", label: "to rebuild a lost drive", hint: "spread over 10,000 drives" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Put, get and delete by bucket and key", notes: "0 bytes to 10 TB; ranged gets; a put replaces the whole object." },
+    { id: "F2", requirement: "List by prefix", notes: "In key order, 1,000 keys a page, with a continuation token." },
+    { id: "F3", requirement: "Multipart upload", notes: "Parts in parallel; retry one part; the object appears on complete." },
+    { id: "F4", requirement: "Versioning", notes: "Keep old versions; a delete adds a delete marker." },
+    { id: "F5", requirement: "Storage classes and lifecycle", notes: "Move objects to a cold tier after N days; expire old versions." },
+  ]}
+/>
+
+- Out of scope: access policies, event notifications, cross-region replication, static websites.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Durability", target: "Designed for 99.999999999 % a year per object", why: "Customers keep the only copy here." },
+    { id: "N2", property: "Consistency", target: "Read-after-write for put, get, delete and list", why: "Pipelines read what the last step wrote." },
+    { id: "N3", property: "Zone loss", target: "0 objects lost and reads continue when one of 3 zones is gone", why: "A zone is a building: fire, power, flood." },
+    { id: "N4", property: "Latency", target: "Metadata p99 under 20 ms; first byte of a small get p99 under 100 ms", why: "Web pages and analytics read objects inline." },
+    { id: "N5", property: "Availability", target: "99.99 % for get and put", why: "About 53 minutes of failed requests a year." },
+    { id: "N6", property: "Cost", target: "Raw disk at most 1.5 × the stored bytes", why: "At 1 EB each 0.1 × is about 6,700 drives." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Stored bytes", assumption: "Given", result: "1 EB, growing 2 PB a day" },
+    { quantity: "Objects", assumption: "Given: 100 billion", result: "Average 10 MB; most under 1 MB" },
+    { quantity: "Metadata", assumption: "100 billion × 1 KB per record", result: "100 TB; 300 TB with 3 replicas" },
+    { quantity: "Metadata ranges", assumption: "100 TB ÷ 50 GB per range", result: "2,000 ranges" },
+    { quantity: "Requests", assumption: "800,000 get and head + 150,000 put + 50,000 list and delete", result: "1,000,000/s; 2,000,000/s at peak" },
+    { quantity: "Per range", assumption: "1,000,000 ÷ 2,000 ranges", result: "500 ops/s on average; split above 3,000 writes/s" },
+    { quantity: "Ingest", assumption: "2 PB a day ÷ 86,400 s", result: "23 GB/s in; × 1.5 = 35 GB/s to disk" },
+    { quantity: "Drives", assumption: "1 EB × 1.5 ÷ 15 TB used per 20 TB drive", result: "100,000 drives (3 copies: 200,000)" },
+    { quantity: "Drive failures", assumption: "2 % a year × 100,000 drives", result: "2,000 a year ≈ 5.5 a day" },
+    { quantity: "Disk reads", assumption: "800,000 gets × (90 % small × 1 read + 10 % large × 10 reads)", result: "1.52 M reads/s of 10 M (100 per drive): 15 %" },
+    { quantity: "Scrubbing", assumption: "1.5 EB read every 14 days ÷ 1,209,600 s", result: "1.24 TB/s ≈ 12.4 MB/s per drive" },
+  ]}
+  note="Data is 10,000 × the metadata, and the drives fail every day: those two facts shape the design."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 800,000 reads/s against 150,000 writes/s: about 5 to 1 | A metadata cache in each zone; reads never wait on a write path |
+| D2 | Peak against average | 2 × daily; one customer can send 10 × its usual rate to one prefix | Ranges split under load; every customer spread over all drives |
+| D3 | Consistency per operation | Put, get, delete and list: read-after-write; tier moves and repair: eventual | A consensus group per range; a cache that checks before it answers |
+| D4 | Latency target | Metadata p99 20 ms; a large get waits for its slowest of 10 drives | Read 11 shards and use the first 10; place by drive heat |
+| D5 | Durability | The defining driver: eleven nines; a write is acknowledged only when it survives a zone | 10 + 5 shards, 5 per zone; checksums end to end; scrubbing; repair in minutes |
+| D6 | Ordering | Per key only: the last committed version wins | The range's consensus log orders versions; nothing orders keys across ranges |
+| D7 | Duplicates | A retried put writes the same bytes again: harmless; a retried complete must not make two objects | Complete is idempotent by upload id; orphan bytes are garbage-collected |
+| D8 | Data size and growth | 1 EB, 100 billion objects, 0 bytes to 10 TB, 2 PB a day | Metadata apart from data; small objects packed; multipart for large ones |
+| D9 | Fan-out shape | Not a driver here: a request touches one key | A very hot public object is the customer's CDN's job |
+| D10 | Contention | Two puts to one key; one prefix taking 12,000 writes/s | The range orders the two puts; conditional puts; a hot range splits |
+| D11 | Geography | One region, three zones; copies to other regions are out of scope | Shards and consensus replicas spread over all three zones |
+| D12 | Availability and degradation | 99.99 %; under stress, background work and lists slow first | Throttle per bucket with `503`; never acknowledge a write that cannot survive a zone |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `PUT /{bucket}/{key}` | Client | Write a whole object up to 5 GB, with a checksum |
+| `GET /{bucket}/{key}` | Client | Read the latest version, or a byte range, or `?versionId=` |
+| `HEAD /{bucket}/{key}` | Client | Size, ETag, version, storage class: metadata only |
+| `DELETE /{bucket}/{key}` | Client | Add a delete marker (versioned) or remove the record |
+| `GET /{bucket}?prefix=&token=` | Client | List up to 1,000 keys in key order |
+| `POST /{bucket}/{key}?uploads` | Client | Start a multipart upload; returns an upload id |
+| `PUT /{bucket}/{key}?part=n&upload=u` | Client | Send part n; returns its ETag |
+| `POST /{bucket}/{key}?upload=u` | Client | Complete with the list of parts and ETags, or `DELETE` to abort |
+
+```http
+PUT /photos/2026/cat.jpg
+Host: bucket-a.store.example
+Content-Length: 104857600
+x-checksum-crc32c: 9a8b7c6d
+If-None-Match: *
+
+200 OK              ETag: "5d41402a"   x-version-id: v7
+400 BadDigest       the bytes do not match the checksum
+412 Precondition    the key already exists (If-None-Match)
+503 SlowDown        Retry-After: 1
+```
+
+- **Idempotency:** a retried put writes the same bytes as a new version, which is harmless; complete is keyed by upload id, so a retry returns the same object.
+- **Conditional writes:** `If-None-Match: *` creates only; `If-Match: <etag>` replaces only that version. This is how two writers avoid overwriting each other (D10).
+- **Pagination:** the continuation token is the last key returned; the next page is a range scan from it.
+- **Errors:** `503 SlowDown` is the back-pressure signal for a hot range; clients back off with jitter.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Object records | Ordered key-value store over consensus groups (TiKV- or FoundationDB-style, <TechIcon id="oss/rocksdb" /> RocksDB on each node) | Strong writes, range scans for list, 100 TB (D3, D8) | Key range of `(bucket, key)` | Strong per key | A hashed key-value store: every list asks every partition |
+| Upload state | Same index, an uploads table | Complete must commit with the object record (D7) | `(bucket, upload_id)` | Strong | A separate store: complete becomes a two-system write |
+| Object bytes | Append-only extents on raw drives, 10 + 5 shards | 1 EB, written once, read whole or by range (D5, D8) | Placement chosen per stripe | Immutable | A file per object: billions of tiny files, one inode each |
+| Shard locations on a node | Local key-value index (<TechIcon id="oss/rocksdb" /> RocksDB) | Shard id → extent and offset, on the same machine as the bytes | Per node | Local | Offsets in the central index: every compaction on a node rewrites central records |
+| Index cache | In-memory store per zone (<TechIcon id="oss/redis" /> Redis or in-process) | 800,000 lookups/s in-zone (D1, D4) | Key hash | Checked against the witness | A TTL cache: a read can miss the latest write |
+| Witness | In-memory map, key hash → latest version | One small call per cached read (D3) | Key hash | Updated before the put is acknowledged | Reading the range leader on every get |
+| Drive membership and health | Consensus store (<TechIcon id="oss/etcd" /> etcd) plus heartbeats | Small, must agree on who is dead (D5) | None | Strong | Gossip alone: two repairers can rebuild the same shard |
+
+The record for one version of one object, as a table in the ordered store:
+
+```sql
+CREATE TABLE objects (
+  bucket        text,
+  key           text,
+  version       bigint,       -- assigned by the range's consensus log; newest first
+  size          bigint,
+  crc32c        int,          -- of the whole object, checked on every read
+  storage_class text,         -- 'standard' | 'cold'
+  delete_marker boolean,
+  layout        bytes,        -- small: (extent, offset, length); large: stripes, each 15 drive ids
+  PRIMARY KEY ((bucket, key) RANGE, version DESC)  -- range-partitioned on (bucket, key)
+);
+
+CREATE TABLE uploads (
+  bucket text, upload_id text, key text, created_at timestamp,
+  parts  bytes,               -- part number → (ETag, size, stripes)
+  PRIMARY KEY ((bucket, upload_id))
+);
+```
+
+- **Get:** a point read of `(bucket, key)`, newest version first; skip it if it is a delete marker.
+- **List by prefix:** a range scan from `(bucket, prefix)` to the end of the prefix, keeping the first version of each key; it reads one or two ranges, in order.
+- **Lifecycle:** a background scan of each range finds versions older than a rule's age; it runs at a set rate per range.
+- Partitioning and replication of small values follow [Key-Value Store](/system-design-case-studies/case-studies/key-value-store); this page spends its depth on what an object store changes.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One node: a file and a map (F1)
+
+The smallest design: a front end writes each object as a file on one storage node, with a local map from key to file.
+
+<AnimatedDiagram spec="animated/s3/architecture" step={1} caption="Step 1: the front end writes each object as a file on one storage node, with a local key map." />
+
+- **Adds:** a load balancer, a stateless front end, one storage node with a file per object and a key → file map.
+- **Flow:**
+  1. The client sends `PUT /photos/cat.jpg`; the front end checks the caller and streams the bytes to the node.
+  2. The node writes the file, flushes it to disk, adds the key to its map and answers `200`.
+  3. A get looks the key up in the map and streams the file back.
+- **Why this and not that:** a front end in front of the node keeps authentication and checksums in one place, so the node only stores bytes.
+- **The gap:** one 20 TB drive holds 1 / 50,000 of an exabyte, and when it dies, everything on it is gone.
+
+<PremiumBreak />
+
+### Step 2: Metadata apart from data (F1, N2)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={2} caption="Step 2: a metadata index records where each object's bytes are; the front end commits the record only after the bytes are stored." />
+
+- **Adds:** the **metadata index**: bucket and key → version, size, checksum and where the bytes are.
+- **Flow:**
+  1. The front end writes the bytes to any node with free space and waits for the flush.
+  2. Then it commits the record in the index; that commit is the moment the object exists.
+  3. A get reads the record first, then fetches the bytes from the node it names.
+- **Why this and not that:** data is 1 EB and metadata 100 TB, 10,000 × apart, with different shapes: large write-once bytes against tiny records that need transactions (D8). Moving or repairing bytes then changes one pointer, never the key.
+- **Why bytes first:** a crash between the two steps leaves orphan bytes that no record points to, which garbage collection deletes; the other order leaves a record that points to nothing (D5).
+- **The gap:** each object still has one copy, and 5.5 drives fail every day.
+
+### Step 3: Three copies across three zones (N1, N3)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={3} caption="Step 3: a placement service picks one drive per zone and the front end writes three copies before it commits the record." />
+
+- **Adds:** the **placement** service and three copies, one per zone.
+- **Flow:**
+  1. The front end asks placement for three healthy drives with space, one in each zone.
+  2. It streams the bytes to all three and waits until all three have flushed them to disk.
+  3. Only then does it commit the record, with the three locations, and answer `200`.
+- **Why this and not that:** one copy per zone survives the loss of a building (N3). Waiting for all three flushes means an acknowledged write never lives on fewer than three drives (D5).
+- **Why placement and not hashing:** the record stores where the bytes went, so placement can pick any drive; a hash ring would move data whenever a drive joins (see Component choices).
+- **The gap:** 3 copies of 1 EB is 3 EB of disk, 200,000 drives, against a target of 1.5 × (N6).
+
+### Step 4: Erasure coding for cost (N1, N6)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={4} caption="Step 4: large objects become ten data shards and five parity shards, five per zone; small objects are packed into extents that a sealer erasure-codes." />
+
+- **Adds:** a **10 + 5 code** for large objects and the **extent sealer** for small ones; the three-copy path goes away.
+- **Flow:**
+  1. An object of 1 MB or more is cut into stripes; each stripe becomes 10 data shards plus 5 parity shards on 15 drives, 5 per zone.
+  2. An object under 1 MB is appended to an open 64 MB extent kept as three copies, one per zone.
+  3. When an extent fills, the sealer erasure-codes it into 10 + 5 shards and drops the three copies.
+- **Why this and not that:** 10 + 5 costs 1.5 ×: 100,000 drives instead of 200,000, and any 10 of 15 shards rebuild the stripe (Deep dive 1).
+- **Why pack small objects:** coding a 1 KB object into 15 pieces is 15 drive writes for 1 KB; packing writes 64 MB at a time, and the code keeps data shards readable as-is, so a small get is still one drive read.
+- **The gap:** every request needs the index, and 100 TB at 1,000,000 ops/s does not fit one machine.
+
+### Step 5: Metadata in key ranges, with a cache and a witness (F2, N2, N4)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={5} caption="Step 5: the index is cut into key ranges; a per-zone cache serves lookups and asks a witness whether each entry is still the latest." />
+
+- **Adds:** 2,000 **key ranges**, each a three-replica consensus group with one replica per zone; an **index cache** per zone; the **witness**.
+- **Flow:**
+  1. A put commits to the leader of the key's range; the leader updates the witness with the new version before it answers.
+  2. A get asks the cache in its own zone; the cache asks the witness whether its version is the latest.
+  3. If it is, the cache answers; if not, it reads the record from the range and refreshes itself.
+- **Why ranges and not hashes:** a list by prefix is then one ordered scan of one range, not a question to every partition (F2, D10).
+
+A range keeps one prefix together; the price is that a hot prefix must split.
+
+<AnimatedDiagram spec="animated/s3/key-ranges" stepper caption="Hashing spreads one prefix over every partition; ranges keep it in one, at the price of splitting a range when one prefix gets hot." />
+
+**How to read it:**
+
+- Row 1: the 16 keys under one date prefix hash to all 8 partitions, 2 each; a list asks all 8 and merges.
+- Row 2: under ranges the same prefix sits in P3 alone; a list is one scan.
+- Row 3: one writer sends 12,000 puts/s under that prefix; P3 splits by key into 4 ranges of about 3,000/s.
+
+**The numbers:** 12,000 ÷ 3,000 writes/s per range = 4 ranges; a split moves no bytes, only records, so it takes seconds.
+
+- **Why a cache:** the range leader is in another zone for two gets in three, and a hot key would sit on one leader (D1, D4).
+- **Why a witness:** a cache with a timeout serves the old version until it expires, which breaks read-after-write (N2, Deep dive 2).
+- **The gap:** a 10 TB object in one stream takes about a day, and a reset at 90 % starts over.
+
+### Step 6: Multipart upload (F3)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={6} caption="Step 6: an upload service tracks the parts of a multipart upload and completes the object with one record in the index." />
+
+- **Adds:** the **upload service**, which records parts against an upload id.
+- **Flow:** the sequence below, in two steps.
+
+<AnimatedDiagram spec="animated/s3/multipart" stepper caption="Multipart upload: parts go in parallel and retry one by one, and the object appears only when one record lists them all." />
+
+<StepCards>
+  <StepCard n={1} title="Parts in parallel, one record">
+    The client starts upload u9 and sends 1,000 parts of 1 GB, eight at a time. Each part is stored as its own shards and its ETag is recorded; complete writes one record that lists the parts, so no byte is copied.
+  </StepCard>
+  <StepCard n={2} title="Retry one part, not the object">
+    Part 417 fails half way. The client resends part 417 alone. An upload that is never completed is aborted after 7 days and its parts are garbage-collected.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 1 TB ÷ 1 GB parts = 1,000 parts; 8 streams × 125 MB/s = 1 GB/s, so 1,000 s ≈ 17 minutes.
+- One stream at 125 MB/s takes 8,000 s ≈ 2.2 hours, and a reset at 90 % resends 900 GB; with parts it resends 1 GB.
+- Parts are 8 MB to 4 GB and at most 10,000 per upload, so a 10 TB object needs parts of at least 1 GB.
+
+- **Why this and not that:** a single put is fine up to 5 GB; above that, parallel parts are the only way to get bandwidth and cheap retries (F3, D7).
+- **The gap:** drives fail and bits rot silently; nothing notices yet.
+
+### Step 7: Scrub and repair (N1)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={7} caption="Step 7: a scrubber re-reads every shard's checksum, and repair workers rebuild lost shards on other drives." />
+
+- **Adds:** the **scrubber** and the **repair workers**, fed by drive heartbeats.
+- **Flow:**
+  1. A drive that misses heartbeats for 10 minutes is declared dead in the membership store.
+  2. Repair workers find every stripe with a shard on it, read 10 surviving shards, rebuild the lost one on a new drive in the same zone, and update the record.
+  3. The scrubber reads every shard once every 14 days and checks its checksum; a mismatch becomes a repair task.
+- **Why this and not that:** a disk does not report a flipped bit; only reading finds it, and 12.4 MB/s per drive is about 6 % of its bandwidth. Repair spread over 10,000 drives takes 13 minutes, where one spare drive would take 21 hours (Deep dive 1).
+- **The gap:** old versions pile up, cold objects sit on the same drives as hot ones, and deleted bytes never leave.
+
+### Step 8: Versions, lifecycle and garbage collection (F4, F5)
+
+<AnimatedDiagram spec="animated/s3/architecture" step={8} caption="Step 8: the lifecycle worker moves cold objects to a dense tier, expires old versions and garbage-collects bytes no record points to." />
+
+- **Adds:** the **lifecycle and GC** worker and the **cold tier** of dense, slow drives.
+- **Flow:**
+  1. A put on a versioned bucket adds a version row; a delete adds a delete marker; a get returns the newest version that is not a marker.
+  2. Once a day the worker scans each range: objects past their rule move to the cold tier (copy shards, swap the pointer in the record, then free the old shards); old versions past their rule are removed.
+  3. Garbage collection deletes shards that no record has pointed to for 24 hours.
+- **Why this and not that:** bytes never change in place, so a move is a copy plus one record update, and a reader always sees a whole copy (D3).
+- **Why a 24 hour grace:** a put in flight has shards but no record yet; deleting unreferenced shards at once would race it.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/s3/architecture" stepper caption="An object store: metadata apart from data, erasure-coded shards over three zones, a cached index kept exact by a witness, and background work that scrubs, repairs and tiers." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | SDK, CLI, applications | Sign requests, send checksums, split large uploads into parts |
+| **Edge** | Load balancer, front end | Spread connections; authenticate, check checksums, encode and decode shards |
+| **Metadata core** | Metadata index, witness | Commit records in key order; know the latest version of every key |
+| **Request services** | Index cache, placement, upload service | Fast lookups, where shards go, multipart state |
+| **Background work** | Extent sealer, scrubber, repair, lifecycle and GC | Code small objects, find rot, rebuild, move and delete |
+| **Storage** | Storage nodes, cold tier | Shards on 100,000 drives; dense drives for cold objects |
+
+Reading a 100 MB object right after it was written:
+
+1. DNS returns one of many load balancer addresses; the request reaches a front end in zone A.
+2. The front end asks zone A's index cache for `photos/cat.jpg`; the cache asks the witness whether its version is current.
+3. The witness says v7 is newer; the cache reads v7's record from the range and returns its stripe layout.
+4. The front end asks 11 of the 15 drives for their shard of each stripe and uses the first 10 to arrive.
+5. It decodes, checks the object's checksum and streams the bytes to the client.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST over HTTPS
+
+- **Choice:** plain HTTP verbs on `/{bucket}/{key}`, ranged gets, conditional headers, multipart as a few extra calls.
+- **Why:** objects are whole values written once and read whole or by range; HTTP already has ranges, ETags and conditions, and works from browsers with signed URLs (F1, F3).
+- **Why not a file-system protocol (NFS, POSIX):** rename, append and locks across an exabyte need distributed locking on every directory; immutable whole objects need none of it (D3, D8).
+- **Why not gRPC:** browsers and CDNs cannot call or cache it without a proxy, and nothing here needs streaming in both directions.
+- **Why not WebSockets:** there is nothing to push; every call is a request and a response.
+
+### Load balancer: DNS plus layer 4
+
+- **Choice:** DNS returns many addresses; each points at a layer-4 load balancer that passes TCP connections to front ends.
+- **Why:** a single upload can be terabytes; a layer-4 balancer forwards packets without reading them, so it is never the bottleneck (D8). The front end does the HTTP work itself.
+- **Why not layer 7 in front of the front ends:** a proxy that terminates HTTP copies every byte twice, at 23 GB/s of ingest; its only extra, path routing, is not needed when every front end serves every call.
+- **Why not one address:** one address is one funnel; many addresses let clients open parallel connections to many front ends.
+
+### Front end: stateless, does the coding
+
+- **Choice:** stateless servers that authenticate, check checksums, ask placement, encode and decode shards, and talk to the cache and the index.
+- **Why:** keeping the coding next to the request means a put sends each shard once, straight to its drive (D5, D8).
+- **Why not let clients write shards to storage nodes:** clients would learn placement, skip checksums and bypass authentication; drives would trust whoever reached them.
+- **Why not code on a storage node:** the bytes would go to one node and then fan out again, doubling the traffic of every put.
+
+### Metadata index: an ordered key-value store over consensus groups
+
+- **Choice:** an ordered key-value store, range-partitioned on `(bucket, key)`, each range a three-replica consensus group (Raft) with one replica per zone, <TechIcon id="oss/rocksdb" /> RocksDB on each node; built in-house or on a TiKV- or FoundationDB-style store.
+- **Why:** puts need a single order per key (D3, D6), lists need key order (F2), and 100 TB with 1,000,000 ops/s needs 2,000 ranges that split on their own (D2, D8).
+- **Why not a hashed, leaderless store (<TechIcon id="oss/apache-cassandra" /> Cassandra, DynamoDB-style):** hashing scatters a prefix, so every list asks every partition; quorums with last-write-wins do not give read-after-write without extra machinery.
+- **Why not a relational database sharded by bucket (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL):** one bucket with 10 billion keys outgrows a shard, and splitting a shard is a manual migration; joins and ad hoc SQL are not needed.
+- **Why not one metadata server (an HDFS NameNode):** 100 billion records do not fit one machine's memory.
+
+### Index cache and witness: in-memory, checked on every read
+
+- **Choice:** an in-memory cache per zone (<TechIcon id="oss/redis" /> Redis or in-process) and a witness: an in-memory map from key hash to the latest version, updated by range leaders before a put is acknowledged.
+- **Why:** 800,000 lookups/s stay in the reader's zone, and a hot key does not pile onto one leader (D1, D4); the witness check keeps every read strong (N2).
+- **Why not a cache with a TTL:** for up to one TTL after a put, readers get the old version, which breaks read-after-write.
+- **Why not read the leader every time:** two gets in three cross a zone, and one viral key puts all its reads on one machine.
+- **If the witness fails:** caches fail closed and read the leader; reads get slower, never stale.
+
+### Storage nodes: append-only extents on raw drives
+
+- **Choice:** each node writes shards into large append-only extent files, with a local <TechIcon id="oss/rocksdb" /> RocksDB index from shard id to extent and offset; deletes are reclaimed by compacting extents.
+- **Why:** writes are sequential, which hard drives do well; billions of small objects become a few large files (D8).
+- **Why not a file per object on a normal file system:** 100 billion files mean 100 billion inodes, and file-system metadata work dominates the drive's 100 random I/Os a second.
+- **Why not a distributed file system (HDFS, CephFS):** it adds directories, rename and POSIX rules this API never uses, and HDFS keeps its namespace on one server.
+
+### Redundancy: 10 + 5 erasure coding, five shards per zone
+
+- **Choice:** Reed-Solomon with 10 data and 5 parity shards, 5 in each zone; small objects packed into extents, coded when the extent fills.
+- **Why:** 1.5 × instead of 3.0 ×, it survives any 5 lost shards or a whole zone (D5, N3, N6).
+- **Why not three copies:** 200,000 drives instead of 100,000 for the same data.
+- **Why not 10 + 4:** 1.4 × is cheaper, but 14 shards over 3 zones put 5 in one zone, so losing it leaves 9 of the 10 needed.
+- **Why not a wider code such as 20 + 10:** the same 1.5 ×, but each large read touches 20 drives and each repair reads 20 shards.
+
+### Placement: chosen per stripe, recorded in the index
+
+- **Choice:** a placement service picks 15 drives, 5 per zone, at random among healthy drives with space, preferring the less busy of two candidates.
+- **Why:** the record stores the drive ids, so data can sit anywhere and move freely; random placement spreads every customer over every drive (D2, D4).
+- **Why not consistent hashing (as in [Key-Value Store](/system-design-case-studies/case-studies/key-value-store)):** adding 1,000 drives would move data onto them by hash; with explicit placement, new drives start taking new writes at once.
+
+### Background work: repair tasks ordered by risk
+
+- **Choice:** scrubber, repair and lifecycle workers that take tasks from a priority list in the metadata store, most at-risk stripes first.
+- **Why:** a stripe that has lost 3 shards is closer to loss than one that has lost 1; repair order is durability (D5).
+- **Why not a log such as <TechIcon id="oss/apache-kafka" /> Kafka:** a log delivers in arrival order; repair needs priority order, and a task must disappear once a newer task covers it.
+
+### CDN: none inside the store
+
+- **Choice:** no CDN in the design; customers put one in front of public objects.
+- **Why:** most objects are read by one consumer, and the store's job is durability and throughput (D9).
+- **Why not cache objects in the front end:** 1 EB of mostly cold bytes gives a tiny hit rate; the per-zone index cache is where caching pays.
+
+## Deep dives
+
+### The durability arithmetic: copies, shards and repair speed
+
+- **The model:** an object is lost when more of its pieces fail than the scheme tolerates before repair puts them back. Two numbers decide it: the drive failure rate (2 % a year here) and the repair window T.
+- **The chance a given drive fails inside T:** p = 0.02 × T ÷ 8,760 hours. For T = 24 h, p = 5.5 × 10⁻⁵; for T = 30 min, p = 1.1 × 10⁻⁶.
+- **Three copies:** a first failure arrives at 3 × 0.02 = 0.06 a year; the object is lost if both other copies fail inside T: 0.06 × p² a year.
+- **10 + 5:** a first failure arrives at 15 × 0.02 = 0.3 a year; the stripe is lost if 5 more of the other 14 fail inside T: 0.3 × C(14, 5) × p⁵, and C(14, 5) = 2,002.
+- **This is a sizing model:** it treats failures as independent and ignores overlapping repairs; it says where the risk is, not the exact number of nines.
+
+Copies against shards, over three zones:
+
+<AnimatedDiagram spec="animated/s3/erasure-vs-replication" stepper caption="Three copies cost 3.0 ×; 10 + 4 costs 1.4 × but a zone holds five shards; 10 + 5, five per zone, costs 1.5 × and survives a whole zone." />
+
+**How to read it:**
+
+- Each row is a scheme; each dotted column is a zone; blue cells are data, green cells are parity.
+- The text on the right says what each scheme survives; red marks the one that a zone loss breaks.
+
+**The numbers:**
+
+| Scheme | Raw bytes | Drives for 1 EB | Loss per object per year, T = 24 h | T = 30 min |
+| --- | --- | --- | --- | --- |
+| 3 copies | 3.0 × | 200,000 | 0.06 × (5.5 × 10⁻⁵)² ≈ 1.8 × 10⁻¹⁰: about 18 objects a year of 100 billion | ≈ 7.8 × 10⁻¹⁴ |
+| 10 + 5, 5 per zone | 1.5 × | 100,000 | 0.3 × 2,002 × (5.5 × 10⁻⁵)⁵ ≈ 3 × 10⁻¹⁹ | far smaller |
+
+- **Repair speed is the lever for copies:** three copies with a one-day rebuild miss eleven nines (1.8 × 10⁻¹⁰ is under ten nines); the same copies with a 30-minute rebuild pass.
+- **Coding passes on independent failures by a wide margin**, so the real risk is correlated: a zone gone, a bad batch of drives, a power event, a software bug that deletes. That is where the design spends: 5 shards per zone, drives of mixed batches in each stripe, checksums, scrubbing and a 24 hour grace before any delete.
+- **Repair cost is the price of coding:** rebuilding one shard reads 10 shards, so a lost 15 TB drive means 150 TB of reads, against 15 TB for copies.
+- **Spread the repair:** the lost drive's shards belong to stripes all over the fleet, so 10,000 drives each give 20 MB/s: 150 TB ÷ 200 GB/s = 750 s, about 13 minutes. One spare drive at 200 MB/s would take 15 TB ÷ 200 MB/s ≈ 21 hours.
+
+<Callout tone="red" title="What breaks">
+  After a zone is lost, every stripe has exactly 10 shards left, and one more failure makes a stripe unreadable. Repair must start with stripes that have also lost a shard elsewhere, and must not rebuild a whole zone's worth of data while the zone may only be briefly unreachable.
+</Callout>
+
+### Strong consistency over a cached metadata tier
+
+- **The commit point:** the record in the range, written by consensus, decides whether an object exists and which version is current. Bytes written before it are invisible.
+- **The cache problem:** a per-zone cache holds records; after a put, a cached copy is old, and a reader in another zone would see the previous version.
+- **The witness:** the range leader tells the witness "this key is now at v7" before it answers the put. A cache, before it answers, asks the witness whether its version is current: one small in-memory call, much cheaper than a read from the range.
+- **Lists:** a list reads the range directly, in key order; ranges are strongly consistent, so a list includes every acknowledged put and excludes every acknowledged delete.
+- **Two puts to one key (D10):** both write their bytes; the range orders the two commits, and the later one is the current version. Version order comes from the consensus log, never from client clocks.
+
+<AnimatedDiagram spec="animated/s3/put-path" stepper caption="Bytes first, the record last, and a cache that asks the witness before it answers: a reader sees the latest write, and a crash leaves orphans, never half an object." />
+
+<StepCards>
+  <StepCard n={1} title="Bytes first, then the record">
+    The front end writes 15 shards, each with a checksum, and waits until all 15 are on disk. Then it commits the record; the range gives it version v7 and tells the witness before the client hears 200.
+  </StepCard>
+  <StepCard n={2} title="Read your write through the cache">
+    A get right after asks the zone's cache, which still holds v6. The cache asks the witness, hears v7, reads the record from the range and returns v7.
+  </StepCard>
+  <StepCard n={3} title="A crash before the commit">
+    A second put writes its shards, then the front end crashes before the commit. A reader still gets the whole of v7, and garbage collection deletes the orphan shards after 24 hours.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- A witness entry is a key hash and a version: about 16 bytes; 100 billion keys hashed into 1 billion slots is 16 GB, small enough for memory.
+- A slot shared by two keys only makes a cache read through more often; it never returns stale data.
+- 800,000 cached gets/s each add one witness call; split over 64 witness nodes per zone that is 12,500 calls/s each, and a check takes well under a millisecond.
+
+<Callout tone="red" title="What breaks">
+  If a cache answers when the witness is unreachable, a reader can get an old version. The cache must fail closed: no witness, read the range.
+</Callout>
+
+### Heat: spread every customer, read the least busy shards
+
+- **Heat** is the number of requests hitting one drive at a time. A hard drive serves about 100 random reads a second whatever its size, so as drives grow, I/O per terabyte falls.
+- **Spread:** random placement puts every customer's objects on every drive, so a 10 × burst from one customer is a small change on 100,000 drives (D2).
+- **The tail:** a large get reads 10 shards; if each drive has a 1 % chance of being slow, the chance at least one of 10 is slow is 1 − 0.99¹⁰ = 9.6 %.
+- **Read 11, use 10:** ask for one extra shard and decode from the first 10 that arrive. The get is slow only if 2 of 11 are slow: 0.5 %. The cost is 10 % more drive reads (D4).
+- **Hedge the rest:** if a shard is still missing at the drive's p95, ask for another parity shard.
+
+The same idea as a hedged request, applied to shards:
+
+<AnimatedDiagram spec="animated/patterns/tail-hedge" stepper caption="A hedge waits for the p95 before sending a second copy, so it adds about 5 % load; a tied request lets the replicas cancel each other." />
+
+**How to read it:** the pattern figure hedges a call to a second replica; here the second copy is an eleventh shard, and any 10 of them rebuild the stripe.
+
+**The numbers:** 1 − 0.99¹¹ − 11 × 0.01 × 0.99¹⁰ = 1 − 0.895 − 0.099 ≈ 0.5 %, down from 9.6 %, for 10 % more reads; at 15 % average drive load, the extra reads fit.
+
+### Worked example: a drive dies at 03:00
+
+1. 03:00: drive d-41207 in zone B stops answering. It holds 15 TB of shards from about 1.5 million stripes of 10 MB shards.
+2. 03:10: it has missed heartbeats for 10 minutes; the membership store marks it dead, and one repair task per affected stripe enters the priority list.
+3. 03:10 to 03:23: repair workers read 10 surviving shards for each stripe, rebuild the lost shard on another zone-B drive and update each record: 150 TB read at 200 GB/s ≈ 750 s.
+4. Meanwhile, gets that needed d-41207 read 11 other shards and decode; nobody sees an error.
+5. Risk window: 23 minutes; inside it, each affected stripe still has 14 of 15 shards and tolerates 4 more losses.
+6. Over a year the fleet repeats this about 2,000 times, 5.5 times a day; it is routine work, not an incident.
+
+**The numbers:** 15 TB ÷ 10 MB per shard = 1.5 million shards; 1.5 million × 10 shards read × 10 MB = 150 TB; 150 TB ÷ (10,000 drives × 20 MB/s) = 750 s.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Redundancy | 3 copies, 10 + 4, 10 + 5 per zone | 10 + 5, 5 shards per zone | D5, D8, N3, N6 | Large gets touch 10 drives; repair reads 10 × | Small, very hot data: keep copies for it |
+| Metadata and data | One store, two stores | Two: an index and storage nodes | D8, N2 | Two systems, and orphan bytes to collect | Never at this size |
+| Commit order | Record first, bytes first | Bytes first, record last | D5, N2 | Garbage collection with a 24 h grace | Never: the other order points at nothing |
+| Index partitioning | Hash, range | Ranges that split on load | F2, D2, D10 | Hot prefixes split; a split is extra work | List by prefix leaves the API |
+| Cache coherence | No cache, TTL cache, cache + witness | Cache + witness, fail closed | N2, D1, D4 | One extra call per read; one more component | Leader reads in-zone are fast enough |
+| Mutability | Change in place, immutable versions | Immutable; a put writes a new version | D3, D6, D10 | No append; changing 1 byte rewrites the object | Append-heavy logs need their own API |
+| Placement | Consistent hashing, explicit per stripe | Explicit, recorded in the index | D2, D4, D8 | A placement service and drive ids in every record | Never: moving data freely is the point |
+| Small objects | Code each object, pack then code | Pack into 64 MB extents, then code | D8, N6 | Sealing work; 3 × while an extent is open | Almost every object is large |
+| Repair | Rebuild onto a spare, spread over the fleet | Spread over 10,000 drives, most at-risk first | D5, N1 | Repair traffic touches every drive; it must be rate-limited | Never |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Metadata apart from bytes; multipart parts | 1 EB of bytes, 100 TB of records |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | 2,000 key ranges that split | 1,000,000 ops/s, ordered lists |
+| [Consistency Models and CAP](/system-design/patterns/consistency-models) | Read-after-write on put, get, list; eventual tiering | Pipelines read what they wrote a moment ago |
+| [Leader Election and Consensus](/system-design/patterns/leader-election) | One leader per key range; drive membership | One order per key; one verdict on a dead drive |
+| [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection) (advanced) | Drive and node heartbeats | 5.5 drive failures a day must be noticed in minutes |
+| [Idempotency](/system-design/patterns/idempotency) | Complete by upload id; retried parts and puts | A retry must not make two objects |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | Read 11 shards, use 10 | One slow drive of 10 sets a large get's latency |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Range splits; per-zone cache | One prefix or one key can take most traffic |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) (advanced) | Five shards per zone; per-bucket throttles | A zone or a tenant must not take down the rest |
+| [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) (advanced) | The out-of-scope next step: copies to another region | Survive a whole region, asynchronously |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Any cloud object store | Metadata apart from data, erasure coding, ranges, scrubbing | API details, code parameters, how many zones |
+| The storage tier under a video or backup service | Shards, repair, lifecycle to a cold tier | Objects are large and written once; packing small objects matters less |
+| A container registry | Content stored once, records point at it | Keys are content hashes, so deduplication is free; tags are the mutable part |
+| A data lake for analytics | Lists by prefix, multipart, ranged gets | Scans read whole prefixes; throughput per prefix becomes the driver |
+
+## How real systems do it
+
+- **2020:** Amazon S3 made reads strongly consistent: what you write is what you read, for GET, PUT and LIST, in all regions, at no extra charge and with no performance impact, by AWS's announcement.
+- **2021:** Werner Vogels wrote that S3's metadata caching had been the source of its eventual consistency; S3 added a cache-coherence protocol with a component that acts as a witness to writes, and checked the algorithm with deductive proofs.
+- **2021 (SOSP):** ShardStore, a new key-value storage node for S3, was validated with lightweight formal methods: executable reference models checked against the code. The paper says this prevented 16 issues from reaching production.
+- **2023:** S3 is built on millions of hard drives. Heat is the number of requests hitting a disk; S3 puts different objects on different sets of drives to spread it. Objects are erasure-coded as k data shards plus m parity shards, readable from any k. A drive does about 120 random operations a second.
+- **S3 FAQ (read 2026):** designed for 99.999999999 % durability; data stored across at least three zones by default; S3 verifies data is stored redundantly across multiple devices before it reports an upload successful, and checksums data at rest and repairs from redundant data. Objects range from 0 bytes to 50 TB; one PUT carries up to 5 GB; multipart is advised above 100 MB.
+- **2026:** at its twentieth anniversary, S3 stored more than 500 trillion objects and served more than 200 million requests a second, across hundreds of exabytes.
+- **Where this design differs:** AWS does not publish S3's code parameters, its metadata store or the witness's internals. The 10 + 5 code, key ranges, per-zone cache and repair numbers here are this page's choices, sized to answer the same questions.
+
+## Failure modes & pitfalls
+
+- **Record before bytes:** a crash leaves a record that points at nothing and reads fail; count records whose shards are missing; always write bytes first and commit last.
+- **Garbage collection too eager:** a put in flight loses its shards before its commit; watch for commits that reference deleted shards; keep a 24 hour grace and check references again before deleting.
+- **Correlated drive failures:** a bad batch fails together and takes several shards of one stripe; track failure rate per drive model and batch; mix batches and racks inside every stripe.
+- **Silent corruption:** a flipped bit is served as good data; watch the age of the oldest unscrubbed shard; scrub every 14 days and check the whole-object checksum on every read.
+- **Repair storm:** a zone is unreachable for 20 minutes and repair starts rebuilding a third of the fleet; watch queued repair bytes; wait before declaring a zone lost, rate-limit repair and rebuild the most at-risk stripes first.
+- **Hot prefix:** one range returns `503 SlowDown` while others idle; watch ops per range; split ranges automatically and keep `503` as the signal to back off.
+- **Stale cache:** a reader gets an old version after a put; test with read-after-write probes in every zone; caches fail closed when the witness is down.
+- **A bug that deletes:** software removes good data at scale; watch the delete rate against the norm; keep deleted bytes for a grace period, and pause deletes when the rate jumps.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify sizes, the durability target, consistency, scale, zones; write F1 to F5 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 1 EB, 100 TB of metadata, 1,000,000 requests/s, 100,000 drives, 5.5 failures a day.
+3. **Minutes 10 to 15:** API and the object record; say that the record is the commit point.
+4. **Minutes 15 to 25:** Steps 1 to 4: separate metadata, three copies, then erasure coding with the cost arithmetic.
+5. **Minutes 25 to 35:** Steps 5 to 8: key ranges and list, the cache and witness, multipart, scrub, repair and lifecycle.
+6. **Minutes 35 to 45:** one deep dive: durability arithmetic, strong consistency over the cache, or heat; answer "why not" for each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** metadata apart from data, copies in several zones, multipart upload, checksums.
+- **Senior:** erasure coding with the zone arithmetic, bytes first and the record last, ranges for list, repair time as the durability lever, garbage collection with a grace period.
+- **Staff:** correlated failures over independent ones, a cache made strong by a witness, heat and tail reads, repair ordering after a zone loss, the cost per stored byte.
+
+**Red flags:** the record before the bytes; "three copies" with no cost; a hashed index with no answer for list; a TTL cache under read-after-write; no plan for silent rot.
+
+## Further reading
+
+- [Amazon S3 update: strong read-after-write consistency](https://aws.amazon.com/blogs/aws/amazon-s3-update-strong-read-after-write-consistency/) (AWS News Blog, 2020)
+- [Diving deep on S3 consistency](https://www.allthingsdistributed.com/2021/04/s3-strong-consistency.html) (All Things Distributed, 2021)
+- [Using lightweight formal methods to validate a key-value storage node in Amazon S3](https://www.amazon.science/publications/using-lightweight-formal-methods-to-validate-a-key-value-storage-node-in-amazon-s3) (SOSP, 2021)
+- [Building and operating a pretty big storage system called S3](https://www.allthingsdistributed.com/2023/07/building-and-operating-a-pretty-big-storage-system.html) (All Things Distributed, 2023)
+- [Amazon S3 FAQs](https://aws.amazon.com/s3/faqs/) (AWS, read 2026)
+- [Twenty years of Amazon S3 and building what's next](https://aws.amazon.com/blogs/aws/twenty-years-of-amazon-s3-and-building-whats-next) (AWS News Blog, 2026)
+- Related pages: [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [Object Storage](/system-design/databases/object-storage) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you separate metadata from data in an object store, and why?" category="Architecture" level="Mid">
+  - A metadata index maps bucket and key to a version, size, checksum and the drives that hold the bytes; storage nodes hold only bytes.
+  - The two differ by about 10,000 × in size and in shape: tiny records that need transactions and order, against large write-once bytes.
+  - Repairing or moving bytes then changes one pointer, and the index can be partitioned for lists without touching the bytes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you reach eleven nines of durability?" category="Concepts" level="Senior">
+  - Store every object so that it survives several drive losses and a whole zone: 10 + 5 shards, 5 per zone.
+  - Repair fast: spread each lost drive's rebuild over thousands of drives, so the risk window is minutes, not a day.
+  - Find silent corruption: checksums on every shard and object, a scrub of every shard every 14 days.
+  - Plan for correlated failures and bugs: mixed drive batches in a stripe, a grace period before deletes, verification of the storage code.
+  </InterviewQuestion>
+  <InterviewQuestion question="Replication or erasure coding? What does each cost when a drive fails?" category="Trade-offs" level="Senior">
+  - Three copies cost 3.0 × raw; 10 + 5 costs 1.5 ×: 200,000 against 100,000 drives for 1 EB.
+  - Rebuilding a lost copy reads one copy; rebuilding a lost shard reads 10 shards, so a 15 TB drive means 150 TB of reads.
+  - Copies give cheaper small reads and repairs; coding gives cheaper storage. Many designs keep small or very hot data as copies and code the rest.
+  </InterviewQuestion>
+  <InterviewQuestion question="A client crashes half way through an upload. What does a reader see, and what happens to the bytes?" category="Failure modes" level="Mid">
+  - The record is written last, so a reader sees the previous version, or 404, never half an object.
+  - The shards already written have no record; garbage collection deletes them after a 24 hour grace.
+  - A multipart upload that is never completed is aborted after 7 days and its parts are deleted.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two clients put the same key at the same moment. Who wins?" category="Concepts" level="Mid">
+  - Both write their bytes; the key's range orders the two commits through its consensus log.
+  - The later commit is the current version; with versioning, both versions are kept.
+  - A client that must not overwrite uses a conditional put: `If-Match` on the ETag it read, or `If-None-Match` to create only.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you list a bucket by prefix when it has billions of keys?" category="Scaling" level="Senior">
+  - Partition the index by key range, not by hash, so one prefix sits in one or two ranges.
+  - A list is an ordered scan from the prefix, 1,000 keys a page, with the last key as the continuation token.
+  - A range that gets too hot or too big splits by key; under hashing the same list would ask every partition and merge.
+  </InterviewQuestion>
+  <InterviewQuestion question="Metadata reads go through a cache. How do you keep read-after-write strong?" category="Architecture" level="Senior">
+  - The range leader tells a witness the new version of the key before it acknowledges the put.
+  - Before answering, the cache asks the witness whether its version is current; if not, it reads the range.
+  - If the witness is unreachable, the cache fails closed and reads the range: slower, never stale.
+  - A TTL cache cannot give this: it serves the old version until the entry expires.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is it safe to garbage-collect data?" category="Failure modes" level="Senior">
+  - Only bytes that no record points to, and only after a grace period longer than any put in flight: 24 hours here.
+  - Check the reference again right before deleting, because a commit may have arrived during the scan.
+  - Keep deleted bytes recoverable for a while and pause deletes when the delete rate jumps; a bug that deletes is a real risk.
+  </InterviewQuestion>
+  <InterviewQuestion question="One customer's traffic makes a few disks hot. What do you do?" category="Scaling" level="Senior">
+  - Place every stripe on random drives across the fleet, so each customer is spread over all 100,000 drives and a burst barely moves any one of them.
+  - Read 11 shards and use the first 10, so one busy drive does not set the latency of a large get.
+  - Throttle per bucket with `503 SlowDown` and split hot index ranges, so one tenant cannot take capacity from the rest.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you add copies in a second region, and what consistency would they have?" category="Architecture" level="Senior">
+  - Replicate asynchronously: a stream of committed records drives copies of the bytes to the other region.
+  - Reads in the second region are eventually consistent; the lag is the recovery point if the first region is lost.
+  - Synchronous writes to two regions would add a cross-region round trip to every put, which few workloads accept.
+  </InterviewQuestion>
+</InterviewQuestions>
