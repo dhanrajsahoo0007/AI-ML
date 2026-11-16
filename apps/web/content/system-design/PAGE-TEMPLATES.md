@@ -104,7 +104,7 @@ everything below it is shown only to Pro readers. Place it so the preview delive
 | Page type | Position |
 |---|---|
 | Concept page | after step 1 of **How it works** |
-| Pattern page | after **The problem** (the failing diagram), before **The pattern** |
+| Pattern page | after the first figure block in **Core concepts** |
 | Case study | after **Step 1** in "Building the architecture" |
 
 One `<PremiumBreak />` per page, on its own line with a blank line above and below. Pages with `access: free` in the
@@ -221,126 +221,72 @@ Word count: 1,200–2,000. "How it works" has 2–5 steps.
 
 ## 3. Pattern page
 
-Same as the concept page, with **How it works** replaced by five sections: The problem → The pattern → Variations →
-Failure modes → Where it appears. The problem and the pattern use **the same spec**: step 1 is the system without the
-pattern, showing the failure; step 2 adds the pattern.
+Pages under `/system-design/patterns` use the **GenAI v2 format** (the same one as
+`content/ai-system-design/genai-system-design/llm-gateway.mdx`), not the concept-page skeleton. The pattern-hub
+block in `tests/unit/doc-headings.test.ts` enforces it on every page with an `updated:` key that is not an outline.
+The full brief, with the running example and the figure rules, is `plans/patterns-expansion-plan.md` §5–§6 in the
+SYSTEM-DESIGN workspace.
 
-H2 order: In one sentence → The story → The problem → The pattern → Variations → Failure modes → Where it appears →
-Try it → Trade-offs → In the wild → Common pitfalls → How to say it in an interview → Interview questions → Related →
-Further reading.
+H2 order: Overview → Mental model → Core concepts → Architecture → Technical mechanics → Trade-offs → Production
+systems → Failure modes & pitfalls → Interview framework → Further reading → `<InterviewQuestions>`. Retired on this
+hub: TL;DR, The idea in plain English, Deep dive, Real-world examples, Common pitfalls, How to answer in an
+interview, Related patterns.
 
-```mdx
+```text
 ---
-title: "Rate limiting"
-description: "Protect a service from too many requests with a token bucket, a sliding window or a fixed window, and know when each one lies."
-updated: 2026-11-09
+title: "…"
+description: "One line, 160 characters or fewer."
+icon: <same as the hub card>
+updated: 2026-11-16
+tier: advanced            # only on advanced pages; absent means foundational
 ---
 
-## In one sentence
+One or two sentences with the failure in them.
 
-<KeyIdea>
-  A rate limiter counts requests per client over a time window and rejects the ones over the limit, so one noisy client cannot slow everyone else down.
-</KeyIdea>
+- Interviewers ask about <pattern> to see whether you can <the judgement it tests>.
 
-## The story
+## Overview
+- 4–6 bullets, one fact each, key terms in bold.
 
-One paragraph the reader can picture, with the failure in it: a script hits your login endpoint 5,000 times a second, the database connection pool fills, and real users see timeouts.
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">   (advanced only)
+  - **What most candidates say:** …
+  - **Why the interviewer pushes back:** …
+  - **The answer that stands out:** …
+</Callout>
 
-## The problem
+## Mental model
+- 3–4 bullets: one everyday analogy, then the line that maps it back to the system.
 
-<AnimatedDiagram name="patterns/rate-limiting" step={1} caption="Without a limiter: one client's burst reaches the database and starves everyone." />
+## Core concepts
+- The running-example numbers this page uses.
+### <Concept>  → bullets → figure block → <PremiumBreak /> after the first figure block
 
-Two to four sentences that walk the failure. Give the numbers: how many requests, where the queue forms, what breaks first.
+## Architecture
+One lead-in sentence → stepper figure → <StepCards> (step 1 is the system without the pattern).
 
-<PremiumBreak />
+## Technical mechanics
+### <Variation or mechanism> · ### Worked example: <one request or event> (numbered steps, then **The numbers:**)
 
-## The pattern
+## Trade-offs        (table: Choice | Pros | Cons | When to use)
+## Production systems (3–5 named systems; end with **Used in our case studies:**)
+## Failure modes & pitfalls (4–6 bullets, failure and fix)
+## Interview framework (4–5 numbered steps, **What interviewers listen for:**, **Red flags:**)
+## Further reading   (3–6 primary sources; last bullet "Related pages: A · B")
 
-<AnimatedDiagram name="patterns/rate-limiting" step={2} caption="With a limiter at the gateway: over-limit requests get a 429 before they cost anything." />
-
-What is added, how the request flows now, and why this placement. Then the worked numbers: a limit of 100 requests per minute per key with 1M keys needs how much memory in the store, and what latency the check adds.
-
-## Variations
-
-<Tabs>
-  <Tab label="Token bucket">
-    How it works in 3–5 sentences, when it fits, and a number (burst size).
-  </Tab>
-  <Tab label="Sliding window">
-    Same shape.
-  </Tab>
-  <Tab label="Fixed window">
-    Same shape, and the edge-of-window problem.
-  </Tab>
-</Tabs>
-
-<Compare
-  columns={["Algorithm", "Memory per key", "Allows bursts", "Accuracy at window edge"]}
-  rows={[
-    ["Token bucket", "2 numbers", "Yes, up to bucket size", "Exact"],
-    ["Sliding window log", "1 timestamp per request", "No", "Exact"],
-    ["Fixed window", "1 counter", "2x at the boundary", "Poor"],
-  ]}
-/>
-
-## Failure modes
-
-What breaks when the pattern itself fails, 3–5 items, each with the fix:
-
-- **The limiter's store is down.** Fail open or fail closed? State the choice and why.
-- **Clock skew between gateways.** ...
-- **Hot key** (one tenant with millions of users behind one API key). ...
-
-## Where it appears
-
-<PatternUses
-  pattern="rate limiting"
-  uses={[
-    { title: "Design an API gateway", href: "/system-design/case-studies/api-gateway", note: "Per-key limits at the edge" },
-  ]}
-/>
-
-`PatternUses` takes an explicit list for now: one entry per case study whose diagram embeds this pattern's spec.
-
-## Try it
-
-<Quiz>
-  <QuizItem question="..." hint="...">...</QuizItem>
-</Quiz>
-
-{/* or <RateLimiterSim /> */}
-
-## Trade-offs
-
-<ProsCons pros={["...", "..."]} cons={["...", "..."]} />
-
-## In the wild
-
-- 2–3 named systems, one line each.
-
-## Common pitfalls
-
-- 3–5 bullets.
-
-## How to say it in an interview
-
-A 60-second answer in prose.
-
-<InterviewQuestions>
-  {/* 6–8 questions; format in section 5 below */}
-</InterviewQuestions>
-
-## Related
-
-- Links to the pattern pages and case studies this one leans on.
-
-## Further reading
-
-- Named sources only.
+<InterviewQuestions> with 6–8 questions, mixed levels, at least two Senior, every answer 3–5 bullets.
 ```
 
-Word count: 1,500–2,000. The spec for a pattern is also what case studies embed, so keep node ids stable
-(`client`, `gateway`, `limiter`, `store`, ...).
+Rules:
+
+- **Points only.** Body text is bullets, one idea per bullet; sequences are numbered lists. Prose is allowed only in
+  the one- or two-sentence intro, a one-sentence lead-in before a figure or code block, and inside a `<StepCard>` or
+  `<Callout>`. No bullet longer than two sentences.
+- **Figure block:** lead-in sentence → `<AnimatedDiagram spec="animated/patterns/<id>">` with a caption that says
+  what to notice → `**How to read it:**` bullets or `<StepCards>` → `**The numbers:**` → a red "What breaks"
+  callout only where true → a code block of at most 15 lines where the thing is a query, command or config.
+- **Colours** come from `PATTERN_TONE` in `src/components/diagrams/presets/patterns.ts`; numbers of the running
+  example (Brightpost, the online shop) from `SHOP` in the same file. No Mermaid.
+- **Case-study links** use `/system-design-case-studies/case-studies/<slug>`.
 
 ---
 

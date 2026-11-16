@@ -24,6 +24,7 @@ import { Diagram } from "@/components/diagrams/diagram";
 import {
   DatabasePicker,
   DatabaseWorkloadMatrix,
+  PatternUseCaseExplorer,
   CompareDatabases,
   DataModelView,
   DataModelTab,
@@ -164,6 +165,7 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       Download,
       DatabasePicker,
       DatabaseWorkloadMatrix,
+      PatternUseCaseExplorer,
       CompareDatabases,
       DbProfile,
       DataModelView,

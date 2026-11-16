@@ -1,0 +1,13 @@
+title: A cache stampede and single flight
+alt: >-
+  A sequence diagram with four lanes: orange readers at 690 reads per second, teal app servers, a violet cache and a
+  violet database. Step 1: the kettle key's TTL ends at 12:00:00; three app servers ask the cache for product:kettle and
+  all miss, then all three query the database; the third query is a red timeout arrow labelled overloaded, with a note
+  that the database load spikes. Step 2, with single flight: the same three requests miss, but only one rebuilds the
+  value with a single database query and writes it back to the cache; the other readers wait about 10 ms and are
+  answered from the refilled key.
+caption: >-
+  When a hot key expires, every read in the rebuild window misses at once; single flight lets one request rebuild it.
+tags: [patterns, caching, stampede, thundering-herd]
+source: original
+created: 2026-11-16

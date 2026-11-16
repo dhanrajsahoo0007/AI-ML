@@ -1,94 +1,206 @@
 ---
 title: "Sharding and Partitioning"
 description: "Splitting data across machines by key range, hash or directory, and living with hot shards and cross-shard queries."
+icon: split
+updated: 2026-11-16
 ---
 
-When one database can no longer hold the data or take the writes, you split it. Sharding is how nearly every large system scales storage and write throughput.
+When one database can no longer hold the data or take the writes, you split it, and every query that crosses the split gets more expensive.
 
-## TL;DR
+- Interviewers ask about sharding to see whether you pick the shard key from the main query, and whether you know which queries that choice breaks.
 
-- **Sharding** splits a dataset into partitions, each on its own node.
+## Overview
+
+- **Sharding** splits a dataset into partitions, each on its own node, so storage and write throughput grow with the number of nodes.
 - Strategies: **range**, **hash**, and **directory (lookup)** based.
 - The **shard key** is the most important decision: it drives balance and query cost.
-- Cross-shard joins, transactions and secondary indexes become hard.
-- Plan for **resharding** from day one.
+- Cross-shard **joins**, **transactions** and **secondary indexes** become hard.
+- Plan for **resharding** from day one, and shard only when replicas and caching are not enough.
 
-## The idea in plain English
+## Mental model
 
-A library too big for one building is split into branches by author surname. Finding a book is easy if you know the surname; asking "which books are about whales?" means visiting every branch.
+- A library too big for one building is split into branches by author surname.
+- Finding a book is easy if you know the surname: one branch.
+- Asking "which books are about whales?" means visiting every branch, or keeping a separate subject catalogue.
+- The surname is the shard key, and the subject catalogue is a global secondary index.
 
 ## Core concepts
 
-1. **Range sharding.** Keys split into contiguous ranges. Great for range scans; prone to hot spots (for example timestamps).
-2. **Hash sharding.** `hash(key)` picks the shard. Even spread; range queries must hit all shards. Use [consistent hashing](/system-design/patterns/consistent-hashing) to ease resharding.
-3. **Directory sharding.** A lookup service maps keys to shards. Flexible, but the directory becomes critical.
-4. **Shard key choice.** High cardinality, even access, and aligned with the main query.
-5. **Secondary indexes.** Local (per shard, scatter-gather reads) or global (partitioned by index term, slower writes).
-6. **Resharding.** Splitting or merging shards online with dual writes, backfill and cutover.
+- The running example is Brightpost's orders: **200,000 a day**, about 146,000,000 rows after two years (200,000 × 730).
 
-## Architecture
+### Strategies
 
-```mermaid
-flowchart LR
-    APP["App"] --> ROUTER["Shard router / metadata"]
-    ROUTER --> S1[("Shard 1<br/>user 0-33%")]
-    ROUTER --> S2[("Shard 2<br/>user 33-66%")]
-    ROUTER --> S3[("Shard 3<br/>user 66-100%")]
-```
+- **Range sharding.** Keys split into contiguous ranges. Great for range scans; prone to hot spots, for example with timestamps, where every new write lands on the newest range.
+- **Hash sharding.** `hash(key)` picks the shard. Even spread; range queries must hit all shards. Use [consistent hashing](/system-design/patterns/consistent-hashing) to ease resharding.
+- **Directory sharding.** A lookup service maps keys to shards. Flexible, but the directory becomes critical and sits on every request.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/shard-strategies" caption="Range keeps neighbours together, hash spreads them evenly, a directory lets you place anything anywhere at the cost of one more critical service." />
+
+**How to read it:**
+
+- Each row asks one question of the three strategies; hash is ringed as the usual default for keys like customer ids.
+- The red cells are the two ways a strategy breaks: a hot newest range, and a directory that is down.
+
+**The numbers:**
+
+- 146,000,000 orders at about 1 KB each is 146 GB; over 8 shards, about 18 GB each.
+- With range sharding by order date, all 200,000 of today's orders land on one shard: one machine takes 100 % of the writes.
+
+<PremiumBreak />
+
+### Choosing the shard key
+
+- **High cardinality:** many distinct values, so the data can be cut finely.
+- **Even access:** no single value takes most of the traffic.
+- **Aligned with the main query,** so most requests touch one shard.
+- Avoid monotonically increasing keys and low-cardinality fields (country, status).
+
+### Secondary indexes on shards
+
+- A query by anything other than the shard key needs an index. On shards there are two kinds.
+- **Local index:** each shard indexes its own rows. Writes stay on one shard, but a query by the indexed field must ask every shard (scatter-gather).
+- **Global index:** the index is its own table, sharded by the indexed term. A query reads one index shard, but each write updates two places, usually asynchronously, so the index lags.
+- DynamoDB makes the split explicit: a local secondary index shares the table's partition key and allows strongly consistent reads; a global secondary index has its own key and is eventually consistent.
+- A global index is a kind of precomputed view: see [Materialized Views and Read Projections](/system-design/patterns/materialized-views).
 
 ### Hot shards
 
-A celebrity or a sequential key can overload one shard. Mitigations: add a salt to the key, split hot shards, cache hot reads, or isolate large tenants.
+- A celebrity or a sequential key can overload one shard, whatever the strategy.
+- Mitigations: add a salt to the key, split hot shards, cache hot reads, or isolate large tenants on their own shard.
+- The read side in depth: [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing).
+
+## Architecture
+
+Brightpost's orders, sharded and later re-split without downtime.
+
+<AnimatedDiagram spec="animated/patterns/shard-resharding" stepper caption="Sharding adds a router and a map; splitting a shard later is dual write, backfill, compare, then cut over." />
+
+<StepCards>
+  <StepCard n={1} title="One database holds every order">
+    The order service writes all 200,000 orders a day to one database. It works until the table outgrows one machine's disk or write rate.
+  </StepCard>
+  <StepCard n={2} title="A router splits orders over two shards">
+    A shard router hashes the customer id and looks up which shard owns that hash range in a shard map. Each customer's orders live on one shard.
+  </StepCard>
+  <StepCard n={3} title="Add a shard and dual-write the moving range">
+    Shard 2 is running hot, so a third shard will take its upper half. The router keeps writing to shard 2 and also writes new orders in that range to shard 3.
+  </StepCard>
+  <StepCard n={4} title="Backfill the moving range">
+    A copy job moves the range's history from shard 2 to shard 3. Dual writes keep the new rows in step while the old ones copy.
+  </StepCard>
+  <StepCard n={5} title="Compare, switch reads, then writes">
+    The router compares reads from both shards, then sends reads for the range to shard 3, then writes, and updates the map. Shard 2 keeps the data until the switch is proven, so the move can be undone.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
 
 ### Cross-shard operations
 
-Prefer designs where one request touches one shard. When you cannot, use scatter-gather for reads and [sagas](/system-design/patterns/saga) for multi-shard writes instead of distributed transactions.
+- Prefer designs where one request touches one shard.
+- When you cannot, use scatter-gather for reads and [sagas](/system-design/patterns/saga) for multi-shard writes instead of distributed transactions.
+- Scatter-gather is only as fast as the slowest shard: see [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation).
+
+### Resharding
+
+- Splitting or merging shards online is dual writes (or a change stream), a backfill, a comparison, then a cut-over of reads and then writes.
+- Keep the old shard and a reverse stream until the switch is proven.
+- The full procedure: [Zero-Downtime Migrations: Dual Writes, Backfill and Cutover](/system-design/patterns/online-migrations).
+
+### Worked example: shard orders by customer or by order id
+
+Brightpost splits 146,000,000 orders over 8 shards. Two queries matter: "my orders" on the account page, and "find order 4471" in the support tool.
+
+1. **Shard by customer id.** "My orders" reads one shard. "Find order 4471" does not know the customer, so it asks all 8 shards.
+2. **Shard by order id.** "Find order 4471" reads one shard. "My orders" asks all 8, because one customer's orders are spread everywhere.
+3. **The fix:** shard by customer id, and put the customer's shard into the order id (or keep a small global index from order id to customer). Both queries now read one shard.
+4. **A third query** breaks both: "all orders for seller 312" crosses every customer. It gets its own global index or a precomputed view.
+
+**The numbers:**
+
+- At 1,000 "my orders" views a second (illustrative), sharding by order id turns them into 8 × 1,000 = 8,000 shard queries a second, against 1,000.
+- Each scatter-gather waits for the slowest of 8 shards, so its latency is the shards' tail, not their median.
+- Per shard: 146 GB ÷ 8 ≈ 18 GB, and 200,000 ÷ 8 = 25,000 new orders a day.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Range | Efficient range scans | Hot spots |
-| Hash | Even load | No range scans |
-| Directory | Flexible placement | Extra lookup, critical service |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Range | Efficient range scans | Hot spots on the newest range | Time-series with a non-time prefix, ordered scans |
+| Hash | Even load | No range scans; scatter-gather for other queries | Point lookups by a high-cardinality key |
+| Directory | Flexible placement; move any key | Extra lookup; a critical service | Large tenants that need their own shard |
+| Local secondary index | Writes stay on one shard | Index queries ask every shard | Queries that also carry the shard key |
+| Global secondary index | Index queries read one shard | Two writes; the index lags | Frequent queries by a non-key field |
 
-## Real-world examples
+## Production systems
 
-- User and post tables sharded by user id: [Twitter](/system-design-case-studies/case-studies/twitter), [Instagram](/system-design-case-studies/case-studies/instagram).
-- Short code keyspace split across databases: [URL Shortener](/system-design-case-studies/case-studies/url-shortener).
-- Per-conversation partitioning: [WhatsApp](/system-design-case-studies/case-studies/whatsapp), [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger).
-- Partitioned logs: [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue), [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging).
+- **Vitess** (as of November 2026): shards MySQL behind a router; its Reshard workflow copies data, checks it with VDiff, switches reads and then writes, and keeps reverse replication so it can switch back.
+- **DynamoDB**: partitions by the partition key; local secondary indexes share it and must be created with the table; global secondary indexes have their own key, scale separately and are read with eventual consistency only.
+- **Spanner**: splits tables into key ranges that move between servers automatically as they grow or run hot.
+- User and post tables sharded by user id: [Twitter](/system-design-case-studies/case-studies/twitter), [Instagram](/system-design-case-studies/case-studies/instagram). Short code keyspace split across databases: [URL Shortener](/system-design-case-studies/case-studies/url-shortener).
+- **Used in our case studies:** [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [Typeahead](/system-design-case-studies/case-studies/typeahead) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue) · [Netflix](/system-design-case-studies/case-studies/netflix) · [S3](/system-design-case-studies/case-studies/s3)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Picking a shard key that skews (country, status, time).
-- Needing cross-shard joins everywhere.
-- No resharding story.
-- Sharding too early when replicas and caching would do.
+- **A skewed shard key** (country, status, time). One shard takes most of the traffic. Pick a high-cardinality key, or salt it.
+- **Cross-shard joins everywhere.** The shard key does not match the main query. Re-choose the key, or add global indexes for the other queries.
+- **No resharding story.** The first hot shard becomes an outage. Use a map or a ring from day one, and practise a split.
+- **Sharding too early.** Replicas and caching would have done. Show with numbers that one primary cannot take the writes or hold the data.
+- **Distributed transactions across shards.** They block and add latency. Keep a transaction on one shard, or use a saga.
 
-## How to answer in an interview
+## Interview framework
 
-Justify why one node is not enough with numbers, pick the shard key from the dominant access pattern, name the strategy, and explain hot shards and resharding.
+1. Justify why one node is not enough with numbers: rows, bytes, writes a second.
+2. Pick the shard key from the dominant access pattern, and name the query it breaks.
+3. Name the strategy (usually hash with a ring or a map) and how secondary queries are served.
+4. Cover hot shards: salting, splitting, caching.
+5. Explain resharding: dual write, backfill, compare, cut over, with a way back.
 
-## Related patterns
+**What interviewers listen for:** a shard key tied to the main query, and an answer for the second query.
 
-[Consistent Hashing](/system-design/patterns/consistent-hashing) · [Consistency Models](/system-design/patterns/consistency-models) · [Saga](/system-design/patterns/saga) · [Relational Databases](/system-design/databases/relational-databases) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Wide-Column Stores](/system-design/databases/wide-column-stores)
+**Red flags:** sharding by a timestamp or a low-cardinality field, or cross-shard transactions on the hot path.
 
 ## Further reading
 
 - [Designing Data-Intensive Applications, ch. 6 Partitioning](https://dataintensive.net/)
 - [Spanner: Google's Globally-Distributed Database](https://research.google/pubs/spanner-googles-globally-distributed-database-2/)
+- [Reshard (Vitess docs)](https://vitess.io/docs/reference/vreplication/reshard/)
+- [Secondary indexes (DynamoDB docs)](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/SecondaryIndexes.html)
+- Related pages: [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Consistency Models](/system-design/patterns/consistency-models) · [Saga](/system-design/patterns/saga) · [Zero-Downtime Migrations](/system-design/patterns/online-migrations) · [Relational Databases](/system-design/databases/relational-databases) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Wide-Column Stores](/system-design/databases/wide-column-stores)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you choose a shard key?" category="Design" level="Mid">
-    Pick a high-cardinality key that spreads load evenly and matches the main query so most requests hit one shard. Avoid monotonically increasing keys and low-cardinality fields.
+  <InterviewQuestion question="How do you choose a shard key?" category="Architecture" level="Mid">
+    - Pick a high-cardinality key that spreads load evenly.
+    - Match it to the main query so most requests hit one shard.
+    - Avoid monotonically increasing keys and low-cardinality fields.
   </InterviewQuestion>
   <InterviewQuestion question="Range vs hash sharding?" category="Concepts" level="Junior">
-    Range keeps neighbouring keys together for scans but risks hot spots; hash spreads evenly but makes range queries touch every shard.
+    - Range keeps neighbouring keys together for scans but risks hot spots, especially on time-ordered keys.
+    - Hash spreads evenly but makes range queries touch every shard.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you reshard without downtime?" category="Operations" level="Senior">
-    Create the new layout, dual-write or stream changes, backfill history, verify, then switch reads and finally writes, keeping the ability to roll back.
+  <InterviewQuestion question="How do you reshard without downtime?" category="Scaling" level="Senior">
+    - Create the new layout, then dual-write or stream changes into it.
+    - Backfill history and verify the copies.
+    - Switch reads, then writes, keeping the ability to roll back until the switch is proven.
+  </InterviewQuestion>
+  <InterviewQuestion question="Orders are sharded by customer id. How does the support tool find order 4471?" category="Architecture" level="Mid">
+    - Without help it asks every shard, because it does not know the customer.
+    - Put the shard number (or the customer id) into the order id, so the id itself says where to look.
+    - Or keep a small global index from order id to customer id, updated when the order is written.
+  </InterviewQuestion>
+  <InterviewQuestion question="Local or global secondary index on a sharded table?" category="Trade-offs" level="Senior">
+    - A local index keeps writes on one shard but makes every index query ask all shards.
+    - A global index makes index queries read one shard but doubles the writes and lags behind the table.
+    - Use local when the query also carries the shard key, and global when a non-key query is frequent and can tolerate a little lag.
+  </InterviewQuestion>
+  <InterviewQuestion question="One shard runs at its limit while the others are idle. What do you do?" category="Failure modes" level="Mid">
+    - Find whether it is one hot key or a hot range.
+    - For a hot key: cache reads, or salt the key into several copies.
+    - For a hot range: split it, which is easy with a map or a ring and hard with modulo.
+  </InterviewQuestion>
+  <InterviewQuestion question="When should you not shard?" category="Trade-offs" level="Senior">
+    - When read replicas and a cache can carry the reads, and one primary can take the writes and hold the data.
+    - Sharding adds a router, a map, cross-shard queries and resharding to run forever.
+    - Show the numbers first: rows, bytes and writes a second against one machine's limits.
   </InterviewQuestion>
 </InterviewQuestions>

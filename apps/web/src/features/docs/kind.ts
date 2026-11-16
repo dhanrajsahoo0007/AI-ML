@@ -211,6 +211,13 @@ export const docsKind: SectionKind<DocItem> = {
               "warning"
             );
           }
+          if (target && (card.tier ?? "core") !== ((target.data.tier as string | undefined) ?? "core")) {
+            push(
+              indexFile,
+              `card ${card.href} has tier ${card.tier ?? "core"} but the page is ${String(target.data.tier ?? "core")}`,
+              line
+            );
+          }
         }
       }
       const markup = JSON.stringify(parseHubMarkup(fs.readFileSync(hubItem.file, "utf8")));

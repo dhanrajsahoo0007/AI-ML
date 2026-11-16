@@ -37,6 +37,7 @@ access: free # free | premium; default from sections.yaml
 order: 3 # optional sort
 categories: [...] # hubs: category titles in display order
 updated: 2026-11-07 # optional; otherwise taken from git history
+tier: advanced # optional; pattern pages only. Must match the hub card's `tier` (absent means core)
 ```
 
 ## Rules

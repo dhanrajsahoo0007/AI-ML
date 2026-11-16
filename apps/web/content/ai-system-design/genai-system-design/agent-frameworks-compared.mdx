@@ -2,41 +2,464 @@
 title: "Agent Frameworks Compared"
 description: "How the main agent frameworks and SDKs differ, and when to use one or write the loop yourself."
 icon: columns
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+An agent framework is a library that runs the agent loop for you and adds the parts round it: tools, state, retries, approvals and tracing.
 
-**What it will cover:** How the main agent frameworks and SDKs differ, and when to use one or write the loop yourself.
+- Interviewers ask about frameworks to see whether you know what the framework does for you, and what it costs: hidden prompts, lock-in and upgrades.
+- This page answers the question-bank question "Which agent frameworks do you know, and when would you avoid one?". The loop itself is on [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures); a graph built step by step is on [Chain & Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration).
 
 ## Overview
 
+- Frameworks come in three styles. **Graph-based** frameworks run nodes and edges you write. **Role-based** frameworks run agents you describe by role and goal. **Loop-based** SDKs run the model in a loop and let it pick each step.
+- **Vendor agent SDKs** (OpenAI Agents SDK, Claude Agent SDK, Google ADK, Microsoft Agent Framework) come from the companies that sell the models or the cloud. They work best with their own models and services.
+- What every framework sells is the same list: tool schemas from plain functions, saved state, retries, a pause for a person, and traces.
+- The cost is a layer between you and the prompt. Anthropic's advice is to start with the model API directly and to understand the code underneath any framework you adopt.
+- Framework facts age fast. Every fact on this page is **as of November 2026**, checked against each project's documentation.
+- One task runs through the page: Brightpost's £42 kettle refund, which waits for a support agent because it is over £30.
+
 ## Mental model
+
+- A framework is a kitchen fitted by someone else.
+- You get the oven, the extractor and the fridge in one go, and you cook on day one.
+- You also get their layout. Moving the sink later means taking out the cupboards round it.
+- Writing your own loop is buying each appliance yourself. It is slower to start, and every part is where you put it.
+
+The loop is short: Anthropic notes that many agent patterns "can be implemented in a few lines of code". The other parts take longer: a durable pause that survives a deploy, retries that do not refund twice, and traces someone can read. Choose a framework for those parts, not for the loop.
 
 ## Core concepts
 
 ### Graph-based, role-based and loop-based frameworks
 
+The three styles differ in one thing: who decides the next step.
+
+<AnimatedDiagram
+  spec="animated/agents/framework-styles"
+  stepper
+  minWidth={620}
+  caption="The same refund three ways. What changes is who decides the next step: your edges, a manager model, or the model in a loop."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Graph-based: you write the nodes and edges">
+    Each box is a node, a function that reads and writes a shared state object. The £30 rule is a conditional edge, so a
+    reviewer can read every path. The approval is its own node that pauses the run. LangGraph, the workflows in
+    Microsoft Agent Framework and the graph workflows new in Google ADK 2.0 work this way.
+  </StepCard>
+  <StepCard n={2} title="Role-based: you describe agents and tasks">
+    In CrewAI, each agent has a `role`, a `goal` and a `backstory`, and each task names an agent. In the hierarchical
+    process a manager model hands out the tasks. A task's `human_input` setting asks a person to review the task's final
+    answer, after the work, not before a tool call.
+  </StepCard>
+  <StepCard n={3} title="Loop-based: the model picks each step">
+    You give the model tools and settings. It calls tools until it answers without one. The approval is a setting on
+    `create_refund`, checked on every call. The OpenAI Agents SDK, the Claude Agent SDK and ADK's LLM agents work this
+    way.
+  </StepCard>
+</StepCards>
+
+- The styles mix. LangGraph ships a prebuilt agent loop, CrewAI puts crews inside event-driven **Flows**, and ADK and Agent Framework offer both agents and workflows.
+- The useful question is not "which framework" but "which parts of this task are fixed". Fixed parts go in edges; open parts go to the model.
+
 ### Vendor agent SDKs
+
+A **vendor SDK** is an agent framework from a model or cloud company.
+
+- **OpenAI Agents SDK.** Agents, tools, hand-offs between agents, guardrails, sessions and tracing. Python and TypeScript. It calls OpenAI models through the Responses API by default; other providers work through Chat Completions-compatible clients or two adapters the docs call "best-effort, beta" (LiteLLM and Any-LLM).
+- **Claude Agent SDK.** Claude Code's loop as a library, with its built-in tools for files, shell commands and web search, plus hooks, subagents, MCP and sessions. Python and TypeScript. Claude models only, through the Claude API, Amazon Bedrock, Google Cloud or Microsoft Foundry.
+- **Google ADK.** LLM agents, workflow agents (sequential, parallel, loop) and, since ADK 2.0, graph workflows. Python, TypeScript, Go, Java and Kotlin. Gemini first; the docs say it "can work with almost any generative AI model".
+- **Microsoft Agent Framework.** The direct successor to AutoGen and Semantic Kernel, built by the same teams. Agents plus graph-based workflows. .NET, Python, and Go in preview. Models from Foundry, Azure OpenAI, OpenAI, Anthropic, Ollama and others.
+
+Vendor SDKs trade breadth for depth: the newest model features arrive there first, and the hosted runtime (Claude Managed Agents, ADK on Google Cloud's Agent Runtime, Foundry) is one step away.
+
+### The main frameworks, as of November 2026
+
+Six frameworks, one row each. Every cell was checked against the project's documentation and package release on 16 November 2026.
+
+<Compare
+  columns={["", "Style", "Models; languages", "Pause for a person", "State and resume", "Tracing"]}
+  rows={[
+    [
+      "LangGraph 1.2",
+      "Graph over one state object",
+      "Any model; Python, TypeScript",
+      "interrupt() in a node or tool",
+      "Checkpoint per super-step, by thread",
+      "LangSmith, opt-in",
+    ],
+    [
+      "OpenAI Agents SDK 0.24",
+      "Loop, with hand-offs",
+      "OpenAI first, others via adapters; Python, TypeScript",
+      "needs_approval: true or a function",
+      "Paused run serialises to JSON",
+      "Built in; sent to OpenAI by default",
+    ],
+    [
+      "Claude Agent SDK 0.2",
+      "Loop: Claude Code's, with built-in tools",
+      "Claude only; Python, TypeScript",
+      "canUseTool callback, after rules and hooks",
+      "Sessions on disk; resume or fork",
+      "OpenTelemetry export",
+    ],
+    [
+      "CrewAI 1.15",
+      "Role-based crews inside Flows",
+      "Six native providers plus LiteLLM; Python",
+      "human_input reviews a task's answer",
+      "Checkpoint per finished task",
+      "CrewAI platform or OpenTelemetry tools",
+    ],
+    [
+      "Microsoft Agent Framework 1.26",
+      "Agents plus graph workflows",
+      "Many providers; .NET, Python, Go (preview)",
+      "approval_mode on a tool",
+      "Checkpoint per superstep",
+      "OpenTelemetry",
+    ],
+    [
+      "Google ADK 2.14",
+      "Agents, workflow agents, graphs",
+      "Gemini first, most others; Python, TypeScript, Go, Java, Kotlin",
+      "require_confirmation: true or a function",
+      "Sessions; confirmation not with the persistent stores",
+      "Logs, metrics, traces",
+    ],
+  ]}
+  caption="As of November 2026. Versions are the Python packages on PyPI on 16 November 2026. Check the docs before you rely on a cell."
+/>
+
+**How to read it:**
+
+- Read the "Pause for a person" column first. It decides how the £42 refund waits, and the frameworks differ most there.
+- A pause that lives in a callback (Claude Agent SDK) holds the process while the person decides. A pause that serialises (OpenAI) or checkpoints (LangGraph, Agent Framework) can wait for hours with no process running.
+- The ADK row has a gap worth knowing: its docs list tool confirmation as unsupported with `DatabaseSessionService` and `VertexAiSessionService`, the two persistent session stores.
 
 ### What a framework gives you: state, tools and tracing
 
+Here are the parts a framework adds round your loop, with what you would write by hand without one.
+
+<AnimatedDiagram
+  spec="animated/agents/what-a-framework-gives"
+  stepper
+  minWidth={620}
+  caption="Every card round the loop is code you would otherwise write and maintain. The loop in the middle is the part you write either way."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Your loop calls the model and runs the tools">
+    You always write this part: send the messages and tool definitions, run the tool the model asks for, send the result
+    back, repeat. A framework turns a typed Python function into a tool schema and routes the call, so
+    `get_order(order_id: str)` needs no hand-written JSON schema.
+  </StepCard>
+  <StepCard n={2} title="State: a checkpoint after every step">
+    The framework saves the run after each step: messages, tool results and pending calls. A crash or a deploy resumes
+    from the last checkpoint, not from the customer's first message. See [State Persistence &
+    Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval).
+  </StepCard>
+  <StepCard n={3} title="Retries wrap each tool call">
+    A timed-out `create_refund` runs again with backoff. The framework retries; you still supply the idempotency key, or
+    the second attempt refunds twice. See [Agent Reliability & Error
+    Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery).
+  </StepCard>
+  <StepCard n={4} title="Human approval pauses and resumes the run">
+    The £42 refund waits in the saved state until the support agent decides. The decision resumes the run from that
+    checkpoint. Without a framework you write the pause, the store, the resume and the check that the decision matches
+    the pending call. See [Human-in-the-Loop &
+    Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
+  </StepCard>
+  <StepCard n={5} title="Tracing records every step">
+    Every model call and tool call becomes a span with its inputs, outputs, tokens and time. Without it, "the agent did
+    something odd on Tuesday" has no evidence behind it.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Trusting the framework's retry with a side effect. Most frameworks retry the whole node or tool call. If
+  `create_refund` sent the payment before it timed out, the retry sends a second one. The framework cannot know your
+  payments API is not idempotent; the key has to come from you.
+</Callout>
+
 ## Architecture
+
+Whichever framework you choose, the system has three layers. Only the middle one changes.
+
+| Layer                 | What lives there                                                          | Who owns it                 |
+| --------------------- | ------------------------------------------------------------------------- | --------------------------- |
+| Your application      | The four tools, the £30 rule, the approval screen, prompts and evaluation | You, in every case          |
+| The framework runtime | The loop or graph executor, state, retries, hooks, tracing                | The framework               |
+| Services it talks to  | The model API, the checkpoint store, the trace backend                    | Vendors, or you if you host |
+
+- Keep the top layer free of framework types where you can. `create_refund` should be a plain function or an [MCP server](/ai-system-design/genai-system-design/model-context-protocol); the framework only wraps it.
+- The £30 rule belongs in code the framework calls (an edge, `needs_approval`, a predicate), never only in the prompt. A pasted note can argue with a prompt; it cannot argue with an `if`.
+- Hosted runtimes move the middle layer to the vendor: Claude Managed Agents, ADK on Google Cloud's Agent Runtime, and LangGraph deployments on LangSmith. You trade operations work for a second dependency on the same vendor.
 
 ## Technical mechanics
 
+### Worked example: the £42 refund in two frameworks
+
+The same refund, built twice: once with the OpenAI Agents SDK (loop-based) and once with LangGraph through LangChain's `create_agent` (a prebuilt agent graph). Both follow the [framework styles figure](#graph-based-role-based-and-loop-based-frameworks): the loop strip and the graph strip.
+
+**OpenAI Agents SDK** (Python, 0.24). The rule is a function on the tool; the paused run is a JSON string you store:
+
+```python
+from agents import Agent, Runner, RunState
+from agents.decorators import tool
+
+async def over_limit(_ctx, params, _call_id) -> bool:
+    return params["amount"] > 30            # the £30 rule, in code
+
+@tool(needs_approval=over_limit)
+async def create_refund(order_id: str, amount: float) -> str:
+    return payments.refund(order_id, amount)   # idempotent
+
+agent = Agent(name="Brightpost support", instructions=POLICY,
+              tools=[get_order, search_help, create_refund, send_email])
+
+result = await Runner.run(agent, MESSAGE)   # stops at create_refund
+paused = result.to_state().to_string()      # JSON: store it server-side
+db.save("run_8f3a", paused)
+
+# 10:20, the support agent approves (any process, later)
+state = await RunState.from_string(agent, db.load("run_8f3a"))
+for item in state.get_interruptions():
+    state.approve(item)
+result = await Runner.run(agent, state)     # refund, email, reply
+```
+
+**LangGraph** (Python, via LangChain 1.5). The rule is a predicate on the middleware; the checkpointer saves the pause by itself:
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import HumanInTheLoopMiddleware
+from langgraph.types import Command
+
+def over_limit(request) -> bool:
+    return request.tool_call["args"]["amount"] > 30   # the £30 rule
+
+gate = HumanInTheLoopMiddleware(interrupt_on={"create_refund": {
+    "allowed_decisions": ["approve", "edit", "reject"],
+    "when": over_limit,
+}})
+agent = create_agent(
+    model=MODEL, system_prompt=POLICY, middleware=[gate],
+    tools=[get_order, search_help, create_refund, send_email],
+    checkpointer=postgres_saver,   # saves every step under the thread
+)
+config = {"configurable": {"thread_id": "th_5e08"}}
+result = agent.invoke({"messages": [MESSAGE]}, config, version="v2")
+
+# 10:20, the support agent approves (any worker, same thread)
+approve = Command(resume={"decisions": [{"type": "approve"}]})
+agent.invoke(approve, config, version="v2")
+```
+
+Here is what LangGraph hands back at the pause, `result.interrupts[0].value`, trimmed. The approval screen renders it:
+
+```json
+{
+  "action_requests": [
+    {
+      "name": "create_refund",
+      "args": { "order_id": "4471", "amount": 42.0 },
+      "description": "Tool execution requires approval\n\nTool: create_refund\nArgs: {...}"
+    }
+  ],
+  "review_configs": [{ "action_name": "create_refund", "allowed_decisions": ["approve", "edit", "reject"] }]
+}
+```
+
+Side by side:
+
+| Step                                 | OpenAI Agents SDK                              | LangGraph via `create_agent`                       |
+| ------------------------------------ | ---------------------------------------------- | -------------------------------------------------- |
+| Model calls 1–2: order and rule      | `get_order`, `search_help` run without a pause | Same                                               |
+| Model call 3 asks for the £42 refund | `over_limit` returns true; the run stops       | `over_limit` returns true; the graph interrupts    |
+| Where the pause lives                | A JSON string, in a table you choose           | A checkpoint in Postgres, under `th_5e08`          |
+| 10:20: the decision                  | `state.approve(item)`, then `Runner.run` again | `Command(resume=…)` on the same thread             |
+| Decisions offered                    | Approve, or reject with a message              | Approve, edit, reject or respond                   |
+| Model calls 4–5: email and reply     | Run after the refund, R-2291                   | Same                                               |
+| Traces by default                    | Uploaded to OpenAI                             | None until you turn on LangSmith or another tracer |
+
+**The numbers:**
+
+- Both runs make **5 model calls and 4 tool calls**, with **1 pause**: the framework moves the pause, not the cost.
+- Both snippets are under 25 lines. What they do not show is the code you would otherwise write: a pause store, a resume path and a check that the decision matches the pending call.
+- The support agent's wait (10:14 to 10:20 on [Human-in-the-Loop](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals#technical-mechanics), illustrative) costs no process in either framework, because both pauses are data.
+
+Three things to take from it:
+
+- **Edit is a framework difference.** To refund £30 instead of £42, LangChain's middleware accepts edited arguments; in the OpenAI SDK you reject with a reason and let the model call again.
+- **The paused state is sensitive.** OpenAI's docs say to keep it on the server, load pending items with `state.get_interruptions()`, and never accept serialised state or arguments from the client.
+- **Resume runs code again.** LangChain re-runs any middleware listed before the approval middleware, and LangGraph re-runs an interrupted node from its first line. Keep side effects after the pause.
+
 ### A framework or your own loop
+
+Write your own loop when:
+
+- The agent is one loop with a few tools and no pause longer than a request.
+- You need every token of the prompt under your control, or a model feature the frameworks do not support yet.
+- You already run a durable workflow engine (Temporal or similar) that can hold the pause. See [State Persistence & Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval#durable-execution-engines).
+
+Use a framework when:
+
+- The run must wait for a person or survive a deploy, and you do not want to build checkpointing.
+- Several teams share the agent and need one way to add tools, trace runs and review changes.
+- The flow has fixed steps and branches that a reviewer should read as edges (a graph framework).
+
+A middle path: write the loop yourself and borrow one part, such as an OpenTelemetry tracer or a checkpoint library. You keep the prompt and still skip the hardest code.
 
 ### Lock-in, debugging and upgrade cost
 
+- **Lock-in.** Your prompts, tools and evaluation set are portable; the framework's state format and pause API are not. A paused LangGraph checkpoint cannot be resumed by the OpenAI SDK.
+- **Projects end or change.** AutoGen's repository is archived and in maintenance mode, and tells new users to start with Microsoft Agent Framework. OpenAI shut down the Assistants API on 26 August 2026, mapping threads to Conversations and runs to Responses. The Claude Code SDK was renamed the Claude Agent SDK, with breaking changes in v0.1.0.
+- **Stability promises help.** LangChain and LangGraph 1.0 (22 October 2025) promised no breaking changes until 2.0. Two of the six frameworks here are still on 0.x (the OpenAI Agents SDK and the Claude Agent SDK), and patch releases are frequent everywhere; pin exact versions.
+- **Debugging.** The question is always "what exactly did the model see?" Turn on tracing on day one and check that it records the full prompt, tool definitions included.
+- **Where the traces go.** The OpenAI SDK uploads traces to OpenAI by default. If customer messages cannot leave your systems, add your own trace processor or turn tracing off.
+
+<Callout tone="red" title="What breaks">
+  A framework upgrade that changes the prompt. A new release rewords the default system prompt or the tool-calling
+  format, and the refund agent starts calling `create_refund` before `search_help`. Nothing in your code changed. Pin
+  the version, and run your [agent evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) set before
+  every upgrade.
+</Callout>
+
 ### A checklist for choosing
+
+1. **Control flow.** Are most steps fixed? Graph. Open-ended? Loop. Is the work naturally split by job titles? Roles, with care.
+2. **The pause.** How long can a run wait, and where is the pause stored? Check it works with your production session store.
+3. **Models.** Which models must it run, now and in a year? A single-vendor SDK is fine if the answer is one vendor.
+4. **Languages.** Does it support the language your team ships in (.NET, Go, Java)?
+5. **Tracing.** Can you see the full prompt and send traces where your data rules allow?
+6. **Tools.** Can tools stay plain functions or MCP servers, usable without the framework?
+7. **Upgrades.** Is there a stability promise or a deprecation policy? Who maintains it, and how often does it break?
+8. **Exit.** Could you replace it in a month? If not, keep the framework at the edge of the code, not in the middle.
 
 ## Trade-offs
 
+| Decision                      | Option A                                 | Option B                                   | Guidance                                                              |
+| ----------------------------- | ---------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
+| Own loop vs framework         | Full control, no hidden prompt           | State, pauses, retries and traces built in | Own loop for short, single-team agents; framework once runs must wait |
+| Graph vs loop                 | Every path reviewable, fewer model calls | Handles open-ended tasks                   | Graph for fixed steps, loop for open ones; mix them                   |
+| Vendor SDK vs model-neutral   | Newest model features first              | Switch models without a rewrite            | Vendor SDK if you are committed to one model family                   |
+| Role-based crews vs one agent | Matches how people split work            | Fewer calls, one context to debug          | One agent until it measurably fails; see multi-agent trade-offs       |
+| Hosted runtime vs self-hosted | No servers, scaling handled              | Data and upgrades under your control       | Hosted for speed; self-host when data rules or costs demand it        |
+
 ## Production systems
+
+- **LangGraph** (1.2.22 on PyPI, 14 November 2026) is the graph framework behind LangChain's `create_agent`. LangChain and LangGraph reached 1.0 on 22 October 2025 with a promise of no breaking changes until 2.0.
+- **OpenAI Agents SDK** (0.24.0, 15 October 2026) offers agents, hand-offs, guardrails, sessions, human approval, tracing and sandbox agents that run in isolated workspaces.
+- **Claude Agent SDK** runs the Claude Code binary as a library, with the same tools, permissions, hooks and sessions. Its permission check runs hooks, then deny rules, ask rules, the permission mode and allow rules, and only then your `canUseTool` callback.
+- **CrewAI** (1.15.41, 12 November 2026) recommends starting with a Flow and calling a crew from a Flow step when a task needs a team.
+- **Microsoft Agent Framework** (1.26.0, 12 November 2026) replaces AutoGen and Semantic Kernel and adds a "Harness Agent" with planning, context compaction and tool approval built in.
+- **Google ADK** (2.14.1, 12 November 2026) added graph-based workflows in 2.0 and supports five languages; tool confirmation is experimental in TypeScript, Go and Kotlin.
 
 ## Failure modes & pitfalls
 
+- Choosing a framework before writing the loop once by hand, so nobody knows what it does underneath.
+- Putting the approval rule in the prompt instead of in the tool's approval setting.
+- Holding a long pause in memory (a callback waiting on a person) in a service that restarts on deploy.
+- Trusting the framework's retries with a tool that has no idempotency key.
+- Leaving default tracing on and sending customer messages to a third party without checking data rules.
+- Splitting one task into a crew of role-play agents because the framework makes it easy, then paying for the extra calls.
+- Upgrading the framework without re-running evaluations.
+- Letting framework types spread into every tool, so leaving costs a rewrite.
+
 ## Interview framework
 
+1. Name the three styles and say who decides the next step in each.
+2. List what a framework gives you (tools, state, retries, approvals, tracing) and which of these the task needs.
+3. Name two or three frameworks with one fact each, and date your facts.
+4. Walk through the hard part for this task, usually the pause or the retry, in the framework you pick.
+5. Say when you would not use one, and how you would keep the exit open.
+
+**What interviewers listen for:** that you choose by what the task needs (a durable pause, fixed steps, one vendor) and that the rules stay in code you own.
+
+**Red flags:** "We use framework X because everyone does", or no idea where the paused run is stored.
+
 ## Further reading
+
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/engineering/building-effective-agents)
+- [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview)
+- [LangGraph: Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [LangChain: Human-in-the-loop middleware](https://docs.langchain.com/oss/python/langchain/human-in-the-loop)
+- [LangChain and LangGraph 1.0 (LangChain, 2025)](https://www.langchain.com/blog/langchain-langgraph-1dot0)
+- [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)
+- [OpenAI Agents SDK: Human in the loop](https://openai.github.io/openai-agents-python/human_in_the_loop/)
+- [OpenAI Agents SDK: Models](https://openai.github.io/openai-agents-python/models/)
+- [Assistants API migration guide (OpenAI)](https://developers.openai.com/api/docs/assistants/migration)
+- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+- [Claude Agent SDK: Configure permissions](https://code.claude.com/docs/en/agent-sdk/permissions)
+- [Claude Agent SDK: Observability with OpenTelemetry](https://code.claude.com/docs/en/agent-sdk/observability)
+- [CrewAI documentation](https://docs.crewai.com/en/introduction)
+- [CrewAI: Processes](https://docs.crewai.com/en/concepts/processes)
+- [Microsoft Agent Framework overview](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Microsoft Agent Framework: Tool approvals](https://learn.microsoft.com/en-us/agent-framework/agents/tools/tool-approval)
+- [AutoGen repository (maintenance mode)](https://github.com/microsoft/autogen)
+- [Google ADK documentation](https://adk.dev/)
+- [Google ADK: Action confirmations](https://adk.dev/tools-custom/confirmation/)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Which agent frameworks do you know, and when would you avoid one?"
+    category="Concepts"
+    level="Mid"
+  >
+    - LangGraph runs graphs of nodes over one saved state; the OpenAI Agents SDK and Claude Agent SDK run a model in a loop with tools; CrewAI runs teams of role-based agents; Microsoft Agent Framework and Google ADK offer agents plus workflows.
+    - All of them give you tool schemas, saved state, retries, a pause for a person and tracing.
+    - Avoid one when the agent is a short loop with a few tools and no long pause, when you need every token of the prompt under your control, or when the framework would hide the prompt you need to debug.
+    - If you adopt one, pin the version and keep tools as plain functions so you can leave.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What does an agent framework give you that a while loop does not?"
+    category="Concepts"
+    level="Junior"
+  >
+    - The loop itself is a few lines: call the model, run the tool it asks for, send the result back, repeat.
+    - A framework adds tool schemas from typed functions, a checkpoint after each step, retries with backoff, a pause that waits for a person and resumes later, and traces of every call.
+    - Those parts are where most of the work is, especially a pause that survives a deploy.
+    - It does not add idempotency keys or your business rules; those stay yours.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Graph-based or loop-based: how would you build a refund agent with an approval step?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - Ask which steps are fixed. Looking up the order, checking the rule and asking for approval over £30 are fixed, so they can be edges a reviewer reads.
+    - Writing the reply to an angry customer is open, so that can be a model call or a small loop inside one node.
+    - A loop-based SDK also works if the approval is a setting on the refund tool, checked in code on every call.
+    - Either way the £30 rule lives in code, not in the prompt, and the pause is saved, not held in memory.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A refund waits six hours for approval. How do the frameworks hold that pause, and what can go wrong?"
+    category="Architecture"
+    level="Senior"
+  >
+    - LangGraph and Microsoft Agent Framework write a checkpoint and stop; any worker resumes the same thread with the decision.
+    - The OpenAI Agents SDK returns the pending calls and a run state you serialise to JSON and store, then resume with the approval.
+    - A callback that waits for the answer, as in the Claude Agent SDK's canUseTool, keeps the process alive, so a restart loses the run unless you deny with a message and resume the session later.
+    - Risks: resumed code runs again, so side effects must sit after the pause; serialised state must stay on the server; and the decision must be checked against the pending call before it is applied.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you limit lock-in when you adopt an agent framework?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Keep tools as plain functions or MCP servers, and keep business rules such as the refund limit in your own code.
+    - Own your prompts and your evaluation set, so a change of framework can be measured.
+    - Pin exact versions and re-run evaluations before every upgrade; several frameworks are still on 0.x.
+    - Remember that projects end or change: AutoGen moved to maintenance mode and the Assistants API was shut down in August 2026, so plan the exit before you need it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent started calling the wrong tool after a framework upgrade, and no code changed. How do you debug it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Compare traces from before and after the upgrade, looking at the full request: system prompt, tool definitions and message format.
+    - Frameworks own part of the prompt, so a new release can reword it or change how tool results are sent.
+    - Roll back the pinned version to confirm, then fix the prompt or tool descriptions on your side and run the evaluation set.
+    - Add a check in CI that fails when the rendered prompt changes, so the next upgrade shows the diff before it ships.
+  </InterviewQuestion>
+</InterviewQuestions>

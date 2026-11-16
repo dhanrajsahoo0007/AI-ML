@@ -1,0 +1,14 @@
+title: Two writes, no transaction
+alt: >-
+  A sequence diagram with four lanes: the order service in teal, the database in violet, a neutral broker and
+  the email service in teal. Step 1: the order service inserts order 4471 and the database answers that the commit
+  succeeded; the service then tries to publish an OrderPlaced event to the broker, but the process dies, shown as a red
+  timeout arrow. A note on the database lane says the order is saved and nobody is told. Step 2 reverses the order:
+  the service publishes OrderPlaced first, the broker delivers it to the email service, then the insert of order 4471
+  rolls back because the kettle is out of stock, shown as a red arrow. A note on the email lane says it confirms a lost
+  order.
+caption: >-
+  Whichever write goes first, a crash or a rollback between the two leaves the database and the broker disagreeing.
+tags: [patterns, outbox, dual-write, messaging]
+source: original
+created: 2026-11-16

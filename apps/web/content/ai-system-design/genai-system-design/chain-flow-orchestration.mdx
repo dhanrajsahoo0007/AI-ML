@@ -118,7 +118,7 @@ Here is the refund as one fixed graph with a fan-out and join, a branch on the a
 
 <StepCards>
   <StepCard n={1} title="classify reads the message">
-    The run starts on thread `th_7c2e` with the message in the state. `classify`, one model call, writes `intent:
+    The run starts on thread `th_5e08` with the message in the state. `classify`, one model call, writes `intent:
     refund`. Gap: nothing is known about the order.
   </StepCard>
   <StepCard n={2} title="Fan out: two nodes run in the same step">
@@ -183,7 +183,7 @@ This follows the [flow graph](#architecture) super-step by super-step, saving th
 | 1          | `classify`                    | Model call 1                                                                                      | `intent: refund`                                                                  |
 | 2          | `get_order` and `search_help` | Two tool calls at once                                                                            | `order`: kettle, £42, delivered 12 Nov; `rule`: "Damaged on arrival": full refund |
 | 3          | `join`                        | Both inputs present                                                                               | `ready: true`                                                                     |
-| 4          | `check`                       | £42 > £30, route to `approve`                                                                     | `refund_key: th_7c2e:create_refund`                                               |
+| 4          | `check`                       | £42 > £30, route to `approve`                                                                     | `refund_key: th_5e08:create_refund`                                               |
 | 5          | `approve`                     | `interrupt()`: saved, paused. Approved at 10:20; resumed on the same thread                       | `approved: true`                                                                  |
 | 6          | `create_refund`               | Attempt 1 times out at 10 s; its writes are discarded. Attempt 2, same key, gets the saved result | `refund_id: R-2291`                                                               |
 | 7          | `reply`                       | Model call 2                                                                                      | the reply text                                                                    |
@@ -193,13 +193,13 @@ Here is the checkpoint during the pause (`values`, `next`, and the thread in `co
 
 ```json
 {
-  "config": { "configurable": { "thread_id": "th_7c2e" } },
+  "config": { "configurable": { "thread_id": "th_5e08" } },
   "next": ["approve"],
   "values": {
     "intent": "refund",
     "order": { "id": "4471", "item": "kettle", "amount": 42.0, "delivered": "12 Nov" },
     "rule": "Damaged on arrival: full refund within 30 days",
-    "refund_key": "th_7c2e:create_refund",
+    "refund_key": "th_5e08:create_refund",
     "approved": null
   }
 }
@@ -211,7 +211,7 @@ And the call `create_refund` sends on both attempts, where only the key makes th
 {
   "order_id": "4471",
   "amount": 42.0,
-  "idempotency_key": "th_7c2e:create_refund"
+  "idempotency_key": "th_5e08:create_refund"
 }
 ```
 

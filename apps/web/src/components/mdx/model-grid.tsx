@@ -2,6 +2,8 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { CategoryProgressBadge, ModelCardDone } from "@/components/read-count";
+import { PatternCardMatch, PatternCategoryMatchCount } from "@/components/patterns/pattern-card-match";
+import { TierBadge } from "@/components/patterns/tier-badge";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
 import { slugify } from "@/lib/doc-headings";
 
@@ -44,7 +46,12 @@ export function ModelCategory({
             </span>
             Category
           </div>
-          {cardHrefs.length > 0 && <CategoryProgressBadge hrefs={cardHrefs} title={title} />}
+          {cardHrefs.length > 0 && (
+            <span className="flex flex-wrap items-center gap-2">
+              <PatternCategoryMatchCount hrefs={cardHrefs} />
+              <CategoryProgressBadge hrefs={cardHrefs} title={title} />
+            </span>
+          )}
         </div>
         <h2 className="!mt-4 !border-0 !pt-0">{title}</h2>
         {subtitle && <p className="mt-3 max-w-2xl text-muted-foreground">{subtitle}</p>}
@@ -68,6 +75,7 @@ export function ModelCard({
   description,
   href,
   status,
+  tier,
 }: {
   title: string;
   icon: string;
@@ -75,14 +83,23 @@ export function ModelCard({
   href: string;
   /** "outline" marks a planned page that is not written yet. */
   status?: "outline";
+  /** "advanced" adds the "Advanced · Interview edge" pill (pattern hub). */
+  tier?: "core" | "advanced";
 }) {
+  // The pattern explorer marks each card through <PatternCardMatch>: dimmed when filtered out (hover or focus to
+  // peek), tinted with an inset ring when it matches. Idle on every other hub. Dimming is a muted title and a faded
+  // icon at 90 % opacity, not 35 %: below about 88 % the muted text falls under WCAG AA contrast (axe).
   return (
     <Link
       href={href}
-      className="group flex h-full flex-col bg-paper p-6 !no-underline transition-colors duration-300 hover:bg-tint-soft/60"
+      className={[
+        "group flex h-full flex-col bg-paper p-6 !no-underline transition-[background-color,opacity] duration-300 hover:bg-tint-soft/60",
+        "has-[[data-pattern-match=dim]]:opacity-90 has-[[data-pattern-match=dim]]:hover:opacity-100 has-[[data-pattern-match=dim]]:focus-visible:opacity-100",
+        "has-[[data-pattern-match=hit]]:bg-tint-soft/70 has-[[data-pattern-match=hit]]:shadow-[inset_0_0_0_2px_var(--tint)]",
+      ].join(" ")}
     >
       <div className="flex items-start justify-between gap-4">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-tint [&_svg]:size-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-tint transition-opacity group-has-[[data-pattern-match=dim]]:opacity-40 [&_svg]:size-4">
           {resolveIcon(icon)}
         </span>
         <span className="flex flex-wrap items-center justify-end gap-2">
@@ -98,8 +115,14 @@ export function ModelCard({
           />
         </span>
       </div>
-      <h3 className="!mt-5 font-display text-lg leading-snug text-ink">{title}</h3>
+      {tier === "advanced" && <TierBadge className="!mt-4 self-start" />}
+      <h3
+        className={`${tier === "advanced" ? "!mt-3" : "!mt-5"} font-display text-lg leading-snug text-ink group-has-[[data-pattern-match=dim]]:text-muted-foreground`}
+      >
+        {title}
+      </h3>
       <p className="!mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p>
+      <PatternCardMatch href={href} />
     </Link>
   );
 }
