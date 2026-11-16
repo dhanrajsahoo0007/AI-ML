@@ -38,6 +38,8 @@ order: 3 # optional sort
 categories: [...] # hubs: category titles in display order
 updated: 2026-11-07 # optional; otherwise taken from git history
 tier: advanced # optional; pattern pages only. Must match the hub card's `tier` (absent means core)
+logo: systems/messenger # optional; case studies. An id under assets/logos; must match the hub card's `logo`
+modelledOn: [tech/oss/apache-kafka] # optional; generic case studies only: up to three logo ids shown as "Modelled on"
 ```
 
 ## Rules

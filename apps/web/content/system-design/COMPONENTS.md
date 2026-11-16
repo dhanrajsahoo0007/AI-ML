@@ -466,6 +466,36 @@ An ordered reading list with numbered steps and the total time.
 
 ---
 
+### InterviewPrompt
+
+The interview question at the top of a case study (`## The interview question`), as the interviewer asks it. A
+server component: the bank is read at build time.
+
+- `prompt` (required string, 20+ characters): the question in the interviewer's words.
+- `level` (required): `Junior`, `Mid`, `Senior` or `Staff`. `minutes` (required integer, 15–120): the round length.
+- `bankId` (optional): the `id` of a question in `content/question-bank/*.yaml`. Its `companies` show as "Reported
+  at" chips. Company names come only from the bank; never type one into the page (§5.2 says what the tags mean).
+  An unknown id is an error.
+- `tests` (required, 2–5 strings): what the question tests.
+- `clarify` (required, 2–8): `{ q, a }[]`, the clarifying questions a strong candidate asks and the answer the page
+  assumes for each.
+- `outOfScope` (optional, up to 6 strings).
+
+```mdx
+<InterviewPrompt
+  prompt="Design a ticket booking system for concerts. Fans pick seats on a map, and a big on-sale can bring millions of people at once."
+  level="Senior"
+  minutes={45}
+  bankId="design-ticket-booking"
+  tests={["Contention on one seat", "Surviving a spike far above capacity", "Payment that never double-charges"]}
+  clarify={[
+    { q: "Assigned seats or general admission?", a: "Assigned seats on a seat map." },
+    { q: "How long is a seat held while the fan pays?", a: "Ten minutes." },
+  ]}
+  outOfScope={["Resale", "Dynamic pricing"]}
+/>
+```
+
 ## 2. Interactive widgets
 
 Source: `apps/web/src/components/teach/widgets/` (server wrappers in `index.tsx`, prop schemas in `schemas.ts`, lazy
@@ -1362,6 +1392,27 @@ foundational; never write `tier: core`.
 ```mdx
 <ModelGrid>
   <ModelCard title="Transactional Outbox and Change Data Capture" icon="database" description="One transaction, then a log-tailed relay, so no event is lost." href="/system-design/patterns/outbox-and-cdc" tier="advanced" />
+</ModelGrid>
+```
+
+### ModelCard `logo` and SystemLogo
+
+`<ModelCard logo="systems/ticketmaster" … />` shows the system's logo in place of the lucide icon tile (case-study
+hub). The page carries the same `logo` in its frontmatter (the article header shows it to the left of the title), and
+the card in `_index.yaml` carries `logo` after `tier`; content-check fails when card and page disagree. Ids are paths
+under `assets/logos` without the extension: `systems/<slug>` (asset type `system-logo`: Simple Icons brand marks in
+their own hex, and original glyph marks for generic systems, tagged `glyph-mark`), `companies/<slug>` (a company logo
+reused for a product, such as OpenAI for ChatGPT) or `tech/oss/<slug>` (monochrome technology marks, also used with
+`<TechIcon id="oss/<slug>" />` in tables). A generic page's `modelledOn` frontmatter (up to three ids) shows as a
+"Modelled on" row under the lead.
+
+`SystemLogo` (`src/components/case-studies/system-logo.tsx`) is the server component behind both: it inlines the SVG
+from the asset manifest on a white rounded tile with a hairline border, so a black mark still reads in dark mode, and
+falls back to a monogram tile when the id has no asset. It is not an MDX component.
+
+```mdx
+<ModelGrid>
+  <ModelCard title="Design Ticketmaster" icon="star" description="Seat selection, holds under heavy contention and fair queuing." href="/system-design-case-studies/case-studies/ticketmaster" logo="systems/ticketmaster" />
 </ModelGrid>
 ```
 

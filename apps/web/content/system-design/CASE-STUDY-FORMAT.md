@@ -1,31 +1,97 @@
 # Case study format
 
-Every page in `system-design/case-studies/` follows this order. `facebook-messenger.mdx` is the reference implementation
-(`uber-eats.mdx` is the second). This file is `.md`, not `.mdx`, so the site does not publish it. The copy-paste MDX
-skeleton, the writing rules and the question format are in `PAGE-TEMPLATES.md`; this file explains the sections and the
-diagram conventions behind them.
+Every page in `system-design-case-studies/case-studies/` follows this order (plan:
+`SYSTEM-DESIGN/plans/case-studies-plan.md` §5). `facebook-messenger.mdx` (a converted page) and `ticketmaster.mdx` (a
+page written from an outline) are the reference implementations. This file is `.md`, not `.mdx`, so the site does not
+publish it. The copy-paste MDX skeleton and the writing rules are in `PAGE-TEMPLATES.md` §4. The format is enforced by
+the third `describe` in `tests/unit/doc-headings.test.ts` on every page with `updated:` and no `status: outline`.
 
-Frontmatter: `title`, `description`. Drop `status: outline` once the page is written.
+**Frontmatter:** `title`, `description` (≤ 160 characters), `logo` (an id under `assets/logos`: `systems/<slug>` or
+`companies/<slug>`), `updated`. Generic systems (no brand) also set `modelledOn`: up to three logo ids shown as
+"Modelled on" in the header (for example `[tech/oss/apache-kafka, tech/oss/rabbitmq]`). Drop `status: outline` once
+the page is written; the hub card and `_index.yaml` lose it in the same commit.
 
-1. **Intro** — one short paragraph: what is being designed and what makes it hard.
-2. **Functional requirements** — table `# | Requirement | Notes`, ids F1, F2, ...; then one line of what is out of scope. Use the `RequirementsTable` component (see `COMPONENTS.md`) instead of a raw table, so every id gets an anchor (`#req-F1`) that prose and step `covers` can link to.
-3. **Non-functional requirements** — table `Property | Target | Why it matters` (latency, availability, durability, consistency, scale, cost/efficiency as relevant). Give numbers.
-4. **Back-of-the-envelope estimates** — table `Quantity | Assumption | Result` (DAU, request rates, peak factor, storage per day/year with replication, bandwidth, servers needed). End with one paragraph: what the numbers imply for the design. Use `EstimateTable` for the table and `Numbers` for the two or three headline figures (see `COMPONENTS.md`); the `EstimateCalculator` widget is for readers to try their own inputs.
-5. **API design** — real-time events as a table if the system has them; REST endpoints in an `http` code block. Call out idempotency keys.
-6. **Database schema** — one `sql` block per store, grouped by store type (wide-column, relational, cache/ephemeral). Comment partition and clustering keys.
-7. **Building the architecture, one requirement at a time** — start from the smallest design that meets F1 and add components only when a requirement forces it. One `### Step n: <title> (<requirement ids>)` per step, each with `<AnimatedDiagram name="<case-study>/architecture" step={n} />`, then: what is added, how the flow works, why this choice (the alternative and its cost), and **the gap** that motivates the next step. Tie claims back to the estimates. `<PremiumBreak />` goes right after Step 1, so the free preview shows the requirements, the estimates and the first picture.
-8. **Final architecture** — `<AnimatedDiagram name="<case-study>/architecture" stepper caption="..." />` (full design with buttons to replay each step), then a `Group | Components | Responsibility` table and a numbered request walk-through.
-9. **Running it on AWS** (optional, see below) — the same design on one cloud, wrapped in `<CloudOnly>`.
-10. **Patterns used** — links to `/system-design/patterns/*`.
-11. **Interview questions** — `<InterviewQuestions>` block; map the page in `question-bank/articles.yaml` to `distributed-systems-patterns/case-studies`. Answer format: `PAGE-TEMPLATES.md`, "Interview question format".
+## Sections, in order
+
+The H2 titles are exact (the guard compares them). Every section is bullets, numbered steps or tables: no paragraphs.
+
+| # | H2 | What goes in it |
+|---|---|---|
+| | (intro) | One or two sentences: what is designed and what makes it hard. One bullet: what interviewers test with it |
+| 1 | `The interview question` | `<InterviewPrompt>`: the prompt in the interviewer's words, level, minutes, `bankId`, what it tests, the clarifying questions with the answers the page assumes, out of scope |
+| 2 | `Overview` | 5–6 bullets: the whole design in thirty seconds; then `<Numbers>` with the 3–4 figures that drive it |
+| 3 | `Functional requirements` | `<RequirementsTable kind="functional">`, ids F1…; one "Out of scope" bullet |
+| 4 | `Non-functional requirements` | `<RequirementsTable kind="non-functional">`, ids N1…, every target a number |
+| 5 | `Estimates and decision drivers` | `<EstimateTable>` with the arithmetic; then the decision-drivers table (below) |
+| 6 | `API design` | Table of endpoints or events (who calls it, when), one `http` block; idempotency keys, pagination and error codes as bullets |
+| 7 | `Data model` | The store-choice table (below), one `sql` block per store with partition and clustering keys commented, the access patterns each table serves |
+| 8 | `Building the architecture, step by step` | `### Step n: <title> (<requirement ids>)`, 5–8 steps. Each: the hero at that step, then **Adds**, **Flow** (numbered), **Why this and not that**, **The gap**. `<PremiumBreak />` after Step 1 |
+| 9 | `Final architecture` | The hero with `stepper`; a `Group \| Components \| Responsibility` table; a numbered walk-through of the main request |
+| | `Running it on AWS` | Optional, Messenger only (new pages do not get one), inside `<CloudOnly>` |
+| 10 | `Deep dives` | The three hardest problems, one `###` each with its own sequence or layout figure, then `### Worked example: …` with computed numbers |
+| 11 | `Design decisions and why` | The design-decisions table (below), 7–10 rows |
+| 12 | `Patterns used` | `Pattern \| Where in this design \| Why it is needed here`; each pattern links its page; advanced patterns marked "(advanced)" |
+| 13 | `Same design, other systems` | `If the interviewer asks for… \| What stays the same \| What changes`, 3–5 rows |
+| 14 | `How real systems do it` | 4–6 bullets of facts from primary sources, each with its year; then where this design differs from the real one and why that is fine |
+| 15 | `Failure modes & pitfalls` | 5–7 bullets: what breaks, how you notice, the fix |
+| 16 | `Interview framework` | A minute-by-minute plan for 45 minutes (numbered); `**What interviewers listen for:**` by level; `**Red flags:**` |
+| 17 | `Further reading` | The primary sources as links; a `Related pages:` line |
+| | `<InterviewQuestions>` | 8–10 questions from the real interview probes, mixed levels, at least three Senior; every answer 3–5 bullets |
+
+Length 320–480 lines; 4–6 figures (one step-by-step hero with `stepper`, at least one sequence, at least one layout).
+
+### The decision-drivers table
+
+`| # | Driver | For this system | What it forces |`, the same twelve rows on every page, in this order. A driver that
+does not matter still gets its row, with "Not a driver here" and one reason.
+
+| # | Driver | The question it answers |
+|---|---|---|
+| D1 | Read to write ratio | Read-heavy or write-heavy, and by how much? |
+| D2 | Peak against average | How bursty? What is the worst minute? |
+| D3 | Consistency per operation | Which operations need strong consistency, read-your-writes, or eventual? |
+| D4 | Latency target | The p99 budget on the hot path |
+| D5 | Durability | Can an acknowledged write be lost? Recovery point? |
+| D6 | Ordering | Does order matter, and in what scope? |
+| D7 | Duplicates | Harmless, annoying or harmful? Where are they removed? |
+| D8 | Data size and growth | Bytes per item, items per day, years kept, hot against cold |
+| D9 | Fan-out shape | One to one, one to many, one to millions? |
+| D10 | Contention | Do many writers fight over one item? |
+| D11 | Geography | One region or many? Residency rules? |
+| D12 | Availability and degradation | The target, and what is switched off first under stress |
+
+### The store-choice table
+
+`| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |`,
+one row per kind of data. Name the store type first ("wide-column store") and an example product second, with its
+mark where one exists (`<TechIcon id="oss/apache-cassandra" />`; the set is in `assets/logos/tech/oss/`).
+
+### The design-decisions table
+
+`| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |`, 7–10 rows. "Decided by"
+cites driver and requirement ids ("D1, D4, N2"). Every row is a choice another workload would flip; "use a load
+balancer" is not a decision.
+
+### Facts, sources and the question bank
+
+- Every claim about a real company sits under "How real systems do it", with a primary source in "Further reading"
+  and a year. Estimates elsewhere on the page are round numbers chosen to size the system.
+- A pattern is never re-taught: two or three bullets on why it is needed here, its figure embedded by id
+  (`spec="animated/patterns/<id>"`), and a link to its page.
+- Map the page in `content/question-bank/articles.yaml` to its `system-design-questions/<subsection>` (plan §8 lists
+  the subsection per page), and add the page path to the matching bank prompts' `topics`, so the bank's "Asked in
+  interviews" block shows at the end of the page.
 
 ## Where diagram specs live
 
 Animated diagrams are assets, not components:
 
 - The spec is `assets/diagrams/animated/<group>/<name>.ts`, which `export default`s a `DiagramSpec` (type in
-  `src/components/diagrams/types.ts`). For a case study `<group>` is the case-study slug (`messenger`, `uber-eats`)
-  and `<name>` is `architecture` for the step build, `aws` for the AWS deployment.
+  `src/components/diagrams/types.ts`). For a case study `<group>` is the short slug (`messenger`, `uber-eats`, `ticketmaster`)
+  and `<name>` is `architecture` for the step build, `aws` for the AWS deployment, and a descriptive name for the
+  other figures (`seat-hold`, `waiting-room`). Shared zones and the hero frame come from
+  `src/components/diagrams/presets/case-study.ts` (`ZONE`, `zoneFrame()`); sequence and layout figures use
+  `PATTERN_TONE` from `presets/patterns.ts`. Blocks are pastel (`fill: "pastel"`) with glyph icons.
 - Every spec has a sidecar `assets/diagrams/animated/<group>/<name>.meta.yaml` with `title`, `alt` (required: one or two
   sentences that describe the picture for a screen reader), `tags` and `created`. Schema: `src/lib/asset-schema.ts`.
 - The registry `src/components/diagrams/animated-specs.ts` is **generated** by `npm run assets -w web`. Never edit it
@@ -63,9 +129,9 @@ Edges: `flow` + `packet` with increasing `delay` for the main request path; `das
 
 Check every diagram at desktop width, at 375 px, in dark mode and with reduced motion before committing.
 
-## Section 8: Running it on AWS (optional)
+## Running it on AWS (optional, Messenger only)
 
-Add this section when the case study has a clear cloud story. Everything in it is wrapped in `<CloudOnly>`, which
+Messenger keeps this section; new pages do not get one (cloud deployments are a separate track). Everything in it is wrapped in `<CloudOnly>`, which
 renders its children only when the Cloud section is visible in the current environment (today Cloud is `hidden` in
 production, so the section is invisible there and nothing from it ships). The page must still read well without it.
 
@@ -95,7 +161,7 @@ Section order, as on the Messenger page:
 ```mdx
 <CloudOnly>
 
-## 8. Running it on AWS
+## Running it on AWS
 
 One paragraph: the design above is cloud-neutral; this section picks AWS services and says why.
 

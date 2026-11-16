@@ -293,172 +293,65 @@ Rules:
 
 ## 4. Case study
 
-The structure is `CASE-STUDY-FORMAT.md`: requirements → NFRs → estimates → APIs → schema → step build → final →
-AWS section (optional) → patterns used → questions. The two additions from the plan: `RequirementsTable` for sections
-1–2 so step `covers` ids link back to rows, and `EstimateTable` in section 3.
-
-H2 order: 1. Functional requirements → 2. Non-functional requirements → 3. Back-of-the-envelope estimates →
-4. API design → 5. Database schema → 6. Building the architecture, one requirement at a time → 7. Final architecture →
-8. Running it on AWS (optional, inside `<CloudOnly>`) → Patterns used → Interview questions.
+The sections, the three tables (decision drivers D1–D12, store choice, design decisions) and the rules are in
+`CASE-STUDY-FORMAT.md`; the references are `case-studies/facebook-messenger.mdx` (converted) and
+`case-studies/ticketmaster.mdx` (new). Points only, figure blocks as on the pattern pages (§3), and every design
+choice names the driver or requirement id that decided it.
 
 ````mdx
 ---
-title: "Design a URL shortener"
-description: "Short links at scale: unique ids, redirects, caching and a read-heavy store, built one requirement at a time."
-updated: 2026-11-09
+title: "Design Ticketmaster"
+description: "Seat maps, holds under heavy contention and a waiting room for big on-sales, built one requirement at a time."
+logo: systems/ticketmaster
+updated: 2026-11-16
 ---
 
-One short paragraph: what is being designed and what makes it hard.
+One or two sentences: what is designed and what makes it hard.
 
-## 1. Functional requirements
+- Interviewers use this question to see whether you …
 
-<RequirementsTable
-  kind="functional"
-  rows={[
-    { id: "F1", requirement: "Shorten a URL", notes: "Return a short code for any valid long URL." },
-    { id: "F2", requirement: "Redirect", notes: "Opening the short link sends the browser to the long URL." },
-    { id: "F3", requirement: "Custom aliases", notes: "Optional; must be unique." },
-    { id: "F4", requirement: "Expiry", notes: "Links can expire after a date." },
-  ]}
-/>
+## The interview question
 
-**Out of scope:** one line listing what this design does not cover.
+<InterviewPrompt prompt="Design …" level="Senior" minutes={45} bankId="design-ticket-booking"
+  tests={["…", "…"]} clarify={[{ q: "…?", a: "…" }, { q: "…?", a: "…" }]} outOfScope={["…"]} />
 
-## 2. Non-functional requirements
+## Overview
+- 5–6 bullets. Then <Numbers items={[…]} />
 
-<RequirementsTable
-  kind="non-functional"
-  rows={[
-    { id: "N1", property: "Latency", target: "p99 redirect under 50 ms", why: "A redirect is on the way to every page view." },
-    { id: "N2", property: "Availability", target: "99.99% for redirects", why: "A dead link looks like a dead site." },
-    { id: "N3", property: "Scale", target: "100:1 reads to writes", why: "Drives caching and the choice of store." },
-  ]}
-/>
+## Functional requirements
+<RequirementsTable kind="functional" rows={[{ id: "F1", requirement: "…", notes: "…" }]} />
+- Out of scope: …
 
-## 3. Back-of-the-envelope estimates
+## Non-functional requirements
+<RequirementsTable kind="non-functional" rows={[{ id: "N1", property: "Latency", target: "p99 < 200 ms", why: "…" }]} />
 
-Assumptions are round numbers chosen to size the system, not real figures.
+## Estimates and decision drivers
+<EstimateTable rows={[…]} />
+| # | Driver | For this system | What it forces |      (D1 … D12, every row)
 
-<EstimateTable
-  rows={[
-    { quantity: "New links per day", assumption: "100 million", result: "about 1,200 writes/s" },
-    { quantity: "Redirects per day", assumption: "100 x reads", result: "about 120K reads/s, 360K at peak" },
-    { quantity: "Storage per link", assumption: "500 bytes", result: "50 GB/day, 18 TB/year, 55 TB with 3x replication" },
-  ]}
-/>
-
-<Numbers items={[{ label: "Peak reads", value: "360K/s" }, { label: "Storage / year", value: "18 TB" }, { label: "Cache for hot 20%", value: "~4 GB" }]} />
-
-One paragraph: what the numbers imply for the design (read-heavy, cache most of it, store is small).
-
-## 4. API design
-
-### REST endpoints
-
-```http
-POST /v1/links            Idempotency-Key: <uuid>
-GET  /{code}              302 -> long URL
-```
-
-Call out idempotency keys. Add a real-time events table only if the system has them.
-
-## 5. Database schema
-
-### Links (key-value or wide-column)
-
-```sql
--- partition key: code
-CREATE TABLE links (...);
-```
-
-One `sql` block per store, grouped by store type. Comment partition and clustering keys.
-
-## 6. Building the architecture, one requirement at a time
-
-Start from the smallest design that meets F1 and add a component only when a requirement forces it.
-
-### Step 1: Shorten and redirect (F1, F2)
-
-<AnimatedDiagram name="url-shortener/architecture" step={1} />
-
-What is added. How the flow works. Why this choice (the alternative and its cost). **The gap:** what this step cannot do yet, which motivates step 2.
-
+## API design            (table of endpoints or events, one http block, idempotency / pagination / errors as bullets)
+## Data model            (store-choice table, one sql block per store, access patterns)
+## Building the architecture, step by step
+### Step 1: <title> (F1)
+<AnimatedDiagram spec="animated/<group>/architecture" step={1} caption="…" />
+- **Adds:** … · **Flow:** 1. … · **Why this and not that:** … (D1) · **The gap:** …
 <PremiumBreak />
-
-### Step 2: Unique codes at 1,200 writes/s (F1, N3)
-
-<AnimatedDiagram name="url-shortener/architecture" step={2} />
-
-Same four parts: added, flow, why, gap. Tie claims to the estimates in section 3.
-
-### Step 3: ...
-
-{/* 3 to 8 steps in all */}
-
-## 7. Final architecture
-
-<AnimatedDiagram name="url-shortener/architecture" stepper caption="URL shortener: create, redirect from cache, fall back to the store. Use the numbers to replay the build." />
-
-| Group | Components | Responsibility |
-|---|---|---|
-| Edge | CDN, load balancer | ... |
-| Services | link service | ... |
-| Storage | links store, cache | ... |
-
-### A redirect, step by step
-
-1. The browser requests `/abc123`.
-2. ...
-
-<CloudOnly>
-
-## 8. Running it on AWS
-
-One paragraph: the design above is cloud-neutral; this section picks AWS services and says why.
-
-### Service mapping
-
-<CloudMapping diagram="url-shortener/architecture" lead="aws" />
-
-### The deployment, step by step
-
-<AnimatedDiagram name="url-shortener/aws" stepper caption="URL shortener on AWS: one Region, three Availability Zones, managed services beside the VPC." />
-
-### Key decisions
-
-| Decision | AWS choice | Why (from the estimates) | Alternative and its cost |
-|---|---|---|---|
-
-### Storage over time
-
-### Availability, failover and limits
-
-### Security and operations
-
-### On Google Cloud and Azure
-
-| Concern | Google Cloud | Azure |
-|---|---|---|
-
-</CloudOnly>
-
+## Final architecture    (hero with stepper, Group | Components | Responsibility, numbered walk-through)
+## Deep dives            (three ### with a figure block each, then ### Worked example: …)
+## Design decisions and why
 ## Patterns used
-
-[Unique ID Generation](/system-design/patterns/unique-id-generation) · [Caching](/system-design/patterns/caching) · [Load Balancing](/system-design/patterns/load-balancing)
+## Same design, other systems
+## How real systems do it
+## Failure modes & pitfalls
+## Interview framework
+## Further reading
 
 <InterviewQuestions>
-  {/* 8–10 questions; format in section 5 below */}
+  <InterviewQuestion question="…" category="Architecture" level="Senior">
+  - three to five bullets
+  </InterviewQuestion>
 </InterviewQuestions>
 ````
-
-Notes:
-
-- Section 8 needs `cloud` refs on the nodes of `architecture.ts` and a second spec `<slug>/aws.ts`; both are described
-  in `CASE-STUDY-FORMAT.md`. Leave the whole `<CloudOnly>` block out if the case study has no cloud story yet.
-- Map the page in `question-bank/articles.yaml` to `distributed-systems-patterns/case-studies`.
-- Add the MDX file, the hub `<ModelCard>` and the `_index.yaml` card together (`add-article` skill).
-
----
 
 ## 5. Interview question format
 
