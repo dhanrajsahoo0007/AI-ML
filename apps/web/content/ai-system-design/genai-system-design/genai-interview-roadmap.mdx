@@ -2,39 +2,274 @@
 title: "GenAI Interview Roadmap"
 description: "What GenAI and LLM interviews ask by role and round, and the order to study this section in."
 icon: route
-status: outline
+updated: 2026-11-16
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** What GenAI and LLM interviews ask by role and round, and the order to study this section in.
+GenAI interviews test the same small set of ideas from different angles: how a model turns tokens into text, how you ground it in data, how you measure it, and what it costs to run. Learn those once, in order, and every round becomes a variation on them.
 
 ## Overview
 
+- **Four roles, one core.** AI engineers, ML engineers, research engineers and forward-deployed engineers all get asked about tokens, context windows, retrieval, evaluation, latency and cost. The roles differ in how deep each round goes, not in which topics exist.
+- **The hub has an order.** Start with the [map of the whole stack](/ai-system-design/genai-system-design/anatomy-of-an-llm-application), then [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture), then the building blocks ([RAG & Knowledge](/ai-system-design/genai-system-design/rag-fundamentals) and [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures)), then the groups that run a system in production ([Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability), [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety)). The rest is depth for your role.
+- **Practice beats reading.** Each page ends with interview questions, and the [question bank](/interviews) files more by topic. Answer them aloud, then compare with the written answer.
+- **One running example.** This page follows one design prompt through every section: "Design an assistant that answers customer questions from our help-centre articles." It is the most common shape of GenAI design question, and it touches almost every group in the hub.
+
+<KeyIdea>Study the hub in dependency order (the map, then foundations, then RAG and agents, then evaluation, serving and safety), and practise every topic as an answer spoken aloud, because every role and round asks the same core from a different angle.</KeyIdea>
+
 ## Mental model
+
+Think of the hub as a driving licence course rather than a library.
+
+- **Theory before the road.** You learn what the pedals do (tokens, attention, decoding) before you drive in traffic. Skipping it works until a question such as why long prompts get slower.
+- **Manoeuvres are the building blocks.** Parking, roundabouts and motorway merges map to retrieval, tool calling and prompting. Each one is practised on its own, then combined.
+- **The test is a route you have not seen.** The examiner does not ask you to recite the manual. They give you a route (a design prompt) and watch how you handle it: checking mirrors (clarifying requirements), signalling (saying your plan out loud) and recovering from a mistake (a failure mode the interviewer raises).
+- **Different licences, same core.** A lorry licence and a car licence share the theory test. The four roles share the core; the specialist rounds are the extra lessons.
 
 ## Core concepts
 
 ### Roles: AI engineer, ML engineer, research engineer and forward-deployed engineer
 
+Job titles vary between companies, so read the job description, not the title. The patterns below are common, not universal.
+
+- **AI engineer:** Builds products on top of foundation models, through APIs or open-weight models. The work is prompts, [retrieval](/ai-system-design/genai-system-design/rag-fundamentals), [tool calling](/ai-system-design/genai-system-design/tool-use-and-mcp), [agents](/ai-system-design/genai-system-design/agent-architectures), [evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) and shipping. Latent Space's 2023 essay "The Rise of the AI Engineer" described the role as software engineers building on foundation models, with product-specific data and evals as their concern. Interviews lean on system design and practical builds.
+- **ML engineer:** Trains, adapts and serves models. On a GenAI team that means [fine-tuning](/ai-system-design/genai-system-design/fine-tuning-llms), [serving and inference](/ai-system-design/genai-system-design/llm-serving-inference), [GPU performance](/ai-system-design/genai-system-design/gpu-performance-for-llms), data pipelines and [release pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines). Interviews add ML fundamentals and classic [ML system design](/ml-system-design) to the GenAI core.
+- **Research engineer:** Turns research ideas into working training and evaluation code. Interviews go deepest on [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture): attention, [scaling laws](/ai-system-design/genai-system-design/scaling-laws-and-training), [post-training](/ai-system-design/genai-system-design/reinforcement-preference-learning), and often a paper discussion or an implementation from scratch.
+- **Forward-deployed engineer:** Works with a customer to scope, build and debug a GenAI system on the customer's data. Interviews test scoping an ambiguous problem, building fast, and explaining trade-offs to a non-specialist. [RAG](/ai-system-design/genai-system-design/rag-fundamentals), [access control](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy) and [data privacy](/ai-system-design/genai-system-design/data-privacy-pii-handling) come up because customer data is messy and sensitive.
+
 ### Round types and what each one tests
+
+- **Coding:** Data structures and algorithms, or a practical task such as parsing a file, calling an API or writing a small service. It tests correct, readable code under time pressure. The [DSA section](/dsa) covers the algorithm side.
+- **LLM and ML concepts:** Short questions on how things work: why attention scales with the square of the sequence length, what temperature does, how LoRA cuts trainable parameters. It tests understanding of the mechanism, not recall of names.
+- **GenAI system design:** An open prompt such as the help-centre assistant. It tests requirements, architecture, retrieval, model choice, evaluation, cost and failure handling, in about 45 to 60 minutes.
+- **Practical build or debugging:** A take-home or live session where you build a small RAG pipeline or agent, or fix a broken one. It tests whether you can make something work and measure it.
+- **Paper or research discussion:** Mostly for research roles. You explain a paper's idea, its experiments and its weaknesses, or propose a follow-up.
+- **Customer or scoping case:** Mostly for forward-deployed roles. The interviewer plays a customer with a vague goal; you ask questions, set a pilot scope and explain risks in plain language.
+- **Behavioural and project deep dive:** Stories about past work, and one project explored in detail: what you built, what broke, what you measured. The [behavioural section](/behavioral) covers story framing.
+
+<Compare caption="Roles by round: which rounds a role usually meets and how deep each goes. Patterns, not any one company's process; read the job description.">
+
+| Round | AI engineer | ML engineer | Research engineer | Forward-deployed engineer |
+| --- | --- | --- | --- | --- |
+| Coding | Practical coding, sometimes DSA | DSA and ML coding (training loop, metrics) | Implement a model piece from scratch (attention, a loss) | Practical coding under time pressure |
+| LLM and ML concepts | Prompting, RAG, decoding, context windows | ML fundamentals plus serving, quantization, fine-tuning | Deepest: attention, scaling, post-training maths | Breadth: what each component does and when it fails |
+| GenAI system design | Core round: RAG, agents, eval, cost | Serving, training and data pipelines at scale | Lighter; often an eval or training-system design | Design on a customer's data and constraints |
+| Practical build or debugging | Common: build or fix a RAG or agent | Debug training or serving issues | Reproduce or extend an experiment | Common: timed build, then explain it |
+| Paper or research discussion | Rare | Sometimes | Core round | Rare |
+| Customer or scoping case | Sometimes, on product teams | Rare | Rare | Core round |
+| Behavioural and project deep dive | Every loop | Every loop | Every loop, often on research taste | Every loop, weighted on customer work |
+
+</Compare>
 
 ### Topics every candidate needs
 
+Whatever the role, these come up in almost every loop. Each links to the page that teaches it.
+
+- **Tokens and context:** [tokenization](/ai-system-design/genai-system-design/tokenization) and [context windows](/ai-system-design/genai-system-design/context-windows-and-in-context-learning), because cost, latency and truncation are all counted in tokens.
+- **How a transformer works:** the [transformer block](/ai-system-design/genai-system-design/transformer-architecture) and [self-attention](/ai-system-design/genai-system-design/self-attention-explained), at the level of "what each part does and why it costs what it costs".
+- **Decoding:** [temperature, top-p and constrained decoding](/ai-system-design/genai-system-design/decoding-and-sampling), and [structured output](/ai-system-design/genai-system-design/structured-output-generation).
+- **Grounding:** the [RAG pipeline](/ai-system-design/genai-system-design/rag-fundamentals) end to end, and [when to prompt, retrieve or fine-tune](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning).
+- **Tools and agents:** [function calling](/ai-system-design/genai-system-design/tool-use-and-mcp) and the difference between a workflow and an [agent](/ai-system-design/genai-system-design/agent-architectures).
+- **Evaluation:** [offline evals, golden sets and LLM judges](/ai-system-design/genai-system-design/llm-evaluation-fundamentals).
+- **Serving, cost and latency:** [time to first token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token), the KV cache, and [cost per request](/ai-system-design/genai-system-design/cost-latency-optimization).
+- **Safety:** [guardrails](/ai-system-design/genai-system-design/guardrails-and-safety) and [prompt injection](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks).
+
 ## Architecture
+
+The study plan has the same shape as an LLM system: lower layers first, because the upper ones assume them. The hub's groups fall into four tiers.
+
+1. **Orientation: [Start Here](/ai-system-design/genai-system-design/anatomy-of-an-llm-application).** The map of every layer. Read it first and return to it after each group; it tells you where the new topic sits.
+2. **Foundations: [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture).** Transformer mechanics, then training and decoding. Every later group refers back here: the KV cache in serving is the attention keys and values; chunk sizes in RAG are counted in tokens.
+3. **Building blocks: [RAG & Knowledge](/ai-system-design/genai-system-design/rag-fundamentals) and [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures).** The two ways a product gives a model more than its weights: retrieved data and tools. RAG comes first because agentic RAG, memory and context engineering build on it. [Fine-Tuning & Adaptation](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning) sits beside them, as the third way to change behaviour.
+4. **Running it: [Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) and [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety).** These turn a demo into a product. Evaluation comes first in this tier: you cannot judge a serving or safety change without a way to measure quality.
+
+[Multimodal & Voice](/ai-system-design/genai-system-design/multimodal-and-voice-ai) is a branch you take only if the role needs it; it assumes the foundations and serving tiers.
+
+The prerequisites that matter most, so you can skip ahead safely:
+
+| Before you read | Read first | Why |
+| --- | --- | --- |
+| [Vector Databases](/ai-system-design/genai-system-design/vector-databases) | [Embeddings](/ai-system-design/genai-system-design/embeddings-and-representation-space) | An index is only as good as the vectors it stores |
+| [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag) | [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) | It is a RAG pipeline driven by an agent loop |
+| [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation) | [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) | Same metrics and judges, applied part by part |
+| [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) | [Self-Attention Explained](/ai-system-design/genai-system-design/self-attention-explained) | The KV cache stores attention's keys and values |
+| [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft) | [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) | Adapters are a cheaper way to do the same job |
+| [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks) | [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) | The worst injections act through tools |
+
+For the help-centre assistant, the tiers map onto the answer: tier 2 explains why a 200-page article must be chunked, tier 3 is the retrieval pipeline, and tier 4 is how you prove it answers correctly, fast enough and safely.
 
 ## Technical mechanics
 
 ### A study order for one week, one month and three months
 
+All times below are **illustrative**: they assume you read the page, redraw its main figure from memory and answer its interview questions aloud. Adjust them to what you already know.
+
+**One week: the core.** If the interview is days away, read these in order. They cover every topic in the list above at the depth a first-round loop expects, and finish with one full case study as a rehearsal.
+
+<LearningPath
+  title="One week: the core (illustrative times)"
+  steps={[
+    { title: "Anatomy of an LLM Application", href: "/ai-system-design/genai-system-design/anatomy-of-an-llm-application", minutes: 45 },
+    { title: "Transformer Architecture", href: "/ai-system-design/genai-system-design/transformer-architecture", minutes: 60 },
+    { title: "Context Windows & In-Context Learning", href: "/ai-system-design/genai-system-design/context-windows-and-in-context-learning", minutes: 40 },
+    { title: "Decoding & Sampling", href: "/ai-system-design/genai-system-design/decoding-and-sampling", minutes: 40 },
+    { title: "RAG Fundamentals", href: "/ai-system-design/genai-system-design/rag-fundamentals", minutes: 60 },
+    { title: "Tool Use & Function Calling", href: "/ai-system-design/genai-system-design/tool-use-and-mcp", minutes: 45 },
+    { title: "LLM Evaluation Fundamentals", href: "/ai-system-design/genai-system-design/llm-evaluation-fundamentals", minutes: 45 },
+    { title: "LLM Serving and Inference", href: "/ai-system-design/genai-system-design/llm-serving-inference", minutes: 60 },
+    { title: "Cost and Latency Optimization", href: "/ai-system-design/genai-system-design/cost-latency-optimization", minutes: 45 },
+    { title: "Guardrails and Safety", href: "/ai-system-design/genai-system-design/guardrails-and-safety", minutes: 40 },
+    { title: "Case Study: Customer Support Agent", href: "/genai-system-design/case-studies/customer-support-agent", minutes: 60 },
+  ]}
+/>
+
+The last step is the help-centre assistant's closest case study. Read its requirements, sketch your own design for 45 minutes, then compare.
+
+**One month: the core plus depth.** Week 1 is the path above. Weeks 2 to 4 go one tier deeper and end in practice.
+
+| Week | Focus | Read | Practise |
+| --- | --- | --- | --- |
+| 2 | Building blocks in depth | [Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking), [Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection), [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking), [Context Engineering](/ai-system-design/genai-system-design/context-engineering), [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) | Build a small RAG pipeline over 20 documents |
+| 3 | Running it | [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model), [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation), [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation), [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching), [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway), [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks) | Add a 30-question eval set to the week 2 pipeline |
+| 4 | Mock rounds | [AI Answer Engine](/genai-system-design/case-studies/ai-answer-engine), [Code Assistant](/genai-system-design/case-studies/code-assistant), [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway) | Two timed designs a week, spoken aloud or with a partner |
+
+**Three months: the core, depth and your role.** Month 1 is the plan above. Month 2 reads whole groups for your role. Month 3 is practice, with one new group as a stretch.
+
+| Role | Month 2: read whole groups | Month 3: practise |
+| --- | --- | --- |
+| AI engineer | [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures), [Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) | All [GenAI case studies](/genai-system-design), plus a build with an agent and an eval |
+| ML engineer | [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [Fine-Tuning & Adaptation](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) | [ML system design](/ml-system-design) cases and GenAI platform cases |
+| Research engineer | [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture) in full, [Fine-Tuning & Adaptation](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning), [Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) | Implement attention and a LoRA layer from scratch; present two papers |
+| Forward-deployed engineer | [RAG & Knowledge](/ai-system-design/genai-system-design/rag-fundamentals) in full, [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety), [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures) | Timed builds on unfamiliar data, then a five-minute explanation to a non-specialist |
+
+### How to study one page
+
+The hub's pages share one shape, so one routine works for all of them.
+
+1. Read the Overview and the one-sentence key idea. Say it back in your own words.
+2. Step through each figure, then close the page and redraw the main one from memory. A diagram you can redraw is a diagram you can use on a whiteboard.
+3. Read Trade-offs and Failure modes twice. Interviewers spend most of their follow-ups there.
+4. Answer the interview questions aloud before opening the answers. Note the ones you missed and come back to them two days later.
+
 ### Mapping topics to the question bank
+
+The [interview question bank](/interviews) files questions by category and subsection. After each group, open the matching subsections and answer five questions you have not seen.
+
+| Hub group | Question bank subsections |
+| --- | --- |
+| LLM Foundations | [Attention & Transformers](/interviews/llm-foundations/attention), [Tokenization & Embeddings](/interviews/llm-foundations/tokenization-embeddings), [Pretraining & Scaling](/interviews/llm-foundations/pretraining-scaling), [LLM Behaviour & Decoding](/interviews/llm-foundations/llm-behaviour) |
+| Prompt and Context Engineering | [Prompting Techniques](/interviews/prompt-engineering/techniques), [Structured Output](/interviews/prompt-engineering/structured-output), [Context Engineering](/interviews/prompt-engineering/context-engineering) |
+| RAG & Knowledge | [RAG Fundamentals](/interviews/rag/rag-fundamentals), [Chunking & Ingestion](/interviews/rag/chunking-ingestion), [Vector Search & Databases](/interviews/rag/vector-search), [RAG Evaluation](/interviews/rag/rag-evaluation) |
+| AI Agents & Engineering | [Agent Architectures](/interviews/agents/agent-architectures), [Harness Engineering](/interviews/agents/harness-engineering), [Function Calling](/interviews/mcp-tool-use/function-calling), [Model Context Protocol](/interviews/mcp-tool-use/mcp) |
+| Fine-Tuning & Adaptation | [Supervised Fine-Tuning](/interviews/fine-tuning/sft), [LoRA & PEFT](/interviews/fine-tuning/peft), [RLHF, DPO & RL](/interviews/fine-tuning/preference-rl) |
+| Evaluation and LLMOps | [LLM Evaluation Methods](/interviews/evaluation/llm-eval-methods), [LLM-as-Judge](/interviews/evaluation/llm-as-judge), [Observability & LLMOps](/interviews/evaluation/observability) |
+| Inference & Serving | [Serving & Batching](/interviews/inference-gpu/serving-batching), [KV Cache & Efficient Attention](/interviews/inference-gpu/kv-cache-attention), [Cost & Capacity](/interviews/inference-gpu/cost-optimization) |
+| Safety, Security & Governance | [Prompt Injection & Jailbreaks](/interviews/safety-security/prompt-injection), [Guardrails & Moderation](/interviews/safety-security/guardrails), [Hallucination](/interviews/safety-security/hallucination) |
+| Multimodal & Voice | [Vision-Language Models](/interviews/multimodal/vision-language), [Voice Agents](/interviews/multimodal/voice-agents) |
+| Whole-system design | [Design Interview Approach](/interviews/ai-system-design/interview-approach), [GenAI Product Design](/interviews/ai-system-design/genai-products), [LLM Platform & Infrastructure](/interviews/ai-system-design/llm-platforms) |
+| Forward-deployed rounds | [Scoping & Pilots](/interviews/forward-deployed/customer-scoping), [Escalations & Debugging](/interviews/forward-deployed/escalations), [Timed Builds & Communication](/interviews/forward-deployed/timed-builds) |
 
 ## Trade-offs
 
+Every study plan gives something up. Choose on purpose.
+
+<Compare caption="Study strategies: what each one buys and what it costs.">
+
+| Choice | Buys | Costs | When to use |
+| --- | --- | --- | --- |
+| Breadth first (the one-week core) | Every topic at a usable depth; no blank stares | Thin follow-up answers on any one topic | Interview within a week; first pass for everyone |
+| Depth first (one group in full) | Strong answers in the role's core round | Gaps elsewhere that a generalist question exposes | Role is narrow and known, after the core |
+| Reading pages | Fast coverage, correct mental models | Feels like progress without proving recall | First pass of each group |
+| Answering aloud and mock rounds | Finds the gaps; trains structure and timing | Slow; uncomfortable; needs a partner or a recorder | Every week, from week 1 |
+| Papers | Primary-source depth; needed for research roles | Hours per paper; may not match product questions | Research roles; one paper per core topic for others |
+| Building a small system | Real numbers and failure stories for the deep dive | Takes days; easy to over-polish | Any role with a practical round |
+
+</Compare>
+
 ## Production systems
+
+The case studies are where the groups meet. Use them as mock rounds, not as reading.
+
+- **Assistants:** [ChatGPT-style chat service](/genai-system-design/case-studies/chatgpt-style-chat-service) (streaming, sessions, scale), [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) (RAG, tools, hand-off to people) and [Code Assistant](/genai-system-design/case-studies/code-assistant) (repository context, latency).
+- **Search and documents:** [AI Answer Engine](/genai-system-design/case-studies/ai-answer-engine) (retrieval with citations) and [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline) (batch, structured output).
+- **Platforms and safety:** [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway) (routing, quotas, cost) and [Content Moderation System](/genai-system-design/case-studies/content-moderation-system) (cascades, precision and recall).
+- **Voice:** [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre), for roles that list speech.
+
+A good order is support agent, answer engine, chat service, then gateway: each adds one new concern to the help-centre assistant you practised in week 1.
 
 ## Failure modes & pitfalls
 
+- **Reading without recall.** Ten pages read is not ten topics known. If you cannot redraw the figure or answer the questions aloud, you have not learned the page yet.
+- **Starting with agents.** Agents are the newest topic and the most fun, but an agent answer falls apart when the interviewer asks how retrieval or evaluation works underneath it.
+- **Architecture without numbers.** Boxes and arrows with no token counts, latency budget or cost per request read as a junior answer. Every design page in the hub has the arithmetic; practise it.
+- **Evaluation as the last slide.** Saying "and then we would evaluate it" in the final minute signals you have not shipped. Name the eval set and the metric when you name the component.
+- **Memorising one company's loop.** Formats change and differ between teams. Prepare for round types, then confirm your loop with the recruiter.
+- **Skipping the behavioural round.** Every role in the table meets it. Prepare two or three project stories with what you measured, using the [behavioural section](/behavioral).
+
+<Callout tone="red" title="What breaks">
+  Over-specialising early. A candidate who reads one group in full during week 1 often meets a generalist question on day one and has nothing to say. Do the one-week core first, then go deep.
+</Callout>
+
 ## Interview framework
 
+Most GenAI design rounds reward the same structure. Here it is applied to the help-centre assistant, with an **illustrative** budget for a 45-minute round.
+
+1. **Clarify (about 5 minutes).** Who asks, how many questions a day, which languages, how fresh the articles must be, what a wrong answer costs, and the latency target. Write the numbers down.
+2. **Baseline (about 5 minutes).** The simplest system that could work: retrieve the top articles, put them in a prompt, generate an answer with citations. Say why you start there and not with an agent or fine-tuning.
+3. **Deep dive (about 20 minutes).** Chunking and embeddings, hybrid search and re-ranking, the prompt and its context budget, [model choice](/ai-system-design/genai-system-design/choosing-a-model), and the hand-off to a person when retrieval finds nothing. Go deepest where the interviewer leans in.
+4. **Evaluate and operate (about 10 minutes).** A golden set of real questions, retrieval and answer metrics, an LLM judge checked against people, then latency, cost per request, caching, guardrails and monitoring.
+5. **Wrap up (about 5 minutes).** Restate the design in three sentences, name the biggest risk and what you would build next.
+
+- **What interviewers listen for:** Requirements as numbers, a baseline before complexity, evaluation tied to each component, cost and latency arithmetic, and failure modes named before they are asked.
+- **Red flags:** Starting with a framework name, no eval plan, ignoring the "no answer found" case, and agents where a fixed pipeline would do.
+
 ## Further reading
+
+- [The Rise of the AI Engineer (Latent Space, 30 June 2023)](https://www.latent.space/p/ai-engineer): the essay that popularised the AI engineer title and its split from ML engineering.
+- [Introduction to Machine Learning Interviews Book (Chip Huyen)](https://huyenchip.com/ml-interviews-book/): chapter 1.1 on ML roles and chapter 2.2 on common interview formats.
+- [Attention Is All You Need (Vaswani et al., 2017)](https://arxiv.org/abs/1706.03762): the transformer, for week 1.
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401): the RAG paper, for week 1.
+- [ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2022)](https://arxiv.org/abs/2210.03629): the reason-act loop behind most agents, for week 2.
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172): why context placement matters, for week 2.
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685): LLM judges and their biases, for week 3.
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., 2023)](https://arxiv.org/abs/2309.06180): the KV cache in serving, for week 3.
+- [LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)](https://arxiv.org/abs/2106.09685) and [Training language models to follow instructions with human feedback (Ouyang et al., 2022)](https://arxiv.org/abs/2203.02155): adaptation, for month 2.
+- [Scaling Laws for Neural Language Models (Kaplan et al., 2020)](https://arxiv.org/abs/2001.08361): for research roles, month 2.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you structure a 45-minute GenAI system design answer?" category="Concepts" level="Mid">
+    - **Clarify first:** Spend the first few minutes turning the prompt into numbers: users, requests a day, latency target, freshness, languages and the cost of a wrong answer.
+    - **Baseline, then depth:** Propose the simplest working system (for a document assistant, retrieve-then-generate with citations), then go deep on two or three parts where the interviewer shows interest.
+    - **Evaluate and operate:** Name the eval set and metrics, then latency, cost per request, guardrails and monitoring.
+    - **Close:** Restate the design in a few sentences and name the biggest risk. An illustrative split is 5, 5, 20, 10 and 5 minutes.
+  </InterviewQuestion>
+  <InterviewQuestion question="You are asked to design an assistant that answers questions from a help centre. What do you ask before drawing anything?" category="Concepts" level="Junior">
+    - **Scale and latency:** How many questions a day, at what peak, and how fast the first token must appear.
+    - **Content:** How many articles, how often they change, which languages, and whether some are private to certain customers.
+    - **Risk:** What a wrong answer costs, and whether the assistant may say "I don't know" and hand off to a person.
+    - **Why it matters:** Each answer changes the design: freshness sets the indexing pipeline, privacy adds access control, and the cost of errors sets how strict the evaluation and guardrails must be.
+  </InterviewQuestion>
+  <InterviewQuestion question="The interviewer asks why you used RAG instead of fine-tuning. How do you answer?" category="Trade-offs" level="Mid">
+    - **Match the method to the gap:** RAG adds knowledge the model lacks and keeps it fresh; fine-tuning changes behaviour, format or style.
+    - **Use the prompt's facts:** Help-centre articles change weekly and need citations, so retrieval fits; re-training for every edit would be slow and would not cite sources.
+    - **Leave room for both:** Fine-tuning can still help later, for tone or a smaller, cheaper model, once an eval set shows where the baseline falls short.
+    - **Show the decision rule:** Prompt first, retrieve for knowledge, fine-tune for behaviour, as in [Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning).
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make evaluation part of a design answer rather than an afterthought?" category="Evaluation" level="Senior">
+    - **Attach a metric to each component:** Retrieval gets recall at k on labelled questions; the answer gets faithfulness to the retrieved text and correctness against a golden set.
+    - **Say where the data comes from:** Real user questions, sampled by type, with edge cases such as unanswerable questions and other languages.
+    - **Calibrate the judge:** If an LLM judge scores answers, check it against human labels before trusting it.
+    - **Close the loop:** Run the eval set as a regression gate on every prompt or model change, and sample live traffic for online scoring.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you show depth on a topic you have not used in production?" category="Concepts" level="Mid">
+    - **Say so plainly:** Interviewers trust a candidate who marks the edge of their experience more than one who bluffs.
+    - **Reason from mechanism:** Explain how it works and derive the trade-off, for example why a longer context raises cost and time to first token.
+    - **Bring numbers from a small build:** A weekend RAG pipeline with a 30-question eval gives real latency, cost and failure examples to quote.
+    - **Name what you would measure first:** It shows you know how you would find out.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does your preparation change if the role is ML engineer rather than AI engineer?" category="Trade-offs" level="Senior">
+    - **Shared core:** Both need tokens, attention, RAG, evaluation, serving cost and safety at a working level.
+    - **ML engineer adds:** ML fundamentals, training and fine-tuning, serving internals (batching, KV cache, quantization, GPU memory) and classic ML system design.
+    - **AI engineer adds:** Agents, prompt and context engineering, tool calling and product-level evaluation, with more practical builds.
+    - **Plan:** Do the one-week core either way, then spend month 2 on the role's groups, and confirm the round list with the recruiter.
+  </InterviewQuestion>
+</InterviewQuestions>

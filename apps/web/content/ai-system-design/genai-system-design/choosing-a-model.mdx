@@ -16,6 +16,8 @@ Almost every LLM design question hides a model choice. Start from the product's 
 - **Routing and cascades** send easy requests to a small model and escalate the rest. FrugalGPT reported matching GPT-4 with **up to 98% lower cost** on its tasks; RouteLLM cut cost by **up to 3.66×** on MT Bench.
 - Self-hosting memory is **parameters × bytes per parameter + KV cache**: a 70B model needs about **140 GB** of weights in 16-bit and **35 GB** in 4-bit.
 
+<KeyIdea>Filter on pass-or-fail constraints first, choose on quality from your own eval set, then on cost at real volume, and keep the model behind one interface so the next release is a config swap.</KeyIdea>
+
 ## Mental model
 
 - **Hard constraints first:** A delivery company never buys a van from a racetrack ranking; first the van must fit under the loading-dock roof and be legal in the city.
@@ -83,11 +85,23 @@ The selection process is a funnel. Step through it to see why the order matters.
 
 How to run it:
 
-1. **Write the numbers down:** Quality bar, TTFT and total-latency targets, monthly budget at expected volume, longest prompt, data rules.
-2. **Apply hard constraints:** Drop anything that fails data residency, licence, deployment, modality, context length or the latency budget at your prompt length. These checks are cheap and need no eval.
-3. **Measure quality on your own eval set:** Run every survivor on the same cases with the same prompts and scoring. Drop those below the bar, whatever their public rank.
-4. **Price and load-test the rest:** Compute monthly cost at real volume and measure TTFT and tokens per second under realistic concurrency.
-5. **Keep a primary and a fallback:** Ship the cheapest model that clears the bar, keep a second one (ideally from another provider) tested and ready, and loop back to step 3 whenever a new model ships.
+<StepCards>
+  <StepCard n={1} title="Write the numbers down">
+    Quality bar, TTFT and total-latency targets, monthly budget at expected volume, longest prompt, data rules.
+  </StepCard>
+  <StepCard n={2} title="Apply hard constraints">
+    Drop anything that fails data residency, licence, deployment, modality, context length or the latency budget at your prompt length. These checks are cheap and need no eval.
+  </StepCard>
+  <StepCard n={3} title="Measure quality on your own eval set">
+    Run every survivor on the same cases with the same prompts and scoring. Drop those below the bar, whatever their public rank.
+  </StepCard>
+  <StepCard n={4} title="Price and load-test the rest">
+    Compute monthly cost at real volume and measure TTFT and tokens per second under realistic concurrency.
+  </StepCard>
+  <StepCard n={5} title="Keep a primary and a fallback">
+    Ship the cheapest model that clears the bar, keep a second one (ideally from another provider) tested and ready, and loop back to step 3 whenever a new model ships.
+  </StepCard>
+</StepCards>
 
 ## Technical mechanics
 
@@ -135,10 +149,13 @@ Weights take parameters × bytes per parameter, and the KV cache takes bytes per
   caption="Weights scale with parameters × bytes per parameter and the KV cache with tokens in flight: 4-bit weights fit a 70B model on one 80 GB GPU, until one full-length request fills it."
 />
 
-- **Quantization:** [Quantization](/ai-system-design/genai-system-design/quantization-optimization) to 4 bits cuts weights by 4× but can cost quality, so evaluate it on the same golden set.
 - **KV cache ceiling:** The KV cache, not the weights, often decides how many concurrent users one GPU can serve.
 - **MoE total weight footprint:** A mixture-of-experts model needs memory for all parameters—DeepSeek-R1 activates 37B parameters per token but stores 671B (~671 GB at 1 byte/param) before any KV cache.
 - **Utilisation and hourly cost:** Self-hosted cost per million tokens is hourly GPU cost divided by tokens served per hour; it beats API pricing only when traffic keeps GPUs busy after counting engineering time, redundancy, and idle night hours (see [GPU performance](/ai-system-design/genai-system-design/gpu-performance-for-llms) and [capacity planning](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)).
+
+<Callout tone="red" title="What breaks">
+  Quantization: [quantization](/ai-system-design/genai-system-design/quantization-optimization) to 4 bits cuts weights by 4× but can cost quality, so evaluate it on the same golden set.
+</Callout>
 
 ### Planning for model upgrades and deprecations
 
@@ -148,10 +165,15 @@ Hosted models retire on the provider's schedule:
 - **Pin model versions:** Use dated snapshots rather than floating aliases so behaviour does not shift silently.
 - **Hide the provider behind one interface:** Make swapping a model a configuration change, not a rewrite.
 - **Keep the eval set and a fallback ready:** Run any new candidate through the eval set, compare cost and latency, and roll it out gradually with an [A/B test](/ai-system-design/genai-system-design/ab-testing-prompts-models).
-- **Expect prompt changes:** Newer models follow instructions differently, so re-tune prompts and re-check structured output before switching.
 - **Re-evaluate on a schedule:** Review quarterly as prices fall and smaller models improve.
 
+<Callout tone="red" title="What breaks">
+  Prompts on a new model. Newer models follow instructions differently, so re-tune prompts and re-check structured output before switching.
+</Callout>
+
 ## Trade-offs
+
+<Compare caption="Closed or open, small or frontier, one model or a router: what each choice buys and costs.">
 
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
@@ -161,6 +183,8 @@ Hosted models retire on the provider's schedule:
 | Open weights, self-hosted | Data stays inside; fine-tuning; fixed version | GPUs, serving stack and on-call; cost depends on utilization | Strict data rules, steady high volume, custom models |
 | Reasoning model | Better on maths, code, planning | More output tokens, slower, higher cost | Multi-step problems where accuracy matters most |
 | Router or cascade | Large savings when most requests are easy | Extra component; misroutes; cascade adds latency on escalation | Mixed-difficulty traffic at scale |
+
+</Compare>
 
 ## Production systems
 

@@ -17,6 +17,8 @@ Vector search finds text that means the same thing; keyword search finds text th
 - A **cross-encoder reranker** reads the question and each candidate together; it is far more accurate and far slower, so it reads 50 to 100 candidates, never the corpus. **LLM rerankers** do the same with a general model.
 - Budget each stage: wide and cheap first (top 100), narrow and expensive last (top 5), and measure recall at every cut.
 
+<KeyIdea>Run keyword and vector search side by side, merge their lists by rank, and spend the expensive reranker only on the shortlist: wide and cheap first, narrow and accurate last, with recall measured at every cut.</KeyIdea>
+
 ## Mental model
 
 - A library has two finding aids. The card catalogue finds every book with the exact word "E1234" in it, but nothing about "stolen phones" if the book says "lost device".
@@ -69,11 +71,20 @@ Vector search finds text that means the same thing; keyword search finds text th
   caption="Each search misses a question the other finds: vectors miss the exact code, keywords miss the paraphrase."
 />
 
-**How to read it:**
+**How to read it**, one card per step:
 
-- Step 1: the main question shares words and meaning with "Reset a forgotten password", so both methods find it, BM25 at rank 1 and vector search at rank 2.
-- Step 2: "Can't log in, phone was stolen" shares only "phone" with any article, so BM25 returns "Update your phone number"; vector search finds "Lost phone: use a backup code" by meaning.
-- Step 3: the code E1234 appears in one article, so BM25 finds it at rank 1; vector search returns the article for E1243, because the two codes look alike to the embedding model.
+<StepCards>
+  <StepCard n={1} title="Shared words and shared meaning: both find it">
+    The main question shares words and meaning with "Reset a forgotten password", so both methods find it, BM25 at rank 1 and vector search at rank 2.
+  </StepCard>
+  <StepCard n={2} title="Same meaning, other words: only vector search finds it">
+    "Can't log in, phone was stolen" shares only "phone" with any article, so BM25 returns "Update your phone number"; vector search finds "Lost phone: use a backup code" by meaning.
+  </StepCard>
+  <StepCard n={3} title="An exact code: only BM25 finds it">
+    The code E1234 appears in one article, so BM25 finds it at rank 1; vector search returns the article for E1243, because the two codes look alike to the embedding model.
+  </StepCard>
+</StepCards>
+
 - Which article each method returns is illustrative.
 - The same blind spot covers order numbers, SKUs, version strings and names, where a similar answer is a wrong answer.
 
@@ -113,11 +124,16 @@ Vector search finds text that means the same thing; keyword search finds text th
   caption="The bi-encoder never sees the question and the chunk together; the cross-encoder does, which is why it ranks better and costs more."
 />
 
-**How to read it:**
+**How to read it**, one card per step:
 
-- Step 1: the bi-encoder scores "No backup codes: verify your ID" at cosine 0.69, rank 7, from two vectors made apart.
-- Step 2: the cross-encoder reads both texts as one input, sees that "lost my phone" and "no backup codes" are the same problem, and scores the pair 0.91 (illustrative).
-- Nothing in step 2 can be computed ahead of time, so it costs one model run per candidate.
+<StepCards>
+  <StepCard n={1} title="Bi-encoder: encode each text alone, compare the vectors">
+    The bi-encoder scores "No backup codes: verify your ID" at cosine 0.69, rank 7, from two vectors made apart.
+  </StepCard>
+  <StepCard n={2} title="Cross-encoder: read the question and the chunk together">
+    The cross-encoder reads both texts as one input, sees that "lost my phone" and "no backup codes" are the same problem, and scores the pair 0.91 (illustrative). Nothing here can be computed ahead of time, so it costs one model run per candidate.
+  </StepCard>
+</StepCards>
 
 - Nogueira and Cho (2019) re-ranked BM25 candidates with a BERT cross-encoder and took the top of the MS MARCO passage leaderboard, 27% (relative) above the previous best MRR@10.
 - **LLM rerankers** prompt a general model to order a list of passages; Sun et al. (2023) found instructed LLMs such as GPT-4 competitive with or better than supervised rerankers on standard benchmarks, and distilled its ranking into a 440M-parameter model that beat a 3B supervised one on BEIR.
@@ -134,12 +150,22 @@ The three stages form one retrieval service. Both searches run in parallel on th
   caption="Two searches find different chunks; fusion merges them by rank and the reranker decides the final order."
 />
 
-**How to read it:**
+**How to read it**, one card per step:
 
-- Step 1: the question goes to BM25 and to vector search at the same time, so hybrid search costs the slower search, not the sum.
-- Step 2: each returns its top 100 and RRF with k = 60 merges them into one list cut at 100; chunks found by both rise, and the E1234 article, found only by BM25, still makes the list.
-- Step 3: the reranker, the accent, reads the question with each of the 100 and keeps 5, about 2,000 tokens; it can only reorder what fusion handed it.
-- Step 4: the user's tenant and access rights become one filter inside both searches, because if only one search filtered, fusion would mix forbidden chunks into the shortlist.
+<StepCards>
+  <StepCard n={1} title="One question runs two searches in parallel">
+    The question goes to BM25 and to vector search at the same time, so hybrid search costs the slower search, not the sum.
+  </StepCard>
+  <StepCard n={2} title="Each returns its top 100; RRF fuses them by rank">
+    RRF with k = 60 merges the two lists into one list cut at 100; chunks found by both rise, and the E1234 article, found only by BM25, still makes the list.
+  </StepCard>
+  <StepCard n={3} title="A cross-encoder reranks the fused 100 and keeps 5">
+    The reranker, the accent, reads the question with each of the 100 and keeps 5, about 2,000 tokens; it can only reorder what fusion handed it.
+  </StepCard>
+  <StepCard n={4} title="Both searches apply the same filter">
+    The user's tenant and access rights become one filter inside both searches, because if only one search filtered, fusion would mix forbidden chunks into the shortlist.
+  </StepCard>
+</StepCards>
 
 **The numbers:**
 
@@ -173,17 +199,26 @@ A reranker's cost grows with the number of candidates it reads, which is why it 
 - Filters (tenant, language, product, access rights) must apply inside both searches, before fusion, with the same values.
 - BM25 engines filter cheaply alongside the inverted index.
 - Vector indexes are harder: filtering after the search can leave fewer than k results when the filter is strict, so use an index that filters during the search (see [Vector Databases](/ai-system-design/genai-system-design/vector-databases)).
-- Test that the two searches return the same permitted set: a filter that one side applies and the other forgets is a data leak that fusion hides.
+
+<Callout tone="red" title="What breaks">
+  A filter that one side applies and the other forgets is a data leak that fusion hides. Fix: test that the two searches return the same permitted set.
+</Callout>
 
 ### Tuning top-k at each stage
 
 - Each cut has its own question. **First stage** (each search): is the right chunk in the top 100?
-- Measure recall@100; if it is low, no reranker can help, so raise the depth or fix the query.
+
+<Callout tone="red" title="What breaks">
+  Low first-stage recall: if the right chunk is not in the top 100, no reranker can help. Fix: measure recall@100, then raise the depth or fix the query.
+</Callout>
+
 - **Fusion**: lists deeper than the reranker's input waste work, so fuse to the reranker's depth.
 - **Final k**: how many chunks the prompt can hold and the model can use; 5 × 400 = 2,000 tokens here.
 - Anthropic's contextual retrieval write-up shows the stages adding up: with contextual embeddings and contextual BM25, then a reranker narrowing the top 150 to the top 20, top-20 retrieval failures fell from 5.7% to 1.9%, a 67% reduction.
 
 ## Trade-offs
+
+<Compare caption="Retrieval, sparse model, fusion, reranker and candidate depth: what each option buys and when to pick it.">
 
 | Decision | Option A | Option B | Guidance |
 | --- | --- | --- | --- |
@@ -192,6 +227,8 @@ A reranker's cost grows with the number of candidates it reads, which is why it 
 | Fusion | RRF: no tuning | Weighted scores: tunable, fragile | RRF by default; weighted only with an evaluation set |
 | Reranker | Cross-encoder: fast enough for 100 | LLM: flexible, slower, costlier | Cross-encoder for volume; LLM for a final short list |
 | Candidates | 50: cheaper rerank | 200: higher recall | Pick the smallest depth that keeps recall@k flat |
+
+</Compare>
 
 ## Production systems
 

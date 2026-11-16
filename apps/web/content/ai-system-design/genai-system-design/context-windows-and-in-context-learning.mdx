@@ -17,6 +17,8 @@ Every LLM system design starts with a budget: how many tokens fit in one call, w
 - Models use the **start and end** of a long prompt better than the middle. In "Lost in the Middle", GPT-3.5-Turbo fell from **75.8%** (answer first) to **53.8%** (answer in the middle), below its **56.1%** with no documents at all.
 - **In-context learning** means the model picks up a task from instructions and examples in the prompt, with **no weight updates**. It is sensitive to example choice, order and format, and with 1M-token windows **many-shot** prompts of hundreds or thousands of examples can approach fine-tuning.
 
+<KeyIdea>The context window is one shared token budget that costs more and is used less evenly as it fills, and in-context learning spends that budget to teach a task for one call, with no weight updates.</KeyIdea>
+
 ## Mental model
 
 - Think of a chef working at a fixed-size counter.
@@ -75,7 +77,9 @@ Every LLM system design starts with a budget: how many tokens fit in one call, w
   caption="Accuracy is highest when the answer is first or last and dips below the no-passages baseline in the middle. Numbers from Liu et al. (2023), Tables 1 and 6."
 />
 
-The extended-context versions of the models they tested (such as GPT-3.5-Turbo 16K) scored almost exactly the same as the shorter ones, so a bigger window did not fix the dip.
+<Callout tone="red" title="What breaks">
+  The extended-context versions of the models they tested (such as GPT-3.5-Turbo 16K) scored almost exactly the same as the shorter ones, so a bigger window did not fix the dip. The fix is placement, not size: strongest evidence at the edges, question last.
+</Callout>
 
 9. **Many-shot in-context learning.** Agarwal et al. (2024) used Gemini 1.5 Pro's 1M-token window to test prompts with hundreds to 8,192 examples.
    - Many-shot prompts beat few-shot prompts across tasks, overrode pretraining biases such as flipped sentiment labels, and came close to full fine-tuning on low-resource translation.
@@ -148,9 +152,11 @@ The practical reading: ICL is strong at recognizing and copying a task's pattern
 - Gemini 1.5 reported over 99% single-needle recall up to at least 10M tokens, and Google's own guide warns that accuracy drops when there are several needles.
 
 - Chroma's "Context Rot" report (Hong et al., July 2025) tested 18 models and found performance getting less reliable as input grew, even on simple tasks.
-- Distractors that look like the answer hurt more as length grows, and a focused prompt of about 300 tokens beat the full 113,000-token version of the same LongMemEval questions across the models tested.
 - Anthropic's documentation now uses the same name: as token count grows, accuracy and recall degrade.
-- The lesson for design is to curate the context, not fill it.
+
+<Callout tone="red" title="What breaks">
+  Distractors that look like the answer hurt more as length grows, and a focused prompt of about 300 tokens beat the full 113,000-token version of the same LongMemEval questions across the models tested. The lesson for design is to curate the context, not fill it.
+</Callout>
 
 ### Long context versus retrieval
 
@@ -170,6 +176,8 @@ The practical reading: ICL is strong at recognizing and copying a task's pattern
 
 ## Trade-offs
 
+<Compare caption="Ways to give a model a task or its knowledge: what each costs per call and when it fits.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Zero-shot instruction | Shortest prompt, nothing to curate | Format and edge cases drift | Common tasks a strong model already does well |
@@ -178,6 +186,8 @@ The practical reading: ICL is strong at recognizing and copying a task's pattern
 | Fine-tuning (full or PEFT) | Cheap per call, behavior baked in | Training pipeline, retraining for changes | Stable task, high volume, strict format or latency |
 | Long context, send everything | Simple, nothing missed by a retriever | Cost, latency, lost in the middle, context rot | One-off analysis of a long document or codebase |
 | Retrieval (RAG) | Small focused prompts, fresh data | Retriever can miss; extra system to run | Large or changing corpora, cost-sensitive traffic |
+
+</Compare>
 
 ## Production systems
 

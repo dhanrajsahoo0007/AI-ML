@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUDGET as ANATOMY_BUDGET, TOTALS } from "@/components/diagrams/presets/llm-anatomy";
 import { attend } from "@/components/diagrams/presets/llm-attention";
 import * as arch from "@/components/diagrams/presets/llm-architecture";
 import { BUDGET, FLASH, PAGED, WINDOW } from "@/components/diagrams/presets/llm-efficient";
@@ -169,5 +170,14 @@ describe("llm-scaling: one compute budget, three ways", () => {
     ]);
     expect(bubble(3, 4)).toBe(0.5);
     expect(bubble(3, 32)).toBe(0.0625);
+  });
+});
+
+describe("llm-anatomy: one Brightpost request through every layer", () => {
+  it("time and money per request", () => {
+    expect(TOTALS.ms).toBe(8_481);
+    expect(Math.round(TOTALS.usd * 1e7)).toBe(349_425);
+    expect(ANATOMY_BUDGET.model.ms).toBe(7_500);
+    expect(ANATOMY_BUDGET.observe.usd).toBeCloseTo(0.0004425, 7);
   });
 });

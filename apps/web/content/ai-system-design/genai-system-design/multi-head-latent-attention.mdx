@@ -18,6 +18,8 @@ Multi-head latent attention (MLA) is the attention design behind DeepSeek-V2, De
 - RoPE cannot pass through the absorbed matrices, so position rides on a **decoupled 64-number key** shared by all heads.
 - DeepSeek reports **better quality than MHA** in its ablations, and a **93.3% smaller KV cache** than DeepSeek 67B; the price is extra attention arithmetic and custom kernels.
 
+<KeyIdea>MLA caches one small latent vector and one shared RoPE key per token instead of per-head keys and values, and absorbs the up-projections into the query and output so decoding reads only the latents.</KeyIdea>
+
 ## Mental model
 
 - Picture a library that keeps a photocopy of every page for each of 128 readers.
@@ -122,16 +124,21 @@ DeepSeek-V2's Table 1 gives the cache per token in numbers (elements), whatever 
 - Prefill and decode want different arithmetic.
 - In prefill, many queries meet many keys, so the work is compute-bound and rebuilding full 192-dim keys and 128-dim values is cheaper than 576-dim absorbed dot products.
 - In decode, one query per sequence meets a long cache, the work is memory-bound, and the absorbed MQA-like form wins because it reads only the latents. vLLM's MLA implementation runs exactly this split: the up-projected, MHA-like path for prefill and the absorbed, MQA-like path for decode.
-- One consequence for parallelism: splitting heads across GPUs does not split the latent, since every head reads all of it.
-- DeepSeek-V3's decode deployment keeps tensor parallelism for attention small (4-way) and combines it with 80-way data parallelism.
+
+<Callout tone="red" title="What breaks">
+  Tensor parallelism over heads. Splitting heads across GPUs does not split the latent, since every head reads all of it. DeepSeek-V3's decode deployment keeps tensor parallelism for attention small (4-way) and combines it with 80-way data parallelism.
+</Callout>
 
 ### Training stability and kernel fusion
 
 - The latent is a narrow bottleneck, and DeepSeek-V2 notes that low-rank compression changes the output scale of a layer.
 - Both V2 and V3 add RMSNorm after the compressed latents and extra scaling factors at those bottlenecks.
 - To save memory, V3 recomputes the MLA up-projections during the backward pass instead of storing their outputs.
-- Some stabilizers do not transfer: Kimi K2's report notes that QK-Norm cannot be used with MLA, because keys are never fully materialized at inference, so it clips query and key weights per head instead and leaves the shared RoPE key untouched.
 - Context extension also changes: DeepSeek applies YaRN only to the decoupled RoPE key, since it alone carries position.
+
+<Callout tone="red" title="What breaks">
+  Some stabilizers do not transfer. Kimi K2's report notes that QK-Norm cannot be used with MLA, because keys are never fully materialized at inference, so it clips query and key weights per head instead and leaves the shared RoPE key untouched.
+</Callout>
 
 - Kernels matter because the naive path wastes most of MLA's benefit.
 - DeepSeek-V2 trained MLA with an improved FlashAttention-2.
@@ -140,6 +147,8 @@ DeepSeek-V2's Table 1 gives the cache per token in numbers (elements), whatever 
 
 ## Trade-offs
 
+<Compare caption="MHA, GQA, MQA and MLA: cache size against quality and serving cost.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | MHA | Best quality of MHA, GQA and MQA in DeepSeek's ablation; standard kernels | Largest cache, $2 n_h d_h$ per layer | Small models, short contexts, training research |
@@ -147,6 +156,8 @@ DeepSeek-V2's Table 1 gives the cache per token in numbers (elements), whatever 
 | MQA | Smallest cache among head-sharing designs | Biggest quality drop | Latency-critical small models |
 | MLA | Cache equal to GQA with 2.25 groups; matched or beat MHA in DeepSeek's tests | More attention arithmetic per cached token; custom kernels; RoPE and QK-Norm need special handling | Large models served at long context and high batch |
 | Converting GQA or MHA to MLA | Reuses a trained checkpoint | Needs fine-tuning and MLA-aware serving; some quality loss | When retraining from scratch is too costly |
+
+</Compare>
 
 - The cost of MLA is arithmetic. In the absorbed form, each head's score is a 576-number dot product instead of 192, and value mixing runs over 512 numbers instead of 128: roughly 3–4× the attention multiply-adds per cached token (our arithmetic from the paper's dimensions), in exchange for reading about 57× less cache than MHA.
 - Kimi K2 cut its heads from 128 to 64 for this reason, reporting that at 128K tokens the extra heads would add 83% to inference FLOPs.

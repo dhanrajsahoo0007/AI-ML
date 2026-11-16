@@ -17,6 +17,8 @@ An LLM request has no single latency, and no single size: a short question and a
 - **Queue depth warns first.** It rises before p99 does. Tie it to a shed or scale action.
 - **Write the SLO on what users see:** for example "95 % of answers complete within 3,500 ms and 95 % start within 800 ms", measured per route.
 
+<KeyIdea>Read latency as percentiles from merged histograms, alert on the wait (TTFT) and the flow (TPS) separately, and count all four token classes, because the mean, the total and the answer length each hide where users wait and where money goes.</KeyIdea>
+
 ## Mental model
 
 - Picture a restaurant that serves 200 tables a night.
@@ -68,8 +70,10 @@ The pipeline that produces these numbers has five steps:
 - Skew puts the mean between the median and the tail, where no real request sits.
 - Three habits follow. Plot p50, p95 and p99 together.
 - Set the SLO on a high percentile. Slice by prompt length, because a 32,000-token prompt belongs to a different distribution from a 2,200-token one, and mixing them blurs both.
-- Merging percentiles from servers by averaging them is a common error: an average of two p99 values is not the p99 of the combined traffic.
-- Merge histogram buckets, then compute the percentile.
+
+<Callout tone="red" title="What breaks">
+  Merging percentiles from servers by averaging them is a common error: an average of two p99 values is not the p99 of the combined traffic. Merge histogram buckets, then compute the percentile.
+</Callout>
 
 ### The two numbers users feel
 
@@ -100,11 +104,15 @@ Every response carries a usage object. Read it on every call and keep four class
 - The left column is the class, the middle two are where each provider reports it, the last is cost.
 - Anthropic's `input_tokens` counts only tokens that were not read from or written to the cache, and its docs give total input as `input_tokens` plus `cache_creation_input_tokens` plus `cache_read_input_tokens`.
 - OpenAI's `input_tokens` is the total, with `input_tokens_details.cached_tokens` inside it.
-- Reasoning tokens are billed as output: Anthropic reports them in `output_tokens_details.thinking_tokens` and OpenAI in `output_tokens_details.reasoning_tokens`, each inside the output total.
+- Reasoning tokens are billed as output: Anthropic reports them as `thinking_tokens` and OpenAI as `reasoning_tokens`, both under `output_tokens_details` and each inside the output total.
 
 - At the illustrative price of \$2 in and \$10 out per million tokens, with a cache read at a tenth of the input price, the request costs 1,200 × \$2 ÷ 1 M + 1,000 × \$0.2 ÷ 1 M + 310 × \$10 ÷ 1 M = \$0.0024 + \$0.0002 + \$0.0031 = **\$0.0057**.
 - Reasoning is \$0.0006 of it, about a tenth, and it is invisible if you chart only the answer length.
-- Normalise to one meaning in your store (the OpenTelemetry convention uses the total) and keep the cache and reasoning counts as separate columns.
+
+<Callout tone="red" title="What breaks">
+  Summing input tokens from two providers as if they meant the same thing: Anthropic's `input_tokens` leaves the cache out and OpenAI's includes it. Normalise to one meaning in your store (the OpenTelemetry convention uses the total) and keep the cache and reasoning counts as separate columns.
+</Callout>
+
 - The caching mechanics are on [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
 
 ### Worked example: sale day
@@ -128,6 +136,8 @@ These are modelled numbers from the figure's illustrative spread, not measuremen
 
 ## Trade-offs
 
+<Compare caption="How to compute percentiles, what to set the SLO on, and how hard to batch: what each choice buys and costs.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Percentiles from histograms | Merge across servers; cheap to store | Resolution limited by bucket edges | Default for latency |
@@ -136,6 +146,8 @@ These are modelled numbers from the figure's illustrative spread, not measuremen
 | SLO on TTFT plus TPS | Matches how streamed answers feel | Two targets to tune | Interactive chat |
 | Per-request token metrics | Exact cost and capacity per tenant | More labels, more series | Always, with bounded labels |
 | Aggressive batching | Higher throughput, lower cost per token | Worse TPS and tail latency for small requests | Batch work and off-peak traffic |
+
+</Compare>
 
 ## Production systems
 

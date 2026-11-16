@@ -18,6 +18,8 @@ A language model outputs a score for every vocabulary token rather than text, an
 - **Logprobs** expose the model's confidence per token, but post-trained models are often **poorly calibrated**.
 - **Temperature 0 is not a determinism guarantee**: on shared servers, batch size changes the floating-point math, so the same prompt can produce different text.
 
+<KeyIdea>Decoding is a short chain of edits to the logits, a softmax and one pick per token, and every product knob (temperature, top-p, JSON mode, determinism) lives in that chain.</KeyIdea>
+
 ## Mental model
 
 - **Greedy tapping vs. weighted dice:** Think of the word suggestions above your phone keyboard ranked by likelihood—always tapping the first suggestion is greedy decoding (which soon gets stuck in repetitive loops), whereas rolling a die weighted by the scores gives varied, sometimes surprising sampling.
@@ -106,7 +108,9 @@ The same 8 tokens at $T = 1$, truncated both ways:
 4. **Softmax and sampling:** Softmax gives probabilities, and the sampler draws one token (or takes the arg-max for greedy).
 5. **Stream and repeat:** The token is streamed to the user and appended to the input, repeating until a stop token, a stop string, or the token limit.
 
-- **Ordering divergence across engines:** Libraries do not agree on the order of step 3—the min-p paper notes that Hugging Face Transformers and vLLM apply temperature before the min-p threshold, so identical settings can behave differently across engines.
+<Callout tone="red" title="What breaks">
+  Identical settings across engines. Libraries do not agree on the order of step 3—the min-p paper notes that Hugging Face Transformers and vLLM apply temperature before the min-p threshold, so identical settings can behave differently across engines.
+</Callout>
 
 ## Technical mechanics
 
@@ -134,7 +138,10 @@ The log-probability of each generated token is a free by-product of decoding, an
 - **Precomputed FSM masks:** Checking every vocabulary token against the parser at every step is slow; Willard and Louf (2023), the paper behind the Outlines library, compile a regular expression into a finite-state machine and precompute allowed tokens per state so the per-step cost becomes `O(1)` on average.
 - **Pushdown automata for JSON:** For nested formats such as JSON, they extend the idea to pushdown automata—the same pattern behind "structured outputs" in hosted APIs and grammar options in open-source servers (see [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation) for the product side).
 - **Syntax vs. truth caveat:** A mask guarantees syntax, not truth—the model above still has to choose correctly between `true` and `false`.
-- **Distribution shift caveat:** Forcing a format the model would rarely choose can pull it into low-probability, lower-quality text, so always describe the schema in the prompt as well.
+
+<Callout tone="red" title="What breaks">
+  Distribution shift. Forcing a format the model would rarely choose can pull it into low-probability, lower-quality text, so always describe the schema in the prompt as well.
+</Callout>
 
 ### Determinism, seeds and reproducibility
 
@@ -145,6 +152,8 @@ The log-probability of each generated token is a free by-product of decoding, an
 
 ## Trade-offs
 
+<Compare caption="Decoding strategies: what each one buys, what it costs and where it fits.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Greedy | Fast, simple, mostly repeatable | Repetition loops in long open-ended text; misses better sequences | Short factual answers, extraction, classification |
@@ -154,6 +163,8 @@ The log-probability of each generated token is a free by-product of decoding, an
 | Top-p | Adapts to the shape of the distribution | Still admits a long tail when the distribution is flat | Default for most chat products |
 | Min-p | Scales with confidence; stable at higher T | Newer, fewer hosted APIs expose it | Creative writing, open-source serving stacks |
 | Grammar-constrained decoding | Output always parses | Mask-building cost; can push the model off its natural path | JSON, function arguments, SQL, any machine-read output |
+
+</Compare>
 
 ## Production systems
 

@@ -16,6 +16,8 @@ Almost every production LLM writes one token at a time, left to right. Diffusion
 - Bidirectional attention gives **infilling and a smaller reversal-curse gap**, but breaks the exact **KV cache**. **Block diffusion** (left to right between blocks, diffusion inside a block) restores caching and variable length.
 - Commercial systems report **over 1,000 tokens per second** (Inception's Mercury Coder, Google's experimental Gemini Diffusion), mostly on code; on hard reasoning and knowledge benchmarks they still lag comparable autoregressive models.
 
+<KeyIdea>A diffusion LLM fills a masked canvas in T parallel passes instead of one pass per token, trading step count against quality and giving up the exact KV cache unless it decodes in blocks.</KeyIdea>
+
 ## Mental model
 
 - **Sequential pen vs. crossword grid:** An autoregressive model writes like a person with a pen who may never go back—one word after another—whereas a diffusion model solves the answer like a crossword grid all at once.
@@ -97,9 +99,13 @@ A diffusion LLM is usually a standard Transformer with the causal mask removed; 
 ### Diffusion step count vs. quality and latency
 
 - **The step-count dial:** Latency is roughly $T$ forward passes over the prompt plus all $L$ positions (versus $N$ cheaper cached passes for an AR model); $T = L$ commits 1 token per pass with no speed gain, whereas $T = L/4$ commits 4 per pass.
-- **Diminishing returns curve:** Fewer steps force more independent simultaneous token choices and revive multimodality—in Mask-Predict, going from 1 to 2 passes raised BLEU from 18.05 to 22.91, while going from 4 to 5 gained only 0.36.
+- **Diminishing returns curve:** In Mask-Predict, going from 1 to 2 passes raised BLEU from 18.05 to 22.91, while going from 4 to 5 gained only 0.36.
 - **Benchmark vs. efficiency settings:** LLaDA sets $T = L$ (e.g., 512 on GSM8K) for peak benchmark scores, but in throughput tests LLaDA 8B Base matched LLaMA3 8B Base on GSM8K and Math at 1.5× and 1.8× higher throughput (without a KV cache), tied on HumanEval, and lagged on MBPP.
 - **Adaptive confidence thresholds:** Fixed schedules waste passes on easy spans, so samplers like Fast-dLLM (Wu et al., 2025) commit every token whose confidence exceeds a threshold, speeding through easy spans and spending passes on hard ones.
+
+<Callout tone="red" title="What breaks">
+  Fewer steps force more independent simultaneous token choices and revive multimodality: repeated or mixed tokens. The fix is to spend passes where they are needed, with more steps or a confidence-threshold sampler.
+</Callout>
 
 ### KV caching challenges in non-causal bidirectional models
 
@@ -130,9 +136,14 @@ A diffusion LLM is usually a standard Transformer with the causal mask removed; 
 - **Likelihood.** On OpenWebText MDLM's perplexity bound is 23.21 against 17.54 for an AR model trained the same way.
 - **Knowledge and hard reasoning.** Gemini Diffusion trails Gemini 2.0 Flash-Lite on GPQA Diamond (40.4% vs 56.5%) and Global MMLU Lite (69.1% vs 79.0%), as reported by Google.
 - **Serving.** Engines such as vLLM and TensorRT-LLM, along with PagedAttention, speculative decoding and prefix caching, were built for AR models. Diffusion serving needs custom kernels and samplers, and post-training methods such as RLHF and RL for reasoning are less mature for diffusion models.
-- **Length.** Plain masked diffusion must fix $L$ in advance; too short truncates the answer, too long wastes compute on padding.
+
+<Callout tone="red" title="What breaks">
+  **Length.** Plain masked diffusion must fix $L$ in advance; too short truncates the answer, too long wastes compute on padding. Block diffusion removes the limit by stopping at any block with an EOS token.
+</Callout>
 
 ## Trade-offs
+
+<Compare caption="Decoding choices: how many tokens each pass commits, and what that costs in caching, length and quality.">
 
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
@@ -142,6 +153,8 @@ A diffusion LLM is usually a standard Transformer with the causal mask removed; 
 | Block diffusion | Exact cache across blocks; variable length; parallel inside a block | Less parallelism than full diffusion; block size is a new hyperparameter | Diffusion serving at scale, long answers |
 | Many denoising steps | Quality close to the model's best | Little or no speed gain over AR | Benchmarks, quality-critical answers |
 | Few steps / confidence-threshold sampling | Large speedups | Multimodality errors such as repeated or mixed tokens | Latency-critical code completion and edits |
+
+</Compare>
 
 ## Production systems
 
