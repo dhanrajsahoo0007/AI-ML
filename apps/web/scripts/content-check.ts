@@ -38,7 +38,7 @@ const WIDGET_TAGS =
 const MAX_WIDGETS = 2;
 /** A line of tool output that has been pasted into the end of pages before; it renders as text. */
 const STRAY_TOOL_LINE = /^`,Path:\s*$/;
-/** Retired casual headings replaced by Overview, Mental model, Technical mechanics, etc. in ai-system-design. */
+/** Retired casual headings replaced by Overview, Mental model, Technical mechanics, etc. (see usesV2Headings). */
 const BANNED_GENAI_HEADINGS = new Set([
   "TL;DR",
   "The idea in plain English",
@@ -47,6 +47,14 @@ const BANNED_GENAI_HEADINGS = new Set([
   "Common pitfalls",
   "How to answer in an interview",
 ]);
+
+/**
+ * Pages held to the v2 heading set: all of ai-system-design, and the System Design pattern pages (not the rest of
+ * system-design, where fundamentals keep "Common pitfalls").
+ */
+const usesV2Headings = (sectionKey: string, file: string) =>
+  sectionKey === "ai-system-design" ||
+  (sectionKey === "system-design" && file.split(path.sep).join("/").includes("/system-design/patterns/"));
 
 const ROOT = process.cwd();
 const APP_DIR = path.join(ROOT, "src", "app");
@@ -253,7 +261,7 @@ async function main() {
         if (NO_EM_DASH.has(section.key) && l.includes("\u2014")) {
           report(item.file, "em dash; use a comma, a colon or a full stop", "error", i + 1);
         }
-        if (!inCodeFence && section.key === "ai-system-design" && l.startsWith("## ")) {
+        if (!inCodeFence && usesV2Headings(section.key, item.file) && l.startsWith("## ")) {
           const h2 = l.slice(3).trim();
           if (BANNED_GENAI_HEADINGS.has(h2)) {
             report(

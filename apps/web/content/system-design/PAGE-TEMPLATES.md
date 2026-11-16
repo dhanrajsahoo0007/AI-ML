@@ -223,7 +223,8 @@ Word count: 1,200–2,000. "How it works" has 2–5 steps.
 
 Pages under `/system-design/patterns` use the **GenAI v2 format** (the same one as
 `content/ai-system-design/genai-system-design/llm-gateway.mdx`), not the concept-page skeleton. The pattern-hub
-block in `tests/unit/doc-headings.test.ts` enforces it on every page with an `updated:` key that is not an outline.
+block in `tests/unit/doc-headings.test.ts` enforces it on every pattern page (each must carry `updated:`; none may be
+an outline), and `scripts/content-check.ts` rejects the retired headings (TL;DR, Deep dive, Common pitfalls, …) there.
 The full brief, with the running example and the figure rules, is `plans/patterns-expansion-plan.md` §5–§6 in the
 SYSTEM-DESIGN workspace.
 

@@ -92,16 +92,24 @@ describe("genai-system-design house headings and point-wise format", () => {
   });
 });
 
-// The pattern hub follows the same v2 format (plan: plans/patterns-expansion-plan.md §7.6). The guard applies to a
-// page once it is converted: it has an `updated:` key and is not an outline. Unconverted pages pass until their wave.
+// The pattern hub follows the same v2 format (plan: plans/patterns-expansion-plan.md §7.6). All 36 pages were
+// converted by 2026-11-16, so every page must carry `updated:` and none may be an outline; a new pattern page lands in
+// the v2 format from the start.
 describe("system-design patterns v2 headings and point-wise format", () => {
   const dir = path.join(process.cwd(), "content", "system-design", "patterns");
   const pages = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith(".mdx"))
     .sort()
-    .map((f) => ({ f, text: fs.readFileSync(path.join(dir, f), "utf8") }))
-    .filter(({ text }) => /^updated:/m.test(text) && !/^status:\s*outline/m.test(text));
+    .map((f) => ({ f, text: fs.readFileSync(path.join(dir, f), "utf8") }));
+
+  it("has every page converted: an `updated` date and no outline", () => {
+    const unconverted = pages
+      .filter(({ text }) => !/^updated:/m.test(text) || /^status:\s*outline/m.test(text))
+      .map(({ f }) => f);
+    expect(pages.length).toBeGreaterThanOrEqual(36);
+    expect(unconverted).toEqual([]);
+  });
   const retired = new Set([
     "TL;DR",
     "The idea in plain English",
