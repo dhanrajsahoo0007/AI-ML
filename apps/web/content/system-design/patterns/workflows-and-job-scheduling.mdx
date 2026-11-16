@@ -101,6 +101,7 @@ The hold-expiry scheduler, built one part at a time.
 - The scanner reads due jobs a page at a time (`ZRANGE … BYSCORE LIMIT 0 1000`) and **claims** each one with `ZREM`; only the caller whose `ZREM` returns 1 enqueues it.
 - In a database, the same job store is a `jobs` table indexed on `(partition, due_at)`, claimed with `SELECT … FOR UPDATE SKIP LOCKED`.
 - A managed queue can do this for short delays: Amazon SQS delays a message by up to 15 minutes, so a 10-minute hold fits but a 24-hour reminder does not.
+- A web crawler's **politeness delay** is the same structure: each host's next fetch is a job due one delay after the last one, and a leased fetcher takes it, so no host is hit twice at once.
 
 ### Leases, heartbeats and a late first worker
 
