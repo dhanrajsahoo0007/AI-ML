@@ -1,12 +1,665 @@
 ---
 title: "Design Amazon Kindle Payments"
-description: "Purchases, entitlements, idempotent payments and refunds."
+description: "One-click purchase of a digital book: charge exactly once, deliver the book, survive provider timeouts and keep a ledger finance can trust."
 logo: companies/amazon
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design the payment system behind one-click purchase of a digital book: the reader taps once, is charged once, and can read the book seconds later.
+The hard parts are an external payment provider that can time out without saying what happened, retries and double taps that must never charge twice, and a record of the money that finance can prove.
 
-**What it will cover:** purchases, entitlements, idempotent payments and refunds.
+- Interviewers use this question to see whether you can make an operation that crosses a system you do not control safe to retry, and prove afterwards that every pound is accounted for.
 
-**Patterns used:** [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation) · [Idempotency](/system-design/patterns/idempotency) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Saga and Distributed Transactions](/system-design/patterns/saga) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design the payment system behind one-click purchase of a digital book: charge the customer exactly once, deliver the book, and keep a record finance can trust."
+  level="Senior"
+  minutes={45}
+  bankId="design-payment-system"
+  tests={[
+    "Charging exactly once across retries, double taps and timeouts",
+    "Handling a provider whose answer is late, missing or out of order",
+    "Never losing a payment record, and proving the money with a ledger",
+    "Saying why for every store and every asynchronous step",
+  ]}
+  clarify={[
+    { q: "What is being bought?", a: "A digital book at about £6; the reader can open it seconds after paying." },
+    { q: "Do we store card numbers?", a: "No: the saved method is a token from the payment provider." },
+    { q: "How many purchases?", a: "10,000,000 a day; the busiest mornings run at 10 × the average." },
+    { q: "What does exactly once mean?", a: "One charge per purchase, however often the app retries or the reader taps." },
+    { q: "How fast must the click feel?", a: "Under 2 s; the provider can take longer, so the answer may be “confirming”." },
+    { q: "Refunds and subscriptions?", a: "Refunds yes; recurring billing as a follow-up on the same design." },
+  ]}
+  outOfScope={["Fraud models", "Tax", "Publisher payouts", "Currency conversion"]}
+/>
+
+## Overview
+
+- Every purchase is first a **payment intent** row, written with the client's **idempotency key** in one transaction, before the provider is called.
+- The provider is called with **the same key** on every attempt, so a retry, a double tap or a worker re-sending never creates a second charge.
+- The intent is a **state machine**; a timeout puts it in **unknown**, and only the provider's answer (asked by a worker, or a **webhook**) moves it on.
+- The book is granted from an **outbox** event: authorise now, then grant, then capture, all asynchronous after the click returns.
+- Every money movement becomes **double-entry ledger entries** that sum to zero; refunds are new entries, never edits.
+- A daily **reconciliation** matches the ledger against the provider's settlement file and sends the few mismatches to a person.
+
+<Numbers
+  items={[
+    { value: "10 M", label: "purchases a day", hint: "≈ 116/s, peak ≈ 1,160/s" },
+    { value: "0", label: "double charges", hint: "100,000 repeat requests a day" },
+    { value: "2 s", label: "click budget", hint: "provider timeout 1.5 s" },
+    { value: "50 M", label: "ledger entries a day", hint: "5 per purchase" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "One-click buy with a saved method", notes: "The reader taps Buy; the saved provider token pays." },
+    { id: "F2", requirement: "Authorise and capture through a payment provider", notes: "Funds held first, taken once the book is granted." },
+    { id: "F3", requirement: "Grant the book", notes: "The book appears in the reader's library within seconds." },
+    { id: "F4", requirement: "Refund", notes: "Full or partial, by the reader or support, with its own key." },
+    { id: "F5", requirement: "A ledger and reconciliation", notes: "Every money movement recorded; matched daily against the provider." },
+    { id: "F6", requirement: "Receipts and purchase history", notes: "An email receipt and a list of past purchases." },
+  ]}
+/>
+
+- Out of scope: fraud models, tax, publisher payouts, currency conversion.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Correctness", target: "0 double charges; 0 captured payments without the book", why: "A double charge is a complaint and a chargeback." },
+    { id: "N2", property: "Durability", target: "0 acknowledged payments lost; recovery point 0", why: "A lost record is money taken with no book, or a book with no money." },
+    { id: "N3", property: "Click latency", target: "p99 under 2 s, even when the provider is slower", why: "One-click must feel instant." },
+    { id: "N4", property: "Grant latency", target: "Book in the library within 5 s of the click (p99)", why: "The reader wants to start reading." },
+    { id: "N5", property: "Availability", target: "99.99% for buy; history may lag", why: "A failed buy is a lost sale." },
+    { id: "N6", property: "Audit", target: "Every pound traceable for 7 years; 100% of payments reconciled daily", why: "Finance must prove the books." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Purchases", assumption: "10,000,000 a day ÷ 86,400 s", result: "≈ 116/s average" },
+    { quantity: "Peak", assumption: "10 × the average on the busiest mornings", result: "≈ 1,160 purchases/s" },
+    { quantity: "Money", assumption: "10,000,000 × £6 average price", result: "£60,000,000 a day" },
+    { quantity: "Repeat requests", assumption: "1% of clicks are retried or double-tapped", result: "100,000 a day that must change nothing" },
+    { quantity: "Click budget", assumption: "≈ 0.1 s our own work + 1.5 s provider timeout", result: "p99 ≈ 1.6 s, inside 2 s" },
+    { quantity: "Unknown outcomes", assumption: "0.1% of authorisations time out", result: "10,000 a day; 58/s if 5% fail at peak" },
+    { quantity: "Webhooks", assumption: "3 events per purchase", result: "30,000,000 a day ≈ 347/s, ≈ 3,470/s at peak" },
+    { quantity: "Ledger entries", assumption: "5 per purchase × 10,000,000", result: "50,000,000 a day ≈ 579/s" },
+    { quantity: "Ledger size", assumption: "50,000,000 × 200 bytes; kept 7 years", result: "10 GB a day, 3.65 TB a year, ≈ 25.6 TB in all" },
+    { quantity: "Intent rows", assumption: "10,000,000 × 1 KB, 90 days hot", result: "10 GB a day, 900 GB hot" },
+    { quantity: "Reconciliation", assumption: "0.01% of 10,000,000 rows unmatched; 90% clear by themselves", result: "1,000 a day, 100 for a person" },
+  ]}
+  note="Volume is modest; every single write is money, and the provider is outside our control."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | About 2 history reads per purchase; every write is money | Not the decider: write correctness, not read scale, shapes the design |
+| D2 | Peak against average | 10 ×: ≈ 1,160 purchases/s and ≈ 3,470 webhooks/s at peak | The click path stays short; grant, capture and receipts run off a log that absorbs bursts |
+| D3 | Consistency per operation | Intent and key strong; ledger appends strong; history seconds stale | One relational primary for intents; history as a projection |
+| D4 | Latency target | Click p99 2 s; the provider's p99 may be longer | A 1.5 s provider timeout, then an honest "confirming" |
+| D5 | Durability | No acknowledged payment lost; recovery point 0 | Write the intent before calling out; synchronous replication |
+| D6 | Ordering | Per intent only; webhooks arrive out of order | A state machine that only moves forward; no global order |
+| D7 | Duplicates | Harmful: a duplicate is a second charge. The defining driver | A key on every request, every provider call and every ledger post |
+| D8 | Data size and growth | 10 GB of ledger a day, kept 7 years | Partition the ledger by month; archive cold months |
+| D9 | Fan-out shape | Not a driver here: one payment feeds 4 consumers | One event log, keyed by intent |
+| D10 | Contention | Not a driver here: one reader, one intent; the only race is the same key twice | A unique constraint settles it |
+| D11 | Geography | Readers in many countries; one home region per marketplace | Payments stay in the reader's region; no cross-region writes |
+| D12 | Availability and degradation | 99.99% for buy; the provider can brown out | Circuit breaker on the provider; receipts and history slow first, never the key check |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/purchases` | Reader app | Tap Buy, with `Idempotency-Key`; returns the intent and its status |
+| `GET /v1/purchases/{id}` | Reader app | Poll while the status is `confirming` |
+| `POST /v1/purchases/{id}/refunds` | Reader app or support tool | Ask for a refund, with its own `Idempotency-Key` |
+| `GET /v1/me/purchases` | Reader app | Purchase history, by cursor |
+| `POST /v1/provider/webhooks` | Payment provider | Every change of a payment at the provider; signed |
+| Settlement file | Payment provider | Once a day, dropped into a blob store |
+
+```http
+POST /v1/purchases
+Authorization: Bearer <session>
+Idempotency-Key: 9f1c2e7a-buy-811
+{ "book_id": 811, "price_pence": 600, "currency": "GBP", "method_id": "pm_tok_42" }
+
+201 Created  { "purchase_id": "pi_5521", "status": "authorised" }
+202 Accepted { "purchase_id": "pi_5521", "status": "confirming" }
+409 Conflict { "error": "in_progress" }        -- same key, first request still running
+422 Unprocessable { "error": "key_reused" }    -- same key, different body
+```
+
+- **Idempotency:** the app makes one key per tap of Buy and reuses it on every retry; the server stores it with the intent and returns the first result to any repeat.
+- **Statuses:** `authorised` means the book is on its way; `confirming` means the provider has not answered yet; `declined` is final.
+- **Errors:** `402` declined by the provider; `409` the same key is still being processed; `422` the key was reused with a different body.
+- **Pagination:** only `GET /v1/me/purchases`, by cursor on `(created_at, purchase_id)`.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Intents, keys, outbox, webhook inbox | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | Key, intent and outbox row in one transaction; unique constraints (D3, D5, D7) | `customer_id` | Strong, synchronous replica | A key in a cache: it cannot commit with the intent |
+| Ledger entries | Relational database, append-only, partitioned by month | Journals that must balance, posted once per event (D5, D7, D8) | `posted_at` month | Strong on append | A balance column: one number, no history to prove |
+| Payment events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | 4 consumers, replay, order per intent (D2, D6) | `intent_id` | Ordered per intent | A work queue: no replay, one consumer per message |
+| Purchase history | Key-value view keyed by customer | Seconds stale is fine; reads off the primary (D1, D3) | `customer_id` | Eventual | Querying the primary: history reads compete with the buy path |
+| Settlement files | Blob store | Daily files, read once, kept for audit (D8) | Date | Immutable | Rows in the ledger DB: raw files are evidence, not entries |
+| Card details | Not stored: provider tokens | Keeps card numbers out of our systems | n/a | n/a | Storing cards: the full card-security audit for every service |
+
+```sql
+CREATE TABLE payment_intents (
+  intent_id       uuid PRIMARY KEY,
+  customer_id     bigint NOT NULL,      -- shard key: one reader's purchases together
+  book_id         bigint,               -- null for a subscription charge
+  subscription_id bigint,               -- set for recurring charges
+  amount_pence    int NOT NULL,
+  method_token    text NOT NULL,        -- provider token, never a card number
+  status          text NOT NULL,        -- created | authorising | unknown | authorised | captured | failed | voided | refunded
+  idempotency_key text NOT NULL,
+  request_hash    bytea NOT NULL,       -- spots a reused key with a different body
+  version         int NOT NULL,         -- every state move is a compare-and-set on it
+  UNIQUE (customer_id, idempotency_key)
+);
+CREATE UNIQUE INDEX one_open_purchase ON payment_intents (customer_id, book_id)
+  WHERE status IN ('created', 'authorising', 'unknown', 'authorised', 'captured');
+CREATE TABLE outbox (event_id uuid PRIMARY KEY, intent_id uuid, type text, payload jsonb);
+CREATE TABLE provider_events (provider_event_id text PRIMARY KEY, intent_id uuid, type text, applied bool);
+```
+
+```sql
+CREATE TABLE ledger_entries (
+  journal_id      uuid NOT NULL,        -- one money movement; its entries sum to zero
+  account         text NOT NULL,        -- 'provider_receivable', 'revenue', 'bank', 'fees', 'refunds'
+  amount_pence    bigint NOT NULL,      -- debit positive, credit negative
+  intent_id       uuid NOT NULL,
+  source_event_id uuid NOT NULL,        -- the event that caused it
+  posted_at       timestamptz NOT NULL
+) PARTITION BY RANGE (posted_at);       -- one partition a month; no UPDATE, no DELETE
+CREATE TABLE posted_events (
+  source_event_id uuid PRIMARY KEY      -- inserted in the posting transaction: a replay fails here
+);
+```
+
+- **Buy:** insert the intent with its key; a unique violation means a repeat, so return the stored intent (or `422` if the hash differs).
+- **Move a state:** `UPDATE … SET status = :next, version = version + 1 WHERE intent_id = :id AND status = :expected`; 0 rows means someone else moved it first.
+- **Recurring:** a scheduler creates one intent per subscription per period with the key `sub:{id}:{period}`, so a re-run of the scheduler cannot bill a month twice.
+- **Ledger:** append a journal per event; read balances by account and the entries of one intent.
+
+An intent only moves forward, and a timeout is a state of its own.
+
+<AnimatedDiagram spec="animated/kindle-payments/intent-states" stepper caption="An intent only moves forward, and a timeout is its own state: only the provider’s answer can move it on." />
+
+**How to read it:**
+
+- Step 1 is the forward path along the top: created, authorising, authorised, captured; a decline ends in failed.
+- Step 2 adds what goes wrong: a timeout leads to red unknown, and only the provider's answer moves it to authorised or failed; a failed grant voids; a refund ends in refunded.
+- Every arrow is one conditional update on `status`, so two writers can never both move the same intent.
+
+## Building the architecture, step by step
+
+- We start with the design most candidates draw first and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Charge, then write the order (F1, F2)
+
+The naive design: the payment service charges the provider, then records the order.
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={1} caption="Step 1: charge the provider, then write the order: a crash in between loses a payment, and a retry charges twice." />
+
+- **Adds:** the reader app, the API gateway, the payment service, the external payment provider, the payments database.
+- **Flow:**
+  1. The reader taps Buy; the gateway passes the request to the payment service.
+  2. The service charges the saved token at the provider.
+  3. When the provider answers, the service writes the order.
+- **Why this and not that:** it is the shortest path, and it shows both failures the rest of the page removes.
+- **The gap:**
+  - A crash after step 2 and before step 3 takes the reader's money with no record (D5).
+  - A timeout at step 2 makes the app retry, and the retry charges again (D7): 1% of clicks is 100,000 repeats a day.
+
+<PremiumBreak />
+
+### Step 2: Write the intent and its key first (F1, F2, N1, N2)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={2} caption="Step 2: the payment intent and its idempotency key are written in one transaction, then the provider is called with the same key." />
+
+- **Adds:** nothing new; the order becomes a **payment intent** written before any call out, and the call carries a key.
+- **Flow:**
+  1. The app sends `Idempotency-Key` with the purchase.
+  2. The service inserts the intent as `authorising` with the key in one transaction; a unique violation means a repeat, so it returns the stored intent.
+  3. It calls the provider's authorise with the intent's id as the provider's idempotency key.
+  4. On the answer, it moves the intent to `authorised` or `failed` with one conditional update.
+- **Why this and not that:** a record exists before money can move, so a crash leaves an `authorising` row to finish, never a silent charge (D5). The same key at both hops makes every retry a replay (D7).
+- **The gap:** nothing finishes an intent left in `authorising` by a crash or a timeout.
+
+### Step 3: A state machine and safe retries (F2, N2)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={3} caption="Step 3: a payment worker picks up intents that stopped half-way and retries them with the same key." />
+
+- **Adds:** the **payment worker**.
+- **Flow:**
+  1. Every intent move is `UPDATE … WHERE status = :expected`, so two writers can never both move it.
+  2. Every 10 s the worker selects intents stuck in `authorising` for more than 30 s.
+  3. It re-sends the call with the same provider key; the provider returns its first result.
+  4. Retries back off exponentially with jitter, and stop after 5 attempts with the intent flagged for a person.
+- **Why this and not that:** a durable table of states is the workflow record; an in-memory retry dies with the process (D5). A fixed retry interval from thousands of clients hammers a provider that is already slow (D12).
+- **The gap:** a timeout tells us nothing; the provider may have approved the payment.
+
+### Step 4: Webhooks and outcomes unknown after a timeout (F2, N2, N3)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={4} caption="Step 4: a webhook receiver takes the provider’s events, and the worker settles intents left unknown after a timeout." />
+
+- **Adds:** the **webhook receiver**, and the `unknown` state.
+- **Flow:**
+  1. The service waits at most 1.5 s for the provider; on a timeout it marks the intent `unknown` and answers `202 confirming`.
+  2. The provider later sends a signed webhook; the receiver checks the signature, stores the event by its event id and answers `200` at once.
+  3. The worker applies stored events and asks the provider about `unknown` intents older than 30 s, with the same key.
+- **Why this and not that:** the click budget is 2 s and the provider's slow tail is longer (D4, N3). Saying "confirming" is honest; failing the click would make the reader tap again.
+- **The gap:** the book is still not in the library.
+
+### Step 5: Grant the book through an outbox (F3, N4)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={5} caption="Step 5: the authorised intent and an outbox row commit together; change data capture puts the event on a log, and entitlements grant the book." />
+
+- **Adds:** the **outbox** table, the **event log** and the **entitlements** service.
+- **Flow:**
+  1. Moving the intent to `authorised` inserts a `PaymentAuthorised` outbox row in the same transaction.
+  2. Change data capture reads the outbox insert from the database's log and publishes it, keyed by intent id.
+  3. Entitlements grants the book (idempotent by intent id) and publishes `BookGranted`.
+  4. The worker captures the payment on `BookGranted`; if the grant fails, it voids the authorisation.
+- **Why this and not that:** writing the database and then publishing is two writes that can fail apart (the dual write); the outbox makes them one commit (D5). Capture after grant means a failed grant is a void, not a refund (N1).
+- **The gap:** nothing proves where the money went.
+
+### Step 6: A double-entry ledger (F5, N6)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={6} caption="Step 6: the ledger service posts double-entry journals from the payment events into an append-only ledger." />
+
+- **Adds:** the **ledger service** and the **ledger database**.
+- **Flow:**
+  1. `PaymentCaptured` posts a journal: debit `provider_receivable` £6, credit `revenue` £6.
+  2. The posting inserts the event id into `posted_events` in the same transaction, so a replayed event posts nothing.
+  3. Settlement later posts debit `bank` £5.82, debit `fees` £0.18, credit `provider_receivable` £6.
+- **Why this and not that:** a balance column says where money stands, not why; entries that sum to zero can be checked by anyone (N6). Posting from the log keeps the ledger off the click path (D2, D4).
+- **The gap:** readers can get their money back, and want receipts and a history.
+
+### Step 7: Refunds, receipts and history (F4, F6)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={7} caption="Step 7: refunds take the same keyed path and post new entries; a receipts service sends receipts and projects the purchase history." />
+
+- **Adds:** refunds on the same path, the **receipts** service and the **history view**.
+- **Flow:**
+  1. `POST /v1/purchases/{id}/refunds` with its own key creates a refund row and calls the provider's refund with that key.
+  2. `RefundSucceeded` posts a new journal: debit `refunds` £6, credit `provider_receivable` £6. Nothing is edited.
+  3. Receipts consumes the same log, emails a receipt and writes the reader's history view.
+- **Why this and not that:** a refund is a new money movement with its own duplicate risk (D7). History is allowed to lag seconds, so it never reads the primary (D1, D3).
+- **The gap:** our ledger says what we think happened; the provider's records may disagree.
+
+### Step 8: Reconcile against the provider's settlement file (F5, N6)
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" step={8} caption="Step 8: a daily reconciler matches every ledger entry against the provider’s settlement file and queues the mismatches." />
+
+- **Adds:** the **reconciler** and the **settlement files** blob store.
+- **Flow:**
+  1. The provider drops a daily settlement file of about 10,000,000 rows.
+  2. The reconciler joins it to the ledger by provider payment id and amount.
+  3. Matched pairs close; about 1,000 mismatches a day are retried the next day, and about 100 go to a person.
+- **Why this and not that:** a lost webhook or a bug shows up here within a day instead of at the year-end audit (N6). The match runs in batch because the file arrives once a day.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/kindle-payments/architecture" stepper caption="Digital book payments: write the intent and its key first, let a worker and webhooks settle the outcome, grant the book through an outbox, and prove the money with a ledger and a daily match." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Reader app; the payment provider (external) | Tap Buy with a key; authorise, capture, refund, send webhooks and settlement files |
+| **Edge** | API gateway, webhook receiver | Authenticate and limit readers; verify and store provider events |
+| **Payments core** | Payment service, payment worker | Intents, keys and the state machine; retries and unknown outcomes |
+| **Application services** | Entitlements, ledger service, reconciler | Grant the book; post journals; match against the provider |
+| **Async pipeline** | Event log, receipts | Carry every payment event in order per intent; receipts and history |
+| **Storage** | Payments DB, ledger DB, history view, settlement files | Intents and outbox (ACID); append-only entries; the reader's list; raw files |
+
+Buying one £6 book, step by step:
+
+1. The reader taps Buy; the app sends key `9f1c…` with book 811.
+2. The payment service inserts intent `pi_5521` as `authorising` with the key, and calls the provider with `pi_5521` as its key.
+3. The provider approves in 0.4 s; the intent moves to `authorised` with a `PaymentAuthorised` outbox row; the app gets `201`.
+4. The event reaches entitlements, which grants book 811 and publishes `BookGranted`; the book is in the library about 1 s later.
+5. The worker captures £6; `PaymentCaptured` posts the first journal and sends the receipt.
+6. Next day, settlement posts the second journal and the reconciler matches the row.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST with an idempotency header, polling for "confirming"
+
+- **Choice:** REST over HTTPS; `POST /v1/purchases` carries `Idempotency-Key`; the app polls `GET /v1/purchases/{id}` every second while the status is `confirming`.
+- **Why:** each action is one short request and response, and an HTTP header is the standard place for a retry key that proxies and SDKs pass through (D7).
+- **Why not GraphQL:** a purchase is one mutation with strict retry rules; a query language adds nothing and hides the key inside a body.
+- **Why not gRPC:** fine between our services, but the reader app and the provider's webhooks speak plain HTTPS.
+- **Why not WebSockets for the outcome:** 99.9% of purchases answer inside the click; holding 1,160 sockets a second open for the other 0.1% costs more than a few polls (D2, D4).
+
+### Load balancer and API gateway: layer 7, per-reader limits
+
+- **Choice:** a layer-7 load balancer behind an API gateway that authenticates the reader and limits purchase attempts per reader.
+- **Why:** every call is short HTTP, routed by path (`/purchases` to payments, `/me` to history), and a per-reader limit stops a stuck client from looping (D2, D12).
+- **Why not layer 4:** it cannot route by path or read the session; there are no long-lived connections to pin.
+- **Why not retry at the gateway:** a gateway that retries a `POST` on its own doubles the calls behind it; only the app and the worker retry, and both send the key.
+
+### Payments database: relational (PostgreSQL), sharded by customer
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL (or <TechIcon id="oss/mysql" /> MySQL) holding intents, keys, the outbox and the webhook inbox; a synchronous replica in a second zone; shards by `customer_id` when one primary is not enough.
+- **Why:** the key, the intent and the outbox row must commit together, and unique constraints settle every duplicate (D3, D5, D7). 1,160 inserts/s at peak fits one primary; 900 GB hot fits one machine.
+- **Why not Cassandra:** no transaction across the intent and the outbox row, and its compare-and-set runs a consensus round per write.
+- **Why not DynamoDB or MongoDB:** both now offer conditional writes and transactions, so either could work; relational wins for the conditional state moves in SQL, the CDC tooling and finance's ad hoc queries.
+- **Why not asynchronous replication:** a failover could lose the last second of acknowledged intents, which breaks recovery point 0 (N2).
+
+### Idempotency keys: a column on the intent, not a cache
+
+- **Choice:** `UNIQUE (customer_id, idempotency_key)` on the intent row, plus a hash of the request body; a partial unique index allows one open purchase per reader and book.
+- **Why:** the key commits atomically with the work, so there is never a key without an intent or an intent without its key (D5, D7). Kept as long as the intent, so a late retry still finds it.
+- **Why not Redis `SET NX`:** fast, but it cannot commit with the intent; a failover or eviction forgets a key and the next retry charges again.
+- **Why not a separate keys table with a 24-hour expiry:** it works, but a reader retrying after a day would buy twice; the intent row already lives longer.
+
+### Event log: Kafka, filled by change data capture
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `intent_id`, filled by a CDC relay that reads outbox inserts from the database's log.
+- **Why:** four consumers (entitlements, ledger, receipts, analytics) each need every event, in order per intent, and the ledger must be rebuildable by replay (D6, D9). It absorbs the 10 × peak so consumers can lag a few seconds (D2).
+- **Why not publishing from the service after commit:** a crash between commit and publish loses the event: the book never arrives (D5).
+- **Why not a work queue (SQS, <TechIcon id="oss/rabbitmq" /> RabbitMQ):** each message goes to one consumer and is deleted; four consumers would need four queues and there is no replay.
+
+### Payment worker: a durable state table, not in-memory retries
+
+- **Choice:** stateless workers that scan the intents table for stuck states, apply stored webhook events, capture, void, and retry with backoff and jitter; a workflow engine (Temporal, for example) is the upgrade.
+- **Why:** the intent row is the workflow's state, so a crashed worker loses nothing; another picks up the row (D5).
+- **Why not retrying inside the request:** the click budget is 2 s (D4); retries that outlive the request die with the process.
+- **Why not a cron job every hour:** 10,000 unknown outcomes a day would wait up to an hour; a 10-second scan keeps the book within minutes even in the worst case.
+
+### Webhook receiver: verify, store, answer, then apply
+
+- **Choice:** a thin endpoint that checks the provider's signature, inserts the event into `provider_events` by its event id, and answers `200` before doing any work.
+- **Why:** at 3,470 webhooks/s at peak, a slow handler makes the provider retry and multiply the load (D2). Storing first makes a redelivered event a no-op (D7).
+- **Why not applying the event inline:** a ledger or grant failure would fail the webhook and the provider would resend it for hours.
+- **Why not trusting webhook order:** events arrive out of order; the state machine ignores a move backwards (D6).
+
+### Ledger database: relational, append-only, partitioned by month
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL, a separate database from payments, one partition a month; inserts only, no `UPDATE` or `DELETE`.
+- **Why:** journals must balance and be posted once (D5, D7); 579 entries/s and 10 GB a day fit one primary; old months move to cheap storage (D8).
+- **Why not a balance column on an account:** an update loses the history; nobody can show why a balance is what it is (N6).
+- **Why not the payments database:** audit queries over 25.6 TB would compete with the buy path; separate retention and access rules.
+- **Why not a wide-column store:** the volume does not need it, and journals that must sum to zero are easier to check with SQL.
+
+### History view: a projection keyed by customer
+
+- **Choice:** a key-value table (DynamoDB, or a <TechIcon id="oss/postgresql" /> PostgreSQL read table) keyed by `customer_id`, written by the receipts consumer.
+- **Why:** history may be seconds stale (D3), and 2 reads per purchase stay off the payments primary (D1).
+- **Why not a read replica of the payments database:** it works at this size; a projection lets history keep refunds, receipts and titles in one row without joins.
+- **Why not a cache:** history is kept for years; a cache would still need a store behind it.
+
+### Settlement files: a blob store
+
+- **Choice:** object storage (S3 or similar), one file a day, write-once, kept with the ledger's retention.
+- **Why:** the file is the provider's evidence; finance must be able to show the original (N6).
+- **Why not loading it straight into the ledger:** the ledger records our money movements; the file is what we check them against.
+
+### Payment provider: tokens, authorise then capture, one key per call
+
+- **Choice:** an external provider; the app stores only the provider's token; authorise on the click, capture after the grant, refund with its own key.
+- **Why:** card numbers never touch our systems, which keeps most services out of card-security audits; the provider's idempotency keys make retries safe (D7).
+- **Why not charging in one step:** a failed grant would need a refund; before capture it is a void that releases the hold, and no money moves (N1).
+
+### No CDN and no cache on the money path
+
+- **Choice:** the store pages and covers come from a CDN; nothing under `/purchases` is cached anywhere.
+- **Why:** every purchase response is personal and changes state; a cached answer to a `POST` is a bug (D3).
+- **Why not caching intent status for polling:** at most 10,000 confirming intents a day; the primary can answer those polls.
+
+## Deep dives
+
+### The retry and the double tap: the life of an idempotency key
+
+- **Who makes the key:** the app, once per tap of Buy, kept until it gets a final answer; every retry of that tap sends the same key.
+- **Three answers to a repeat:** a new key runs; a key whose first request is still running gets `409, retry later`; a finished key gets the stored response, with no second call out.
+- **Same key, different body:** the stored `request_hash` differs, so the server answers `422`; it never guesses which body the reader meant.
+- **A backstop the domain gives us:** a reader cannot own a book twice, so the partial unique index allows one open purchase per reader and book, even if the app makes a new key by mistake.
+- **One key per hop:** the app's key protects our API; the intent id is the provider's key for authorise; `pi_5521:capture` and the refund id protect capture and refund; the event id protects the ledger post.
+
+The pattern page's figure shows the same life on its running example, a £42 order.
+
+<AnimatedDiagram spec="animated/patterns/idem-key-flow" stepper caption="Reserve the key first, save the response with it, and every repeat gets the first answer instead of a second charge." />
+
+**How to read it:**
+
+- Step 1 reserves the key before any work; here that is the intent insert, which is the same transaction.
+- Step 2 does the work once and saves the answer against the key; here the answer is the intent's status.
+- Steps 3 and 4 are our two repeats: a retry after the answer is replayed, and a double tap during the call gets `409`.
+
+**The numbers:** 100,000 repeats a day cost one failed insert and one read each: 200,000 queries a day, about 2.3/s on a primary that takes 1,160 purchases/s at peak.
+
+<Callout tone="red" title="What breaks">
+  A key made per HTTP attempt instead of per tap turns every retry into a new purchase. Make the key when the reader taps, keep it in the app until the purchase reaches a final state, and test the retry path with a forced timeout.
+</Callout>
+
+### The unknown outcome: persist first, ask the provider, reconcile
+
+- **A call out has three outcomes, not two:** success, a definite failure (a decline), and unknown (a timeout, a `5xx`, a reset after sending). Only the first two are final.
+- **Persist first:** the intent exists as `authorising` before the call, so a crash or a timeout leaves a row to finish, never a payment nobody knows about (D5).
+- **Answer the reader honestly:** after 1.5 s the click returns `202 confirming`; the app polls, and the reader is not tempted to tap again (D4).
+- **Ask, with the same key:** after 30 s the worker re-sends the call or looks the payment up; the provider returns its first result. A webhook may arrive first; whichever lands first moves the state, and the other changes 0 rows.
+- **No record at the provider:** the request never arrived, so the intent goes to `failed` and nothing was taken.
+- **Too many unknowns:** a circuit breaker opens when 5% of calls time out over 10 s; new purchases get a fast "try again in a minute" instead of 58 new unknowns a second (D12).
+- **The last net:** whatever the worker and the webhooks miss, the daily reconciliation finds.
+
+<AnimatedDiagram spec="animated/kindle-payments/timeout-retry" stepper caption="A timeout is not a failure: save the payment as unknown, answer the reader, and let the worker ask again with the same key." />
+
+<StepCards>
+  <StepCard n={1} title="No answer inside the budget">
+    The reader buys book 811 with key k7. The intent is saved as authorising, the provider does not answer within 1.5 s, so the intent is marked unknown and the reader sees “confirming”.
+  </StepCard>
+  <StepCard n={2} title="The worker asks again, same key">
+    Thirty seconds later the worker re-sends the authorisation with k7. The provider returns its first result, approved, without a second hold; the intent becomes authorised with an outbox row that grants the book.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 0.1% of 10,000,000 = 10,000 unknown outcomes a day, about 0.12/s; a 10-second scan settles each within about 40 s.
+- The click: about 0.1 s of our own work plus the 1.5 s timeout is 1.6 s, inside the 2 s budget (N3).
+
+<Callout tone="red" title="What breaks">
+  Treating a timeout as a decline: the reader taps again with a new key, and if the first call went through, they pay twice. Treating it as a success grants a book that may never be paid for. Keep it unknown until the provider says.
+</Callout>
+
+### Proving the money: double entry, entries that sum to zero, clearing accounts
+
+- **A journal per money movement:** each event posts a journal whose entries sum to zero, so money is only ever moved between accounts, never created.
+- **A clearing account:** `provider_receivable` is what the provider owes us. Capture adds £6; settlement takes £6 out; after settlement every payment's clearing balance must be zero.
+- **The check:** a clearing balance that stays above zero for 3 days is a capture with no settlement; below zero is a settlement we never captured. Both are one SQL query.
+- **Corrections:** nothing is updated or deleted; a mistake is fixed by a reversing journal, so the history shows both.
+- **Refunds:** new journals in the opposite direction, linked to the refund id.
+
+The pattern page's figure shows a payment and its refund as entries, on its £42 order.
+
+<AnimatedDiagram spec="animated/patterns/ledger-double-entry" stepper caption="The balance says where things stand; the entries say why, and they must always balance." />
+
+**How to read it:** step 1 is the balance column we reject; steps 2 and 3 are the capture and the refund as new entries; step 4 is the check that debits equal credits.
+
+The same page's reconciliation figure is our Step 8: two records of one day, matched by payment id and amount.
+
+<AnimatedDiagram spec="animated/patterns/ledger-recon" stepper caption="Every payment must appear on both sides; the few that do not become a short, daily list for a person to check." />
+
+**How to read it:** step 2's matcher is our reconciler; step 4's two kinds of mismatch are a payment only the provider has (a lost event) and one only we have (it settles tomorrow).
+
+**The numbers:** 10,000,000 rows a day at 0.01% unmatched is 1,000; about 900 settle the next day and close themselves, so about 100 reach a person.
+
+### Worked example: one £6 book, a double tap and a timeout
+
+1. 10:00:00.0: the reader taps Buy; the app sends key k7; intent `pi_5521` is inserted as `authorising` and the provider is called with key `pi_5521`.
+2. 10:00:00.2: a second tap sends k7 again; the insert hits the unique key and the first request is still running, so the answer is `409`; the app keeps waiting on the first.
+3. 10:00:01.5: no answer from the provider; the intent becomes `unknown`; the app shows "confirming" and polls.
+4. 10:00:03.0: the provider's `payment.authorised` webhook arrives; it is stored by event id and applied: `unknown` to `authorised`, with an outbox row.
+5. 10:00:04.0: entitlements grants book 811; the worker captures £6 with key `pi_5521:capture`; the ledger posts debit `provider_receivable` £6, credit `revenue` £6.
+6. 10:00:31.0: the worker's 30-second check finds the intent already `authorised`; its conditional update changes 0 rows.
+7. Next day: settlement posts debit `bank` £5.82, debit `fees` £0.18, credit `provider_receivable` £6; the clearing balance for `pi_5521` is £6 − £6 = £0, and the reconciler matches the row.
+
+**The numbers:**
+
+- 3 requests (tap, double tap, worker), 1 hold, 1 capture, and the book in the library 4 s after the tap.
+- 5 ledger entries: debits £6 + £5.82 + £0.18 = £12 equal credits £6 + £6 = £12.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Payments store | Wide-column, key-value with transactions, relational | Relational, synchronous replica, shard by customer | D3, D5, D7, N2 | Write scale needs sharding by hand | Sustained load beyond one primary per shard |
+| Where the key lives | Cache with TTL, keys table with 24 h expiry, column on the intent | Column on the intent, same transaction | D5, D7, N1 | A primary write for every repeat | Never for money |
+| The click | Charge to the end inside the click, authorise then async, accept and queue everything | Authorise inside 1.5 s, the rest async | D4, N3, N4 | A "confirming" state for 0.1% of buys | The provider's p99 regularly passes 1.5 s: go fully async |
+| When to grant | Before authorising, after authorising, after capture | After authorising; capture after the grant | N1, F3, D12 | A rare capture failure after the book is granted | Lost sales during outages cost more than unpaid books |
+| Publishing events | Dual write, outbox with polling, outbox with CDC | Outbox with CDC | D5, D2 | A CDC relay to run | Low volume: polling the outbox is enough |
+| Ledger shape | Balance column, append-only double entry | Append-only double entry | N6, D7, D8 | 25.6 TB over 7 years; balances are computed | Never |
+| Timeouts | Treat as failure, retry inside the request, unknown state with worker and webhooks | Unknown state, resolved with the same key | D4, D7, N2 | An extra state and a worker | Never: a timeout never proves anything |
+| Webhooks | Apply inline, store then apply | Store by event id, answer, then apply | D2, D6, D7 | A second hop before the state moves | Never at 3,470/s peaks |
+| Card data | Store cards, provider tokens | Provider tokens | F1, D11 | Changing provider means migrating tokens | Routing across several providers |
+| Reconciliation | Real-time stream match, daily batch | Daily batch, when the file arrives | N6, F5 | A mismatch can be found a day late | The provider offers a real-time report |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Idempotency](/system-design/patterns/idempotency) | Purchase and refund keys, provider keys, ledger posts by event id | A duplicate is a second charge |
+| [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation) (advanced) | Ledger service, reconciler | Finance must prove every pound |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | Authorised intent to the event log | A lost event is a paid book never granted |
+| [Saga and Distributed Transactions](/system-design/patterns/saga) | Authorise, grant, capture; void as the compensation | The provider cannot join our transaction |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | Payment worker, recurring billing scheduler | Work that must finish after a crash |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | 1.5 s timeout, backoff with jitter, breaker on the provider | The provider can be slow or down |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | Event log with four consumers | One payment event, several independent readers |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Purchase history view | Seconds-stale reads off the primary |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| App-store purchases | Intent with a key, authorise then grant then capture, ledger | Many sellers: revenue splits into several accounts per journal |
+| In-game currency | Keys, outbox, double entry | The grant is a wallet credit, itself a ledger journal; spending needs a balance check |
+| Subscription billing | Intents, the state machine, unknown outcomes | A scheduler makes one intent per period with key `sub:{id}:{period}`; failed renewals retry over days |
+| Wallet top-ups | Keys, provider calls, reconciliation | The wallet balance is a ledger account; withdrawals need a hold first |
+| Donations | Keys, receipts, ledger | No grant step; receipts carry tax data |
+
+## How real systems do it
+
+- **Stripe, 2017:** clients send a unique key per operation and retry with the same key; the server returns the cached result of an earlier success, and clients back off exponentially with jitter.
+- **AWS Builders' Library (read 2026):** the request token is recorded in the same atomic unit as the work; the same token with different parameters returns a validation error; tokens are kept for the life of the resource plus an interval.
+- **Stripe documentation (read 2026):** a PaymentIntent moves through statuses including `requires_action`, `processing`, `requires_capture` (when authorising and capturing separately), `succeeded` and cancelled; a failed attempt returns it to `requires_payment_method`.
+- **Stripe, 2024:** its ledger is an immutable double-entry record of about five billion events a day; clearing accounts should sit at zero, and a nonzero balance signals a problem.
+- **Uber, 2020:** the entries of each order sum to zero, so the system cannot create or destroy money, and orders are immutable once written.
+- **Uber, 2024:** LedgerStore uses strongly consistent indexes for card authorisation holds, where a delay could cause a duplicate charge, and eventually consistent indexes for payment history, where a few seconds of lag is fine.
+- **Where this design differs:** this page states nothing about how Amazon builds Kindle purchases; the design is modelled on what Stripe, Uber and AWS publish, at an interview's round numbers.
+
+## Failure modes & pitfalls
+
+- **A key per attempt, not per tap:** double charges rise with timeouts; count captures per reader and book; make the key once per tap and keep it.
+- **Timeout treated as decline:** readers pay twice or get no book; watch intents failed by timeout that later appear in the settlement file; add the `unknown` state.
+- **Dual write instead of an outbox:** a paid book never granted; alert on `authorised` intents older than 1 minute with no grant; commit the event with the state.
+- **Webhooks processed inline:** the provider retries for hours and the load multiplies; watch webhook latency and redeliveries; store, answer, then apply.
+- **Ledger updated in place:** balances nobody can explain; any `UPDATE` on ledger tables should page someone; append reversing journals instead.
+- **Retry storm on a slow provider:** every client retries at once and the brownout becomes an outage; watch retries per second; backoff with jitter and a circuit breaker.
+- **Reconciliation that only reports:** mismatches pile up unread; track the oldest open mismatch; auto-close known patterns and route the rest to a named owner.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify what is bought, card storage, volume, what "once" means and the click budget; write F1 to F6 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 116/s average, 1,160/s peak, 100,000 repeats a day, 10,000 unknowns a day, 50,000,000 ledger entries a day.
+3. **Minutes 10 to 15:** API with `Idempotency-Key`, the intent table and its states; say where strong consistency lives.
+4. **Minutes 15 to 25:** Steps 1 to 4: draw the naive charge, fix it with intent-first and keys, add the worker, webhooks and `unknown`.
+5. **Minutes 25 to 35:** Steps 5 to 8: the outbox and the grant, the ledger, refunds, reconciliation.
+6. **Minutes 35 to 45:** one deep dive: the double tap, the unknown outcome or proving the money; answer the "why" behind each store.
+
+**What interviewers listen for:**
+
+- **Mid:** an idempotency key on the purchase, a payment provider holding the cards, a record of each payment.
+- **Senior:** the key stored with the intent in one transaction, timeouts as unknown, the outbox for the grant, a ledger that sums to zero.
+- **Staff:** keys at every hop, clearing accounts and reconciliation, what degrades when the provider browns out, recurring billing on the same design.
+
+**Red flags:** calling the provider before writing anything; a key only in a cache; retrying with a new key; a balance column as the ledger; "use two-phase commit with the provider".
+
+## Further reading
+
+- [Designing robust and predictable APIs with idempotency](https://stripe.com/blog/idempotency) (Stripe, 2017)
+- [Making retries safe with idempotent APIs](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/) (Amazon Builders' Library)
+- [How PaymentIntents and SetupIntents work](https://docs.stripe.com/payments/paymentintents/lifecycle) (Stripe documentation)
+- [Ledger: Stripe's system for tracking and validating money movement](https://stripe.dev/blog/ledger-stripe-system-for-tracking-and-validating-money-movement) (Stripe, 2024)
+- [Money scale and strong data at Uber](https://www.uber.com/blog/money-scale-strong-data/) (Uber, 2020)
+- [How LedgerStore supports trillions of indexes at Uber](https://www.uber.com/us/en/blog/how-ledgerstore-supports-trillions-of-indexes/) (Uber, 2024)
+- Related pages: [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) (authorise, claim, capture) · [Design a Hotel Booking Service](/system-design-case-studies/case-studies/hotel-booking) · [Idempotency](/system-design/patterns/idempotency) · [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you make sure a customer is never charged twice for one purchase?" category="Concepts" level="Mid">
+  - The app makes one idempotency key per tap of Buy and sends it on every retry.
+  - The server stores the key on the intent row in the same transaction, behind a unique constraint; a repeat gets the first answer.
+  - Every call to the provider carries a key too (the intent id), so a retry there replays instead of charging.
+  - For a book, one open purchase per reader and book is a second guard.
+  </InterviewQuestion>
+  <InterviewQuestion question="The call to the payment provider times out. What do you do?" category="Failure modes" level="Senior">
+  - Do not treat it as a failure: the provider may have approved it. Mark the intent unknown.
+  - Answer the reader "confirming" inside the 2 s budget and let the app poll.
+  - A worker asks again with the same key after about 30 s; a webhook may settle it first, and the state machine takes whichever comes first.
+  - If the provider has no record, mark it failed; the daily reconciliation catches anything both paths miss.
+  </InterviewQuestion>
+  <InterviewQuestion question="A client reuses an idempotency key with a different amount. What should happen?" category="Concepts" level="Mid">
+  - Store a hash of the request body with the key.
+  - On a repeat, compare hashes: the same body replays the stored answer, a different body gets `422`.
+  - Never guess which request the client meant, and never run the second one under the first one's key.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle asynchronous events from the provider, such as webhooks that arrive late or out of order?" category="Architecture" level="Senior">
+  - Verify the signature, store the event by its event id and answer `200` at once; a redelivery is a no-op.
+  - Apply stored events through the state machine: each move is a conditional update from an expected state.
+  - An event that would move a state backwards changes 0 rows and is logged, not applied.
+  - Do not depend on webhooks alone: the worker polls unknown intents and reconciliation is the last check.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure no payment is ever lost?" category="Failure modes" level="Senior">
+  - Write the intent before calling the provider, on a database with a synchronous replica: recovery point 0.
+  - Commit the state change and its outbox event in one transaction, so the grant and the ledger always hear about it.
+  - A worker sweeps intents stuck in any non-final state.
+  - Reconcile daily against the provider's settlement file: a payment only the provider has is found within a day.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why a double-entry ledger instead of a balance column?" category="Trade-offs" level="Senior">
+  - A balance column says where money stands, not why; an update destroys the history.
+  - Entries that sum to zero per journal can be checked by a query, and every balance can be rebuilt from them.
+  - Clearing accounts, such as what the provider owes us, must return to zero, so a stuck payment shows up as a nonzero balance.
+  - The cost is storage, about 25.6 TB over 7 years here, and computing balances instead of reading one number.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why authorise first and capture later for a digital book, instead of charging in one step?" category="Trade-offs" level="Mid">
+  - The grant can fail (a withdrawn title, a region block); before capture, that is a void, not a refund.
+  - Authorisation keeps the click fast; capture runs off the event log after the grant.
+  - The cost is two provider calls and an authorisation that must be captured before it expires.
+  </InterviewQuestion>
+  <InterviewQuestion question="Traffic jumps to ten times normal on the busiest mornings. What changes?" category="Scaling" level="Senior">
+  - The click path is one insert and one provider call: 1,160 inserts/s fits one relational primary.
+  - Grant, capture, ledger and receipts run off the event log, so they lag seconds instead of failing.
+  - Webhooks peak near 3,470/s; storing and answering first keeps the receiver fast.
+  - If the provider browns out, a circuit breaker fails new purchases fast instead of piling up unknown outcomes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you model one-time and recurring payments in the same system?" category="Architecture" level="Senior">
+  - One intent table for both: `book_id` for a one-time purchase, `subscription_id` for a renewal.
+  - A scheduler creates one intent per subscription per period, with the key `sub:{id}:{period}`, so a re-run cannot bill twice.
+  - The state machine, provider keys, outbox and ledger are the same; renewals add retries over days for declined cards.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Idempotency keys at every hop because a duplicate is a second charge.
+  - A transactional outbox because a paid book must always be granted.
+  - A saga of authorise, grant and capture, with void as the compensation, because the provider cannot join our transaction.
+  - A double-entry ledger with reconciliation because finance must prove the money.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,15 @@
+title: A timeout leaves the payment unknown; the worker settles it with the same key
+alt: >-
+  A sequence diagram in two steps with five lanes: an orange reader app, a teal payment service, a violet payments
+  database, a green worker and a neutral payment provider. Step 1: the app buys book 811 with key k7; the payment
+  service inserts the intent as authorising, asks the provider to authorise 6 pounds with key k7, and gets no reply in
+  1.5 seconds, drawn as a red timeout; it marks the intent unknown and answers 202, confirming purchase. Step 2: the
+  worker finds unknown intents older than 30 seconds, sends the same authorisation with the same key, and gets back the
+  first result, approved; it saves the intent as authorised with an outbox row to grant the book, and the app's next
+  status call gets 200, book on its way.
+caption: >-
+  A timeout is not a failure: save the payment as unknown, answer the reader, and let the worker ask again with the
+  same key.
+tags: [case-studies, kindle-payments, payments, idempotency, retries]
+source: original
+created: 2026-11-17
