@@ -1,0 +1,17 @@
+title: Chat assistant high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, inference, application services, async
+  pipeline and storage. Step 1: a user's prompt goes through a load balancer to the chat service, which waits for one
+  model server to finish the whole answer, drawn red. Step 2: the answer streams back token by token as server-sent
+  events. Step 3: the chat service stores conversation metadata in a relational database with replicas, message
+  bodies in a sharded message store, and reads through a cache. Step 4: a router with a queue, the solid green accent
+  node, hands each prompt a batch slot on the model servers. Step 5: a limits service counts tokens per plan in the
+  cache, and the router writes tokens used to a usage log for billing and analytics. Step 6: a moderation
+  service checks the prompt and the answer. Step 7: every response's tokens go to a stream buffer so a client can
+  resume or stop. Step 8: the router sends overflow to a fleet running a smaller model.
+caption: >-
+  A chat assistant: stream every answer, keep history in two stores, and put a router with a queue and token limits in
+  front of the scarce GPUs.
+tags: [case-studies, chatgpt, architecture, streaming, llm]
+source: original
+created: 2026-11-17

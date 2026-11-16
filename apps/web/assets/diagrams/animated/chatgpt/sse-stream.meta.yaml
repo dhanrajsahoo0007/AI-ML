@@ -1,0 +1,16 @@
+title: "One streamed answer: stream, resume after a drop, stop"
+alt: >-
+  A sequence diagram with five lanes: the user app in orange, the chat service in teal, the stream buffer in violet,
+  the router in grey and a model server in teal. Step 1: the app posts a prompt with request id r7; the chat service
+  queues it at the router, which gives it a batch slot on the model server; the app receives event 1,
+  response.created, then numbered output_text.delta events while the chat service appends every event to the stream
+  buffer. Step 2: the connection drops at event 41, drawn as a red arrow; the app reconnects with Last-Event-ID 40,
+  and the chat service reads events 41 to 57 from the buffer, replays them and goes live again. Step 3: the user
+  presses stop; the cancel travels from the app to the chat service, the router and the model server, which frees
+  the slot after 230 tokens, and the app receives response.completed with status stopped.
+caption: >-
+  Numbered events make a dropped stream resumable from the buffer, and a stop only saves GPU time when the cancel
+  reaches the model server.
+tags: [case-studies, chatgpt, sequence, streaming, sse]
+source: original
+created: 2026-11-17
