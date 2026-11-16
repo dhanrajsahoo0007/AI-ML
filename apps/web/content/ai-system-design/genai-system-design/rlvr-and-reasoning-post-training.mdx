@@ -34,9 +34,7 @@ Reasoning models such as DeepSeek-R1, Qwen3 and Kimi k1.5 learn to think at leng
 2. **RLHF vs. Reinforcement Learning with Verifiable Rewards (RLVR).** Tülu 3 introduced the name for RL that "replaces the reward model with a verification function". The objective is the usual KL-regularized one, with a verifier $v$ that returns a fixed reward when the answer checks out:
 
    $$
-
-- \max_{\pi_\theta}\; \mathbb{E}_{y \sim \pi_\theta(\cdot \mid x)}\big[v(x, y)\big] - \beta\, \mathrm{KL}\big[\pi_\theta(y \mid x) \,\|\, \pi_{\text{ref}}(y \mid x)\big], \qquad v(x, y) = \begin{cases} \alpha & \text{if correct} \\ 0 & \text{otherwise} \end{cases}
-
+   \max_{\pi_\theta}\; \mathbb{E}_{y \sim \pi_\theta(\cdot \mid x)}\big[v(x, y)\big] - \beta\, \mathrm{KL}\big[\pi_\theta(y \mid x) \,\|\, \pi_{\text{ref}}(y \mid x)\big], \qquad v(x, y) = \begin{cases} \alpha & \text{if correct} \\ 0 & \text{otherwise} \end{cases}
    $$
 
 - Tülu 3 used $\alpha = 10$, PPO, and about 30,000 prompts with ground truth from GSM8K, MATH and IFEval-style constraints.
@@ -67,9 +65,7 @@ Reasoning models such as DeepSeek-R1, Qwen3 and Kimi k1.5 learn to think at leng
    Every token of output $o_i$ gets advantage $A_i$. The loss is PPO's clipped objective with the KL divergence to the reference added directly, rather than folded into the reward:
 
    $$
-
-- J(\theta) = \frac{1}{G}\sum_{i=1}^{G} \min\!\Big(\rho_i A_i,\; \operatorname{clip}(\rho_i, 1 - \varepsilon, 1 + \varepsilon)\, A_i\Big) - \beta\, D_{\text{KL}}\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big), \qquad \rho_i = \frac{\pi_\theta(o_i \mid q)}{\pi_{\theta_{\text{old}}}(o_i \mid q)}
-
+   J(\theta) = \frac{1}{G}\sum_{i=1}^{G} \min\!\Big(\rho_i A_i,\; \operatorname{clip}(\rho_i, 1 - \varepsilon, 1 + \varepsilon)\, A_i\Big) - \beta\, D_{\text{KL}}\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big), \qquad \rho_i = \frac{\pi_\theta(o_i \mid q)}{\pi_{\theta_{\text{old}}}(o_i \mid q)}
    $$
 
    DeepSeekMath, which introduced GRPO with a *learned* reward model, used $G = 64$ and $\beta = 0.04$; DeepSeek-R1 used $G = 16$ and $\beta = 0.001$ with rule-based rewards. Step through one update with $G = 6$:
