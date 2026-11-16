@@ -1,90 +1,206 @@
 ---
 title: "Fan-out: Push vs Pull"
 description: "Delivering one write to many readers: fan-out on write, fan-out on read, and the hybrid used for feeds and notifications."
+icon: users
+updated: 2026-11-16
 ---
 
 Every feed, notification and chat group raises the same question: when someone posts, do you do the work now for all followers, or later when each follower reads?
 
-## TL;DR
+- Interviewers ask about fan-out to see whether you price both sides with the follower distribution, and notice the one account that breaks push.
 
-- **Fan-out on write (push):** copy the post into each follower's feed at write time. Reads are fast; writes are expensive.
+## Overview
+
+- **Fan-out on write (push):** copy the post id into each follower's feed at write time. Reads are fast; writes are expensive.
 - **Fan-out on read (pull):** assemble the feed when the user opens it. Writes are cheap; reads are expensive.
-- **Hybrid:** push for normal users, pull for celebrities.
-- Feeds are stored as lists of ids in a cache, with content fetched separately.
+- **Hybrid:** push for ordinary accounts, pull for the few with huge followings, merged at read time.
+- Feeds hold **lists of ids** in a cache; the post bodies are stored once and fetched by id.
+- Fan-out runs **asynchronously** through a queue, so the post call returns at once.
+- Notifications are the same problem with a rate limit on the far end: spread the sends over time.
 
-## The idea in plain English
+## Mental model
 
-A newspaper either delivers a copy to every subscriber's door (push) or leaves papers at the kiosk for people to collect (pull). Delivering to ten million doors for one big story is costly; for a small town it is perfect.
+- A newspaper either delivers a copy to every subscriber's door (push) or leaves papers at the kiosk for people to collect (pull).
+- Delivering to ten million doors for one big story is costly; for a small town it is perfect.
+- Most readers read far more often than anyone writes, which is why push usually wins, until one writer has ten million readers.
+- The feed is the doormat, the post is the paper, and the fan-out workers are the delivery round.
 
 ## Core concepts
 
-1. **Feed store.** Per-user list of post ids (for example a Redis list or sorted set).
-2. **Push cost.** Writes scale with follower count.
-3. **Pull cost.** Reads scale with followees and need merging and ranking.
-4. **Hybrid threshold.** Users above a follower count are skipped at write time and merged in at read time.
-5. **Async workers.** Fan-out runs through a [queue](/system-design/patterns/message-queues) so the post call returns quickly.
+- The running example is Brightpost's seller feed: shoppers follow sellers and see their deals and restocks. An ordinary seller has **300 followers**; the Brightpost Deals account has **2,000,000**, every daily shopper.
+
+### Two places to do the work
+
+- **Push cost** grows with the follower count: one post becomes one append per follower.
+- **Pull cost** grows with the accounts a reader follows: one feed open becomes one read per followed account, then a merge and sort.
+- Reads usually outnumber posts by a wide margin, so moving work from reads to writes pays, as long as no single write is huge.
+- Push also wastes work on followers who never come back to read.
+
+<AnimatedDiagram spec="animated/patterns/fanout-celebrity" caption="Push breaks on the one huge account and pull breaks on every feed open; the hybrid pays each cost only where it is small." />
+
+**How to read it:**
+
+- Each row prices one event under push, pull and the hybrid. Red marks the cost that breaks an option.
+- The hybrid (ringed) pushes ordinary sellers and pulls the Deals account.
+
+**The numbers:**
+
+- Push, one Deals post: 2,000,000 appends; at 100,000 appends a second (illustrative) it takes 20 s to reach the last shopper, and 2,000,000 ids × 8 bytes = 16 MB of feed entries.
+- Pull, one feed open: 50 followed sellers (illustrative) = 50 reads and a merge, on every open.
+- Hybrid: 300 appends per ordinary post, 1 write per Deals post, and 1 list read plus 1 merge per feed open.
+
+<PremiumBreak />
+
+### The hybrid threshold
+
+- Accounts above a follower threshold (say 10,000) skip the fan-out workers.
+- Their recent posts go to a small per-author store, and the feed service merges them in when a follower reads.
+- A reader follows only a handful of such accounts, so the read cost stays at a few extra lookups.
+- The threshold can move: the right number is where one push costs more than the reads it saves.
+
+### Feeds hold ids, not posts
+
+- A feed entry is a post id (8 bytes) and maybe a timestamp; the post body lives once in the posts store.
+- An edit or a delete then changes one row, not millions of copies.
+- Cap each feed (keep the newest few hundred ids) and rebuild an expired one from the follow graph on demand.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    POST["New post"] --> Q[("Fan-out queue")]
-    Q --> W["Fan-out workers"]
-    W --> F1[("Feed: user 1")]
-    W --> F2[("Feed: user 2")]
-    READ["Read feed"] --> F1
-    READ --> CEL["Celebrity posts (pull)"]
-```
+The seller feed, built one part at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/fanout-write-vs-read" stepper caption="Ordinary sellers are pushed into each follower's list at write time; the one huge account is pulled and merged when a shopper reads." />
 
-### Why hybrid wins
+<StepCards>
+  <StepCard n={1} title="A seller posts">
+    A seller with 300 followers posts a restock. The post service stores the full post once and returns. Nobody's feed has it yet.
+  </StepCard>
+  <StepCard n={2} title="Fan-out on write">
+    The post id goes on a queue, and fan-out workers append it to the feed list of each of the 300 followers. The writes happen after the post call has returned, so a slow fan-out never slows the seller.
+  </StepCard>
+  <StepCard n={3} title="Reading the feed">
+    A shopper opens the feed. The feed service reads one list of ids from the feed cache and fetches those posts by id, which is one cache read and one batched lookup.
+  </StepCard>
+  <StepCard n={4} title="A huge account: fan-out on read">
+    The Deals account has 2,000,000 followers, so its posts skip the workers and land in a recent-posts store. The feed service reads that store for the few large accounts a shopper follows and merges the results in.
+  </StepCard>
+</StepCards>
 
-Push makes reads a single cache fetch, which matters because reads dominate. But one account with 50 million followers would need 50 million writes per post. Skipping those accounts and merging their recent posts at read time bounds the write cost.
+## Technical mechanics
+
+### Write path
+
+- The post call writes the post and enqueues one fan-out job; workers page through the follower list in batches (say 1,000 at a time).
+- Skip followers who have not opened the app in 30 days; build their feed on demand when they return.
+- Make each append idempotent (a set keyed by post id, or a sorted set scored by time), so a retried batch does no harm.
+
+### Read path
+
+- Read the id list, fetch the posts in one batched call, filter deleted and blocked posts, then rank.
+- Merge the large accounts' recent posts by time, and cache the merged first page for a short time.
 
 ### Notifications
 
-The same split applies to push notifications: fan out through a queue, rate limit per user, and deduplicate.
+- The same split applies to push notifications: fan out through a queue, deduplicate per user, rate limit per user.
+- Push providers cap the send rate, so a large audience takes minutes, not milliseconds; Firebase advises ramping up over at least a minute and spreading sends evenly.
+- In-app inboxes are a feed: push the notification id into each inbox, or pull from a broadcast list for very large audiences.
+- Live delivery to open sessions goes through the gateway fleet (see [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence)).
+
+### Worked example: "back in stock" to 500,000 shoppers
+
+The kettle is restocked with 10,000 units and 500,000 shoppers asked to be told.
+
+1. The restock publishes one event; a fan-out job pages through the 500,000 subscribers in batches of 1,000.
+2. Workers write an inbox entry per shopper and hand a push message to the provider.
+3. 20 workers each send 400 pushes a second, 8,000 a second in all, under Firebase's default of 600,000 per minute (10,000 a second).
+4. Shoppers who receive the alert open the kettle's page, which is a hot key (see [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing)).
+
+**The numbers:**
+
+- Batches: 500,000 ÷ 1,000 = 500 batch jobs on the queue.
+- Time to send all: 500,000 ÷ 8,000 per second = 62.5 s, about a minute.
+- Inbox entries: 500,000 × 8-byte ids = 4 MB, written once.
+- Demand against stock: 500,000 alerts for 10,000 kettles is 50 alerts per kettle, so the alert order decides who buys. Shuffle the subscriber list, or alert in waves and stop when stock runs out.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Push | Fast reads | Write amplification, wasted work for inactive users |
-| Pull | Cheap writes | Slow, heavy reads |
-| Hybrid | Balanced | More moving parts |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Push (on write) | One read per feed open | Writes grow with followers; work for inactive users | Most accounts, read-heavy feeds |
+| Pull (on read) | One write per post | Every open reads every followee and merges | Few readers, or followees with huge audiences |
+| Hybrid | Bounded writes and fast reads | Two code paths and a threshold to tune | Social feeds with a skewed follower count |
+| Ids in the feed | Edits and deletes touch one row | A second lookup for the bodies | Almost always |
 
-## Real-world examples
+## Production systems
 
-- [Twitter](/system-design-case-studies/case-studies/twitter): the classic hybrid timeline.
-- [Instagram](/system-design-case-studies/case-studies/instagram) and [TikTok](/system-design-case-studies/case-studies/tiktok): feeds and recommendation merge.
-- [WhatsApp](/system-design-case-studies/case-studies/whatsapp) and [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger): group message delivery.
+- **Twitter home timelines** (2012 "Timelines at Scale" talk, as summarised by High Scalability): about 300K requests a second read timelines against about 6,000 a second of writes; each home timeline is a Redis list capped at 800 entries, replicated 3 times.
+- **Twitter, large accounts**: the same talk reports that a tweet could take up to 5 minutes to reach 31 million followers by fan-out, and that some very large accounts were merged in at read time instead.
+- **Firebase Cloud Messaging** (as of November 2026): the HTTP v1 API allots 600K quota tokens per one-minute bucket by default; Google advises ramping up over at least 60 seconds and spreading sends rather than sending all at once.
+- **Used in our case studies:** [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Fanning out to inactive users.
-- Storing full post bodies in every feed instead of ids.
-- Synchronous fan-out in the request path.
-- Not handling deletes and edits after fan-out.
+- **Fanning out to inactive users.** Most of the writes are never read. Skip dormant followers and build their feed when they return.
+- **Full post bodies in every feed.** Memory multiplies and edits cannot be applied. Store ids.
+- **Synchronous fan-out in the request path.** One post with many followers times out. Enqueue and return.
+- **Deletes and edits after fan-out.** Old copies keep showing. Filter at read time against the posts store, and clean feeds lazily.
+- **Pure push with a skewed follower graph.** One account's post backs up the queue for everyone. Pull accounts above a threshold.
+- **Notifications sent all at once.** The provider throttles you and your own site gets a stampede. Ramp up, spread, and send in waves.
 
-## How to answer in an interview
+## Interview framework
 
-State read/write ratio and follower distribution, pick push, pull or hybrid with a threshold, and describe the feed store and async workers.
+1. State the read-to-write ratio and the follower distribution, including the largest account.
+2. Price push and pull for an ordinary account and for the largest one.
+3. Choose the hybrid with a threshold, and describe the feed store (ids in a capped list) and the async workers.
+4. Cover deletes, edits, inactive users and how an expired feed is rebuilt.
+5. For notifications, add per-user rate limits, deduplication and a send rate the provider accepts.
 
-## Related patterns
+**What interviewers listen for:** the arithmetic for the largest account and a threshold that switches it to pull.
 
-[Message Queues](/system-design/patterns/message-queues) · [Caching](/system-design/patterns/caching) · [Back Pressure](/system-design/patterns/back-pressure)
+**Red flags:** "write the post into every follower's feed" with no word about an account with millions of followers.
 
 ## Further reading
 
 - [Timelines at Scale (Twitter, InfoQ)](https://www.infoq.com/presentations/Twitter-Timeline-Scalability/)
+- [The Architecture Twitter Uses to Deal with 150M Active Users (High Scalability)](https://highscalability.com/the-architecture-twitter-uses-to-deal-with-150m-active-users/)
 - [Feeding Frenzy: Selectively Materializing Users' Event Feeds](https://dl.acm.org/doi/10.1145/1807167.1807257)
+- [Best practices when sending FCM messages at scale (Firebase docs)](https://firebase.google.com/docs/cloud-messaging/scale-fcm)
+- Related pages: [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views) · [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Push or pull for a news feed?" category="Design" level="Mid">
-    Reads outnumber writes, so push gives fast reads for most users, but celebrity accounts make push too expensive. A hybrid pushes for normal users and pulls celebrity posts at read time.
+  <InterviewQuestion question="Push or pull for a news feed?" category="Architecture" level="Mid">
+    - Reads outnumber writes, so push gives fast reads for most users: one list read per feed open.
+    - Accounts with millions of followers make push too expensive: one post becomes millions of writes.
+    - A hybrid pushes for ordinary users and pulls the large accounts' posts at read time, merging them in.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you handle a post deleted after fan-out?" category="Consistency" level="Senior">
-    Feeds store ids, so filter at read time against a deleted flag or tombstone, and clean feeds lazily in the background.
+  <InterviewQuestion question="How do you handle a post deleted after fan-out?" category="Failure modes" level="Senior">
+    - Feeds store ids, so the post body is gone from one place only.
+    - Filter at read time against a deleted flag or tombstone in the posts store.
+    - Clean the stale ids out of feeds lazily in the background; capped feeds age them out anyway.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is fan-out on write?" category="Concepts" level="Junior">
+    - When someone posts, the system copies the post id into the feed of every follower straight away.
+    - Reading a feed is then one fast lookup of a precomputed list.
+    - The cost is paid at write time and grows with the number of followers.
+  </InterviewQuestion>
+  <InterviewQuestion question="An account with 2 million followers posts. Walk through the cost of push and what you do instead." category="Scaling" level="Senior">
+    - Push means 2,000,000 appends; at 100,000 appends a second that is 20 s before the last follower sees it, and 16 MB of ids for one post.
+    - Every post by that account repeats the cost and delays other accounts' fan-out on the shared queue.
+    - Instead, skip fan-out for accounts above a threshold, store their recent posts per author, and merge them at read time.
+    - A reader follows only a few such accounts, so the extra read cost is a few lookups.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why store ids in each feed instead of the full post?" category="Trade-offs" level="Mid">
+    - An id is 8 bytes; a post with text and image links is hundreds of bytes, multiplied by every follower.
+    - Edits and deletes then change one row in the posts store instead of every copy.
+    - The cost is a second, batched lookup to fetch the bodies, which is cheap and cacheable.
+  </InterviewQuestion>
+  <InterviewQuestion question="500,000 shoppers asked to hear when the kettle is back. How do you send it?" category="Scaling" level="Senior">
+    - Publish one restock event and fan it out through a queue in batches, never in the request that restocked.
+    - Send at a rate the push provider accepts, ramping up: at 8,000 a second it takes about a minute.
+    - With only 10,000 kettles, send in shuffled waves and stop when stock runs out, so the alert does not become a stampede on one product page.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should you fan out to followers who have not opened the app in months?" category="Trade-offs" level="Mid">
+    - Usually not: those writes are almost never read, and they can be most of the fan-out work.
+    - Skip dormant followers and rebuild their feed from the follow graph when they come back.
+    - The cost is a slower first feed open for a returning user.
   </InterviewQuestion>
 </InterviewQuestions>
