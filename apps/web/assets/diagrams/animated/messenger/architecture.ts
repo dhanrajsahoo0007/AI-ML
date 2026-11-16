@@ -4,6 +4,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // introduces it; edges with `until` are early shortcuts that a later step replaces (chat server writing
 // straight to the store until the message bus arrives in step 5).
 //
+// Style: pastel blocks (fill "pastel") for services, glyphs for stores and logs (restyled 2026-11-16; node ids and
+// positions unchanged, because other pages embed this spec with `highlight`).
+//
 // Full main path (packets, in order): sender -> load balancer -> chat servers -> message bus -> store +
 // fan-out -> recipient's chat server -> recipient, with offline recipients going through the push service.
 const spec: DiagramSpec = {
@@ -29,10 +32,31 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 1012, y: 60, w: 172, h: 620 },
   ],
   nodes: [
-    { id: "sender", label: "Sender", sub: "mobile / web", icon: "phone", x: 105, y: 210, w: 140, h: 64 },
-    { id: "recipient", label: "Recipient", sub: "mobile / web", icon: "phone", x: 105, y: 540, w: 140, h: 64 },
+    {
+      id: "sender",
+      fill: "pastel",
+      label: "Sender",
+      sub: "mobile / web",
+      icon: "phone",
+      x: 105,
+      y: 210,
+      w: 140,
+      h: 64,
+    },
+    {
+      id: "recipient",
+      fill: "pastel",
+      label: "Recipient",
+      sub: "mobile / web",
+      icon: "phone",
+      x: 105,
+      y: 540,
+      w: 140,
+      h: 64,
+    },
     {
       id: "lb",
+      fill: "pastel",
       label: "Load balancer",
       sub: "sticky WebSockets",
       icon: "load-balancer",
@@ -49,6 +73,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "chat",
+
       label: "Chat servers",
       sub: "hold WebSocket conns",
       icon: "chat",
@@ -78,6 +103,7 @@ const spec: DiagramSpec = {
 
     {
       id: "session",
+      fill: "pastel",
       label: "Session registry",
       sub: "user → server",
       icon: "registry",
@@ -96,6 +122,7 @@ const spec: DiagramSpec = {
 
     {
       id: "push",
+      fill: "pastel",
       label: "Push service",
       sub: "APNs / FCM",
       icon: "bell",
@@ -114,6 +141,7 @@ const spec: DiagramSpec = {
 
     {
       id: "gateway",
+      fill: "pastel",
       label: "API gateway",
       sub: "auth, rate limit",
       icon: "gateway",
@@ -131,6 +159,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "groups",
+      fill: "pastel",
       label: "Group service",
       sub: "members, roles",
       icon: "users",
@@ -148,6 +177,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "fanout",
+      fill: "pastel",
       label: "Fan-out workers",
       sub: "one copy per member",
       icon: "workers",
@@ -212,6 +242,7 @@ const spec: DiagramSpec = {
 
     {
       id: "presence",
+      fill: "pastel",
       label: "Presence",
       sub: "heartbeats + TTL",
       icon: "presence",
@@ -230,6 +261,7 @@ const spec: DiagramSpec = {
 
     {
       id: "media",
+      fill: "pastel",
       label: "Media service",
       sub: "upload URLs, thumbnails",
       icon: "media",
@@ -264,6 +296,7 @@ const spec: DiagramSpec = {
 
     {
       id: "history",
+      fill: "pastel",
       label: "History service",
       sub: "paged by message id",
       icon: "history",

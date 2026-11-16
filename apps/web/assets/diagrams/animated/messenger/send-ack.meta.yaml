@@ -1,0 +1,14 @@
+title: Save, then ack; a retry reuses the client id
+alt: >-
+  A sequence diagram in two steps with five lanes: an orange sender app, a teal chat server, a green dedup cache, a
+  neutral message bus and a violet message store. Step 1: the app sends client id c7 for conversation 88; the chat
+  server claims c7 in the dedup cache and gets message id m42, publishes m42 to the bus keyed by conversation 88,
+  waits until two of three replicas have it, and only then acks the app; the store writer persists m42 from the bus
+  afterwards. Step 2: the ack is lost, drawn as a red timeout; after 2 seconds the app resends c7, the dedup cache
+  already holds c7 as m42, and the server returns the same m42 without publishing again.
+caption: >-
+  “Sent” means the replicated log has it; a retry with the same client id gets the same message id, never a second
+  message.
+tags: [case-studies, messenger, idempotency, durability]
+source: original
+created: 2026-11-16
