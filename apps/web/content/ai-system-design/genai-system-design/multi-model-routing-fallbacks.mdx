@@ -1,24 +1,253 @@
 ---
 title: Multi-Model Routing & Fallbacks
 description: Intelligent request routing across models with resilience patterns, cost controls, and experimentation-friendly traffic splits.
+updated: 2026-11-15
 ---
 
-Production LLM applications rarely rely on a single model. Routers choose among options with different cost, latency, context limits, and capability profiles. Simple policies route by tenant tier, task type, or prompt length. More advanced routers train lightweight classifiers or use small models to predict which large model is needed, or they cascade: attempt a cheap model first and escalate only when confidence is low or validation fails.
+Production LLM applications rarely call one model for everything. Interviewers ask about routing to see whether you can cut the bill without cutting quality, and whether you know what to do when a provider fails halfway through a sale.
 
-Fallback chains improve reliability when a provider returns 429 errors, when a regional endpoint fails health checks, or when output schema validation fails and a retry with a stricter model is warranted. Each hop should be bounded by deadlines so total latency does not exceed client timeouts. Circuit breakers stop hammering unhealthy backends and allow half-open probes to recover gracefully.
+## TL;DR
 
-Model cascades differ from pure fallbacks: they spend more compute only on hard inputs while keeping easy inputs cheap. A and B traffic splitting supports experimentation: route a percentage of users to a new prompt or model, compare metrics, and roll forward or back. Feature flags and consistent hashing by user id keep experiences stable across requests.
+- A **router** picks which model answers each request, before any model runs. A **cascade** tries a cheap model first and **escalates** when a check says the answer is weak. A **fallback** is different: it reacts to a failure, not to difficulty.
+- Routing pays when most traffic is easy. At Brightpost's illustrative prices, sending **70 % of questions to a model a tenth of the price cuts a \$1,380 day to \$510.60 (63 %)**.
+- Router types, cheapest first: **rules**, a **trained classifier**, **embedding similarity**, an **LLM as router**, and a **cascade with a confidence check**. Each trades cost and latency against how well it spots hard questions.
+- RouteLLM and FrugalGPT report large savings on public benchmarks (**3.66x fewer strong-model calls on MT Bench; up to 98 % lower cost on one finance dataset**). Your savings depend on your own mix of questions.
+- A **circuit breaker** (closed, open, half-open) stops calls to a failing provider, so each request does not pay a timeout. Every hop in a fallback chain needs a **deadline**.
+- Judge a router on the **golden set** with a **quality-versus-cost curve**, and tag every span with the route taken.
 
-Cost optimization intersects routing when you downgrade non-critical workloads to smaller models or shorten max tokens dynamically. The trade-off is engineering and observability complexity: more branches mean harder attribution of quality regressions unless you tag spans with router decisions and outcomes.
+## The idea in plain English
+
+Think of a hospital front desk. A nurse greets everyone, sends a sprained ankle to a nurse practitioner and a chest pain to a cardiologist. The cardiologist is expensive, so the desk must not waste them on ankles. It must also not send chest pain to the ankle room. If the cardiology wing loses power, the desk stops sending patients there at once, tests the wing every half minute, and reopens only when it works. Routing is the desk's choice. Fallback and the circuit breaker are the power cut plan.
+
+## Core concepts
+
+1. **Route.** A decision made before the call: which model, which region, which prompt version. The inputs are the request, the user and the system's current load.
+2. **Cascade.** Call the cheap model, check its answer, and call the large model only if the check fails. It decides after seeing an answer, so it pays twice for the hard cases.
+3. **Fallback.** After a failure (429, 5xx, timeout, invalid output), send the same request to another model or provider. The trigger is an error, not difficulty.
+4. **Router types.** Rules on request fields, a trained difficulty classifier, nearest examples by embedding, a small LLM that reads the request, or a cascade's confidence check.
+5. **Deadline.** The total time the client will wait. Each retry or hop gets what is left, never a fresh timeout.
+6. **Circuit breaker.** A small state machine in front of a backend. **Closed** passes calls, **open** skips the backend for a cooldown, **half-open** lets a few probes through.
+7. **Traffic split.** A stable share of users sent to a new model or prompt, chosen by hashing the user id, so an experiment gives one person one experience.
+8. **Router decision tag.** A label on every span that records the route, the reason and the outcome. Without it, a quality drop cannot be traced to the router.
+
+## Architecture
+
+Brightpost's router sits in the gateway, after the key and limit checks and before the provider call (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) for the layer around it). Prices below are illustrative.
+
+<AnimatedDiagram
+  spec="animated/serving/route-by-difficulty"
+  stepper
+  caption="Sending the easy 70 % of questions to a model a tenth of the price cuts the day’s bill from $1,380 to $510.60. The saving holds only while the router sends hard questions to the large model."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A router sends easy questions to the small model">
+    Of 200,000 requests a day, 140,000 are easy ("where is my parcel?", opening hours) and go to the small model. The other 60,000 (refunds, damaged goods, policy questions) go to the large one.
+  </StepCard>
+  <StepCard n={2} title="One request costs a tenth on the small model">
+    At 2,200 tokens in and 250 out, a large-model request costs \$0.0069 and a small-model request \$0.00069 (illustrative prices: \$2 and \$10 per million tokens for the large model, a tenth of that for the small one).
+  </StepCard>
+  <StepCard n={3} title="The day's bill with and without the router">
+    All on large: 200,000 × \$0.0069 = \$1,380. Routed: 140,000 × \$0.00069 = \$96.60, plus 60,000 × \$0.0069 = \$414, giving \$510.60. The router saves \$869.40 a day, 63 %, about \$26,082 over 30 days.
+  </StepCard>
+  <StepCard n={4} title="A router that is wrong sends hard questions to the small model">
+    If the router misses 10 % of the hard questions, 6,000 a day get the small model's answer. The small model does not say it is out of its depth, so nothing downstream notices unless you measure.
+  </StepCard>
+</StepCards>
+
+The router's own cost is left out: a small classifier adds well under 1 % of the saving. The 70 % easy share is Brightpost's assumption, not a measurement. Measure yours on a labelled sample before you promise a saving.
+
+## Deep dive
+
+### Router types
+
+Each type answers one question: how does the router know a request is hard?
+
+- **Rules.** Route on fields you already have: tenant tier, task type (`classify` or `answer`), prompt length, a tool-use flag, language. Free and predictable. It cannot see that a short question ("can I return a gift?") is hard.
+- **Trained classifier.** A small model (a BERT-sized encoder, say) predicts "needs the large model" from the text. It costs a few milliseconds and needs labelled examples: tickets where the small model failed and the large one passed.
+- **Embedding similarity.** Embed the request, find the nearest labelled examples, and copy their route. No training run, only an example set. It fails on request types you never labelled. See [Embeddings and Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space) for the nearest-neighbour step.
+- **LLM as router.** A small LLM reads the request and answers "easy or hard?". It handles odd requests, but it adds a model call and its own tokens to every request.
+- **Cascade with a confidence check.** Skip the prediction: run the cheap model and test the answer. The check can be token probabilities, a schema validator, a verifier model or a retrieval score.
+
+A cascade and a router differ in when they decide. The figure below is the cascade, drawn with a different illustrative workload (50,000 requests a day) from the Brightpost figures on this page.
+
+<AnimatedDiagram
+  spec="animated/llm/choose-cascade"
+  stepper
+  caption="Every request pays for the small model and only the escalated 20% also pay for the large one, so with these illustrative prices the blend costs 30% of large-only, at the price of extra latency on the hard cases."
+/>
+
+**How to read it.** Blue is the small model, violet the large one, orange the check. The hard 20 % pay for both models and wait for both. With Brightpost's numbers and 30 % escalated, a cascade costs 200,000 × (\$0.00069 + 0.3 × \$0.0069) = \$552 a day, against \$510.60 for a perfect router: the extra \$41.40 is 60,000 × \$0.00069, the small model's wasted answers. The user also waits for the whole small answer before the large model starts, so an escalated first token arrives later (illustrative: about 1.5 s plus 0.4 s).
+
+For a sketch of how a router and a safety rule combine in code (the tool and field names are placeholders, not a product API):
+
+```python
+def choose_model(req, difficulty_score):
+    if req.topic in ("refund", "legal", "complaint"):
+        return "large"            # safety bucket: never downgrade
+    if req.needs_tools or req.tokens_in > 6_000:
+        return "large"            # capability rule
+    if difficulty_score >= 0.5:   # threshold tuned on the golden set
+        return "large"
+    return "small"
+```
+
+### What the research reports
+
+**FrugalGPT** (Chen, Zaharia and Zou, 2023, arXiv 2305.05176) studies three ways to cut cost: adapt the prompt, approximate the model, and cascade. Its cascade has a learned scoring function (a DistilBERT regressor) that rates each answer from 0 to 1, and moves to the next model when the score is under a threshold. At the accuracy of the best single model it reports savings of 98.3 % on a finance-headline dataset (against GPT-4), 73.3 % on a legal one (against GPT-4) and 59.2 % on a reading-comprehension one (against GPT-3). It also reports up to 4 % higher accuracy than GPT-4 at the same cost.
+
+**RouteLLM** (Ong et al., 2024, arXiv 2406.18665) trains routers between a strong and a weak model on human preference data from Chatbot Arena. It tests four: similarity-weighted ranking, matrix factorisation, a BERT classifier and a causal-LLM classifier. With GPT-4 as the strong model and Mixtral 8x7B as the weak one, its best router reached 95 % of GPT-4's quality on MT Bench with 3.66 times fewer GPT-4 calls than a random router, about 73 % fewer. On MMLU it was 1.41 times at 92 % of GPT-4's quality, and on GSM8K 1.49 times at 87 %. The routers also kept working when the model pair changed, without retraining.
+
+Read both as upper bounds on benchmark traffic. Savings were largest where many questions were easy and the weak model was good at them (MT Bench), and small on MMLU and GSM8K, where fewer were. Your savings depend on your mix.
+
+### Fallback chains and deadlines
+
+A fallback reacts to a failure: a 429 from an overloaded provider, a 5xx, a timeout, or an answer that fails schema validation. The gateway page covers retries and cool-downs; the sequence is repeated here because deadlines are the routing decision.
+
+<AnimatedDiagram
+  spec="animated/serving/gateway-fallback"
+  stepper
+  caption="The answer still arrives, but its first token comes at 3.45 s instead of 0.4 s: every retry and timeout is paid for in the user’s wait."
+/>
+
+**How to read it.** The first token costs 50 ms (429) + 1,000 ms (wait) + 2,000 ms (timeout) + 400 ms (B) = 3,450 ms, against 400 ms on a normal day (illustrative timings). Give every request one **deadline** and let each hop spend only what is left: `hop timeout = min(its own limit, deadline − time already spent)`. If a client gives up at 6 s, the chain has about 2.5 s of slack after the 3.45 s above. A third hop that needs 4 s must be skipped.
+
+Two more rules from the chain. Fall back only to a model that passes the same golden set, since a fallback that works but answers worse is a silent quality loss. And fall back on a failed schema check only when a retry on a stricter model is likely to pass, because it doubles the cost of that request.
+
+### Circuit breakers
+
+Without a breaker, every request tries the failing provider first and pays the detour. A breaker remembers that it is failing. It has three states, as Martin Fowler's classic description puts it: closed, open and half-open.
+
+<AnimatedDiagram
+  spec="animated/serving/route-circuit-breaker"
+  stepper
+  caption="The breaker spends a few failed calls to learn that a provider is down, then stops sending it traffic. After 30 seconds it tests the provider with three probes before trusting it again."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Closed: calls go to the provider">
+    The breaker counts the outcomes of the last 20 calls. A failure is a 429, a 5xx or no first token within 2 s.
+  </StepCard>
+  <StepCard n={2} title="Open: too many failures, skip the provider">
+    When 10 of the last 20 calls fail (and at least 10 calls were seen), the breaker opens. For 30 s every call goes straight to B. At 12 requests/s that is 360 calls that skip A's detour.
+  </StepCard>
+  <StepCard n={3} title="Half-open: let a few probe calls through">
+    After the 30 s, three probe calls go to A, one at a time. They are real customer requests, so keep the probe count small.
+  </StepCard>
+  <StepCard n={4} title="Close again on success, re-open on failure">
+    Three successes close the breaker. One failure opens it for another 30 s. Log every transition with its reason, so on-call can tell saturation from a hard outage.
+  </StepCard>
+</StepCards>
+
+**The numbers.** Each of the 360 calls skips 3,050 ms of retry and timeout (the 3,450 ms path less B's own 400 ms): 360 × 3.05 s = 1,098 s of customer waiting avoided in one open window. The settings are illustrative; LiteLLM's router, for one, cools a deployment down after `allowed_fails` failures in a minute for `cooldown_time` seconds, and its default is 5 s.
+
+<Callout tone="red" title="What breaks">
+  A breaker that opens on rate-limit errors from one noisy tenant takes the provider away from every tenant. Count failures per provider and model, not per key, and keep per-key limits in the [rate limiter](/ai-system-design/genai-system-design/rate-limiting-throttling). Also watch for flapping: a short cooldown with one probe re-opens every few seconds. Use several probes and an alert on each trip.
+</Callout>
+
+### Evaluating a router
+
+A router has two outputs to judge: the quality of the answers and the share of calls it sends to the large model. Plot them against each other. Run the 200-ticket golden set through every candidate threshold, grade each answer with your judge (see [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)), and keep the whole curve, not one point.
+
+The table shows the shape for Brightpost. Quality is a **judge pass rate on the golden set, invented to show the shape** (it is not a measurement); cost is computed from the prices above.
+
+| Share sent to large | Cost per day | Pass rate (illustrative) |
+| --- | --- | --- |
+| 0 % (all small) | \$138 | 62 % |
+| 20 % | \$386.40 | 80 % |
+| 30 % | \$510.60 | 92 % |
+| 50 % | \$759 | 95 % |
+| 100 % (all large) | \$1,380 | 96 % |
+
+Cost at a share *s* is 200,000 × (*s* × \$0.0069 + (1 − *s*) × \$0.00069); at 30 % it is 200,000 × (\$0.00207 + \$0.000483) = \$510.60. The curve rises steeply and then flattens, so the useful point is the knee: here, 30 % costs 37 % of all-large for 4 points of pass rate. Also check that a good average does not hide a bad slice: report the refund tickets separately, since those are the ones the safety bucket must keep on the large model. Weigh the cost of a lost point against the dollars, and re-draw the curve whenever the models or the traffic mix change. Calibrate the threshold on your own traffic, as the RouteLLM authors advise, not on a public dataset.
+
+### Traffic splits and experiments
+
+A split sends a fixed share of users to a new model, to compare it with the old one. Assign by `hash(user_id) mod 100`: a user stays in the same arm for every request, so their experience is stable. Log the arm and the model on every span. Fallbacks can contaminate the arms: if arm B's model fails and falls back to arm A's, the data mixes, so record the model that answered and analyse by it. Compare quality and spend per resolved ticket, not latency alone. See [A/B Testing Prompts and Models](/ai-system-design/genai-system-design/ab-testing-prompts-models) for the statistics.
+
+### Worked example: a refund question and an opening-hours question
+
+Two customers write at 11:00 on sale day, with Brightpost at its 12 requests/s peak. Follow them through the four steps of the routing figure.
+
+1. **Router.** "What time do you close on Saturday?" scores 0.1 on difficulty: no topic in the safety bucket, no tools, short. "My kettle arrived cracked. It's order 4471. Can I get my money back?" matches the `refund` rule and goes to the large model whatever the score.
+2. **Price.** The first costs \$0.00069 on the small model. The second costs \$0.0069 on the large one, ten times more, and is worth it: a refund of £42 is over the £30 approval limit, so the answer must hand off to a person.
+3. **Provider A is overloaded.** The refund call hits the gateway's retry and fallback path (the sequence above), and the breaker for A trips after 10 failures in 20. For the next 30 s, 360 calls skip A.
+4. **Measure.** The span records `route=large`, `reason=refund-rule`, `served_by=B`. A week later the golden-set curve shows whether 30 % to large is still the knee.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Rule-based router | Free, predictable, easy to explain | Cannot see hidden difficulty | First version; safety and capability limits |
+| Trained classifier or embedding router | Cheap per request; learns from your tickets | Needs labels; drifts as traffic changes | Stable traffic with a labelled history |
+| LLM as router | Handles odd requests | Adds a model call and tokens to every request | Low volume, high variety |
+| Cascade with a check | No up-front guess; sees the answer | Pays and waits twice on escalations | Answers that are easy to verify (schemas, retrieval scores) |
+| Fallback chain with deadlines | Survives provider failures | Slower answers on failover; fallback must be evaluated | Customer-facing paths |
+| Circuit breaker | No per-request detour while a provider is down | Can flap or open on a noisy tenant | Any multi-provider setup |
+
+## Real-world examples
+
+All as of November 2026, from each project's own docs and papers:
+
+- **RouteLLM** (LMSYS and Berkeley, Apache-2.0): routers trained on preference data and a threshold you calibrate to a target share of strong-model calls; its README reports up to 85 % lower cost at 95 % of GPT-4's quality on MT Bench, and tells users to calibrate on their own queries.
+- **FrugalGPT** (Stanford): the cascade with a learned scorer, tested over a dozen model APIs from several providers.
+- **LiteLLM router**: routing strategies including weighted shuffle, latency-based, least-busy and cost-based; retries, fallbacks per model group, and cooldowns after repeated failures.
+- **Portkey gateway**: configuration for fallback targets and retries, with status codes that trigger each.
+- **The circuit breaker pattern**: described by Martin Fowler in 2014 and used well beyond LLMs, in libraries such as Resilience4j.
+
+## Common pitfalls
+
+- Routing on prompt length alone: the shortest questions ("can I get a refund?") are often the ones with the most policy in them.
+- No safety bucket, so a cost rule sends a refund or a legal question to the small model.
+- A fallback model nobody evaluated, and no alert on the fallback rate, so quality drops quietly.
+- Retries and fallback hops with no total deadline, so a three-hop chain outlasts the client's timeout.
+- Opening the breaker on per-tenant rate limits, or with one probe and a short cooldown, which flaps.
+- A router decision that is not logged, so a quality regression cannot be traced to a route.
+
+## How to answer in an interview
+
+1. Separate the three ideas: routing (before the call, by difficulty), cascades (after a cheap call, by confidence) and fallbacks (after a failure).
+2. Give the saving as arithmetic: the easy share, the two prices, the daily bill with and without. Name what you assumed.
+3. Pick a router: rules and a safety bucket first, then a classifier trained on your own tickets; mention the cascade's double cost.
+4. Cover failure: a deadline across hops, a breaker with closed, open and half-open and its trip and recovery rules, and a fallback that passed the golden set.
+5. Close with evaluation: the quality-versus-cost curve on the golden set, per-slice checks, and a route tag on every span.
+
+**What interviewers listen for:** a saving computed from an easy-traffic share, a safety bucket that overrides cost, deadlines across hops, and a router judged on a curve rather than one number.
+
+**Red flags:** routing with no way to measure the misses, treating fallback and cascade as the same thing, or unlimited retries across providers.
+
+## Further reading
+
+- [RouteLLM: Learning to Route LLMs with Preference Data (Ong et al., 2024)](https://arxiv.org/abs/2406.18665) · [RouteLLM code and README (LMSYS)](https://github.com/lm-sys/RouteLLM)
+- [FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance (Chen, Zaharia, Zou, 2023)](https://arxiv.org/abs/2305.05176)
+- [Circuit Breaker (Martin Fowler, 2014)](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [Router: strategies, cooldowns and fallbacks (LiteLLM docs)](https://docs.litellm.ai/docs/routing)
+- [Fallbacks (Portkey docs)](https://portkey.ai/docs/product/ai-gateway/fallbacks)
+- Related pages: [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Cost & Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization) · [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model) · [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do circuit breakers interact with fallback chains in a multi-provider setup?" category="Reliability">
-    When error rates or latency against a provider exceed thresholds, the breaker opens and the router skips that provider for a cool-down period, sending traffic to the next backend in the chain. Half-open states send a trickle of probes to detect recovery without flooding a bad endpoint. Log each transition with reason codes so on-call can distinguish saturation from hard outages.
+  <InterviewQuestion question="What is the difference between a router, a cascade and a fallback?" category="Concepts" level="Junior">
+    A router chooses a model before any call, from features of the request such as task type or a predicted difficulty. A cascade calls a cheap model first and escalates only when a check on its answer says it is weak, so it decides after seeing an answer and pays twice on the hard cases. A fallback reacts to a failure such as a 429, a timeout or invalid output, and sends the same request to another model. Routers and cascades save money; fallbacks keep the product running.
   </InterviewQuestion>
-  <InterviewQuestion question="What signals would you use for a capability-based router between a small and large LLM?" category="Architecture">
-    Combine cheap heuristics such as token count, language detection, and tool requirement flags with a calibrated confidence score from the small model if you use a cascade. For RAG, router inputs may include retrieval score distributions. Always include safety bucketing so high-risk topics always route to the stronger model regardless of length heuristics.
+  <InterviewQuestion question="What signals would you use for a capability-based router between a small and large LLM?" category="Architecture" level="Mid">
+    Start with cheap, explainable signals: token count, language, whether the request needs tools or structured output, tenant tier and topic. Add a difficulty score from a small classifier or from the nearest labelled tickets, tuned to a threshold on the golden set. For a cascade, use a calibrated confidence such as token probabilities or a schema check. With retrieval, add the retrieval score distribution. Always add a safety bucket so high-risk topics such as refunds go to the stronger model regardless of length or score.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you run an A/B test between two models without biasing metrics?" category="Cost">
-    Assign users or sessions with stable hashing to arms, keep prompts comparable, and log model identifiers with outcomes. Watch both quality metrics and spend per successful task, because a cheaper model might look good on latency while hurting conversion. Use sequential testing or frequentist power analysis to avoid peeking bias, and ensure fallback paths do not contaminate arms unless you stratify analysis.
+  <InterviewQuestion question="How do circuit breakers interact with fallback chains in a multi-provider setup?" category="Failure modes" level="Mid">
+    When the failure rate against a provider crosses a threshold, such as 10 of the last 20 calls, the breaker opens and the router skips that provider for a cooldown, sending traffic to the next backend in the chain. That removes the retry-and-timeout detour from every request. After the cooldown the breaker goes half-open and lets a few probes through: success closes it, failure re-opens it. Log each transition with a reason code so on-call can tell saturation from a hard outage.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you run an A/B test between two models without biasing the metrics?" category="Trade-offs" level="Mid">
+    Assign users or sessions to arms with a stable hash of the user id, keep the prompts comparable and log the arm and the model that answered on every span. Compare quality and spend per resolved task, not latency alone, because a cheaper model can look fast and still hurt resolution. Use a sample size fixed in advance or a sequential test to avoid peeking bias. Fallbacks can move a request into the other arm, so analyse by the model that answered, or exclude those requests.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you evaluate a router before sending it live traffic?" category="Concepts" level="Mid">
+    Run the golden set through the router at several thresholds and grade each answer with the same judge. Plot quality against the share of calls sent to the large model, or against dollars per day, and choose the knee of the curve rather than one point. Report slices separately, for example the refund tickets, because an average can hide a failing class. Compare with two baselines, all-large and a random router at the same share. Then shadow-run on live traffic and re-draw the curve whenever the models or the traffic mix change.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the retry, fallback and deadline policy for a customer-facing assistant across two providers." category="Failure modes" level="Senior">
+    Give each request one deadline, for example the client timeout, and let every hop spend only what remains of it. Retry once, honouring `retry-after`, with a short first-token timeout; then fall back to a second provider whose model passed the golden set. Put a circuit breaker per provider and model, opened by a failure rate and not by one error, with a cooldown and a few probes. Skip any hop that cannot finish inside the remaining time. Alert on the fallback rate and on every breaker trip, because a working fallback hides a degraded primary.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your router cuts the bill by 60 % but the complaint rate rises. What do you do?" category="Failure modes" level="Senior">
+    Treat it as a router miss until shown otherwise. Use the route tag on each span to compare complaint rates for small-routed and large-routed tickets, and look for a class, such as refunds or non-English requests, that the router sends down wrongly. Raise the threshold or add a rule for that class, and re-run the golden set curve, with the slice reported separately. Add a cheap online check, such as a judge on a sample of small-routed answers, so a miss shows up in hours and not in the next survey. Roll the change out behind a traffic split and watch complaints per arm.
+  </InterviewQuestion>
+  <InterviewQuestion question="Cascade or up-front router: which would you choose for Brightpost, and why?" category="Architecture" level="Senior">
+    With a reliable cheap check, a cascade needs no difficulty model and cannot misroute a hard question without the check noticing. At Brightpost's numbers a 30 % escalation costs about \$552 a day against \$510.60 for a perfect router, a small premium. But escalated requests wait for the whole small answer before the large model starts, which hurts first-token latency, and refund answers have no cheap check. So I would use rules and a classifier up front, with the cascade's confidence check as a second line on the small-routed answers.
   </InterviewQuestion>
 </InterviewQuestions>

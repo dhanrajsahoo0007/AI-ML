@@ -9,7 +9,7 @@ description: The software around a model that turns it into a reliable agent or 
 
 - A **harness** is everything around the model except its own reasoning: context assembly, tools, execution sandbox, state, verification, retries, guardrails, logging and evaluation.
 - Two meanings show up in interviews: the **agent harness** (runtime scaffolding that lets a model act) and the **evaluation harness** (the test rig that measures it). Good teams build both together.
-- The model proposes; the harness **constrains, verifies and records**.
+- The model proposes; the harness **constrains, verifies and records**. In the bug-fix run on this page the model makes 6 proposals, and only 2 of them are real decisions; the harness runs, checks or hands over every one.
 - Reliability comes from **feedback loops**: run the code, check the output against a schema or a test, and feed errors back to the model.
 - Treat the harness like product code: version it, test it with regression suites, and measure it with traces and evals.
 
@@ -17,9 +17,38 @@ description: The software around a model that turns it into a reliable agent or 
 
 A brilliant new hire still needs a desk, logins to the right systems, a checklist, someone reviewing their work, and a record of what they did. The model is the hire; the harness is the desk, the access, the checklist and the review. Give a strong model a bad harness and it flails. Give an average model a great harness and it can be dependable.
 
+Birgitta Böckeler puts it as a formula: "Agent = Model + Harness", where the harness is everything in the agent except the model. Here is what each side owns.
+
+<AnimatedDiagram
+  spec="animated/agents/model-plus-harness"
+  minWidth={620}
+  caption="The model reads and proposes; the eight parts of the harness decide what it sees, what runs and what counts as done."
+/>
+
+**How to read it.** The model owns three things, and all three are words: it reads the context, proposes a step and says when it is done. The ringed box is its one real decision. Everything on the right is code your team writes, tests and owns. The two sides touch at two arrows only: context goes in, a proposal comes out.
+
 ## Core concepts
 
-1. **Context assembly.** The harness decides what the model sees on each step: system instructions, the task, retrieved documents, tool results, memory and a summary of earlier steps. This is also called context engineering, and it is the biggest lever on quality.
+Every figure on this page follows one task. A coding agent works on `brightpost-orders`, the order-import code of Brightpost, the shop from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures). The issue reads "Order import drops the last line of a CSV file". The agent has four tools, `search`, `read_file`, `edit_file` and `run_tests`, and the repository has 18 tests. The bug is in `src/parser.ts`. The full run is nine steps, traced in the [worked example](#worked-example-fixing-the-csv-bug-step-by-step).
+
+1. **Context assembly.** The harness decides what the model sees on each step: system instructions, the task, retrieved documents, tool results, memory and a summary of earlier steps. This is also called context engineering, and it is the biggest lever on quality. Anthropic defines the goal as the smallest set of high-signal tokens that gets the job done.
+
+Here is the coding agent's context window at its first step and at its last, drawn to the same budget.
+
+<AnimatedDiagram
+  spec="animated/agents/context-budget"
+  stepper
+  minWidth={620}
+  caption="By step 9 tool results are the biggest slice of the window, and they are the first thing compaction trims. Token counts are illustrative."
+/>
+
+**How to read it.** Step 1 holds only what the harness put there before any work: instructions, tool definitions and the issue. By step 9 the window also holds the two files the agent opened, its own earlier calls (history) and every tool result. The ringed slice, tool results, grew fastest: test output and file contents are long, and most of it is never needed again.
+
+**The numbers** (illustrative, for a 32,000-token budget). Step 1: 2,000 + 1,500 + 300 = **3,800 tokens**, 12 %. Step 9: 3,800 + 6,400 + 4,000 + 9,800 = **24,000 tokens**, 75 %. That is 20,200 tokens over 8 steps, about 2,500 per step, so the 8,000 tokens left last about three more steps. Tool results alone are 9,800 / 24,000 = 41 % of what is used.
+
+<Callout tone="red" title="What breaks">
+  A window that only grows. Long before it is full, answers get worse: Anthropic calls this context rot, where recall falls as the token count rises. Load files when they are needed, not up front, and compact the history. The lightest compaction is to clear old tool results the model has already acted on.
+</Callout>
 
 2. **Tool layer.** Tools are described with names, descriptions and JSON schemas so the model can call them. The harness validates arguments, executes the call, handles timeouts and returns results in a compact form. Protocols such as MCP standardize how tools are exposed.
 
@@ -29,60 +58,107 @@ A brilliant new hire still needs a desk, logins to the right systems, a checklis
 
 5. **Verification and feedback loops.** After each action, the harness checks results: does the output parse against the schema, do the tests pass, did the API return an error? Failures are fed back to the model with the error message so it can fix them, up to a retry budget.
 
+The order of the checks matters. Run the cheap, certain ones first.
+
+<AnimatedDiagram
+  spec="animated/agents/verification-ladder"
+  stepper
+  minWidth={620}
+  caption="Cheap, certain checks run on everything; costly judgement runs only on what got past them, and every failure goes back to the model as an error."
+/>
+
+**How to read it.** The first two rungs are what Böckeler calls computational checks: deterministic, fast and cheap, so they run on every proposal. The last two are inferential: a reviewer model judges whether the change solves the right problem, and a person signs off on anything risky. They cost tokens and attention, so they see only work that passed the cheap rungs. Every dashed "fail" ends at the model, as an error it can act on.
+
+**The numbers** for the bug-fix run. The schema check ran 5 times, once per tool call, at no cost. The test suite ran twice, 18 tests each time, and caught the first fix's gap. The reviewer model and the person each looked once, at the end.
+
 6. **Guardrails and permissions.** Risky actions (sending email, deleting data, spending money) need allow-lists, human approval, or both. Inputs and outputs are filtered for prompt injection, sensitive data and policy violations.
 
-7. **Budgets and stopping rules.** Limits on steps, tokens, time and cost stop runaway loops. Clear success criteria let the agent stop when the job is done.
+Match the agent's freedom to how hard an action is to undo.
+
+<AnimatedDiagram
+  spec="animated/agents/permission-tiers"
+  minWidth={620}
+  caption="The harder an action is to undo, the more the harness stands between the proposal and the action."
+/>
+
+**How to read it.** Read across. Reading `src/parser.ts` changes nothing, so it runs at once. Editing it inside the sandbox can be undone with git, so it runs and the tests check it. Merging the fix, deploying or emailing a customer may not be undoable, so the ringed gate waits for a person. Real tools draw the lines in different places: Claude Code's default mode reads files without asking, but asks before it edits a file or runs most shell commands.
+
+<Callout tone="red" title="What breaks">
+  Tiers assigned by tool name instead of by effect. A `run_tests` tool that runs any shell command can also push to a remote or call an outside API, so it is a tier-3 tool in disguise. Give the tool a fixed command, or run it in a sandbox with no network and no credentials.
+</Callout>
+
+7. **Budgets and stopping rules.** Limits on steps, tokens, time and cost stop runaway loops. Clear success criteria let the agent stop when the job is done. For the coding agent, "done" is all 18 tests passing with clean lint and types, and the token budget is the 32,000 above.
 
 8. **Observability.** Every model call, tool call, input, output, latency and cost is traced, so failures can be replayed and debugged.
 
-9. **Evaluation harness.** A fixed set of tasks with expected outcomes and graders (exact match, unit tests, rubric scoring, LLM-as-judge), run automatically on every change to the prompt, tools, model or harness code.
+9. **Evaluation harness.** A fixed set of tasks with expected outcomes and graders (exact match, unit tests, rubric scoring, LLM-as-judge), run automatically on every change to the prompt, tools, model or harness code. The [Deep dive](#the-evaluation-harness-that-guards-the-agent-harness) shows the gate it feeds.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    U["User task"] --> ORCH["Harness orchestrator<br/>(loop, budgets, stop rules)"]:::accent
-    ORCH --> CTX["Context builder<br/>(instructions, task, memory,<br/>retrieved docs, recent steps)"]
-    CTX --> LLM["LLM"]
-    LLM -->|"proposed action or answer"| VAL["Validate<br/>(schema, policy, permissions)"]
-    VAL -->|"tool call"| TOOLS["Tool layer / MCP servers"]
-    TOOLS --> SANDBOX["Sandboxed execution"]
-    SANDBOX --> CHECK["Verify result<br/>(tests, errors, assertions)"]
-    CHECK -->|"error, retry"| CTX
-    CHECK -->|"ok"| STATE["Update state and memory"]
-    STATE --> ORCH
-    VAL -->|"risky action"| HUMAN["Human approval"]
-    HUMAN --> TOOLS
-    VAL -->|"final answer"| OUT["Response to user"]
-    ORCH -.-> TRACE["Tracing and cost logs"]
-```
+Here is the harness built round the model, one part at a time. Step through it; each card below matches one step.
 
-One step of the loop:
+<AnimatedDiagram
+  spec="animated/agents/harness-anatomy"
+  stepper
+  minWidth={620}
+  caption="The model is one box in the middle; every other box is harness code that decides what it sees, what runs and what counts as done."
+/>
 
-1. The orchestrator checks budgets and decides whether to continue.
-2. The context builder assembles exactly what the model needs for this step.
-3. The model proposes either a tool call or a final answer.
-4. The harness validates the proposal against schemas, policies and permissions, routing risky actions to a human.
-5. The tool runs inside a sandbox, and the result is verified.
-6. Errors go back into the context for a retry; successes update the state, and the loop continues.
+<StepCards>
+  <StepCard n={1} title="The model sees only the context the harness assembles">
+    Context assembly builds each request: instructions, the issue, the files found so far and the results of earlier steps. The model has no other view of the repository. Gap: the model can only write text; nothing runs yet.
+  </StepCard>
+  <StepCard n={2} title="A tool layer turns proposals into calls">
+    The model's proposal is a tool call, such as `read_file("src/parser.ts")`. The tool layer checks the arguments against the tool's schema, runs it and returns the result. Gap: the call runs wherever the harness runs, with its access.
+  </StepCard>
+  <StepCard n={3} title="Calls run in a sandbox">
+    Every call now runs in a container with a copy of the repository and no production credentials. A bad command costs a retry, not an incident. Gap: the raw output goes straight back, right or wrong.
+  </StepCard>
+  <StepCard n={4} title="Verification checks every result">
+    The sandbox's output goes through tests, lint and type checks before the model sees it. The harness, not the model, decides whether a step worked. Gap: nothing remembers what already passed.
+  </StepCard>
+  <StepCard n={5} title="State keeps progress; failures go back as errors">
+    What passes is saved as state: the plan, the steps done, the diff so far. State feeds progress into the next context. A failure goes back along the dashed line as an error message the model can act on.
+  </StepCard>
+  <StepCard n={6} title="Guardrails stand between a proposal and an action">
+    Proposals no longer reach the tools directly. Guardrails check each one against the permission tiers: reads pass, writes inside the sandbox pass and are checked, anything outside waits for a person.
+  </StepCard>
+  <StepCard n={7} title="Budgets decide whether the next turn starts">
+    Before each turn the harness checks its limits on steps, tokens and time. A run that hits a limit stops and reports, instead of looping all night.
+  </StepCard>
+  <StepCard n={8} title="Observability records every call">
+    Every request, proposal, tool call, check result, token count and cost is written to a trace. When a run fails, you replay the trace instead of guessing.
+  </StepCard>
+</StepCards>
+
+**The numbers.** The model is 1 box of 9. In the bug-fix run it made 6 proposals, and each one passed through at least two other boxes before anything changed: guardrails and the tool layer, then the sandbox and verification for every edit.
+
+<Callout tone="red" title="What breaks">
+  A harness without step 4. If nothing checks the output, the model marks its own homework. Anthropic found that long-running coding agents often declared a feature done without testing it end to end; giving them a way to test as a user would, through browser automation, fixed much of it.
+</Callout>
 
 ## Deep dive
 
 ### The evaluation harness that guards the agent harness
 
-```mermaid
-flowchart LR
-    CHANGE["Change to prompt, tools,<br/>model or harness code"] --> RUN["Run eval suite<br/>(fixed tasks, seeds)"]
-    RUN --> GRADE["Graders: unit tests, exact match,<br/>rubrics, LLM-as-judge"]
-    GRADE --> REPORT["Scores by task type,<br/>cost, latency, failure taxonomy"]
-    REPORT --> GATE{"Better than baseline,<br/>no regressions?"}:::accent
-    GATE -->|"Yes"| SHIP["Ship"]
-    GATE -->|"No"| FIX["Inspect traces, fix"]
-    FIX --> CHANGE
-    PROD["Production traces<br/>and failures"] -->|"turn into new test cases"| RUN
-```
+The agent harness runs the agent. A second harness, the evaluation harness, decides which changes to the first one ship.
+
+<AnimatedDiagram
+  spec="animated/agents/eval-gate"
+  stepper
+  minWidth={620}
+  caption="A change ships only if it beats the baseline on the fixed suite, and every production failure becomes a new test case."
+/>
+
+**How to read it.** Step 1: a change to the prompt, tools, model or harness code runs on every test case, with the same settings each time. For the coding agent a test case is a past issue, like the CSV bug, with its repository at the commit before the fix. Step 2: graders score each run; here the grader is the repository's own tests. Step 3: the ringed gate ships the change only if it beats the baseline with no regressions; otherwise someone reads the failing traces and makes the next change. Step 4: the shipped agent runs on real work, and its failures become new test cases.
+
+This is how SWE-bench grades coding agents. A task counts as solved only if two sets of tests pass: the tests the original fix made pass (FAIL_TO_PASS) and the tests that passed before and must still pass (PASS_TO_PASS). SWE-bench Verified is a 500-task subset that people checked by hand.
 
 The flywheel is the point: real failures from production become new test cases, so the harness gets measurably better over time instead of being tuned by feel.
+
+<Callout tone="red" title="What breaks">
+  A suite that never changes. After enough rounds, the harness is tuned to those exact cases and the score stops meaning much. Keep adding fresh production failures, and keep a held-out set that nobody tunes against.
+</Callout>
 
 ### Example: a coding agent harness
 
@@ -93,6 +169,67 @@ For a "fix this bug" task, a good harness:
 - runs everything in a container with a copy of the repo;
 - runs the test suite after every edit and feeds failures back;
 - stops when tests pass or after a step budget, and asks for review before merging.
+
+### Worked example: fixing the CSV bug, step by step
+
+This follows the coding agent through the whole issue, "Order import drops the last line of a CSV file", one step per row.
+
+<AnimatedDiagram
+  spec="animated/agents/coding-agent-trace"
+  stepper
+  minWidth={620}
+  caption="The model proposed six of the nine steps, including both edits; the harness ran, allowed and checked each one, and caught the first fix's gap."
+/>
+
+**How to read it.** The left column is the run: teal rows are tool calls the model proposed, red is a failing test, blue is what came back, lime is a passing check, green is the model's summary. The right column is what the harness did with each step. The first edit fixes the reported bug, but the ringed row shows it broke another case: an empty file now crashes the parser. The model did not catch that. The tests did.
+
+Here is step 3, the first edit, as the model sends it (Anthropic Messages API shape; other APIs name the fields differently):
+
+```json
+{
+  "type": "tool_use",
+  "id": "toolu_03",
+  "name": "edit_file",
+  "input": {
+    "path": "src/parser.ts",
+    "old_text": "for (let i = 0; i < lines.length - 1; i++)",
+    "new_text": "for (let i = 0; i < lines.length; i++)"
+  }
+}
+```
+
+Steps 5 and 6 arrive together, in the result of step 4's `run_tests` call:
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_04",
+  "content": [
+    { "type": "text", "text": "17 passed, 1 failed: parses an empty file" },
+    { "type": "text", "text": "Error: empty input has no lines" }
+  ]
+}
+```
+
+Each step leans on a different part of the harness from the [architecture](#architecture):
+
+| Step | What happened | Harness parts |
+| --- | --- | --- |
+| 1 | `search("last line")`: 2 matches | Tool layer, sandbox |
+| 2 | `read_file("src/parser.ts")`: 3,200 tokens | Tool layer, context |
+| 3 | First edit: loop bound `< n - 1` to `< n` | Guardrails (tier 2), sandbox |
+| 4 | `run_tests()`: 18 tests | Sandbox, verification |
+| 5 | 1 failed: "parses an empty file" | Verification (rejects the fix) |
+| 6 | Error: "empty input has no lines" | Context (error and test go back) |
+| 7 | Second edit: return `[]` for empty input | Guardrails (tier 2), sandbox |
+| 8 | 18 passed, lint and types clean | Verification, state (progress saved) |
+| 9 | Summary for review | Guardrails (tier 3: a person merges) |
+
+Three things to take from it:
+
+- **The model made six proposals and two real decisions.** The decisions were the two edits; the other proposals were two lookups, a test run and the summary. Steps 5, 6 and 8 were results, and the harness produced or judged all three.
+- **The tests, not the model, found the second bug.** Without step 4 the first fix would have shipped, and empty files would have crashed the import.
+- **The context grew from 3,800 to 24,000 tokens** (illustrative), as in the [context window figure](#core-concepts). A longer task needs compaction before it needs a bigger model.
 
 ## Trade-offs
 
@@ -109,6 +246,9 @@ For a "fix this bug" task, a good harness:
 - Coding agents run edits inside sandboxes and use test results as their feedback signal; benchmarks such as SWE-bench evaluate them by whether the repository's tests pass after the change.
 - EleutherAI's open-source **lm-evaluation-harness** is a widely used evaluation harness for running language models on many benchmarks with one interface.
 - Platforms describing "agent harnesses" emphasize the same layers: tool access, permissions, approvals for irreversible actions, and observability.
+- Anthropic's harness for long-running coding agents writes memory to files: a first session sets up a JSON feature list (each feature starts as failing) and a progress log, and every later session reads them, builds one feature, tests it and commits.
+- OpenAI's Codex team built and shipped a product of about a million lines with agents writing the code; the engineers' work moved to the environment: documentation the agent reads, linters and structural tests that enforce the architecture, and feedback loops.
+- Claude Code's permission system is a working set of tiers: file reads run without asking, while file edits and most shell commands ask first unless the user allows them.
 
 ## Common pitfalls
 
@@ -137,6 +277,12 @@ For a "fix this bug" task, a good harness:
 - [lm-evaluation-harness (EleutherAI, GitHub)](https://github.com/EleutherAI/lm-evaluation-harness)
 - [SWE-bench: Can Language Models Resolve Real-World GitHub Issues? (Jimenez et al., 2023)](https://arxiv.org/abs/2310.06770)
 - [Model Context Protocol documentation](https://modelcontextprotocol.io)
+- [Harness engineering for coding agent users (Birgitta Böckeler, martinfowler.com, 2026)](https://martinfowler.com/articles/harness-engineering.html)
+- [Effective context engineering for AI agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- [Effective harnesses for long-running agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [Harness engineering: Codex agents at scale (InfoQ summary of OpenAI's post, 2026)](https://www.infoq.com/news/2026/02/openai-harness-engineering-codex/)
+- [Introducing SWE-bench Verified (OpenAI, 2024)](https://openai.com/index/introducing-swe-bench-verified/)
+- [Configure permissions (Claude Code documentation)](https://code.claude.com/docs/en/permissions)
 
 <InterviewQuestions>
   <InterviewQuestion question="What is an agent harness, and how is it different from the model?" category="Concepts" level="Junior">

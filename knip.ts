@@ -9,7 +9,8 @@ const config: KnipConfig = {
   workspaces: {
     ".": {},
     "apps/web": {
-      entry: ["scripts/**/*.ts", "tests/**/*.ts"],
+      // Diagram specs import the presets; build-assets loads them by path, so knip sees them as entries.
+      entry: ["scripts/**/*.ts", "tests/**/*.ts", "assets/diagrams/animated/**/*.ts"],
       project: ["src/**/*.{ts,tsx,css}", "scripts/**/*.ts", "tests/**/*.ts"],
       ignoreDependencies: [
         // Loaded by name through FlatCompat (`next/core-web-vitals`), which knip can't follow.

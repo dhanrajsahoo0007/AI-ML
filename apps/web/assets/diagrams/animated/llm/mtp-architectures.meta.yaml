@@ -1,0 +1,23 @@
+title: Parallel heads vs sequential MTP modules
+alt: >-
+  Two architectures side by side, inputs at the bottom and predictions at the top. Left, titled "Meta (Gloeckle et
+  al., 2024): parallel heads": tokens 1 to t enter a pink Embedding block, then a dotted "Shared trunk" group with an
+  orange Multi-Head Attention block and a blue Feed Forward block. The trunk output z for position t runs up to a line
+  that feeds four separate heads, each an orange Attention block under a blue FFN block, in a group titled "4 heads,
+  one layer each". All four heads go through one wide lavender block, "Shared unembedding (Linear)", into four green
+  blocks P(t + 1) to P(t + 4). A note says every head reads the same z, so the four guesses are made in parallel and
+  independently. Right, titled "DeepSeek-V3 (2024): a sequential module": a "Main model" column with a pink
+  Embedding, orange Multi-Head Attention, blue Feed Forward, lavender Output head and green P(token t + 1). The main
+  model's last hidden state, labelled h0, branches off before its output head and runs into a yellow-green RMSNorm
+  block of the "MTP module (D = 1)". Tokens 2 to t + 1 enter a second pink Embedding, joined to the main one by a
+  dashed line labelled "shared", then a second RMSNorm. Both RMSNorm outputs go into a lavender "Concat, Linear M1"
+  block, then an orange Attention block, a blue Feed Forward block, a lavender "Output head (shared)" joined to the
+  main output head by a dashed line, and a green P(token t + 2). A note says the module also sees the true token
+  t + 1, so its guess for t + 2 is conditioned on it and the causal chain holds.
+caption: >-
+  Meta's heads all read the same trunk output and guess t + 1 … t + 4 independently; DeepSeek-V3's module feeds the
+  main model's hidden state together with the true next token into one more Transformer block, so its guess for t + 2
+  knows t + 1.
+tags: [llm, multi-token-prediction, architecture, deepseek, genai]
+source: original
+created: 2026-11-15

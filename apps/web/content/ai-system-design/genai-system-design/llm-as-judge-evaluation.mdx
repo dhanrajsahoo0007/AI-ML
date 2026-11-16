@@ -1,24 +1,234 @@
 ---
 title: LLM-as-Judge Evaluation
 description: Rubrics, pairwise judging, bias mitigation, and multi-judge setups for scalable LLM output evaluation.
+updated: 2026-11-15
 ---
 
-Using a language model to score or rank other model outputs scales evaluation beyond human panels, but only if the judging protocol is disciplined. Rubrics should define discrete score anchors with concrete behaviors, include negative examples, and separate dimensions such as correctness, verbosity, and tone so judges do not conflate them. Pairwise comparison, where the judge picks A or B with optional ties, often yields more stable preferences than absolute grading because relative judgments reduce scale drift.
+A person can read 200 answers; nobody can read 20,000 after every prompt change. Interviewers ask about LLM-as-judge because it is the usual answer to that gap, and because a judge that nobody has checked is a second model with its own bugs.
 
-Reference-free evaluation asks the judge only for the prompt and candidate answer, sometimes plus context for RAG. It is portable when gold answers are unavailable but risks circularity if judge and generator share similar biases or training data. Reference-based evaluation anchors to ground truth when it exists and is usually preferred for factual tasks, though constructing references is expensive. Judge model selection is a trade-off: stronger judges correlate better with humans but cost more; weaker judges add noise and can be swayed by position bias or eloquent wrong answers.
+## TL;DR
 
-Bias in LLM judges is well documented: position bias favors the first or second answer depending on model and framing; verbosity bias rewards longer responses; self-enhancement bias favors outputs from the same family as the judge. Mitigations include swapping answer order across duplicate trials, using blinded labels, calibrating scores with a small human-labeled set, and aggregating across multiple judges or prompts. Multi-judge consensus reduces variance at the cost of compute; disagreement itself is a useful signal for ambiguous items worth human review.
+- An **LLM judge** is a model call that reads a question, an answer and a **rubric**, then returns a **reason and a verdict**. It scores in minutes what a person scores in days.
+- It is only as good as its **agreement with people**. Measure it on a labelled set with **agreement and Cohen's kappa**: on Brightpost's 200 tickets an 88 % agreement (illustrative counts) is **κ = 0.71**, and a judge that always says "pass" also scores 70 % agreement but **κ = 0**.
+- Judges have **known biases**: **position** (the first answer wins), **verbosity** (padding wins) and **self-preference** (its own writing wins). Each has a cheap test and a fix.
+- **Pointwise** grading scores one answer against a rubric and suits release gates. **Pairwise** grading picks the better of two and suits choosing between prompts, but its cost grows with the **square** of the candidates.
+- Use a judge to **scale** human judgment, never to replace it. Keep a person on the **disagreements** and on a sample of the **agreements**.
 
-Calibration means mapping raw judge scores to probabilities or human-equivalent scales so thresholds for release gates are interpretable. Without calibration, a score of four out of five is not comparable across judge versions or prompt templates.
+## The idea in plain English
+
+A restaurant inspector cannot taste every dish, so the owner trains a sous-chef to check plates against a written standard. The sous-chef is fast, but has habits: favours the plate that came first, is impressed by a big portion, and likes dishes cooked in the house style. So the owner checks the sous-chef: the inspector and the sous-chef grade the same 200 plates, and the owner counts where they differ. Only a sous-chef who matches the inspector, and a standard that is written down, is trusted with the rest of the plates.
+
+## Core concepts
+
+Brightpost's support assistant answers tickets and handles refunds. Its **golden set** is 200 real tickets with reference answers (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)). A judge grades each new answer against the rubric, so a prompt change gets a score in minutes.
+
+1. **Rubric.** The written standard the judge applies: for each criterion, what a pass and a fail look like, with one example of each. A vague rubric ("is it helpful?") gives vague scores.
+2. **Pointwise judging.** The judge sees one answer and returns a verdict or a score. The result is comparable across runs, so it works as a gate.
+3. **Pairwise judging.** The judge sees two answers and picks one, or a tie. Relative choices are steadier than absolute scores, which drift between prompts and judge versions.
+4. **Reference-free and reference-based.** A reference-free judge sees only the question and the answer (plus retrieved context for RAG). It works when no gold answer exists but can share the generator's blind spots. A reference-based judge also sees a correct answer and is better for factual tasks, at the price of writing the references.
+5. **Agreement.** The share of items where the judge and a person give the same verdict. **Cohen's kappa** corrects it for the agreement luck would give.
+6. **Bias.** A systematic preference unrelated to quality. Three are well documented: position, verbosity and self-preference.
+7. **Calibration.** Mapping raw judge scores to what a person would say, so a threshold means the same thing across judge versions. A "4 out of 5" from one judge prompt is not a "4" from another.
+
+### A judge prompt and its rubric
+
+A judge prompt is a few lines of instructions, the three inputs and a fixed output shape. This one is our own wording for Brightpost; it asks for the reason before the verdict so the model works through the criteria first.
+
+```text
+You grade one answer from Brightpost's support assistant.
+Ticket: {ticket}
+Policy excerpt: {policy}
+Answer: {answer}
+
+Pass only if all three hold:
+1. The answer agrees with the policy excerpt.
+2. A refund over £30 is sent for approval, never promised.
+3. Every claim appears in the policy excerpt or the ticket.
+Otherwise fail. Length and tone earn nothing.
+
+Reply as JSON: {"reason": "<two sentences>", "verdict": "pass" | "fail"}
+```
+
+The placeholders in braces are filled by code. Pass or fail with named criteria is easier for a judge to apply, and for you to audit, than a 1 to 5 scale.
+
+## Architecture
+
+The judge is a small pipeline: three inputs, one prompt, one call, one stored verdict, and a person who checks a sample.
+
+<AnimatedDiagram
+  spec="animated/eval/judge-pipeline"
+  stepper
+  caption="The judge sees the question, the answer and the rubric in one prompt, writes its reason before its verdict, and a person checks a sample of what it says."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Three inputs">
+    The ticket (the cracked £42 kettle, order 4471), the answer the assistant gave, and the rubric. The answer is what is being graded; the other two define what good means.
+  </StepCard>
+  <StepCard n={2} title="One judge prompt">
+    A template fills in the three inputs and makes a single call. Use a judge from a different model family from the one that wrote the answer, to avoid self-preference.
+  </StepCard>
+  <StepCard n={3} title="Reason first, then a verdict">
+    The judge returns JSON with a short reason and then pass or fail. Writing the reason first gives the model room to check each criterion. A reason you can read also makes a wrong verdict easy to spot.
+  </StepCard>
+  <StepCard n={4} title="Stored for every ticket">
+    Each verdict is saved with the ticket id, the prompt version, the judge model and its version. Without these, two runs cannot be compared.
+  </StepCard>
+  <StepCard n={5} title="A person checks a sample">
+    People read a sample of verdicts, always the ones where two judges disagree, and a few from the rest. That sample is how you find out the judge has drifted.
+  </StepCard>
+</StepCards>
+
+## Deep dive
+
+### Pointwise or pairwise
+
+Pointwise asks "is this answer good?"; pairwise asks "which of these two is better?". Zheng et al. (2023) describe both, and a third variant where the judge also gets a reference solution. They note that pairwise comparison scales badly because the number of pairs grows quadratically, and that single-answer grading may miss subtle differences. In their agreement tests single-answer grading matched pairwise judgments closely.
+
+<AnimatedDiagram
+  spec="animated/eval/judge-pairwise-vs-pointwise"
+  stepper
+  caption="Pairwise matches pointwise at two candidates and falls behind fast: five candidates need four times the calls, ten need nine times."
+/>
+
+<StepCards>
+  <StepCard n={1} title="What each asks the judge">
+    Pointwise gives each answer a verdict against a fixed rubric, so it works as a release gate with a threshold. Pairwise picks a winner between two answers, so it needs no absolute scale and suits "is prompt B better than prompt A?".
+  </StepCard>
+  <StepCard n={2} title="What each costs as candidates grow">
+    On the 200-ticket set, pointwise needs 200 × k calls for k candidates. Pairwise with both orders needs k(k − 1) ÷ 2 pairs × 2 orders × 200 = 200 × k(k − 1). That is 400 and 400 for two candidates, but 1,000 against 4,000 for five, and 2,000 against 18,000 for ten.
+  </StepCard>
+</StepCards>
+
+The rule of thumb: **pointwise to gate, pairwise to choose**. Gate a release on pointwise pass rate. Choose between two prompts with a pairwise head-to-head. To rank many systems from pairwise results, fit a Bradley-Terry or Elo model instead of counting raw wins, because a plain win count ignores who each system met.
+
+### Biases, with numbers
+
+Three biases are documented in the MT-Bench study (Zheng et al., 2023). The numbers are for the 2023-era judges tested, so treat them as the size of the problem then, not now. The bias is real; its size is something to measure on your own judge.
+
+<AnimatedDiagram
+  spec="animated/eval/judge-biases"
+  stepper
+  caption="Numbers are from one study of 2023-era judges (Zheng et al., Tables 2 and 3 and section 3.3); the size changes with the judge, the bias does not go away, and each has a cheap test you can run on your own judge."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Position bias">
+    In the study the judges preferred the first answer on 30.0 % of pairs for GPT-4, 50.0 % for GPT-3.5 and 75.0 % for Claude-v1, with the default prompt. Test it by swapping the order of every pair. Count a win only when both orders agree, and report the share that flips as a quality number for the judge.
+  </StepCard>
+  <StepCard n={2} title="Verbosity bias">
+    The authors padded 23 answers with a repeated list and no new content. The judges failed to see through it on 91.3 % of answers for Claude-v1 and GPT-3.5 and 8.7 % for GPT-4. A later study found that GPT-4 favoured longer answers more than people did (Saito et al., 2023). Test it by padding a good answer and checking the score does not rise; the AlpacaEval team raised its agreement with Chatbot Arena rankings from 0.94 to 0.98 by controlling for length (Dubois et al., 2024).
+  </StepCard>
+  <StepCard n={3} title="Self-preference">
+    GPT-4 won about 10 points more often when its own answers were in the pair, Claude-v1 about 25, GPT-3.5 not at all. The authors say their data cannot settle whether it is a true bias. A later study found that models that recognise their own text better prefer it more (Panickssery et al., 2024). The cheap defence is a judge from a different family than the writer.
+  </StepCard>
+</StepCards>
+
+Two more failures do not need a figure. **Limited reasoning**: on math questions the default judge prompt failed 14 of 20 tests in the same study, chain of thought cut that to 6, and giving the judge a reference solution cut it to 3. **Eloquent wrong answers**: a weak judge can be swayed by fluent text that is wrong. Neither is fixed by a longer prompt alone; both are found by measuring against people.
+
+### Multi-judge and calibration
+
+Several judges, or one judge with several prompts, lower the variance and catch one model's blind spots. The cost is linear in the number of judges unless they run in parallel. The usual compromise is a **cheap judge for triage and a strong judge for borderline cases**, with a person on anything the two disagree about. **Disagreement is itself a signal**: tickets where judges split are the ambiguous ones, which are the most worth a person's time.
+
+Calibration closes the loop. Take the 200 human labels, compare them with the judge's verdicts, and set the pass threshold where the judge agrees best with people. Redo it every time the judge model or prompt changes, because a new version has a different scale. Open-weight judges fine-tuned for the job exist; Prometheus (Kim et al., 2023) reports a Pearson correlation of 0.897 with human evaluators on 45 custom rubrics for a 13 B model, against 0.882 for GPT-4 in the same setup. That is one benchmark, not a guarantee for your task.
+
+### Worked example: is Brightpost's judge good enough to gate a release?
+
+Brightpost grades its 200 golden tickets with the judge above, and people have already labelled them (the labelling is on [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback)): 60 fail, 140 pass.
+
+<AnimatedDiagram
+  spec="animated/eval/judge-agreement"
+  stepper
+  caption="Agreement is the diagonal, 176 of 200; kappa removes the agreement that luck would give, and the 14 missed failures are the cell to read first. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Where the judge and the person agree">
+    The judge and the person both said fail on 46 tickets and both said pass on 130. Agreement is (46 + 130) ÷ 200 = **88 %**. With 200 tickets, a normal approximation puts the 95 % interval at 88 % ± 4.5 points, about 83.5 to 92.5 %.
+  </StepCard>
+  <StepCard n={2} title="Failures caught, and agreement beyond chance">
+    Of the 60 tickets people failed, the judge caught 46: **77 %**. Chance agreement is (60 × 56 + 140 × 144) ÷ 200² = 0.588, so κ = (0.88 − 0.588) ÷ (1 − 0.588) = **0.71**. On one published reading of kappa, 0.60 to 0.79 is moderate and below 0.60 is inadequate (McHugh, 2012).
+  </StepCard>
+  <StepCard n={3} title="Why agreement alone is not enough">
+    A judge that says "pass" to everything agrees on the 140 passes, 70 %, and its chance agreement is also 70 %, so κ = 0. On a set that is mostly passes, 88 % sounds good and says little.
+  </StepCard>
+</StepCards>
+
+**The decision.** κ = 0.71 clears 0.60, so the judge can screen prompt changes. The 14 failures it passes are the risk: in this illustration most of them are invented policies. Brightpost adds a rubric line and two examples for that case, re-runs the 200 tickets, and sends every ticket where the judge says pass but a second judge says fail to a person. A release gate would read pass rate and also **audit a random 10 % of passes** each week, because a judge that has drifted looks the same as a good one until a person checks.
+
+<Callout tone="red" title="What breaks">
+  The judge is tuned on the same 200 tickets it is measured on, and agreement climbs to 95 % (illustrative numbers). In production it falls back to 84 %, because the rubric now fits those tickets. Keep a **held-out slice** of labelled tickets that no prompt edit sees, and re-measure agreement on it. A judge is validated on data it was not tuned on.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Pointwise, pass or fail | Cheap (one call per answer); comparable across runs; a gate has a meaning | Weak at separating two good answers | Release gates, regression suites, dashboards |
+| Pairwise, order swapped | Steadier relative preferences; no absolute scale needed | Two calls a pair; cost grows with the square of the candidates | Choosing between two prompts or models |
+| Reference-free | No gold answers needed; portable | Can share the generator's blind spots | Open-ended tasks, new products |
+| Reference-based | Anchored to ground truth | Writing references is slow and costly | Factual tasks, and the golden set |
+| Single strong judge | Simple to run and explain | Concentrates one model's biases | Early work, low-risk checks |
+| Cheap judge plus strong judge plus person | Spends effort where judges disagree | More moving parts to maintain | High volume or high-risk domains |
+
+## Real-world examples
+
+- **MT-Bench and Chatbot Arena (Zheng et al., 2023).** The paper that named the approach: a strong LLM judges answers on a multi-turn question set, and the authors report over 80 % agreement with human preferences, the same level as between humans. It is also the source of the three biases above.
+- **AlpacaEval, length-controlled (Dubois et al., 2024).** An automatic evaluator that adjusts for answer length to cut verbosity bias, raising its Spearman correlation with Chatbot Arena from 0.94 to 0.98.
+- **Prometheus (Kim et al., 2023).** An open-weight 13 B evaluator model that takes a reference answer and a custom score rubric, with a reported 0.897 Pearson correlation with human evaluators on its 45-rubric test.
+- **InstructGPT labellers (Ouyang et al., 2022).** The human side of the comparison: the labellers agreed with each other on 72.6 ± 1.5 % of comparisons, so a judge's agreement with people is limited by how much people agree with each other.
+
+## Common pitfalls
+
+- **Trusting the judge with no human check.** Agreement and kappa on a labelled set come first; the first run of a judge is a hypothesis.
+- **Reporting agreement alone.** On an imbalanced set it flatters a lazy judge. Report kappa, the failures caught and the interval.
+- **Tuning and testing on the same tickets.** The score rises and production quality does not. Hold out a labelled slice.
+- **A judge from the same family as the writer.** It favours its own style. Use a different family, or mix two.
+- **Skipping the order swap.** A pairwise result with one order is partly an artefact of position.
+- **Changing the judge silently.** A new judge model or prompt changes every score. Version both and re-calibrate.
+
+## How to answer in an interview
+
+1. Say what it is for: scaling human judgment, with a rubric, a reason and a verdict, not replacing people.
+2. Name the two grading modes and when each wins: pointwise for gates, pairwise for choices.
+3. List the three biases with a test for each: swap the order, pad an answer, use a different family.
+4. Show how you validate: a labelled set, agreement and kappa with an interval, a held-out slice.
+5. Close with the loop: sample verdicts for people, route disagreements to them, re-calibrate on every change.
+
+**What interviewers listen for:** kappa and not just agreement, a named test per bias, a held-out slice, and a person left in the loop.
+
+**Red flags:** "the judge scores it 8 out of 10, so it is good", one model grading its own outputs, and no mention of how the judge itself is checked.
+
+## Further reading
+
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- [Large Language Models are not Fair Evaluators (Wang et al., 2023)](https://arxiv.org/abs/2305.17926)
+- [Verbosity Bias in Preference Labeling by Large Language Models (Saito et al., 2023)](https://arxiv.org/abs/2310.10076)
+- [LLM Evaluators Recognize and Favor Their Own Generations (Panickssery et al., 2024)](https://arxiv.org/abs/2404.13076)
+- [Length-Controlled AlpacaEval (Dubois et al., 2024)](https://arxiv.org/abs/2404.04475) · [Prometheus (Kim et al., 2023)](https://arxiv.org/abs/2310.08491)
+- [A Coefficient of Agreement for Nominal Scales (Cohen, 1960)](https://doi.org/10.1177/001316446002000104) · [Interrater reliability: the kappa statistic (McHugh, 2012)](https://pmc.ncbi.nlm.nih.gov/articles/PMC3900052/)
+- Related pages: [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) · [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) · [Online & Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline) · [Reinforcement & Preference Learning](/ai-system-design/genai-system-design/reinforcement-preference-learning)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why is pairwise judging often preferred to absolute 1-5 scores when using an LLM as a judge?" category="Evaluation">
-    Relative comparisons reduce calibration drift because the judge anchors on two concrete options in the same context rather than mapping to an abstract numeric scale that shifts across sessions. Pairwise designs also map naturally to preference learning for reward models. The downside is more comparisons needed to rank many candidates and potential intransitivity if not aggregated carefully.
+  <InterviewQuestion question="Why is pairwise judging often preferred to absolute 1-5 scores when using an LLM as a judge?" category="Concepts" level="Junior">
+    Relative comparisons reduce calibration drift because the judge anchors on two concrete options in the same context rather than mapping to an abstract numeric scale that shifts across sessions. Pairwise designs also map naturally to preference learning for reward models. The downside is cost: pairs grow with the square of the candidates, and with both orders judged, five candidates on 200 tickets need 4,000 calls against 1,000 for pointwise. Pairwise can also be intransitive if it is not aggregated carefully.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you design a methodology to detect and reduce position bias in LLM judges?" category="Methodology">
-    Run each pair twice with swapped order and discard or downweight inconsistent decisions, report agreement across orders as a quality metric for the judge setup, and use neutral framing that does not hint which system is baseline. Augment with a subset of human-adjudicated pairs to measure bias magnitude and track it over judge model upgrades. Consider Bradley-Terry or Elo aggregation instead of raw win counts when comparing many systems.
+  <InterviewQuestion question="How would you design a methodology to detect and reduce position bias in LLM judges?" category="Failure modes" level="Mid">
+    Run each pair twice with the order swapped and count a win only when both orders agree; report the share that flips as a quality number for the judge. Use neutral labels that do not hint which system is the baseline. Measure the size of the bias against a subset that people adjudicated, and track it when the judge model changes. To rank many systems, fit Bradley-Terry or Elo to the pairwise results instead of counting raw wins.
   </InterviewQuestion>
-  <InterviewQuestion question="What are the main trade-offs of multi-judge consensus versus a single strong judge model?" category="Trade-offs">
-    Multiple judges reduce variance and catch idiosyncratic failures but increase latency and cost linearly unless run in parallel with batching. A single strong judge is simpler operationally but concentrates model-specific biases. A hybrid is common: a cheap judge for triage and a strong judge for borderline cases or high-risk domains, with human review when judges disagree.
+  <InterviewQuestion question="What are the main trade-offs of multi-judge consensus versus a single strong judge model?" category="Trade-offs" level="Mid">
+    Multiple judges reduce variance and catch idiosyncratic failures, but the cost rises linearly with the number of judges unless they run in parallel. A single strong judge is simpler to run but concentrates one model's biases. A common hybrid is a cheap judge for triage and a strong judge for borderline cases or high-risk domains, with a person reviewing anything the judges disagree about. Disagreement marks the ambiguous items, which are the most useful ones for people to label.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your judge agrees with human labels 88 % of the time. Is that good enough to gate releases?" category="Concepts" level="Mid">
+    Agreement alone does not say. If 70 % of tickets pass, a judge that always says pass agrees 70 % of the time, so compute Cohen's kappa: with 60 human fails and 140 passes and 46 fails caught, κ is 0.71, enough to screen changes. Then read the cell that hurts, the failures the judge passes (14 of 60 here), and put an interval on the estimate, about ± 4.5 points at 200 tickets. A gate also needs a held-out set the judge was not tuned on and a weekly audit of the passes.
+  </InterviewQuestion>
+  <InterviewQuestion question="A verbose model wins every pairwise comparison, but customers prefer a competitor. What do you check?" category="Failure modes" level="Senior">
+    Suspect verbosity bias first. Pad a known good answer with a repeated list and see whether the judge's score rises; in the MT-Bench study two of three judges failed that test on 91.3 % of answers. Add a rubric line that padding earns nothing, control for length in the comparison, and compare the judge's winners with customer preferences on a labelled sample. If agreement with customers is low, the judge is measuring style, so re-calibrate it against their choices, not against the judge's own.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you stop a judge from favouring the model that wrote the answers?" category="Architecture" level="Senior">
+    Use a judge from a different model family from the writer, or two judges from two families whose verdicts must agree. Strip any model names or signatures from the answers before judging. Measure the effect: grade a set where the same ideas are written by different models and check whether the judge's own family wins more than people say it should. Research reports that models which recognise their own text prefer it more, so blind formatting also helps.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do you do when a new judge model gives every score two points higher?" category="Scaling" level="Senior">
+    Treat it as a scale change, not a quality gain. Re-run the judge on the labelled set, compare to the human labels and set the pass threshold again so the judge's pass rate matches the people's. Keep the old and new judge side by side for one release cycle and plot both on the dashboard. Version the judge model and the prompt in every stored verdict, so old results are never compared with new ones as if they were the same measurement.
   </InterviewQuestion>
 </InterviewQuestions>

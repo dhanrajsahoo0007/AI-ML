@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { lintSpec } from "@/components/diagrams/spec-lint";
 import type { DiagramSpec, LayoutSpec, SequenceSpec } from "@/components/diagrams/types";
-import { layout, seq } from "./fixtures";
+import { layout, paperLayout, seq } from "./fixtures";
 
 const base: DiagramSpec = {
   title: "Two nodes",
@@ -71,6 +71,28 @@ describe("lintSpec: architecture", () => {
     const problems = lintSpec(with_({ nodes: [...base.nodes, { id: "a", label: "Again", x: 250, y: 100 }] }));
     expect(problems).toContain('duplicate node id "a"');
   });
+
+  it("accepts card fills and diagram-only tones, and flags a fill on a glyph or accent node", () => {
+    const clean = with_({
+      zones: [{ id: "z", title: "Embed", tone: "pink", x: 20, y: 40, w: 200, h: 120 }],
+      nodes: [
+        { id: "a", label: "Embed", tone: "pink", fill: "pastel", x: 100, y: 100 },
+        { id: "b", label: "Rerank", tone: "lime", fill: "soft", x: 400, y: 100, step: 2 },
+      ],
+      edges: [{ from: "a", to: "b", tone: "pink" }],
+    });
+    expect(lintSpec(clean)).toEqual([]);
+    const problems = lintSpec(
+      with_({
+        nodes: [
+          { id: "a", label: "Index", variant: "glyph", icon: "database", fill: "pastel", x: 100, y: 100 },
+          { id: "b", label: "Server", accent: true, fill: "soft", x: 400, y: 100, step: 2 },
+        ],
+      })
+    );
+    expect(problems).toContain('node "a": fill only applies to card nodes, not glyph nodes');
+    expect(problems).toContain('node "b": fill does nothing on an accent node');
+  });
 });
 
 describe("lintSpec: sequence", () => {
@@ -116,5 +138,75 @@ describe("lintSpec: layout", () => {
     expect(problems).toContain('shape "far" leaves the 520×200 canvas');
     expect(problems).toContain('arrow "arr": unknown shape "missing"');
     expect(problems).toHaveLength(3);
+  });
+});
+
+describe("lintSpec: layout paper-figure options", () => {
+  const withShapes = (shapes: LayoutSpec["shapes"]): LayoutSpec => ({ ...paperLayout, shapes, steps: undefined });
+
+  it("passes the fixture that uses every option", () => {
+    expect(lintSpec(paperLayout)).toEqual([]);
+  });
+
+  it("measures the longest line of a multi-line label and checks the lines fit the height", () => {
+    const problems = lintSpec(
+      withShapes([
+        { id: "ok", type: "box", x: 10, y: 10, w: 100, h: 44, label: "Multi-Head\nAttention" },
+        { id: "wide", type: "box", x: 10, y: 60, w: 60, h: 44, label: "Feed\nAttention" },
+        { id: "short", type: "box", x: 120, y: 10, w: 100, h: 30, label: "Feed\nForward" },
+        { id: "many", type: "text", x: 120, y: 60, w: 100, h: 80, label: "a\nb\nc\nd" },
+      ])
+    );
+    expect(problems).toEqual([
+      'shape "wide": label "Attention" is wider than its box',
+      'shape "short": 2 label lines need a box at least 36px tall',
+      'shape "many": label has 4 lines (at most 3)',
+    ]);
+  });
+
+  it("flags weights outside 0..1, symbols off circles, fills on text and paths without two points", () => {
+    const problems = lintSpec(
+      withShapes([
+        { id: "c", type: "cell", x: 10, y: 10, weight: 1.5 },
+        { id: "b", type: "box", x: 60, y: 10, symbol: "plus" },
+        { id: "t", type: "text", x: 10, y: 80, fill: "pastel", label: "x" },
+        { id: "p", type: "path", x: 0, y: 0, points: [[10, 10]] },
+      ])
+    );
+    expect(problems).toEqual([
+      'shape "c": weight 1.5 is not between 0 and 1',
+      'shape "b": symbol only applies to circles',
+      'shape "t": fill only applies to boxes, cells and circles',
+      'path "p" needs at least two points',
+    ]);
+  });
+
+  it("keeps paths inside the canvas and lets them cross boxes", () => {
+    const problems = lintSpec(
+      withShapes([
+        { id: "b", type: "box", x: 10, y: 10 },
+        {
+          id: "inside",
+          type: "path",
+          x: 0,
+          y: 0,
+          points: [
+            [0, 0],
+            [100, 100],
+          ],
+        },
+        {
+          id: "out",
+          type: "path",
+          x: 0,
+          y: 0,
+          points: [
+            [10, 10],
+            [500, 10],
+          ],
+        },
+      ])
+    );
+    expect(problems).toEqual(['shape "out" leaves the 400×300 canvas']);
   });
 });

@@ -2,43 +2,200 @@
 title: "Real-Time Voice Agents"
 description: "Designing a voice agent that feels live: cascaded and speech-to-speech pipelines, latency budgets, turn-taking and interruptions."
 icon: message-circle
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Designing a voice agent that feels live: cascaded and speech-to-speech pipelines, latency budgets, turn-taking and interruptions.
+On a phone call, a pause of one second feels like a dropped line. Interviewers ask about voice agents because the hard parts are not the models: they are the budget of milliseconds, knowing when the caller has finished, and stopping cleanly when the caller cuts in.
 
 ## TL;DR
 
+- A **cascaded** agent chains a turn detector, speech recognition, a language model and speech synthesis; a **speech-to-speech** model takes audio in and gives audio out in one step.
+- The **latency budget** is the time from the caller's last word to the first sound of the reply. An illustrative tuned budget is **1,000 ms**: 300 wait + 80 recognition + 400 model + 120 synthesis + 100 network.
+- **The wait for the end of the turn is the biggest lever.** One live API documents a default of about **800 ms**, which alone would take the same budget to **1,500 ms**.
+- **Barge-in** means the caller can interrupt. On speech, stop playing, cancel the reply, and keep only what the caller heard in the history.
+- **Transport** decides the floor: WebRTC for browsers and apps, a server WebSocket for back-end links, and SIP or the phone network for calls (narrowband, 8 kHz audio).
+- Judge a voice agent on **task success, the gap before the reply, barge-in behaviour and digits heard correctly**, not on one WER number.
+
 ## The idea in plain English
+
+A good phone operator listens while the caller talks, starts forming the answer before the sentence ends, and stops mid-word if the caller says "no, wait". She also fills a gap ("let me look that up") rather than leave silence. A voice agent copies those habits with parts: an ear that notices when speech starts and stops, a typist that writes it down, a brain that decides what to say, and a mouth that speaks the first clause while the rest is still being written. Each part adds delay. The engineering is a budget: how many milliseconds each part may use, and which tricks (streaming, filler, early start) hide the rest.
 
 ## Core concepts
 
 ### A cascaded pipeline versus speech-to-speech models
 
+A **cascade** is voice activity detection (VAD), speech recognition (ASR), a language model (LLM), then speech synthesis (TTS), as in the figure below. Every hop is text, so you can log it, test it, run guardrails on it and swap any stage. The cost is that the delays add and the voice loses tone at the text hop. A **speech-to-speech** model takes audio and returns audio in one model, so there is no wait between stages and it hears how something was said. It is harder to inspect, and you accept the vendor's model and voices. Both can call tools. For the speech stages in detail, see [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts).
+
+<AnimatedDiagram
+  spec="animated/multimodal/cascade-vs-speech-to-speech"
+  caption="Top: the cascade, three models and two text hops. Bottom: one speech-to-speech model with audio in and audio out."
+/>
+
 ### The latency budget, stage by stage
+
+Define the number first. **Response gap** is the time from the end of the caller's speech to the first sound of the reply. It has five parts: the **wait** that decides the turn is over, the **recognition tail** (the last audio still to be read), the model's **time to first token** (see [Streaming and Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)), the **first audio chunk** from synthesis, and **telephony and network**. Streaming at every stage is what makes the budget possible: recognition works while the caller talks, and synthesis starts on the first clause, not the whole answer.
 
 ### Turn detection and barge-in
 
+**Turn detection** (endpointing) decides the caller has finished. The simple method waits for silence. A short wait cuts the caller off mid-thought; a long one adds delay to every turn. A smarter detector reads the words as well: "I want a refund for order four four" is not finished, "…seven one" is. **Barge-in** is the reverse problem: the agent is speaking, and the caller starts. The system must notice speech over its own voice, stop playing within about 100 ms, cancel the model and speech synthesis, and trim the history to what was heard. Echo cancellation matters here, or the agent hears itself and interrupts itself.
+
 ### Transport: WebRTC and telephony
+
+**WebRTC** carries audio between a browser or app and a server over UDP with jitter buffers, the Opus codec and echo cancellation built in; it is the usual choice for client apps. A **WebSocket** is a reliable stream and suits server-to-server links, at the cost of waiting for lost packets. **Telephony** (the public phone network, reached by SIP trunks) uses 8 kHz narrowband audio, so recognition meets a thinner signal than the models were often trained on. For general real-time connections on the cloud, see [Real-Time Connections on the Cloud](/cloud/networking/realtime-on-the-cloud).
 
 ## Architecture
 
+How does one call turn into a reply, and what happens when the caller interrupts?
+
+<AnimatedDiagram
+  spec="animated/multimodal/voice-pipeline"
+  stepper
+  caption="A cascaded agent: the turn detector gates the recogniser, the model may call a tool, synthesis starts on the first clause, and a barge-in sends a stop to the buffer and a cancel to the model."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The caller speaks; audio streams in">
+    Phone audio reaches the agent service in small chunks, not as a finished file.
+  </StepCard>
+  <StepCard n={2} title="The turn detector passes speech to the recogniser">
+    It separates speech from silence, feeds the speech on, and decides when the turn is over.
+  </StepCard>
+  <StepCard n={3} title="The text reaches the language model">
+    A streaming recogniser gives partial text early and a final text at the end of the turn; the model reads it.
+  </StepCard>
+  <StepCard n={4} title="The model calls a tool for the order">
+    For order 4471 it asks for get_order, gets the result, and writes a reply.
+  </StepCard>
+  <StepCard n={5} title="Speech synthesis starts on the first clause">
+    The first sentence goes to synthesis as soon as it exists.
+  </StepCard>
+  <StepCard n={6} title="Audio chunks play to the caller">
+    Chunks wait in a playback buffer, which is what the interruption path flushes.
+  </StepCard>
+  <StepCard n={7} title="The caller interrupts">
+    The turn detector hears speech while the agent is talking: stop playing, cancel the reply.
+  </StepCard>
+</StepCards>
+
 ## Deep dive
+
+### The latency budget in numbers
+
+<AnimatedDiagram
+  spec="animated/multimodal/voice-latency-budget"
+  caption="Two budgets on one scale. All stage times are illustrative except the model's 400 ms; the 800 ms wait is one live API's documented default (read 16 November 2026)."
+/>
+
+**How to read it.** Each row is a stage, in order; the dashed line is when the reply starts. The top chart waits 300 ms for the end of the turn: 300 + 80 + 400 + 120 + 100 = 1,000 ms. The bottom chart changes only the wait to 800 ms, Gemini Live's documented server default (its guide recommends 500 to 800 ms): 800 + 80 + 400 + 120 + 100 = 1,500 ms. The model's 400 ms is Brightpost's time-to-first-token target from the text assistant.
+
+**The levers, biggest first.** Shorten the wait with a detector that reads meaning (OpenAI's `semantic_vad` has an `eagerness` setting for this; its `server_vad` has `silence_duration_ms`). Start synthesis on the first clause. Keep recognition streaming so the tail is short. Cut network hops: put the agent near the telephony edge. Cache or pre-warm the model prompt (see [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)).
+
+### Turn-taking on a timeline
+
+<AnimatedDiagram
+  spec="animated/multimodal/turn-taking"
+  stepper
+  caption="One call on a time axis. The caller stops at 2.4 s, the agent starts at 3.4 s, the caller cuts in at 4.6 s and the agent stops at 4.7 s. Times are illustrative."
+/>
+
+**How to read it.** Violet is audio, lime is the turn detector, green is the model thinking. The agent's reply is 2.6 s long but the caller heard 4.7 − 3.4 = 1.3 s of it. The other 1.3 s is shown pale: it was generated and never played. If the history keeps the whole reply, the model will later "remember" saying things the caller never heard. OpenAI's Realtime guide describes this repair: on `input_audio_buffer.speech_started`, stop playback, drop queued audio, and send `conversation.item.truncate` with the milliseconds actually played (over WebRTC and SIP the server truncates for you).
+
+```jsonc
+// server to you: the caller started speaking over the agent (other fields omitted)
+{ "type": "input_audio_buffer.speech_started" }
+// you to server, after stopping local playback: keep only the 1,300 ms the caller heard
+{ "type": "conversation.item.truncate", "item_id": "…", "content_index": 0, "audio_end_ms": 1300 }
+```
+
+This follows the OpenAI Realtime events as documented on 16 November 2026. Gemini Live reports an `interrupted` flag instead, discards pending function calls, and keeps only the content already sent to the client.
 
 ### Tool calls in the middle of a conversation
 
+A tool call takes time the caller can hear. If `get_order` takes 300 ms (illustrative), the reply starts at 1,000 + 300 = 1,300 ms unless the agent speaks first. Three habits help. Say a **filler** ("one moment, I'll look that up") while the call runs. Make read tools fast and give them **short timeouts**. Keep write tools behind a check: a £42 refund is over Brightpost's £30 limit, so the agent says it has sent the request for approval and does not promise the money. If the caller interrupts during a tool call, cancel what has not started and decide what happens to a write already sent (Gemini discards pending calls and reports their IDs). See [Tool Use & MCP](/ai-system-design/genai-system-design/tool-use-and-mcp).
+
 ### Handling noise, silence and errors
+
+Plan for the bad minute. **Noise** triggers false barge-in; raise the VAD threshold (`threshold` in OpenAI's `server_vad`) and use noise suppression before detection. **Silence** from the caller needs a prompt after a few seconds ("are you still there?") and a hang-up rule. **Errors** (a failed tool, a recogniser timeout, a dropped link) need a spoken fallback that never leaves dead air, and a hand-off to a person. Live APIs also have session limits: Gemini Live's audio-only sessions are limited to 15 minutes and audio-plus-video to 2 minutes unless you use its session management, so a long call must reconnect and carry context over.
 
 ### Evaluating voice agents
 
+Score the call, not one part. **Task success:** did the caller get the refund routed correctly? **Response gap:** p50 and p95 of the time from end of speech to first audio, measured at the phone, not inside your server. **Barge-in:** time to stop after speech starts, and the false-interruption rate on noisy calls. **Recognition of what matters:** digit-string and entity accuracy beside WER. **Voice quality:** human MOS ratings. **Safety:** the guardrails of [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety) on every spoken turn. Test with scripted caller audio (accents, noise, interruptions) and replay real calls with consent. The full design is in the [Voice Agent for a Call Centre case study](/genai-system-design/case-studies/voice-agent-call-centre).
+
+### Worked example: Brightpost's phone line
+
+A caller says "refund for order 4471" (2.4 s). The turn detector waits 300 ms, calls the end of the turn and passes the text to the model: 2.7 s on the timeline above. The model calls `get_order`; the agent says "one moment" so the 300 ms tool time is covered. The model replies "I've sent your £42 refund for approval", which needs a person because it is over £30. The first clause reaches synthesis at once, and the caller hears it at 3.4 s, 1,000 ms after she stopped (the budget). At 4.6 s she cuts in with "wait, it was the other kettle". The turn detector sends a stop to the buffer and a cancel to the model within 100 ms. The caller heard 1.3 s of a 2.6 s reply, and the history keeps only that. The model then handles the new turn.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Cascade (ASR, LLM, TTS) | Text trail, guardrails, swappable parts, any LLM | Delays add; tone lost at the text hop | Regulated or tool-heavy calls |
+| Speech-to-speech model | One hop, hears tone and pauses, natural flow | Harder to inspect and guard; vendor's voices | Open conversation, coaching, companion apps |
+| Silence-based turn end | Simple, predictable | Cuts off slow talkers or adds delay | Short commands |
+| Semantic turn end | Fewer cut-ins, shorter waits | More compute; can still misjudge | Natural conversation |
+| WebRTC | Low delay, echo handling | More complex to run | Browsers and apps |
+| Telephony (SIP) | Reaches every phone | 8 kHz audio; carrier hops | Contact centres |
 
 ## Real-world examples
 
+- **OpenAI Realtime API (docs read 16 November 2026).** Speech-to-speech over WebRTC in the browser or WebSocket on the server; 24 kHz mono PCM; `server_vad` and `semantic_vad`; truncation events for interruptions; function calling.
+- **Gemini Live API (docs read 16 November 2026).** A stateful WebSocket; 16-bit PCM at 16 kHz in and 24 kHz out; automatic VAD with a configurable silence wait; interruptions cancel generation; native audio models with a 128k-token context.
+- **Brightpost's phone line (this page's running example).** A cascade, chosen for its text trail: each turn is logged and checked against the refund policy before it is spoken.
+- **Contact-centre agents.** Most phone deployments use a cascade behind SIP trunks, because transcripts, redaction and audit are required.
+
 ## Common pitfalls
+
+- Measuring latency inside the server, not at the caller's phone. Carrier and network time sit outside your server.
+- A fixed 800 ms silence wait copied from a default. It spends most of the budget before any model runs.
+- Playing the whole reply after an interruption, or keeping the whole reply in history, so the model repeats things the caller never heard.
+- Letting noise or the agent's own voice trigger barge-in. Use echo cancellation and tune the threshold.
+- Promising an outcome a tool has not confirmed (a refund that still needs approval).
+- Silence with no fallback when a tool or a model call fails.
 
 ## How to answer in an interview
 
+1. Pick a design: cascade or speech-to-speech, and say why (text trail, control, tools, voice).
+2. Give the latency budget with numbers per stage, and name the largest item: the turn wait.
+3. Explain turn detection and barge-in: how the end of turn is found, how playback stops, what goes in the history.
+4. Cover transport (WebRTC, WebSocket, SIP) and the 8 kHz telephone reality.
+5. Close with evaluation: response gap p95, task success, barge-in time, digit accuracy.
+
+**What interviewers listen for:** a numeric budget, the end-of-turn wait as the main lever, truncating the history to what was heard, and a fallback for every failure.
+
+**Red flags:** "just use a big model", no latency numbers, no plan for interruptions, and measuring only WER.
+
 ## Further reading
+
+- [OpenAI: voice activity detection in the Realtime API (read 16 November 2026)](https://developers.openai.com/api/docs/guides/realtime-vad)
+- [OpenAI: Realtime conversations, audio formats and interruptions (read 16 November 2026)](https://developers.openai.com/api/docs/guides/realtime-conversations)
+- [OpenAI: Realtime API guide (read 16 November 2026)](https://developers.openai.com/api/docs/guides/realtime)
+- [Gemini Live API capabilities: VAD, interruptions, session limits (read 16 November 2026)](https://aistudio.google.com/docs/live-api/capabilities)
+- [Robust Speech Recognition via Large-Scale Weak Supervision (Whisper; Radford et al., 2022)](https://arxiv.org/abs/2212.04356)
+- Related pages: [Multimodal & Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai) · [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts) · [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models) · [Streaming and Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What are the stages of a cascaded voice agent, and what does each add?" category="Architecture" level="Junior">
+    A turn detector finds speech and its end, a speech recogniser turns speech into text, a language model writes the reply, and speech synthesis speaks it. Each stage adds delay, and each hop is text, which makes the system easy to log, test and guard. Streaming at every stage lets them overlap: recognition runs while the caller talks, and synthesis starts on the first clause.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a latency budget for a voice agent, and what goes in it?" category="Concepts" level="Junior">
+    It is the time from the end of the caller's speech to the first sound of the reply, split among stages. A tuned example is 300 ms for the end-of-turn wait, 80 ms of recognition tail, 400 ms for the model's first token, 120 ms for the first synthesised audio and 100 ms of telephony and network, 1,000 ms in all. The numbers are illustrative, but the exercise is real: give every stage a number and measure at the caller's phone.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a voice agent decide that the caller has finished speaking?" category="Concepts" level="Mid">
+    The simplest method waits for a set time of silence, such as the `silence_duration_ms` setting in OpenAI's `server_vad`. A short wait cuts the caller off, a long one slows every reply. A semantic detector also reads the words so far: it waits longer after "order four four" than after "order four four seven one". Gemini Live and OpenAI both let you tune the wait, and some let you run VAD on the client and signal the end of speech yourself.
+  </InterviewQuestion>
+  <InterviewQuestion question="The caller interrupts the agent mid-sentence. What should the system do?" category="Failure modes" level="Mid">
+    Stop playing at once and discard queued audio, cancel the model and synthesis, and then repair the history. The caller heard only part of the reply, so keep only that part: with OpenAI's Realtime API over WebSocket, send `conversation.item.truncate` with the milliseconds played. Cancel tool calls that have not started and decide about any write already sent. Keep the stop under about 100 ms, and use echo cancellation so the agent does not interrupt itself.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose a speech-to-speech model over a cascade?" category="Trade-offs" level="Mid">
+    Choose speech to speech when the conversation is open and the feel matters most: it has one hop, no wait between stages, and it hears tone, pauses and laughter. Choose a cascade when you need a text trail for audit, guardrails on every turn, a specific language model, or separate control of voice and recogniser. Tool calls work in both. For a regulated refund line I would pick the cascade; for a coaching app I would test speech to speech.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your voice agent feels slow. How do you find out why?" category="Scaling" level="Senior">
+    Instrument every stage with timestamps and measure the response gap at the caller's phone, as p50 and p95. Break it into wait, recognition tail, model first token, synthesis first chunk and network. The turn wait is often the largest: a default of about 800 ms spends most of a 1,000 ms budget. Then pull the levers in order: tune or replace the turn detector, stream everything, start synthesis on the first clause, move compute to the telephony edge, cache the prompt, and add a filler while tools run.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you evaluate a voice agent before launch?" category="Failure modes" level="Senior">
+    Build a call set with scripted callers: accents, noise, interruptions, digits and silence. Score task success end to end, response gap p50 and p95, barge-in stop time and false interruptions, digit and entity accuracy, and human MOS for voice quality. Replay real calls, with consent, through the new version. Run the guardrails on every spoken turn and check that refunds over £30 reach approval rather than being promised. Track the same metrics in production and alert on the p95 gap.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does the transport layer matter for a voice agent?" category="Architecture" level="Senior">
+    It sets the delay floor and the audio quality. WebRTC uses UDP with jitter buffers, Opus and echo cancellation, which suits browsers and apps. A WebSocket is simple and reliable but waits for lost packets, so it suits server-to-server links. Phone calls arrive over SIP as 8 kHz narrowband audio, so recognition has less detail than studio audio and you must test on real call recordings. Geography matters too: run the agent close to the telephony edge to save network time.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -30,6 +30,13 @@ Imagine each token writes a sticky note (its key and value) the first time it is
 
    For a model with 80 layers, 64 heads of size 128 and 16-bit values, that is about 2.6 MB per token with full multi-head attention, or around 10 GB for a single 4,000-token sequence.
 
+Prefill writes the prompt's keys and values in one pass; every decode step then appends one more column to every layer's cache.
+
+<AnimatedDiagram
+  spec="animated/transformer/kv-cache-growth"
+  caption="Each new token appends one key and one value per layer and KV head, so the cache grows with every token: about 2.6 MB per token and about 10 GB for one 4,000-token sequence in this 80-layer model."
+/>
+
 3. **Multi-query attention (MQA).** All query heads share one key head and one value head. The cache shrinks by the number of heads, at some quality cost.
 
 4. **Grouped-query attention (GQA).** Query heads are split into groups that each share a key and value head. With 8 KV heads instead of 64, the example above drops from about 2.6 MB to about 0.33 MB per token, with quality close to full attention.
@@ -44,18 +51,10 @@ Imagine each token writes a sticky note (its key and value) the first time it is
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    REQ["Incoming requests"] --> SCHED["Scheduler with continuous batching"]
-    SCHED --> PRE["Prefill: full prompt in parallel<br/>(compute-bound)"]
-    PRE --> KV["Paged KV cache<br/>(blocks per sequence, shared prefixes)"]:::accent
-    KV --> DECODE["Decode loop: one token per step<br/>(memory-bound)"]
-    DECODE --> KV
-    DECODE --> OUT["Streamed tokens"]
-    FA["FlashAttention kernel"] -.-> PRE
-    FA -.-> DECODE
-    GQA["GQA: fewer KV heads"] -.-> KV
-```
+<AnimatedDiagram
+  spec="animated/transformer/serving-stack"
+  caption="Continuous batching keeps the GPU full, prefill writes each prompt's keys and values into fixed-size cache blocks (shared prefixes stored once), and every decode step reads the whole cache to append one token; FlashAttention serves both phases and GQA shrinks every block."
+/>
 
 How these pieces combine in a modern serving stack:
 
@@ -68,30 +67,23 @@ How these pieces combine in a modern serving stack:
 
 ### What FlashAttention avoids
 
-```mermaid
-flowchart LR
-    subgraph NAIVE["Standard attention"]
-        direction TB
-        N1["Compute S = QK^T"] --> N2["Write S to GPU memory (n x n)"]
-        N2 --> N3["Read S, softmax, write P"]
-        N3 --> N4["Read P, multiply by V"]
-    end
-    subgraph FLASH["FlashAttention"]
-        direction TB
-        F1["Load a tile of Q, K, V into on-chip memory"] --> F2["Partial scores + running softmax"]
-        F2 --> F3["Accumulate output tile"]:::accent
-        F3 --> F1
-    end
-```
+Every arrow between the two memory levels is traffic; the heavy ones carry an n × n matrix.
+
+<AnimatedDiagram
+  spec="animated/transformer/flash-attention-io"
+  caption="Standard attention writes the n × n scores and weights to slow HBM and reads them back; FlashAttention keeps each tile in fast on-chip SRAM with a running softmax, so only Q, K, V and O cross: the same exact result with far less memory traffic."
+/>
 
 The arithmetic is the same; what disappears is the round trip of an n-by-n matrix through slow memory. That is why it is described as "IO-aware".
 
 ### Picking MHA, GQA or MQA
 
-```mermaid
-flowchart LR
-    MHA["MHA: 64 query heads,<br/>64 KV heads"] --> GQA2["GQA: 64 query heads,<br/>8 KV heads"]:::accent --> MQA2["MQA: 64 query heads,<br/>1 KV head"]
-```
+Each query head reads keys and values from one KV head; the three designs differ only in how many query heads share each KV head.
+
+<AnimatedDiagram
+  spec="animated/transformer/mha-gqa-mqa"
+  caption="Fewer key/value heads mean a smaller cache: GQA shares one key/value head per group of query heads and cuts the cache 8× here, with quality close to MHA."
+/>
 
 Moving right shrinks the cache and speeds decoding; moving left preserves more quality. GQA is the common compromise.
 

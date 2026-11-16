@@ -17,21 +17,81 @@ Retrieval-augmented generation (RAG) is the most common LLM system design questi
 
 An LLM is like a smart student taking a closed-book exam: it knows a lot, but not your company's policies and nothing after its training cut-off. RAG turns it into an open-book exam. Before answering, a librarian (the retriever) finds the most relevant pages from your documents and hands them over, and the student answers using those pages and points to where each fact came from.
 
+Here is the difference on one question. The model is the same on both sides; only the evidence changes.
+
+<AnimatedDiagram
+  spec="animated/rag/closed-vs-open-book"
+  caption="The model does not change; what changes is the evidence on the desk when it answers."
+/>
+
+**How to read it.** On the left, the model has only what it learned in training, so it gives generic steps from other sites with no source to check. On the right, the retriever hands over three passages from the help centre, numbered [1] to [3]. The answer now follows the shop's own steps and cites the passages it used, so a reader can check every claim.
+
 ## Core concepts
+
+Every figure in the RAG pages uses one example. Brightpost, a fictional shop, runs a help centre of **1,200 articles**. A customer asks: "How do I reset my password if I lost my phone?" The answer needs two articles, "Reset a forgotten password" and "Recover two-factor access", which is why finding the right passages matters more than anything else.
 
 1. **Why RAG.** Fine-tuning is poor at adding fresh facts, is expensive to refresh, and does not give citations. RAG updates knowledge by updating an index, works with any model, and can cite sources and respect document permissions.
 
+Concepts 2 to 5 happen ahead of time, in the ingestion lane:
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  path="sources>parse>chunk>embed>index"
+  caption="The ingestion lane runs before any question arrives; its output is the vector index."
+/>
+
 2. **Document parsing.** PDFs, HTML, slides and tables are converted to clean text with structure (titles, headings, tables) preserved. Bad parsing silently ruins everything downstream.
 
-3. **Chunking.** Documents are split into passages, commonly a few hundred tokens with some overlap, ideally along natural boundaries (sections, paragraphs). Chunks that are too small lose context; too large dilute relevance and waste prompt space.
+3. **Chunking.** Documents are split into passages, commonly a few hundred tokens with some overlap, ideally along natural boundaries (sections, paragraphs). Chunks that are too small lose context; too large dilute relevance and waste prompt space. Brightpost uses **400-token chunks with a 50-token overlap**.
 
-4. **Embeddings.** An embedding model maps each chunk and each query to a vector so semantically similar text lands close together. Query and documents must use the same model.
+Overlap exists for one reason: a cut can land in the middle of the sentence you need.
 
-5. **Vector index.** Approximate nearest-neighbor indexes (such as HNSW) find the closest chunk vectors in milliseconds, even across millions of chunks, with metadata filters for things like tenant, date or access rights.
+<AnimatedDiagram
+  spec="animated/rag/chunk-overlap"
+  stepper
+  caption="Watch the sentence at token 385; the overlap is what keeps it whole."
+/>
 
-6. **Retrieval.** Embed the query, fetch the top-k chunks (often 5 to 20). Many systems combine vector search with keyword search (BM25) to catch exact terms like product codes.
+**How to read it.** Step 1 draws one article as 1,100 tokens, 50 tokens per cell, with its key sentence marked. Step 2 cuts every 400 tokens: the cut at token 400 splits the sentence, so no chunk holds the whole instruction and neither half matches the question well. Step 3 starts a new 400-token chunk every 350 tokens instead, so neighbouring chunks share 50 tokens and chunk 2 (tokens 350 to 750) holds the sentence whole.
 
-7. **Prompt construction.** Put instructions, retrieved chunks with source ids, and the question into the prompt. Instruct the model to answer only from the provided context and cite sources.
+**The numbers.** A new chunk every 400 − 50 = 350 tokens gives (1,100 − 50) ÷ 350 = 3 chunks per article, and 1,200 × 3 = **3,600 chunks**. The overlap costs about 9% more text to embed: 3,600 × 400 = 1.44 million tokens instead of 1.32 million.
+
+<Callout tone="red" title="What breaks">
+  Overlap only rescues sentences shorter than the overlap. A table or a numbered procedure that is longer than 50 tokens can still be cut in two. Fix: cut on structure first (headings, list items, table rows), then fall back to fixed-size cuts with overlap.
+</Callout>
+
+4. **Embeddings.** An embedding model maps each chunk and each query to a vector so semantically similar text lands close together. Brightpost's model gives each chunk **1,536 numbers**. Query and documents must use the same model.
+
+5. **Vector index.** Approximate nearest-neighbor indexes (such as HNSW) find the closest chunk vectors in milliseconds, even across millions of chunks, with metadata filters for things like tenant, date or access rights. Brightpost's 3,600 vectors take 3,600 × 1,536 × 4 bytes ≈ **22 MB** before any index structure.
+
+Concepts 6 to 8 happen for every question, in the answering lane:
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  path="question>qembed>retrieve>prompt>llm>answer"
+  highlight={["index"]}
+  caption="The answering lane reads the index the ingestion lane built; nothing is re-embedded except the question."
+/>
+
+6. **Retrieval.** Embed the query, fetch the top-k chunks (often 5 to 20). Many systems combine vector search with keyword search (BM25) to catch exact terms like product codes. Brightpost keeps the **top 5**.
+
+"Nearest" is a geometric idea. The picture below shows what it means and where it goes wrong.
+
+<AnimatedDiagram
+  spec="animated/rag/similarity-topk"
+  stepper
+  caption="Near is not the same as needed; one chunk the answer needs is ranked 7th and is left out."
+/>
+
+**How to read it.** Step 1 places every chunk as a point; the question lands among the password and phone articles, far from shipping and returns. Step 2 draws a ring around the 5 nearest points, and the list on the right gives their cosine similarity (1.0 means the same direction). Step 3 shows the catch: "No backup codes: verify your ID" is relevant but ranked 7th, so it never reaches the prompt, while "Change your password", which does not help someone who lost their phone, is ranked 1st.
+
+**The numbers.** Similarities run from 0.82 (rank 1) to 0.61 (rank 10). The relevant chunks sit at ranks 2, 4 and 7, so the top 5 holds two of the three.
+
+<Callout tone="red" title="What breaks">
+  Similarity rewards chunks that sound like the question, not chunks that answer it. Fix: fetch more candidates (say 100) and let a reranker, which reads the question and each chunk together, choose the final 5. See [Advanced RAG](/ai-system-design/genai-system-design/advanced-rag).
+</Callout>
+
+7. **Prompt construction.** Put instructions, retrieved chunks with source ids, and the question into the prompt. Instruct the model to answer only from the provided context and cite sources. Brightpost's prompt is about 200 tokens of instructions + 5 × 400 tokens of chunks + a 15-token question ≈ **2,200 tokens**.
 
 8. **Generation with citations.** The model answers and references chunk ids, which the application turns into links.
 
@@ -39,52 +99,73 @@ An LLM is like a smart student taking a closed-book exam: it knows a lot, but no
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph OFF["Offline ingestion"]
-        direction TB
-        DOCS["Sources<br/>(PDFs, wikis, tickets)"] --> PARSE["Parse and clean"]
-        PARSE --> CHUNK["Chunk with overlap"]
-        CHUNK --> EMB["Embed chunks"]
-        EMB --> IDX[("Vector index<br/>+ metadata, ACLs")]
-    end
-    subgraph ON["Online query"]
-        direction TB
-        Q["User question"] --> QE["Embed query"]
-        QE --> RET["Retrieve top-k<br/>(filtered by permissions)"]:::accent
-        RET --> PROMPT["Build prompt:<br/>instructions + chunks + question"]
-        PROMPT --> LLM["LLM generates answer"]
-        LLM --> CITE["Answer with citations"]
-    end
-    IDX --> RET
-```
+The whole system is two pipelines that meet at one index. Step through it once; every later RAG page adds a stage to this picture.
 
-The online path, step by step:
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  stepper
+  caption="Two pipelines share one index and one embedding model: ingestion runs ahead of time, answering runs per question."
+/>
 
-1. Receive the question and the user's identity.
-2. Embed the question with the same model used for the chunks.
-3. Retrieve the top-k chunks, filtered by the user's access rights and any metadata.
-4. Build a prompt that contains instructions, the chunks with ids, and the question.
-5. Generate an answer that cites chunk ids; if nothing relevant was found, say so.
-6. Log the query, retrieved chunks and answer for evaluation.
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="Sources are parsed">
+    The 1,200 help articles are read from the help centre and turned from HTML into clean text, keeping headings. Without this, menus and footers end up in the answer. The text is still one long string per article, too long to retrieve precisely.
+  </StepCard>
+  <StepCard n={2} title="Text is split into chunks">
+    Each article becomes three 400-token chunks with a 50-token overlap, 3,600 in all. A chunk is small enough to match one question and big enough to hold one instruction. Chunks are still text, and text cannot be searched by meaning.
+  </StepCard>
+  <StepCard n={3} title="Each chunk becomes a vector">
+    The embedding model turns each chunk into 1,536 numbers, so chunks with similar meaning get similar vectors. This is what lets "lost my phone" match "no access to your device". The vectors need a home that can be searched fast.
+  </StepCard>
+  <StepCard n={4} title="Vectors and metadata go into the index">
+    The vector index stores the 3,600 vectors with each chunk's article, URL and who may read it. Ingestion is done until an article changes. Nothing answers questions yet.
+  </StepCard>
+  <StepCard n={5} title="A question arrives and is embedded">
+    A signed-in customer asks the question, and the same embedding model turns it into a vector. Using the same model is essential: vectors from two models live in different spaces. The question vector still has to be compared with the index.
+  </StepCard>
+  <StepCard n={6} title="The index returns the nearest permitted chunks">
+    The index returns the 5 chunks closest to the question that this user may read. Filtering here, not after generation, keeps restricted text out of the prompt. The chunks and the question are still separate pieces.
+  </StepCard>
+  <StepCard n={7} title="Chunks and question become one prompt">
+    Instructions, the 5 chunks with their ids, and the question are assembled into one prompt of about 2,200 tokens. The instructions say to answer only from the chunks. The model has not run yet.
+  </StepCard>
+  <StepCard n={8} title="The model answers and cites its chunks">
+    The LLM writes the steps and cites the two articles it used; the app turns the citations into links. If no chunk is relevant, the instructions tell it to say so. Log the question, chunks and answer for evaluation.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative timings): embedding the question ≈ 20 ms, vector search ≈ 15 ms, building the prompt ≈ 2 ms, the model's first token ≈ 400 ms. Retrieval is under a tenth of the time to the first token.
 
 ## Deep dive
 
 ### Where RAG fails
 
-```mermaid
-flowchart TB
-    F1["Parsing lost tables or headings"] --> BAD["Wrong or missing answer"]
-    F2["Chunk split the key fact in two"] --> BAD
-    F3["Query wording differs from document wording"] --> BAD
-    F4["Right chunk ranked 30th, only top 5 used"] --> BAD
-    F5["Too much context; key fact lost in the middle"] --> BAD
-    F6["Model ignores context and answers from memory"] --> BAD
-    F7["Stale index after documents changed"] --> BAD
-    BAD --> FIX["Fixes: better parsing, structure-aware chunking,<br/>hybrid search, re-ranking, fewer but better chunks,<br/>grounding instructions, incremental re-indexing"]:::accent
-```
+A wrong answer always starts at one stage. This map puts each common failure under the stage where it happens.
+
+<AnimatedDiagram
+  spec="animated/rag/failure-map"
+  stepper
+  caption="Every failure has a stage and a fix; two of the seven happen at retrieval."
+/>
+
+**How to read it.** Step 1 is the pipeline from the Architecture figure, compressed to six stages. Step 2 adds the failure each stage causes; Retrieve has two, the wrong words and the wrong rank (the chunk at rank 7 in the similarity figure). Step 3 adds the fix for each one.
 
 Most RAG quality problems are **retrieval** problems. If the right passage is not in the prompt, no model can answer correctly.
+
+Even with the right chunk in the prompt, its position matters. Liu et al. (2023) measured how well long-context models use information at different positions.
+
+<AnimatedDiagram
+  spec="animated/rag/lost-in-the-middle"
+  caption="Shape only, after Liu et al. (2023); the same chunk helps more at the edges of the prompt than in its middle."
+/>
+
+**How to read it.** The curve is the shape of their result, not their numbers: accuracy is highest when the relevant passage is at the start or the end of the context and drops when it sits in the middle. In Brightpost's 5-chunk prompt, the middle is chunk 3.
+
+<Callout tone="red" title="What breaks">
+  Stuffing 20 chunks "to be safe" pushes the useful one into the middle and adds cost. Fix: retrieve wide, rerank, keep a few, and put the strongest chunks first.
+</Callout>
 
 ### Measuring a RAG system
 
@@ -92,6 +173,18 @@ Evaluate in two layers with a test set of real questions:
 
 - **Retrieval:** recall at k (is a correct passage in the top k?) and ranking metrics such as MRR or nDCG.
 - **Generation:** faithfulness (is every claim supported by the retrieved context?), answer relevance, and correctness against reference answers. Frameworks such as RAGAS automate much of this with LLM-based graders.
+
+The three retrieval metrics answer different questions about the same list. Here they are for the main question.
+
+<AnimatedDiagram
+  spec="animated/rag/retrieval-metrics"
+  stepper
+  caption="Score retrieval and generation separately; one ranked list gives three different retrieval numbers."
+/>
+
+**How to read it.** Step 1 is the ranked list from the similarity figure, with the three relevant chunks shaded. Step 2 computes the retrieval metrics: recall asks how many relevant chunks made the cut, MRR asks how early the first one appears, and nDCG rewards every relevant chunk more the higher it sits. Step 3 adds the two checks on the answer, which need the question, the chunks and the answer together.
+
+**The numbers.** Recall@5 = 2 ÷ 3 = 0.67. MRR = 1 ÷ 2 = 0.5. nDCG@10 = (1/log₂3 + 1/log₂5 + 1/log₂8) ÷ (1 + 1/log₂3 + 1/log₂4) = 1.39 ÷ 2.13 = 0.65.
 
 ## Trade-offs
 

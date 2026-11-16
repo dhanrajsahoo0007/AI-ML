@@ -30,6 +30,20 @@ Imagine shuffling the words of a sentence onto cards and handing them over in a 
 
    It needs no parameters, and a fixed offset between positions corresponds to a linear transformation, which helps the model learn relative patterns.
 
+Each pair of dimensions is a wave with its own wavelength. Here are three of the 512, sampled at positions 0 to 7.
+
+<AnimatedDiagram
+  spec="animated/transformer/pe-waves"
+  caption="Each dimension of the sinusoidal encoding is a wave with its own wavelength; reading the values down one column gives every position its own code."
+/>
+
+Across many dimensions, the fast waves sit on the left and the slow ones on the right.
+
+<AnimatedDiagram
+  spec="animated/transformer/pe-heatmap"
+  caption="Fast dimensions on the left change at every step; slow ones on the right barely move, so together they place each position both locally and globally."
+/>
+
 3. **Learned absolute embeddings.** BERT and GPT-2 learn one vector per position. Simple and effective, but the model has nothing for positions beyond the training length.
 
 4. **Relative position bias.** T5 adds a learned bias to each attention score based on the (bucketed) distance between the two tokens.
@@ -42,16 +56,12 @@ Imagine shuffling the words of a sentence onto cards and handing them over in a 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    T["Token embeddings"] --> A{"Where is position injected?"}
-    A -->|"Absolute: add to input"| ABS["Sinusoidal or learned vector<br/>added once at the bottom"]
-    A -->|"Rotary: inside attention"| ROPE["Rotate Q and K by angle<br/>proportional to position"]:::accent
-    A -->|"Bias: on attention scores"| BIAS["Add distance penalty<br/>(ALiBi) or learned bias (T5)"]
-    ABS --> ATT["Attention in every layer"]
-    ROPE --> ATT
-    BIAS --> ATT
-```
+The methods differ in where position enters the model: absolute vectors (sinusoidal or learned), rotary embeddings, or a bias on the scores. The ringed shape in each panel marks the spot.
+
+<AnimatedDiagram
+  spec="animated/transformer/position-injection"
+  caption="Absolute encodings change the input once; RoPE rotates queries and keys in every attention layer; ALiBi and T5 add a distance-based bias to the scores in every layer."
+/>
 
 Where each method acts:
 
@@ -63,26 +73,23 @@ Where each method acts:
 
 ### How RoPE turns absolute positions into relative ones
 
-```mermaid
-flowchart LR
-    Q["Query for token at position m"] --> RQ["Rotate by angle m x theta"]
-    K["Key for token at position n"] --> RK["Rotate by angle n x theta"]
-    RQ --> DOT["Dot product"]
-    RK --> DOT
-    DOT --> REL["Score depends on (m - n),<br/>the relative distance"]:::accent
-```
+Take one pair of dimensions, rotate the query by m·θ and the key by n·θ. Two token pairs with the same gap end up the same angle apart.
+
+<AnimatedDiagram
+  spec="animated/transformer/rope-rotation"
+  caption="The absolute angles differ, but the gap n − m = 3 gives the same 3θ between query and key, so the attention score is the same."
+/>
 
 Rotating two vectors and taking their dot product gives the same result as rotating one of them by the angle difference. So even though each token is encoded at its absolute position, attention only "sees" relative distance. Different dimension pairs rotate at different frequencies: fast ones capture local order, slow ones capture long-range position.
 
 ### Extending a context window
 
-```mermaid
-flowchart LR
-    BASE["Model trained at 4K tokens"] --> PI["Rescale RoPE<br/>(interpolation, NTK, YaRN)"]
-    PI --> FT["Short fine-tune on long documents"]
-    FT --> EVAL["Check needle-in-a-haystack<br/>and long-doc QA"]:::accent
-    EVAL --> SERVE["Serve at 32K to 128K tokens"]
-```
+Take a model trained on 4K positions and give it 16K: the positions must either run past what it saw, or be squeezed back into range.
+
+<AnimatedDiagram
+  spec="animated/transformer/context-extension"
+  caption="Extrapolation pushes slow RoPE pairs to angles never seen in training; position interpolation divides every position by 4 to stay in range, and NTK-aware scaling and YaRN squeeze only the slow pairs so local detail survives, before a short long-document fine-tune."
+/>
 
 ## Trade-offs
 

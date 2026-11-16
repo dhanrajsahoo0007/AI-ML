@@ -28,9 +28,53 @@ Basic RAG is asking a librarian one question and taking the first five books the
 
 4. **HyDE (hypothetical document embeddings).** Ask the LLM to write a hypothetical answer, then embed that text and search with it. A fake answer often looks more like real documents than a short question does.
 
+Every figure on this page uses the running example from [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals): Brightpost's help centre of 1,200 articles (3,600 chunks) and the question "How do I reset my password if I lost my phone?". Plain top-5 vector search finds only 2 of the 3 chunks the answer needs. Here is what rewriting does to that question.
+
+<AnimatedDiagram
+  spec="animated/rag/query-rewriting"
+  stepper
+  caption="No single rewrite finds every chunk; together they put all three relevant chunks in the top 5."
+/>
+
+**How to read it.** Step 1: an LLM turns the question into three search queries, each worded the way a help article might be. Step 2 adds the HyDE answer: a guessed reply that may be wrong in its details but reads like an article, so its vector lands near real articles (Gao et al., 2022). Step 3 runs all four searches and merges the four result lists with reciprocal rank fusion (concept 5); the "found by" column shows which searches found each chunk.
+
+**The numbers** (illustrative): the question alone puts 2 of the 3 relevant chunks in its top 5, a recall@5 of 0.67. The merged list puts all 3 there, a recall@5 of 1.0. The price is one LLM call and four searches instead of one.
+
+<Callout tone="red" title="What breaks">
+  A rewrite can drift from what the customer meant, and a wrong HyDE guess pulls the search towards the wrong articles. If the LLM guesses "contact support", the search lands among contact pages. Fix: always run the original question as one of the searches, and compare rewrites against the original on an evaluation set.
+</Callout>
+
 5. **Hybrid search.** Run dense vector search and sparse keyword search (BM25) in parallel and merge them, commonly with reciprocal rank fusion. Dense catches meaning; sparse catches exact names, codes and rare terms.
 
+BM25 scores and cosine similarities are on different scales, so adding them gives a meaningless number. Reciprocal rank fusion (RRF, Cormack et al., 2009) ignores the scores and uses only each chunk's rank in each list.
+
+<AnimatedDiagram
+  spec="animated/rag/rrf-fusion"
+  stepper
+  caption="Only ranks count: a chunk both lists place fairly high beats a chunk one list loves and the other misses."
+/>
+
+**How to read it.** Step 1 shows the two rankings for the main question. The vector order is the one from RAG Fundamentals; the BM25 order is illustrative, and it ranks "No backup codes: verify your ID" 2nd because the chunk uses the question's words. Vector search ranks the same chunk 7th, outside the top 5. Step 2 gives the formula: each list adds 1 / (60 + rank) to a chunk's score, and a chunk missing from a list gets nothing from it. The constant 60 flattens the top: rank 1 is worth 1/61 and rank 2 is worth 1/62, so one list's favourite cannot drown out the other list. Step 3 adds up both lists and sorts.
+
+**The numbers.** "No backup codes" scores 1/62 + 1/67 = 0.0161 + 0.0149 = 0.0311. That beats "Update your phone number" at 1/67 + 1/63 = 0.0308, so the chunk moves from rank 7 to rank 4. The fused top 5 holds all 3 relevant chunks (recall@5 = 1.0, up from 0.67). Fusion fixes recall, not order: "Change your password", which does not help, is still 2nd. Ordering is the reranker's job.
+
 6. **Re-ranking.** A cross-encoder reads the query and each candidate together and scores relevance much more accurately than vector similarity. Retrieve 50 to 100 candidates cheaply, re-rank, keep the top 5 to 10.
+
+The reranker is expensive per chunk, so it only reads what a cheap search has already narrowed down.
+
+<AnimatedDiagram
+  spec="animated/rag/rerank-funnel"
+  stepper
+  caption="The cheap stage narrows 3,600 chunks to 100 so the expensive stage only has to read 100."
+/>
+
+**How to read it.** Step 1 is every chunk in the index, embedded ahead of time. Step 2: one vector (or hybrid) search keeps the 100 nearest. Step 3: the cross-encoder reads the question together with each of the 100 chunks, scores each pair, and keeps the best 5. Each box's width follows its count, so the big drop is the first one.
+
+**The numbers** (illustrative timings): search ≈ 15 ms and reranking 100 pairs ≈ 120 ms, about 1.2 ms per pair. Reranking all 3,600 chunks the same way would take 3,600 ÷ 100 × 120 ms ≈ 4.3 s per question. The 5 kept chunks are 5 × 400 = 2,000 tokens of context.
+
+<Callout tone="red" title="What breaks">
+  The reranker can only reorder what it is given. A chunk that the first search ranks 101st never reaches it. Fix: measure recall at 100 on an evaluation set, and raise the candidate count or add BM25 when the right chunk is often missing from the 100.
+</Callout>
 
 7. **Late interaction (ColBERT-style).** Keeps one vector per token and matches token-to-token, between bi-encoders and cross-encoders in cost and quality.
 
@@ -46,70 +90,82 @@ Basic RAG is asking a librarian one question and taking the first five books the
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    Q["User question + chat history"] --> RW["Query rewriting<br/>(standalone query, multi-query, HyDE)"]
-    RW --> ROUTE{"Route by intent"}
-    ROUTE -->|"factual lookup"| HYB["Hybrid search<br/>dense + BM25, metadata filters"]
-    ROUTE -->|"broad / thematic"| SUM["Hierarchical or graph summaries"]
-    ROUTE -->|"structured data"| SQL["Text-to-SQL or API tool"]
-    HYB --> FUSE["Reciprocal rank fusion"]
-    FUSE --> RR["Cross-encoder re-ranker<br/>(top 100 → top 8)"]:::accent
-    SUM --> RR
-    RR --> GRADE{"Relevant enough?"}
-    GRADE -->|"No"| RW
-    GRADE -->|"Yes"| COMP["Compress and order context"]
-    SQL --> COMP
-    COMP --> GEN["LLM generates grounded answer with citations"]
-    GEN --> CHECK["Faithfulness check"]
-    CHECK --> OUT["Answer"]
-```
+Advanced RAG is basic RAG with stages added where it fails. Step through it from the basic pipeline; each step adds one stage and names the gap that stage closes.
 
-The request path:
+<AnimatedDiagram
+  spec="animated/rag/advanced-pipeline"
+  stepper
+  caption="Each stage closes one gap in the stage before it; the reranker is the step most systems get the most from."
+/>
 
-1. Rewrite the question into one or more search queries.
-2. Route it to the right retrieval method for its intent.
-3. Retrieve broadly with hybrid search and fuse the result lists.
-4. Re-rank candidates and keep a small, high-precision set.
-5. If nothing is relevant enough, rewrite and try again, or answer "not found".
-6. Compress, order, generate with citations, and optionally verify faithfulness.
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="Basic RAG: embed the question, send the top 5 to the LLM">
+    The question is embedded, vector search returns the 5 nearest chunks, and the LLM answers from them with citations. This is the answering lane of the [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) pipeline. For Brightpost it finds 2 of the 3 chunks the answer needs, and the customer's chat wording ("lost my phone") is not how the articles are written.
+  </StepCard>
+  <StepCard n={2} title="Chat wording misses the articles: rewrite the question">
+    An LLM turns the question into a few search queries and one HyDE answer before anything is searched. The search now sees article-like wording, and a follow-up such as "and if I have no codes?" becomes a standalone query. Vector search still misses exact words, such as the code in "What does error E1234 mean?".
+  </StepCard>
+  <StepCard n={3} title="Vectors miss exact words: add BM25 and fuse the lists">
+    BM25 keyword search runs beside vector search on the same queries, and reciprocal rank fusion with k = 60 merges the two lists by rank. The E1234 article is found by its exact code, and "No backup codes" rises from rank 7 to rank 4. The fused list has the right chunks but not in the right order: "Change your password" is still 2nd.
+  </StepCard>
+  <StepCard n={4} title="Near is not relevant: rerank 100, keep 5">
+    Fusion now passes its top 100 to a cross-encoder reranker, which reads the question with each chunk and keeps the best 5, in about 120 ms (illustrative). It is drawn solid because it is usually the biggest single gain. Even the best 5 can be poor when the help centre has nothing on the question.
+  </StepCard>
+  <StepCard n={5} title="Sometimes nothing fits: grade, then rewrite and retry">
+    A grader checks whether the 5 chunks answer the question. Weak results go back to the rewriter along the dashed loop, at most twice, and then the system answers "not found" instead of guessing. The chunks that pass are still whole 400-token passages, most of which is off topic.
+  </StepCard>
+  <StepCard n={6} title="Long, noisy prompts: compress and order the chunks">
+    Sentences that do not bear on the question are removed, and the strongest chunk goes first, because models use the middle of a long prompt less reliably. The prompt gets shorter, cheaper and easier to follow. The model can still write a sentence that no chunk supports.
+  </StepCard>
+  <StepCard n={7} title="Unsupported claims slip through: check the answer">
+    A faithfulness check compares each claim in the answer with the chunks. A supported answer is shown with its citations; an unsupported one goes back to the rewriter or loses the claim. Every stage on this path adds latency and cost, so keep a stage only if it moves your evaluation numbers.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative timings from the running example): embedding the question ≈ 20 ms, search ≈ 15 ms and reranking 100 candidates ≈ 120 ms, so retrieval takes about 155 ms before the model's first token at ≈ 400 ms. The rewrite, the grader and the faithfulness check are each another model call on top.
+
+The figure leaves out routing. A production system often sends broad "what are the main themes" questions to graph or hierarchical summaries ([GraphRAG](/ai-system-design/genai-system-design/graphrag)), questions about records to SQL ([Text-to-SQL](/ai-system-design/genai-system-design/text-to-sql-and-structured-data)), and only factual lookups down this path.
 
 ## Deep dive
 
 ### Bi-encoder vs cross-encoder
 
-```mermaid
-flowchart LR
-    subgraph BI["Bi-encoder (retrieval)"]
-        direction TB
-        BQ["Query"] --> BE1["Encoder"] --> BV1["Query vector"]
-        BD["Document"] --> BE2["Encoder"] --> BV2["Doc vector (precomputed)"]
-        BV1 --> COS["Cosine similarity"]
-        BV2 --> COS
-    end
-    subgraph CROSS["Cross-encoder (re-ranking)"]
-        direction TB
-        CQ["Query + document together"] --> CE["Encoder reads both jointly"]:::accent --> SC["Relevance score"]
-    end
-```
+Both models score the same question against the same chunk. The difference is whether they ever read the two together.
+
+<AnimatedDiagram
+  spec="animated/rag/bi-vs-cross-encoder"
+  stepper
+  caption="The bi-encoder never sees the question and the chunk together; the cross-encoder does, which is why it ranks better and costs more."
+/>
+
+**How to read it.** Step 1, the bi-encoder: the question and the chunk "No backup codes: verify your ID" pass through the encoder separately, and each becomes a vector. The chunk's vector was made once, at ingestion, and waits in the index, so a question costs one encoding and one search. Step 2, the cross-encoder: the question and the chunk go in as one input, so the model can see that "lost my phone" and "no backup codes" belong to the same problem. It outputs one relevance score per pair, and nothing can be computed ahead of time.
+
+**The numbers.** The bi-encoder's cosine for this chunk is 0.69, rank 7 in the vector list. An illustrative cross-encoder score of 0.91 lifts it into the reranked top 5. The cost is the catch: 100 pairs take ≈ 120 ms, and all 3,600 chunks would take ≈ 4.3 s per question (illustrative timings).
 
 Bi-encoders are fast because document vectors are precomputed, but they compress each text separately. Cross-encoders see query and document word by word, so they are far more accurate but too slow to run over a whole corpus. That is why they are paired: retrieve with one, re-rank with the other.
 
 ### Corrective retrieval loop
 
-```mermaid
-stateDiagram-v2
-    [*] --> Retrieve
-    Retrieve --> Grade
-    Grade --> Generate: passages relevant
-    Grade --> Rewrite: passages weak
-    Rewrite --> Retrieve
-    Grade --> Fallback: still weak after retries
-    Fallback --> Generate: search another source
-    Generate --> Verify
-    Verify --> [*]: supported
-    Verify --> Rewrite: unsupported claims
-```
+A corrective pipeline checks its own work twice: once on the chunks, once on the answer. Here is one run of Brightpost's question where the first search is weak.
+
+<AnimatedDiagram
+  spec="animated/rag/corrective-loop"
+  stepper
+  caption="Nothing reaches the customer until the chunks pass one check and the answer passes another."
+/>
+
+**How to read it.** Step 1: the app retrieves the top 5 and asks a grader whether they answer the question; only 2 of 5 do. Step 2: the app asks an LLM to rewrite the query ("lost phone, no backup codes"), searches again, and this time 3 of 5 pass. If a retry stays weak, the app searches another source or says "not found". Step 3: the LLM drafts an answer from the 3 passing chunks. Step 4: the grader checks every claim in the draft against those chunks, and only a supported answer reaches the customer.
+
+The two papers behind this pattern grade in different places:
+
+- **Corrective RAG** (Yan et al., 2024) adds a small retrieval evaluator, a fine-tuned T5-large, that rates the retrieved documents. When it judges them correct, it keeps them and filters out irrelevant strips of text; when incorrect, it discards them and runs a web search with rewritten keyword queries; when ambiguous, it uses both. The paper's flow is a single pass; the retry loop in the figure is a common production variant.
+- **Self-RAG** (Asai et al., 2023) trains the LLM itself to emit reflection tokens: whether to retrieve at all, whether a passage is relevant, whether its output is supported by the passage, and whether the output is useful. In the figure, the grader and LLM lanes become one model.
+
+<Callout tone="red" title="What breaks">
+  Every retry adds a search, a grader call and an LLM call, and a question the help centre cannot answer would loop forever. Fix: cap retries (two here), then answer "not found" or hand over to a person, and log those questions as gaps in the content.
+</Callout>
 
 ## Trade-offs
 
@@ -150,6 +206,9 @@ stateDiagram-v2
 
 ## Further reading
 
+- [Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods (Cormack, Clarke and Büttcher, 2009)](https://doi.org/10.1145/1571941.1572114)
+- [Passage Re-ranking with BERT (Nogueira and Cho, 2019)](https://arxiv.org/abs/1901.04085)
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
 - [Precise Zero-Shot Dense Retrieval without Relevance Labels, HyDE (Gao et al., 2022)](https://arxiv.org/abs/2212.10496)
 - [Self-RAG (Asai et al., 2023)](https://arxiv.org/abs/2310.11511)
 - [Corrective Retrieval Augmented Generation (Yan et al., 2024)](https://arxiv.org/abs/2401.15884)

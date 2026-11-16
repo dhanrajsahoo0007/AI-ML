@@ -2,43 +2,182 @@
 title: "Hybrid Search & Re-ranking"
 description: "Combining keyword and vector retrieval, fusing the results and re-ranking them with cross-encoders or LLMs."
 icon: combine
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Combining keyword and vector retrieval, fusing the results and re-ranking them with cross-encoders or LLMs.
+Vector search finds text that means the same thing; keyword search finds text that says the same thing. Production retrieval runs both, merges the two lists, and then lets a slower, more accurate model put the best few chunks in order. This page covers each of those three stages and how to budget for them.
 
 ## TL;DR
 
+- **BM25** scores exact word matches, weighting rare words more. It finds codes, names and IDs that embeddings blur. **Learned sparse** models (SPLADE) learn the word weights but keep the inverted index.
+- **Dense** retrieval finds paraphrases but misses exact tokens: "E1234" lands near "E1243".
+- **Reciprocal rank fusion** merges the two lists by rank, so their incompatible scores never meet. Weighted score fusion needs normalised scores and tuning.
+- A **cross-encoder reranker** reads the question and each candidate together; it is far more accurate and far slower, so it reads 50 to 100 candidates, never the corpus. **LLM rerankers** do the same with a general model.
+- Budget each stage: wide and cheap first (top 100), narrow and expensive last (top 5), and measure recall at every cut.
+
 ## The idea in plain English
+
+A library has two finding aids. The card catalogue finds every book with the exact word "E1234" in it, but nothing about "stolen phones" if the book says "lost device". A well-read assistant finds books about your problem whatever words you use, but mixes up E1234 with E1243. You ask both, put their two piles together, and hand the combined pile to an expert who reads each book against your question and keeps the five best. That is hybrid search with re-ranking.
 
 ## Core concepts
 
+The running example is the one from [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals): Brightpost's help centre, **1,200 articles** in **3,600 chunks**, the main question "How do I reset my password if I lost my phone?", and the keyword question "What does error E1234 mean?".
+
 ### Sparse retrieval: BM25 and learned sparse models
+
+Keyword search runs on an **inverted index**: for every word, the list of chunks that contain it (its postings). The query is split into words the same way the documents were, each word's postings are fetched, and the chunks are scored.
+
+<AnimatedDiagram
+  spec="animated/databases/inverted-index"
+  stepper
+  caption="Documents and queries pass through the same analyzer, so a query word finds its postings list in one lookup."
+/>
+
+**How to read it.** This is a generic three-document example. Steps 1 and 2 build the index: each document is split and stemmed into terms, and each term keeps a list of the documents that contain it. Steps 3 and 4 answer a query: it is analyzed the same way, the postings of its terms are fetched and combined, and BM25 ranks the matches.
+
+**BM25** (Robertson and Zaragoza, 2009) adds three ideas to "count the matching words". A word that is rare in the corpus counts more (inverse document frequency, IDF). Repeating a word helps less each time (saturation, set by k1). Long chunks are discounted, so they do not win by containing every word (length normalisation, set by b). Elasticsearch and Lucene default to k1 = 1.2 and b = 0.75.
+
+**The numbers.** With Lucene's IDF, ln(1 + (N − n + 0.5) ÷ (n + 0.5)), and N = 3,600 chunks: "E1234", in 1 chunk, weighs ln(1 + 3,599.5 ÷ 1.5) = 7.78; "password", in an illustrative 300 chunks, weighs ln(1 + 3,300.5 ÷ 300.5) = 2.48. One match on the code is worth three matches on a common word.
+
+**Learned sparse** models such as SPLADE (Formal et al., 2021) use a Transformer to give each word a learned weight and add related words the text does not contain, while keeping the output sparse enough to serve from an inverted index. They narrow the vocabulary gap without giving up exact matching.
 
 ### Dense retrieval and where it fails
 
+Dense retrieval embeds the question and every chunk as vectors and returns the nearest ones (see [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)). It matches meaning, which is its strength and its blind spot. Here are three questions, searched both ways.
+
+<AnimatedDiagram
+  spec="animated/rag/keyword-vs-vector"
+  stepper
+  caption="Each search misses a question the other finds: vectors miss the exact code, keywords miss the paraphrase."
+/>
+
+**How to read it.** Step 1: the main question shares words and meaning with "Reset a forgotten password", so both methods find it, BM25 at rank 1 and vector search at rank 2. Step 2: "Can't log in, phone was stolen" shares only "phone" with any article, so BM25 returns "Update your phone number"; vector search finds "Lost phone: use a backup code" by meaning. Step 3: the code E1234 appears in one article, so BM25 finds it at rank 1; vector search returns the article for E1243, because the two codes look alike to the embedding model. Which article each method returns is illustrative. The same blind spot covers order numbers, SKUs, version strings and names, where a similar answer is a wrong answer.
+
 ### Fusion: reciprocal rank fusion and weighted scores
+
+BM25 scores are unbounded (a 7.78 IDF weight is ordinary) and cosine similarities in the running example sit between 0.61 and 0.82, so adding them lets BM25 decide alone. **Reciprocal rank fusion** (RRF, Cormack et al., 2009) ignores scores: each list adds 1 ÷ (60 + rank) to a chunk, and the sums are sorted.
+
+<AnimatedDiagram
+  spec="animated/rag/rrf-fusion"
+  stepper
+  caption="Only ranks count: a chunk both lists place fairly high beats a chunk one list loves and the other misses."
+/>
+
+**How to read it.** Step 1 shows the BM25 order (illustrative) and the vector order for the main question. Step 2 gives the formula. Step 3 adds the two contributions per chunk and sorts: "No backup codes: verify your ID", 2nd in BM25 and 7th in vector search, rises to 4th.
+
+**The numbers.** 1/62 + 1/67 = 0.0161 + 0.0149 = 0.0311, enough to pass "Update your phone number" at 1/67 + 1/63 = 0.0308. The fused top 5 holds all 3 relevant chunks (recall@5 = 1.0, up from 0.67), but "Change your password" is still 2nd: fusion fixes recall, not order.
+
+**Weighted score fusion** is the alternative: normalise each list's scores to 0..1 (min-max per query) and add them with a weight, such as 0.7 × dense + 0.3 × sparse. It can beat RRF once tuned, but the weight must be tuned on your own questions and min-max normalisation is fragile: one outlier score squashes every other chunk in that list. RRF needs no tuning, which is why it is the usual default.
 
 ### Cross-encoder and LLM re-rankers
 
+A **bi-encoder** (the embedding model) encodes the question and each chunk separately, so chunk vectors are computed once and searched fast. A **cross-encoder** reads the question and one chunk together and outputs one relevance score, so it sees how the two relate word by word.
+
+<AnimatedDiagram
+  spec="animated/rag/bi-vs-cross-encoder"
+  stepper
+  caption="The bi-encoder never sees the question and the chunk together; the cross-encoder does, which is why it ranks better and costs more."
+/>
+
+**How to read it.** Step 1: the bi-encoder scores "No backup codes: verify your ID" at cosine 0.69, rank 7, from two vectors made apart. Step 2: the cross-encoder reads both texts as one input, sees that "lost my phone" and "no backup codes" are the same problem, and scores the pair 0.91 (illustrative). Nothing in step 2 can be computed ahead of time, so it costs one model run per candidate.
+
+Nogueira and Cho (2019) re-ranked BM25 candidates with a BERT cross-encoder and took the top of the MS MARCO passage leaderboard, 27% (relative) above the previous best MRR@10. **LLM rerankers** prompt a general model to order a list of passages; Sun et al. (2023) found instructed LLMs such as GPT-4 competitive with or better than supervised rerankers on standard benchmarks, and distilled its ranking into a 440M-parameter model that beat a 3B supervised one on BEIR. LLM rerankers cost more per question, so they suit low volumes or a final pass over 10 to 20 chunks. Late-interaction models such as ColBERT sit between the two: one vector per token, matched token by token, with document vectors still precomputed.
+
 ## Architecture
+
+The three stages form one retrieval service. Both searches run in parallel on the same question, under the same permission filter, and only the fused shortlist reaches the reranker.
+
+<AnimatedDiagram
+  spec="animated/rag/hybrid-fusion"
+  stepper
+  caption="Two searches find different chunks; fusion merges them by rank and the reranker decides the final order."
+/>
+
+**How to read it.** Step 1: the question goes to BM25 and to vector search at the same time, so hybrid search costs the slower search, not the sum. Step 2: each returns its top 100 and RRF with k = 60 merges them into one list cut at 100; chunks found by both rise, and the E1234 article, found only by BM25, still makes the list. Step 3: the reranker, the accent, reads the question with each of the 100 and keeps 5, about 2,000 tokens; it can only reorder what fusion handed it. Step 4: the user's tenant and access rights become one filter inside both searches, because if only one search filtered, fusion would mix forbidden chunks into the shortlist.
+
+**The numbers** (illustrative timings from the running example): embedding the question ≈ 20 ms, vector search ≈ 15 ms with BM25 in parallel, fusion well under 1 ms, reranking 100 candidates ≈ 120 ms. Retrieval takes about 155 ms, before the model's first token at ≈ 400 ms.
 
 ## Deep dive
 
 ### The latency and cost budget of a re-ranking stage
 
+A reranker's cost grows with the number of candidates it reads, which is why it sits at the narrow end of a funnel.
+
+<AnimatedDiagram
+  spec="animated/rag/rerank-funnel"
+  stepper
+  caption="The cheap stage narrows 3,600 chunks to 100 so the expensive stage only has to read 100."
+/>
+
+**How to read it.** Step 1 is the whole index. Step 2 keeps the 100 nearest with one cheap search. Step 3 reranks those 100 and keeps 5; each box's width follows its count.
+
+**The numbers** (illustrative): 120 ms ÷ 100 = 1.2 ms per pair, so reranking all 3,600 chunks would take 3,600 × 1.2 ms ≈ 4.3 s per question. Halving the candidates to 50 saves about 60 ms; a smaller cross-encoder, a GPU with batched pairs, or caching scores for repeated questions saves more. A hosted rerank API is billed per call or per document read, so the candidate count is also the cost lever.
+
 ### Metadata filtering with hybrid search
+
+Filters (tenant, language, product, access rights) must apply inside both searches, before fusion, with the same values. BM25 engines filter cheaply alongside the inverted index. Vector indexes are harder: filtering after the search can leave fewer than k results when the filter is strict, so use an index that filters during the search (see [Vector Databases](/ai-system-design/genai-system-design/vector-databases)). Test that the two searches return the same permitted set: a filter that one side applies and the other forgets is a data leak that fusion hides.
 
 ### Tuning top-k at each stage
 
+Each cut has its own question. **First stage** (each search): is the right chunk in the top 100? Measure recall@100; if it is low, no reranker can help, so raise the depth or fix the query. **Fusion**: lists deeper than the reranker's input waste work, so fuse to the reranker's depth. **Final k**: how many chunks the prompt can hold and the model can use; 5 × 400 = 2,000 tokens here. Anthropic's contextual retrieval write-up shows the stages adding up: with contextual embeddings and contextual BM25, then a reranker narrowing the top 150 to the top 20, top-20 retrieval failures fell from 5.7% to 1.9%, a 67% reduction.
+
 ## Trade-offs
+
+| Decision | Option A | Option B | Guidance |
+| --- | --- | --- | --- |
+| Retrieval | Vector only: simple, one index | Hybrid: two indexes, fusion | Hybrid for any corpus with codes, names or IDs |
+| Sparse model | BM25: no training, explainable | SPLADE: learned weights, expansion | Start with BM25; try learned sparse if vocabulary gaps remain |
+| Fusion | RRF: no tuning | Weighted scores: tunable, fragile | RRF by default; weighted only with an evaluation set |
+| Reranker | Cross-encoder: fast enough for 100 | LLM: flexible, slower, costlier | Cross-encoder for volume; LLM for a final short list |
+| Candidates | 50: cheaper rerank | 200: higher recall | Pick the smallest depth that keeps recall@k flat |
 
 ## Real-world examples
 
+- Elasticsearch, OpenSearch and Lucene-based engines rank keyword queries with BM25 by default, and several search engines and vector databases now offer hybrid queries with RRF built in.
+- Anthropic's contextual retrieval experiments combined contextual embeddings, contextual BM25 and a reranker, and measured each addition's drop in retrieval failures.
+
 ## Common pitfalls
+
+- Adding raw BM25 scores to cosine similarities.
+- Reranking too few candidates, or ones the first stage never retrieved.
+- Applying permission filters to only one of the two searches.
+- Measuring only the final answer, so a first-stage recall problem looks like a reranker problem.
 
 ## How to answer in an interview
 
+1. Explain why one method is not enough: exact tokens for BM25, paraphrases for vectors.
+2. Draw the service: two parallel searches, one shared filter, fusion, reranker, top k.
+3. Justify RRF over adding scores, and say when a weighted fusion is worth tuning.
+4. Size the reranker from a latency budget: milliseconds per pair times candidates.
+5. Name the metrics at each cut: recall@100 for the first stage, nDCG or MRR after reranking.
+
+**What interviewers listen for:** a funnel with numbers at each stage and a reason for every cut.
+
+**Red flags:** "use a cross-encoder for retrieval" over the whole corpus, or "add the two scores".
+
 ## Further reading
+
+- [The Probabilistic Relevance Framework: BM25 and Beyond (Robertson and Zaragoza, 2009)](https://doi.org/10.1561/1500000019)
+- [SPLADE: Sparse Lexical and Expansion Model for First Stage Ranking (Formal et al., 2021)](https://arxiv.org/abs/2107.05720)
+- [Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods (Cormack, Clarke and Büttcher, 2009)](https://doi.org/10.1145/1571941.1572114)
+- [Passage Re-ranking with BERT (Nogueira and Cho, 2019)](https://arxiv.org/abs/1901.04085)
+- [Is ChatGPT Good at Search? LLMs as Re-Ranking Agents (Sun et al., 2023)](https://arxiv.org/abs/2304.09542)
+- [ColBERT: Efficient and Effective Passage Search (Khattab and Zaharia, 2020)](https://arxiv.org/abs/2004.12832)
+- [Introducing Contextual Retrieval (Anthropic, 2024)](https://www.anthropic.com/news/contextual-retrieval)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is BM25 and why does it still matter next to embeddings?" category="Concepts" level="Junior">
+    BM25 is a keyword ranking function: it scores a document by the query words it contains, weighting rare words more, giving diminishing credit for repeats and discounting long documents. It matters because embeddings blur exact tokens such as error codes, product IDs and names into similar-looking ones, while BM25 matches them exactly and explainably. Most production systems run it beside vector search rather than instead of it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does reciprocal rank fusion work, and why not add the two scores?" category="Concepts" level="Mid">
+    Each result list gives a document 1 divided by (k plus its rank), with k usually 60, and the contributions are summed and sorted; a document missing from a list gets nothing from it. Adding raw scores fails because BM25 scores are unbounded and cosine similarities sit in a narrow band, so one method would dominate. RRF uses only ranks, needs no tuning, and rewards documents that both methods place reasonably high. Weighted score fusion can do better after normalisation and tuning on an evaluation set.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use a cross-encoder only as a reranker and not for first-stage retrieval?" category="Trade-offs" level="Mid">
+    A cross-encoder needs the query and the document together, so nothing can be precomputed and it must run once per pair at query time. Scoring a whole corpus that way takes seconds or more per question. A bi-encoder or BM25 retrieves a shortlist of 50 to 100 cheaply, and the cross-encoder reorders only that shortlist, which gives most of its accuracy at a small fraction of the cost.
+  </InterviewQuestion>
+  <InterviewQuestion question="Retrieval must finish in 300 ms. How do you fit hybrid search and a reranker into it?" category="Architecture" level="Senior">
+    Run BM25 and vector search in parallel so they cost the slower of the two, about 15 to 30 ms, plus about 20 ms to embed the question. Fusion is negligible. That leaves roughly 250 ms for reranking, so I would measure milliseconds per pair for the chosen cross-encoder and set the candidate count to fit, for example 100 candidates at about 1.2 ms each on a GPU with batching. If it does not fit, use a smaller reranker, fewer candidates where recall@k stays flat, or cache scores for frequent questions.
+  </InterviewQuestion>
+  <InterviewQuestion question="What can go wrong when you add permission filters to hybrid search?" category="Failure modes" level="Senior">
+    The filter can be applied to one search and not the other, so fusion mixes forbidden chunks into the shortlist and the reranker happily ranks them. Post-filtering a vector search can leave too few results, which silently lowers recall for users with narrow access. And the two indexes can hold different permission snapshots if they sync at different times. I would apply the same filter inside both searches, use filtered vector search, sync permissions to both indexes from one source, and test with users of different roles.
+  </InterviewQuestion>
+</InterviewQuestions>

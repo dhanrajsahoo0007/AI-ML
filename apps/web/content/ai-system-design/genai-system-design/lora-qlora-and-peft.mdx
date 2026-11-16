@@ -2,43 +2,228 @@
 title: "LoRA, QLoRA & PEFT"
 description: "Parameter-efficient fine-tuning: how low-rank adapters work, how to choose rank and target modules, and how to serve adapters."
 icon: minimize
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Parameter-efficient fine-tuning: how low-rank adapters work, how to choose rank and target modules, and how to serve adapters.
+Fine-tuning a 65 B model the plain way needs hundreds of gigabytes of GPU memory, and most teams have one GPU. Interviewers ask about LoRA because a good answer joins the arithmetic (what is trained, what it costs), the recipe (rank, alpha, target modules) and the serving choice (merge or swap).
 
 ## TL;DR
 
+- **Parameter-efficient fine-tuning (PEFT) trains a few new numbers and freezes the rest.** The base model's weights never change, so one base can serve many tasks.
+- **LoRA adds two thin matrices beside a frozen weight.** For a 4,096 × 4,096 matrix at rank 8 that is **2 × 4,096 × 8 = 65,536 trainable numbers against 16,777,216 (0.39 %)**.
+- **The update is scaled by α ÷ r.** Raising the rank adds capacity; alpha sets how loud the update is.
+- **QLoRA stores the frozen base in 4-bit NF4** and trains 16-bit adapters on top. A 65 B model needs about **780 GB** to fine-tune in 16-bit and about **43 GB** with QLoRA (weights, gradients and optimiser state).
+- **Serving:** merge the adapter into the base for one fast model, or keep adapters separate and pick one per request.
+- **PEFT is not free.** It can fall short of full fine-tuning when the task needs a lot of new knowledge or a big shift in behaviour.
+
 ## The idea in plain English
+
+A frozen model is a printed textbook. Full fine-tuning rewrites the book. LoRA leaves the print alone and sticks thin transparent sheets over the pages: the reader sees the page with the corrections laid over it. The sheets are cheap to make, small to carry, and easy to swap. One textbook can have a sheet for Brightpost's tone, another for a different shop, and you can peel them off again.
 
 ## Core concepts
 
 ### Why full fine-tuning is expensive
 
+Training keeps three things per weight beyond the weight itself: its gradient and the optimiser's running averages. With Adam, a common 16-bit setup holds 2 bytes for the weight, 2 for the gradient and 8 for two 32-bit averages: **12 bytes per parameter**. A 7 B model needs 84 GB; a 65 B model needs 780 GB, which matches the figure the QLoRA paper quotes. Then every task produces a full copy of the model to store and serve. PEFT attacks both costs: only a small set of numbers needs gradients and optimiser state, and what you store per task is that small set.
+
 ### Low-rank adapters: the idea and the maths
+
+A weight matrix **W** maps a vector **x** to **W·x**. LoRA freezes W and learns a change **ΔW** as the product of two thin matrices: **B** (d × r) and **A** (r × d), with the rank **r** much smaller than d. The layer computes **h = W·x + (α ÷ r)·B·A·x**. A starts random and B starts at zero, so training begins exactly at the base model. The idea rests on the observation that fine-tuning changes live in a low-dimensional space, so a thin pair captures most of the change (Hu et al., 2021).
+
+<AnimatedDiagram
+  spec="animated/finetune/lora-matrices"
+  stepper
+  caption="Only the orange pair is trained. The frozen matrix holds 16,777,216 numbers; the pair holds 65,536, and because B starts at zero the model begins exactly where the base model was."
+/>
+
+**How to read it.** Grey is frozen, orange is trained. The input goes down two paths and the outputs are added. The figure is drawn to shape, not to scale: 8 is 1/512 of 4,096.
+
+**The numbers.** W: 4,096 × 4,096 = 16,777,216. A: 8 × 4,096 = 32,768. B: 4,096 × 8 = 32,768. Together 65,536, and 65,536 ÷ 16,777,216 = 0.39 %. This is per matrix; a real model has many (see Deep dive).
 
 ### QLoRA: fine-tuning a quantized model
 
+QLoRA (Dettmers et al., 2023) keeps the frozen base in **4-bit NormalFloat (NF4)**, a 4-bit format designed for weights that follow a bell curve, and trains 16-bit LoRA adapters on top. Gradients flow back through the 4-bit weights into the adapters; each layer unpacks a block of weights to 16-bit, multiplies, and drops the unpacked copy. Two more tricks keep memory down: **double quantisation** (quantising the quantisation constants) and **paged optimisers** (optimiser state moves to CPU memory when the GPU runs short). The [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization) page covers rounding in general.
+
 ### Other PEFT methods: prefix tuning, prompt tuning and adapters
 
+- **Prompt tuning** (Lester et al., 2021) learns a few vectors prepended to the input embeddings. Nothing else trains.
+- **Prefix tuning** (Li and Liang, 2021) learns key and value vectors in the attention of every layer.
+- **Adapters** (Houlsby et al., 2019) insert a small down-project, non-linearity, up-project block after a sub-layer. They add a step to every forward pass, so they add latency at serve time.
+- **LoRA** (Hu et al., 2021) puts the change beside a weight; after training it can be merged into the weight, so it adds no latency.
+- **DoRA** (Liu et al., 2024) splits each weight into a magnitude and a direction, applies LoRA to the direction and trains the magnitude as a small vector.
+
 ## Architecture
+
+Where does each method attach to a decoder block? Every base weight stays frozen; the methods differ in where the new orange parameters go.
+
+<AnimatedDiagram
+  spec="animated/finetune/peft-family"
+  stepper
+  caption="The grey base never changes. Each method differs in where its orange parameters attach: at the input, inside attention, after a sub-layer, or beside a weight matrix. Norms and residual adds are left out."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Prompt tuning: learned vectors at the input">
+    The smallest change: a handful of vectors in front of the token embeddings. Cheap to store, but it steers the model only through its input.
+  </StepCard>
+  <StepCard n={2} title="Prefix tuning: learned keys and values in every layer">
+    The same idea at every layer: extra key and value vectors that every token can attend to.
+  </StepCard>
+  <StepCard n={3} title="Adapters: a small block after a sub-layer">
+    A bottleneck block whose output is added back into the stream. It is a new step in the forward pass, so it costs a little time on every token.
+  </StepCard>
+  <StepCard n={4} title="LoRA: two thin matrices beside a weight">
+    The update runs in parallel with a weight matrix and folds into it afterwards. The usual place is the attention and feed-forward matrices.
+  </StepCard>
+  <StepCard n={5} title="DoRA: LoRA plus a trained magnitude">
+    W′ = m · (W0 + BA) ÷ ‖W0 + BA‖ per column. LoRA moves the direction; the vector m sets the length. It merges like LoRA and adds about 0.01 % more trainable numbers (Liu et al., 2024).
+  </StepCard>
+</StepCards>
+
+LoRA won in practice because it needs no change to the forward pass at serving time and its adapters are tiny. The decoder block itself is drawn on the [Transformer architecture](/ai-system-design/genai-system-design/transformer-architecture) page.
 
 ## Deep dive
 
 ### Choosing rank, alpha and target modules
 
+**Rank** sets capacity and cost: trainable numbers grow in a straight line with r. **Alpha** scales the update by α ÷ r. Hu et al. set α to the first r they tried and did not tune it, because with Adam, tuning α is roughly like tuning the learning rate. With α fixed, a higher rank gets a quieter update; setting α = 2r keeps the scale constant.
+
+<AnimatedDiagram
+  spec="animated/finetune/lora-rank-alpha"
+  stepper
+  caption="The rank sets how much the adapter can learn and how many numbers it costs. Alpha sets how loudly the update speaks; with alpha fixed, raising the rank quietens it, so many recipes tie alpha to the rank."
+/>
+
+**The numbers.** Trained numbers for one 4,096 × 4,096 matrix: r = 4 gives 32,768 (0.20 %), r = 8 gives 65,536 (0.39 %), r = 16 gives 131,072 (0.78 %), r = 64 gives 524,288 (3.13 %). With α = 16 (illustrative) the scale is 4, 2, 1 and 0.25 for those ranks.
+
+**Target modules.** The LoRA paper adapted the attention matrices, mostly Wq and Wv. The QLoRA paper found, on LLaMA 7B, that adapting all linear layers (q, k, v, o and the feed-forward matrices) was needed to match full fine-tuning. For a LLaMA-7B-shaped model (hidden size 4,096, feed-forward 11,008, 32 layers) that costs r × 2,498,560 numbers: 39,976,960 at r = 16 (0.59 % of 6.74 B) and 159,907,840 at r = 64 (2.37 %). Start at r = 8 or 16 on all linear layers, then compare on your own evaluation set before raising r.
+
+### The QLoRA memory arithmetic
+
+<AnimatedDiagram
+  spec="animated/finetune/qlora-stack"
+  stepper
+  caption="The 4-bit base is frozen and stored small; only the orange adapters carry gradients and optimiser state. That moves a 65 B fine-tune from 780 GB to about 43 GB. Activations are extra, and paged optimisers absorb the spikes."
+/>
+
+**How to read it.** Step 3 is a table of memory to fine-tune, in GB, for a 7 B and a 65 B model. Red cells do not fit one 48 GB GPU. The highlighted cell is the QLoRA result.
+
+**The numbers.** NF4 with a block of 64 shares a 32-bit constant per block: 32 ÷ 64 = 0.5 bit per weight. Double quantisation stores that constant in 8 bits and quantises those in blocks of 256: 8 ÷ 64 + 32 ÷ (64 × 256) = 0.127 bit, a saving of 0.373 bit per weight, about 3 GB on 65 B (Dettmers et al., 2023). So the base costs 4.127 bits per weight: 7 B gives 3.6 GB and 65 B gives 33.5 GB. Adapters at r = 64 on all linear layers (159.9 M numbers for 7 B, about 799.5 M for 65 B) cost 12 bytes per number: 1.9 GB and 9.6 GB. Totals: 5.5 GB and 43.1 GB, so the 65 B case fits a 48 GB GPU with about 5 GB left for activations. The paper's own run also uses gradient checkpointing. The 16-bit LoRA column is 15.9 GB and 139.6 GB: the base in 16-bit is what stops it fitting.
+
+<Callout tone="red" title="What breaks">
+  Activation memory grows with batch size and sequence length and is not in the table. A long-sequence batch can overflow the GPU in the middle of training; this is the spike that paged optimisers and gradient checkpointing exist to absorb.
+</Callout>
+
 ### Merging adapters and serving many adapters
+
+After training, W′ = W + (α ÷ r)·B·A has the same shape as W, so a merged model runs at the speed of the base (Hu et al., 2021). But a merged model is one full copy per task. The alternative is to keep one base in GPU memory and select an adapter per request.
+
+<AnimatedDiagram
+  spec="animated/finetune/lora-merge-or-swap"
+  stepper
+  caption="Merging gives the fastest single model but one 14 GB copy per task. Swapping keeps one base in memory and costs about 40 MB per adapter, which is why multi-tenant serving uses it."
+/>
+
+**The numbers.** A 7 B-shaped model at r = 8 on all linear layers has 19,988,480 adapter numbers, 40 MB in 16-bit. For 100 tasks: merged, 100 × 14 GB = 1,400 GB; swapped, 14 GB + 100 × 0.04 GB = 18 GB.
+
+S-LoRA (Sheng et al., 2023) serves thousands of adapters from one GPU or several, and reports up to 4× the throughput of vLLM with naive LoRA support and of Hugging Face PEFT. vLLM serves several adapters from one base: `--enable-lora` turns it on, `--lora-modules name=path` registers each adapter, and a request picks one by setting `model` to the adapter's name; `--max-lora-rank` must cover the largest rank (vLLM documentation, November 2026). Runtime loading through `VLLM_ALLOW_RUNTIME_LORA_UPDATING` is documented as unsafe outside a trusted environment. See [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) for the engine side.
 
 ### When PEFT falls short of full fine-tuning
 
+PEFT works best when the base already has the skill and you are teaching style, format or policy. It is weaker when the task needs a lot of new knowledge, a new language, or a large behaviour change; a low rank limits how much the weights can move. Full fine-tuning also avoids a second hyperparameter set (rank, alpha, modules). QLoRA's 4-bit base adds rounding error that the adapter must work around; compare against a 16-bit LoRA if quality is close. For new facts, retrieval is usually a better tool; see [Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning).
+
+### Worked example: Brightpost's tone and refund adapter
+
+Brightpost wants replies in its voice that follow its refund rule (refunds over £30 need a team member's approval). Prompting and retrieval already work, but the prompt is 200 tokens of style rules on every one of 200,000 daily requests. The team trains a LoRA on the **5,000 resolved tickets**, each rewritten as one chat example. One training example looks like this (the shape of a chat fine-tuning record, not a provider's exact format):
+
+```json
+{"messages": [
+  {"role": "user", "content": "My kettle (order 4471) arrived cracked. £42. Can I get my money back?"},
+  {"role": "assistant", "content": "I'm sorry the kettle arrived cracked. Refunds over £30 need a team member's approval, so I have sent order 4471 for review and they will confirm the refund by email."}
+]}
+```
+
+Plan (all numbers computed or labelled illustrative):
+
+1. **Base and recipe.** A 7 B open-weight base, QLoRA with r = 16 on all linear layers: 39,976,960 trainable numbers (0.59 %), 80 MB in 16-bit.
+2. **Memory.** Base 3.6 GB + adapter 40 M × 12 bytes = 0.5 GB, about 4.1 GB before activations, so one 24 GB GPU is plenty.
+3. **Data volume.** At an illustrative 600 tokens a ticket, 5,000 tickets is 3.0 M tokens an epoch, 9 M for three epochs.
+4. **Evaluate.** Run the 200-ticket golden set on the base with the long prompt and on the base with the adapter and a short prompt. Check tone and the refund-approval decision on every refund ticket (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)). The golden tickets must not appear in the 5,000.
+5. **Ship.** One adapter and one base: Brightpost merges it. If it ran three shop brands it would keep three adapters on one base and route by brand (see [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)).
+
+The adapter teaches how to reply and what the policy says; the live order status still comes from a tool call, not from weights.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Full fine-tuning | Most capacity; no extra hyperparameters | 12 bytes per parameter in training; a full copy per task | Large behaviour change; plenty of GPUs |
+| LoRA (16-bit base) | Few trained numbers; tiny files; mergeable | Capacity limited by rank; base still needs 2 bytes per parameter | Style, format and policy on a model that fits |
+| QLoRA | Fine-tunes a 65 B model on one 48 GB GPU | 4-bit rounding; slower steps from unpacking | Big base, small GPU |
+| Prompt or prefix tuning | Smallest artefact | Weaker steering; sensitive to length | Many tiny per-task tweaks |
+| Adapters (bottleneck) | Simple; strong results | Extra step in every forward pass | When latency is not the limit |
+| Merge | One model at base speed | One copy per task | One or two tasks |
+| Swap (multi-LoRA) | One base for many tasks; 40 MB per adapter | Needs an engine with adapter support | Many tenants or tasks |
 
 ## Real-world examples
 
+- **LoRA (2021).** Reports adapting GPT-3 175B with r = 4 on the query and value projections, shrinking the checkpoint from 350 GB to 35 MB.
+- **QLoRA and Guanaco (2023).** Fine-tuned models up to 65 B on a single 48 GB GPU; the best Guanaco model reaches 99.3 % of ChatGPT's score on the Vicuna benchmark.
+- **S-LoRA (2023).** Serves thousands of adapters on one or more GPUs.
+- **vLLM multi-LoRA.** One server hosts a base and several adapters, each addressed by name in the request.
+- **DoRA (2024).** Adds a trained magnitude vector to LoRA; on LLaMA-7B the paper lists 0.83 % trainable parameters for LoRA and 0.84 % for DoRA.
+
 ## Common pitfalls
+
+- Quoting "LoRA trains 0.4 % of the parameters" without saying it is per matrix and depends on r and on which modules you adapt.
+- Adapting only Wq and Wv and concluding LoRA is weaker than full fine-tuning; the QLoRA paper found all linear layers were needed to match it on LLaMA 7B.
+- Raising rank without checking alpha: with α fixed the update gets quieter as r grows.
+- Leaving out activation memory when sizing a QLoRA run.
+- Merging an adapter into a 4-bit base without care: the merge is done in 16-bit, and rounding the result back to 4-bit loses what the adapter learned.
+- Training and testing on overlapping tickets, so a high score hides a failed adapter.
 
 ## How to answer in an interview
 
+1. Start with the cost of full fine-tuning: 12 bytes per parameter, a full copy per task.
+2. Explain LoRA in one line: h = W·x + (α ÷ r)·B·A·x, with W frozen, and give the count: 2 × d × r against d × d.
+3. Add QLoRA: 4-bit NF4 base, 16-bit adapters, double quantisation, paged optimisers, and the memory you would expect.
+4. Place the other methods: input (prompt tuning), every layer (prefix tuning), after a sub-layer (adapters), beside a weight (LoRA, DoRA).
+5. Finish with serving and evaluation: merge for one task, multi-LoRA for many, and a held-out set that tests the behaviour you trained.
+
+**What interviewers listen for:** the parameter count, why B starts at zero, what alpha does, why QLoRA fits, and the merge-or-swap decision.
+
+**Red flags:** "LoRA makes the model smaller", ignoring activation memory, or fine-tuning to add facts that retrieval would serve better.
+
 ## Further reading
+
+- [LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)](https://arxiv.org/abs/2106.09685)
+- [QLoRA: Efficient Finetuning of Quantized LLMs (Dettmers et al., 2023)](https://arxiv.org/abs/2305.14314)
+- [DoRA: Weight-Decomposed Low-Rank Adaptation (Liu et al., 2024)](https://arxiv.org/abs/2402.09353)
+- [S-LoRA: Serving Thousands of Concurrent LoRA Adapters (Sheng et al., 2023)](https://arxiv.org/abs/2311.03285)
+- [LoRA adapters (vLLM documentation)](https://docs.vllm.ai/en/latest/features/lora/)
+- [Parameter-Efficient Transfer Learning for NLP (Houlsby et al., 2019)](https://arxiv.org/abs/1902.00751) · [Prefix-Tuning (Li and Liang, 2021)](https://arxiv.org/abs/2101.00190) · [The Power of Scale for Parameter-Efficient Prompt Tuning (Lester et al., 2021)](https://arxiv.org/abs/2104.08691)
+- Related pages: [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) · [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models) · [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does LoRA reduce the number of trainable parameters?" category="Concepts" level="Junior">
+    LoRA freezes a weight matrix W and learns its change as the product of two thin matrices, B (d by r) and A (r by d), with r much smaller than d. For a 4,096 by 4,096 matrix at rank 8 that is 2 × 4,096 × 8 = 65,536 trainable numbers instead of 16,777,216, which is 0.39 percent. Only those numbers need gradients and optimiser state. After training they can be folded into W, so the served model keeps its original shape.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is B initialised to zero and A to random values?" category="Concepts" level="Mid">
+    With B at zero the product B·A is zero, so the adapted model starts as exactly the base model and training does not begin from a damaged state. A cannot also be zero: with both at zero, gradients to each factor would be zero and nothing would learn. A random A means B receives a useful gradient from the first step, and A starts to move once B is non-zero.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do rank and alpha control, and how would you choose them?" category="Trade-offs" level="Mid">
+    Rank sets how many numbers the adapter has and so how much it can change. Alpha scales the update by alpha divided by rank, so it sets how loudly the adapter speaks; the LoRA paper treated tuning alpha as roughly like tuning the learning rate. I would start at rank 8 or 16 on all linear layers, set alpha to twice the rank so the scale stays at 2 whatever the rank, and compare on a held-out set before raising rank. If quality stops improving as rank rises, the limit is the data, not the capacity.
+  </InterviewQuestion>
+  <InterviewQuestion question="How can QLoRA fine-tune a 65 B model on one 48 GB GPU?" category="Scaling" level="Senior">
+    The frozen base is stored in 4-bit NormalFloat with double quantisation, about 4.127 bits per weight, which is 33.5 GB for 65 B parameters. Only the 16-bit adapters get gradients and Adam state; at rank 64 on all linear layers that is about 800 M numbers at 12 bytes each, 9.6 GB, so the total is about 43 GB. Full 16-bit fine-tuning needs 12 bytes per parameter, 780 GB. Gradient checkpointing and paged optimisers handle the activation spikes that remain.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where do prefix tuning, adapters and LoRA attach to a transformer, and which adds serving latency?" category="Architecture" level="Mid">
+    Prefix tuning adds learned key and value vectors to the attention of every layer. Adapters insert a small bottleneck block after a sub-layer, in the forward path. LoRA adds a parallel low-rank path beside a weight matrix. Adapters add a step to every forward pass, so they add latency. LoRA can be merged into the weight after training and then adds none; prefix tuning lengthens the attended sequence slightly.
+  </InterviewQuestion>
+  <InterviewQuestion question="You have 50 customers, each with their own adapter on the same base. Merge or swap?" category="Architecture" level="Senior">
+    Swap. Merging makes one full copy of the base per customer, which for a 7 B model is about 14 GB each, 700 GB for 50. Keeping one base and 50 adapters of about 40 MB each costs about 16 GB. An engine such as vLLM, with LoRA enabled, loads adapters by name and picks one per request; S-LoRA reports serving thousands this way. Merge only the adapter of a customer with enough traffic to justify its own replica, since a merged model runs at base speed.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your LoRA matches the base on the golden set but fails on new refund phrasings. What do you check?" category="Failure modes" level="Senior">
+    First check data: whether the 5,000 tickets cover the phrasings, and whether the golden set overlaps the training set, which hides the failure. Second, check capacity: try a higher rank, or all linear layers instead of only the attention matrices. Third, check that the task is behaviour: if the failure is a missing fact, retrieval is the right fix, not more training. Last, compare a 16-bit LoRA with the QLoRA run to see whether the 4-bit base is costing quality.
+  </InterviewQuestion>
+</InterviewQuestions>

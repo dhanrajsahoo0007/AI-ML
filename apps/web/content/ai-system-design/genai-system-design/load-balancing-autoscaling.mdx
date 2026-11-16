@@ -1,24 +1,206 @@
 ---
 title: Load Balancing & Auto-Scaling
 description: Distributing inference across GPUs and clusters while controlling latency, cost, and cold-start behavior.
+updated: 2026-11-15
 ---
 
-LLM inference load balancers must be GPU-aware. A naive round robin ignores memory headroom: two heavy prompts landing on the same card can cause eviction or out-of-memory while another card sits idle. Better schedulers track KV cache usage estimates, batch depth, and model shard placement for tensor-parallel replicas. Session affinity matters when using continuous batching with sticky prefixes, but strict affinity can create hot spots, so hybrid policies route new work to the least loaded replica while optionally pinning long sessions.
+A web load balancer counts connections and a web autoscaler watches the CPU. Neither works for LLM replicas, because one request can cost ten times another and a busy GPU looks the same as an overloaded one. Interviewers ask this question to see whether you route by work instead of by request, scale on the right signal, and remember that a new replica needs minutes before it can serve. This page covers what changes for LLMs; the general algorithms are in [Load Balancing Basics](/system-design/fundamentals/load-balancing-basics) and [Autoscaling](/cloud/compute/autoscaling).
 
-Request queuing is inevitable under bursts. You choose between rejecting with retry-after headers, degrading to shorter outputs, or queueing with explicit timeouts. Deep queues improve utilization but explode tail latency, so tiered queues for premium versus best-effort traffic are common. Autoscaling signals include queue depth, p95 prefill and decode latency, GPU utilization, and power draw proxies such as SM occupancy. Pure CPU metrics mislead because a GPU can be memory bound while reporting high utilization.
+## TL;DR
 
-Cold start includes pulling container images, loading multi-hundred-gigabyte weights from disk to VRAM, and JIT compilation for some runtimes. Warm pools of preloaded instances reduce risk at the cost of idle spend. Spot or preemptible GPUs cut cost for fault-tolerant batch inference but need checkpoint-friendly jobs and rapid failover to on-demand capacity for SLA-backed endpoints.
+- **Requests are not equal.** A 9,000-token request costs about 20 times a 450-token one, so round-robin can pile the long ones on one replica. Route by **tokens in flight** or **queue depth**, not by request count.
+- **Sticky routing buys cache hits.** A replica that already holds a conversation's KV blocks skips most of its prefill: **11 ms instead of 99 ms** for Brightpost's second turn (illustrative). Keep a load guard so a popular prefix cannot make a hot spot.
+- **Scale on the queue**, not CPU or GPU utilisation: **waiting requests per replica**, KV-cache use or tokens in flight. A busy engine is a healthy engine.
+- **A cold start is minutes, not seconds.** For a 16 GB model, pulling the image, downloading weights, loading them and warming up add up to about **99 s** (illustrative); moving the slow stages ahead of time gives about **23 s**.
+- **Scale-to-zero trades money for latency.** A warm pool or a minimum of one replica costs idle GPU hours and removes the first-customer wait.
+- Brightpost's peak of 12 requests/s needs **2 replicas plus 1 spare** ([LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference)); the spare is what covers a failure while a replacement starts.
 
-Architectures often combine a gateway that authenticates and rate limits, a router that picks model replicas, and horizontal pod autoscaler rules tuned with custom metrics exporters from the inference server. Cost optimization trades replica count against SLOs: aggressive scale-to-zero saves money but conflicts with strict latency guarantees unless you maintain a minimum fleet during peak windows.
+## The idea in plain English
+
+Think of a delivery depot with three vans. A dispatcher who hands out parcels in turn gives van 3 every third parcel, and those happen to be the pianos. A dispatcher who looks at the weight already loaded gives each parcel to the lightest van. Now add a rule for repeat customers: a regular who always ships the same crate goes back to the van that still has the crate's packing jig set up, unless that van is already full. Finally, the depot manager hires another van when parcels pile up at the door, not when the drivers look tired, and knows a new van needs a day to be fitted out, so the fitting is done ahead of time.
+
+## Core concepts
+
+1. **Work-aware routing.** Cost is tokens, not requests: prefill grows with prompt length and decode with answer length. The router should balance **tokens in flight** (or the replica's reported queue depth), because a request count says nothing about load.
+2. **Router signals.** Each engine exports its state: `vllm:num_requests_waiting`, `vllm:num_requests_running` and `vllm:kv_cache_usage_perc` (vLLM metrics, checked November 2026). The router reads these, or counts what it has sent and not yet seen finish.
+3. **Prefix-cache-aware routing.** Requests that share a prompt prefix (the same conversation, the same system prompt) run faster on the replica that holds that prefix's KV blocks. The router hashes or matches the prefix and prefers that replica.
+4. **Session affinity and its limit.** Pinning a session to one replica gets cache hits but creates hot spots. The usual answer is a hybrid: prefer the cached replica, leave it when it is much busier than the rest.
+5. **Replica groups.** A model split over several GPUs (tensor parallelism) is served by a group that works in lockstep. The balancer targets the group, health checks cover every shard, and scaling adds or removes whole groups.
+6. **Queueing and admission.** Under a burst, choose between rejecting with a retry-after, degrading (shorter outputs, a smaller model) and queueing with a timeout. Deep queues raise utilisation and blow up tail latency. See [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling).
+7. **The right scaling signal.** Queue depth per replica, KV-cache use or tokens in flight lead the problem. CPU lags it; GPU utilisation sits near full on a healthy continuously batched engine.
+8. **Cold start.** A new replica pulls an image, fetches weights, loads them into GPU memory and warms up before the readiness probe passes. Only then should the router send traffic.
+9. **Warm pools and scale-to-zero.** Idle capacity you keep (a spare replica, a pool of started instances) costs GPU hours. Capacity you release costs a cold start for the first request.
+
+## Architecture
+
+Brightpost's replicas sit behind a router that reads their metrics, and an autoscaler reads the same metrics. First the routing, then the scaling loop.
+
+<AnimatedDiagram
+  spec="animated/serving/lb-least-tokens"
+  stepper
+  caption="The same nine requests and three replicas: round-robin puts all three long requests on replica 3 (24,000 tokens, twice the budget); least tokens in flight keeps every replica under budget."
+/>
+
+**How to read it.** Each bar is one replica's tokens in flight; each orange block is a request, and a request's width is its prompt plus answer tokens. Step 1 deals A to I in turn and replica 3 receives C, F and I. Step 2 gives each request to the replica with the fewest tokens so far. Step 3 puts the two spreads side by side. The nine lengths and the 12,000-token budget are illustrative.
+
+**The numbers.** The nine requests total 400 + 600 + 8,000 + 500 + 300 + 7,000 + 450 + 700 + 9,000 = 26,950 tokens, so an even share is 8,983 per replica. Round-robin gives replicas 1,350, 1,600 and 24,000: the busiest carries 24,000 ÷ 1,350 = 17.8 times the quietest. Least tokens gives 7,900, 11,050 and 8,000: 1.4 times. It is not perfectly even, because one 9,000-token request cannot be split.
+
+<Callout tone="red" title="What breaks">
+  Counting requests. Replica 3 passes its budget, its queue grows, and every short request that lands behind a long prefill waits with it. The other two replicas sit nearly empty while customers see the slowdown.
+</Callout>
+
+The scaling loop is the one from the cloud track. Embed it here to see its parts; below the figure, the LLM-specific changes.
+
+<AnimatedDiagram
+  spec="animated/cloud/autoscaling-loop"
+  stepper
+  caption="Autoscaling as a control loop: measure, compare with a target, act, wait. Brightpost's web tier measures CPU; an LLM tier replaces that one signal."
+/>
+
+**How to read it.** Steps 1 and 2 are the loop: servers report a metric, the autoscaler compares it with the target, adds servers, and they join only after warm-up. Step 3 is flapping (removing servers too soon) and step 4 is the cure (drain, remove one at a time). Step 6 is a warm pool. Step 7 scales workers on a queue's backlog, which is the model for LLM replicas.
+
+**What changes for LLMs.** Replace "average CPU" with a queue signal. The Kubernetes HPA computes `desiredReplicas = ceil(currentReplicas × currentMetric ÷ desiredMetric)` ([Kubernetes docs](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)). With 2 replicas, 4 waiting requests each and a target of 2, that is ceil(2 × 4 ÷ 2) = 4 replicas. The loop's other lessons carry over unchanged: wait for warm-up and scale in slowly. Warm-up is far longer here, as the next figure shows.
+
+## Deep dive
+
+### Cold start: where the minutes go
+
+A new replica is not ready when its container starts. It must fetch its inputs and compile for the GPU.
+
+<AnimatedDiagram
+  spec="animated/serving/cold-start-timeline"
+  stepper
+  caption="A new replica takes four stages before it serves. From scratch they add up to 99 s; with the slow stages moved ahead of time, 23 s. Seconds are illustrative."
+/>
+
+**How to read it.** The top timeline goes in order: pull the engine image, download the weights, load them into GPU memory, warm up (compile kernels, capture CUDA graphs, run dummy requests). The dashed line is when the readiness probe can pass. Step 2 repeats it with the image already on the node, the weights on a local disk and a compile cache kept.
+
+**The numbers.** An 8B model at 16 bits is 8 × 10⁹ × 2 bytes = 16 GB. At illustrative rates: image 8 GB ÷ 0.2 GB/s = 40 s; weights 16 GB ÷ 1 GB/s = 16 s; GPU load 16 GB ÷ 2 GB/s = 8 s; warm-up 35 s. Total 40 + 16 + 8 + 35 = **99 s**. The ahead-of-time path is 0 + 0 + 8 + 15 = **23 s**. Measure your own: network, disk, GPU and engine version all change the figures, and bigger models scale the weight stages linearly. For the container side, see [Containerization & Orchestration](/ai-system-design/genai-system-design/containerization-orchestration).
+
+Research systems attack the same stages. ServerlessLLM (OSDI 2024) reports reducing latency by 10 to 200 times against other serverless systems with faster, multi-tier checkpoint loading. Treat its numbers as the paper's workloads, not yours.
+
+### Prefix-cache-aware routing
+
+Prefill is the expensive step, and the engine already reuses cached prefix blocks (see [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)). That only helps if the request lands where the blocks are.
+
+<AnimatedDiagram
+  spec="animated/serving/lb-prefix-routing"
+  stepper
+  caption="A follow-up turn carries the whole conversation. Prefix-aware routing sends it to the replica that holds the earlier turns; a load guard stops it overloading that replica."
+/>
+
+**How to read it.** Replica 1 answered turn 1 and holds its blocks. Step 1: round-robin sends turn 2 to replica 2, a miss. Step 2: prefix-aware routing sends it to replica 1, a hit on the whole blocks. Step 3: if replica 1 is much busier than the rest, the router chooses the least-loaded replica anyway.
+
+**The numbers.** Turn 2's prompt is 2,200 (turn 1) + 250 (answer) + 20 (follow-up) = 2,470 tokens. A prefix cache reuses only full blocks of 16 tokens (the vLLM default), so floor(2,200 ÷ 16) = 137 blocks = 2,192 tokens are reused and 278 are prefilled. At 0.04 ms per token (88 ms ÷ 2,200 tokens, from the serving page's illustrative 400 TFLOP/s): a miss costs 2,470 × 0.04 = 98.8 ms of GPU time, a hit 278 × 0.04 = 11.1 ms. This assumes the application keeps the retrieved context fixed across turns; if it re-retrieves and changes the prompt's middle, the cache stops at the first changed token.
+
+Real routers differ in how they find the replica. The vLLM production stack offers round-robin, session-ID, prefix-aware and KV-aware routing (documentation checked November 2026; prefix-aware routing is newer than the first two). The SGLang router's cache-aware policy keeps an approximate radix tree of recent requests per worker and, when workers are imbalanced past a threshold, falls back to load balancing. The Kubernetes Gateway API Inference Extension defines an endpoint picker that chooses a model server from the metrics it reports, including prefix-cache status. The pattern is the same everywhere: match the prefix, guard by load.
+
+### Scale-to-zero, warm pools and the first customer
+
+Scaling a GPU service to zero saves the idle hours and charges the first request a full cold start: 99 s from scratch, 23 s at best. That is acceptable for an internal batch tool and not for a support chat. KEDA can scale a target between 0 and 1, and the Kubernetes HPA handles 1 to N; the HPA can reach zero only with the `HPAScaleToZero` feature gate and an object or external metric (documentation checked November 2026). KEDA's defaults are a 30 s polling interval and a 300 s cool-down. Options in between: a minimum of one replica, a **warm pool** of started instances with weights already loaded, or a pre-scale on a schedule before known peaks.
+
+### Worked example: Brightpost's sale-day morning
+
+Brightpost runs 2 replicas and 1 spare at the 12 requests/s peak. Each request needs 2,200 × 0.04 = 88 ms of prefill, so a replica saturates on prefill alone at 1 ÷ 0.088 = 11.4 requests/s. The figures above answer three questions.
+
+1. **Routing.** On sale mornings a few customers paste whole order histories. Switch from round-robin to least tokens in flight, with a prefix guard: the cached replica wins unless it is more than twice as loaded as the least-loaded one (an illustrative threshold).
+2. **Scaling.** The signal is waiting requests per replica. At the 80 ms queue budget, 12 × 0.08 ≈ 1 request waits across the fleet at peak, so a threshold of 2 per replica means the budget is already blown. The rule adds replicas and then waits out the cold start.
+3. **Failure.** One of two running replicas dies at peak. The survivor must absorb 12 × 0.088 = 1.06 GPU-seconds of prefill per second, which is 6 % too much, so its queue grows by 0.06 s of work per second. A replacement from scratch takes 99 s: 0.06 × 99 = 5.9 GPU-seconds of backlog, about 67 requests' prefill, before any decode interference. With the spare running, nobody notices. With a warm replacement at 23 s the backlog is 1.4 GPU-seconds, about 16 requests.
+
+The scaler follows the KEDA Prometheus scaler and the HPA behaviour settings (checked November 2026; thresholds and windows are illustrative):
+
+```yaml
+spec:
+  minReplicaCount: 2            # never below 2: one failure must not stop the assistant
+  maxReplicaCount: 6
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 600   # longer than the 300 s default: replicas are expensive to restart
+  triggers:
+    - type: prometheus
+      metadata:
+        query: sum(vllm:num_requests_waiting)
+        threshold: "2"          # waiting requests per replica
+```
+
+Keeping the third replica warm all day is 24 GPU-hours a day; releasing it overnight saves about 8 of them and costs a 99 s cold start the next time it is needed, so a daily schedule that starts it before the morning rush is the middle path.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Round-robin | Trivial; no state | Ignores request size; one replica can overload | Uniform, short requests only |
+| Least tokens in flight | Balances real work | Needs token counts or engine metrics | Mixed prompt and answer lengths |
+| Prefix-aware routing | Skips prefill on cached prefixes | Router state; can create hot spots | Multi-turn chat, shared long prompts |
+| Scale on queue depth | Leads user-visible problems | Per-replica threshold to tune; lags cold start | Any GPU fleet |
+| Scale-to-zero | No idle cost | First request waits a full cold start | Internal tools, batch, rare traffic |
+| Warm pool or minimum replicas | Fast scale-out, failure cover | Pays idle GPU hours | Interactive, SLO-backed endpoints |
+| Spot GPUs | Large discount | Preempted; needs fast fallback | Batch and fault-tolerant work |
+
+## Real-world examples
+
+- **vLLM production stack router (as of November 2026).** Routes by round-robin, session ID, prefix match or KV-cache match, and is documented with Helm values.
+- **SGLang router (as of November 2026).** Cache-aware policy with an approximate radix tree per worker, falling back to load balancing past an imbalance threshold.
+- **Kubernetes Gateway API Inference Extension.** An endpoint picker chooses a model server from the metrics each one reports, such as prefix-cache status and loaded LoRA adapters.
+- **KEDA with vLLM metrics.** Scale a Deployment on a Prometheus query over `vllm:num_requests_waiting`, as above.
+- **ServerlessLLM (OSDI 2024).** Fast checkpoint loading and locality-aware scheduling for serverless LLM serving, reporting 10 to 200 times lower latency against other serverless systems.
+
+## Common pitfalls
+
+- Round-robin or least-connections across replicas, with long and short requests mixed.
+- Strict session affinity with no load guard: a few busy sessions overload their replica.
+- Scaling on CPU or GPU utilisation, so the autoscaler never sees the queue.
+- Sending traffic when the container starts instead of when the model is loaded and warmed (use a readiness probe that checks the engine).
+- Scaling in on the first quiet minute, then paying a 99 s cold start for the next wave.
+- Autoscaling a tensor-parallel replica by single pods rather than whole groups.
+
+## How to answer in an interview
+
+1. Say why LLM load is different: cost is tokens and requests vary by an order of magnitude.
+2. Route by tokens in flight or reported queue depth; add prefix awareness with a load guard.
+3. Scale on queue depth per replica (or KV-cache use), with a minimum above zero for interactive traffic.
+4. Put numbers on the cold start and say how to cut it: image on the node, weights on local disk, compile cache, a warm pool.
+5. Cover failure: spare capacity, readiness probes, and what happens to in-flight streams when a replica dies.
+
+**What interviewers listen for:** work-based routing, the right scaling signal, a cold-start number, and the idle-cost versus latency trade-off stated plainly.
+
+**Red flags:** "put it behind an ordinary load balancer and scale on CPU", and treating a new replica as instantly ready.
+
+## Further reading
+
+- [Horizontal Pod Autoscaling (Kubernetes documentation)](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [KEDA Prometheus scaler](https://keda.sh/docs/latest/scalers/prometheus/) and [ScaledObject specification](https://keda.sh/docs/latest/reference/scaledobject-spec/)
+- [vLLM metrics design](https://docs.vllm.ai/en/latest/design/metrics.html) and [production stack prefix-aware routing](https://docs.vllm.ai/projects/production-stack/en/latest/use_cases/prefix-aware-routing.html)
+- [SGLang router documentation](https://docs.sglang.ai/router/router.html)
+- [Gateway API Inference Extension](https://gateway-api-inference-extension.sigs.k8s.io/)
+- [ServerlessLLM: Low-Latency Serverless Inference for Large Language Models (OSDI 2024)](https://arxiv.org/abs/2401.14351)
+- Related pages: [LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) · [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why is GPU utilization alone a weak autoscaling metric for LLM serving?" category="Scaling">
-    Utilization can look healthy while memory bandwidth is saturated or KV cache is full, which still causes queueing and timeouts. Conversely low average utilization can hide bursty prefill phases. Pair utilization with request queue age, batch formation rate, and latency error budget consumption to scale before users notice degradation.
+  <InterviewQuestion question="Why is GPU utilisation alone a weak autoscaling metric for LLM serving?" category="Scaling" level="Mid">
+    Utilisation can look healthy while memory bandwidth is saturated or the KV cache is full, which still causes queueing and timeouts. A continuously batched engine also keeps the GPU busy whether one user or fifty are waiting, so the signal stays high all day. Low average utilisation can hide bursty prefill phases. Pair or replace it with request queue depth, queue age, KV-cache use and latency error-budget burn, so you scale before users notice.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you design load balancing for tensor-parallel model shards?" category="Architecture">
-    Requests must land on complete shard groups that communicate in lockstep, so the load balancer targets replica sets rather than individual pods. Health checks should verify all shards in a group are ready. Scale replica groups as a unit and avoid splitting a user session across groups unless your client layer can transparently reconnect, which is hard for streaming sessions.
+  <InterviewQuestion question="How would you design load balancing for tensor-parallel model shards?" category="Architecture" level="Senior">
+    Requests must land on complete shard groups that communicate in lockstep, so the balancer targets replica groups rather than individual pods. Health checks must confirm that every shard in a group is ready, and one failed shard takes the whole group out of rotation. Scale groups as a unit, and avoid splitting a user session across groups unless the client layer can reconnect transparently, which is hard for streaming sessions.
   </InterviewQuestion>
-  <InterviewQuestion question="What is the cost trade-off of keeping a warm pool versus aggressive scale-to-zero?" category="Cost">
-    Warm pools pay for idle GPUs and electricity but protect latency SLOs and absorb unpredictable spikes without queue buildup. Scale-to-zero minimizes baseline cost yet pays in cold starts, potential thundering herds on wake, and more complex burst handling. Hybrid approaches keep a small warm baseline, use predictive scaling from historical traffic, and burst onto spot for non-interactive workloads.
+  <InterviewQuestion question="What is the cost trade-off of keeping a warm pool versus aggressive scale-to-zero?" category="Trade-offs" level="Mid">
+    A warm pool pays for idle GPUs but protects latency targets and absorbs spikes without queue build-up. Scale-to-zero minimises baseline cost but charges the first request a full cold start (99 s in the illustrative case here) and risks a thundering herd on wake. Hybrids keep a small warm baseline, pre-scale from a schedule or forecast, and burst onto spot capacity for non-interactive work.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does round-robin work badly for LLM replicas, and what do you use instead?" category="Concepts" level="Junior">
+    Round-robin balances the number of requests, but requests differ in cost by an order of magnitude because prompts and answers differ in length. Three long requests can land on one replica while the others idle. Route by tokens in flight, or by the queue depth and KV-cache use each engine reports, so the router balances work rather than count.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is prefix-cache-aware routing, and what is its risk?" category="Architecture" level="Mid">
+    The router sends a request to the replica that already holds the KV blocks for its prompt prefix, so the engine skips most of the prefill. For Brightpost's second turn that is about 11 ms instead of 99 ms of GPU time (illustrative). The risk is a hot spot: a popular prefix keeps hitting one replica. A load guard fixes it, by leaving the cached replica when it is much busier than the least-loaded one.
+  </InterviewQuestion>
+  <InterviewQuestion question="A replica takes 99 seconds to become ready. How do you shorten it, and what can you not shorten?" category="Scaling" level="Senior">
+    Break it into stages: image pull, weight download, load into GPU memory and warm-up. Pre-pull the image onto nodes, keep weights on a local disk or a shared fast volume, keep a compile cache and capture graphs ahead of time, and mark the replica ready only after warm-up. The GPU load itself is bounded by the bytes moved and the link speed, so a larger model keeps a floor. For the rest, scale earlier on the queue signal or keep a warm spare.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your queue-based autoscaler adds replicas, but p99 time to first token still spikes at each sale start. Why, and what do you change?" category="Failure modes" level="Senior">
+    The scaler reacts after the queue has already grown, and each new replica then needs a cold start, so the spike lasts at least that long. Pre-scale on a schedule or forecast before known peaks, keep a warm spare, and shorten the cold start. Also check the threshold: if it allows more waiting requests per replica than the queue budget permits, the signal fires too late. Finally, make sure traffic reaches new replicas only when they are ready, and shed or degrade low-priority work while capacity arrives.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you size the minimum replica count for an interactive LLM endpoint?" category="Scaling" level="Senior">
+    Start from the off-peak load and the failure case. Brightpost's off-peak 2.3 requests/s needs 0.2 GPU-seconds of prefill a second, which one replica carries, but one failure would then mean zero capacity during a 99 s cold start. So the minimum is 2. At the 12 requests/s peak, 2 replicas carry the prefill and a third covers a failure. Check all of it with a load test at real prompt lengths.
   </InterviewQuestion>
 </InterviewQuestions>

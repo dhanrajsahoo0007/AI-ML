@@ -45,17 +45,11 @@ Scaling laws are the school's budget rules: for a fixed amount of teaching time,
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    DATA["Raw corpora<br/>(web, code, books)"] --> CLEAN["Filter, deduplicate,<br/>mix domains"]
-    CLEAN --> TOK["Tokenize"]
-    TOK --> PT["Pre-training<br/>(next-token prediction)"]:::accent
-    PT --> BASE["Base model"]
-    BASE --> SFT["Supervised fine-tuning<br/>(instruction data)"]
-    SFT --> PREF["Preference tuning<br/>(RLHF or DPO)"]
-    PREF --> SAFE["Safety tuning and evals"]
-    SAFE --> REL["Released assistant model"]
-```
+<AnimatedDiagram
+  spec="animated/transformer/training-pipeline"
+  stepper
+  caption="Pre-training on trillions of tokens spends most of the compute and yields a base model; fine-tuning, preference tuning (RLHF or DPO) and safety work turn it into an assistant at a small fraction of that cost."
+/>
 
 The pipeline stage by stage:
 
@@ -69,29 +63,21 @@ The pipeline stage by stage:
 
 ### How a large training job is split across GPUs
 
-```mermaid
-flowchart TB
-    subgraph DP["Data parallel replicas (different batches)"]
-        direction LR
-        subgraph R1["Replica 1"]
-            direction TB
-            P1["Pipeline stage 1<br/>layers 1-20"] --> P2["Stage 2<br/>layers 21-40"]
-            P2 --> P3["Stage 3<br/>layers 41-60"]
-        end
-        subgraph R2["Replica 2"]
-            direction TB
-            Q1["Stage 1"] --> Q2["Stage 2"] --> Q3["Stage 3"]
-        end
-    end
-    TP["Inside each stage: tensor parallel<br/>split matrices across GPUs in a node"]:::accent -.-> P2
-    R1 <-->|"average gradients<br/>(sharded with ZeRO/FSDP)"| R2
-```
+<AnimatedDiagram
+  spec="animated/transformer/parallelism-3d"
+  caption="Tensor parallelism splits each matrix across the GPUs of one server, pipeline parallelism splits the layers across servers, and data parallelism copies that whole pipeline and averages gradients between the copies."
+/>
 
 Large jobs combine all three: tensor parallelism inside a server, pipeline parallelism across servers, and data parallelism across replicas. This is often called 3D parallelism.
 
 ### A worked compute estimate
 
-A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2e12 = 8.4e22 floating-point operations. At an effective 400 teraflops per GPU, that is about 58,000 GPU-hours, or roughly 2.5 days on 1,000 GPUs, before accounting for failures, restarts and lower real-world utilization.
+A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2e12 = 8.4e22 floating-point operations. At an effective 400 teraflops per GPU, that is about 58,000 GPU-hours, or about 2.4 days on 1,000 GPUs, before accounting for failures and restarts.
+
+<AnimatedDiagram
+  spec="animated/transformer/compute-estimate"
+  caption="Multiply 6 by parameters and tokens for the FLOPs, divide by what each GPU really sustains and by the number of GPUs: 7B parameters on 2T tokens is about 58,000 GPU-hours, or 2.4 days on 1,000 GPUs."
+/>
 
 ## Trade-offs
 
@@ -148,7 +134,7 @@ A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2
     Chinchilla minimizes training compute for a target loss, but a deployed model's lifetime cost is dominated by inference. Training a smaller model on far more tokens costs more upfront but produces a model that is cheaper and faster to serve for billions of requests, so total cost is lower.
   </InterviewQuestion>
   <InterviewQuestion question="Roughly how much compute does it take to train a 7B model on 2 trillion tokens?" category="Scaling" level="Mid">
-    Using about 6 floating-point operations per parameter per token, it is 6 times 7e9 times 2e12, or about 8.4e22 operations. At an effective 400 teraflops per GPU that is about 58,000 GPU-hours, roughly two and a half days on a thousand GPUs, plus overhead for failures, restarts and lower utilization.
+    Using about 6 floating-point operations per parameter per token, it is 6 times 7e9 times 2e12, or about 8.4e22 operations. At an effective 400 teraflops per GPU that is about 58,000 GPU-hours, or about 2.4 days on a thousand GPUs, plus overhead for failures and restarts.
   </InterviewQuestion>
   <InterviewQuestion question="Explain data, tensor and pipeline parallelism." category="Architecture" level="Senior">
     Data parallelism gives each GPU a model copy and different data, then averages gradients; ZeRO or FSDP shard the optimizer states, gradients and weights so copies do not each hold everything. Tensor parallelism splits individual weight matrices across GPUs, which needs fast interconnects so it usually stays inside a server. Pipeline parallelism puts different layers on different GPUs and streams micro-batches through, at the cost of idle bubbles. Large runs combine all three.

@@ -1,24 +1,215 @@
 ---
 title: A/B Testing for Prompts & Models
 description: Experiment design, traffic allocation, statistical power, guardrails, sequential testing, and bandits for prompt optimization.
+icon: split
+updated: 2026-11-15
 ---
 
-Prompt and model changes are not traditional UI tweaks; they alter distributions of tokens, safety outcomes, and downstream automation. Experiments need preregistered hypotheses, primary metrics such as task success or revenue proxies, and guardrail metrics including toxicity rate, P95 latency, cost per session, and escalation to human support. Traffic splitting should be stable per user or session to avoid inconsistent experiences, implemented at a reliable assignment layer with salted hashes rather than ad hoc random calls in each microservice.
+An offline test set tells you a new prompt is probably better. Only an experiment on live traffic tells you customers are better off. Interviewers ask about it because LLM outputs are noisy, the metrics are scored by another model, and a win on the headline number can hide a loss in cost, latency or safety.
 
-Statistical power depends on baseline rates, minimum detectable effect, and variance. Rare events like safety violations need enormous samples, so composite guardrails and Bayesian monitoring help, but do not replace careful power analysis before launch. Sequential testing methods allow earlier stopping under controlled false-positive rates when effects are large, which suits fast iteration environments, though they require statistical literacy to avoid peeking abuse.
+## TL;DR
 
-Multi-armed bandits allocate more traffic to better-performing arms dynamically, useful when exploring many prompt variants or retrieval configurations. They trade exploration for exploitation: pure bandits optimize short-term reward but can under-explore risky tails, so constrained bandits with safety caps or periodic exploration phases are safer for LLM products.
+- An **A/B test** sends different users to the current prompt or model (**A**) and the candidate (**B**) at the same time, so the only systematic difference is the change. Compare before-and-after instead and you also measure the week, the sale and the provider's silent model updates.
+- **Assign by user, not by request.** Hash a salt plus the user id into a bucket, so a customer sees one variant for the whole test. Enforce the split on the server and log the exposure.
+- **Plan the sample size first.** From a 70 % baseline, detecting a 5-point lift at α = 0.05 and power 0.8 needs **1,248 requests per arm**; a 2-point lift needs **8,077**. A noisy LLM judge or repeat users make it larger.
+- **Pick one primary metric and several guardrails**: task success against cost per conversation, p95 latency, safety incidents and hand-offs to a person. Run at least a full week; **novelty effects** fade.
+- **Shadow traffic** runs the candidate on copies of requests and shows nobody its answer: safe, but no user outcomes. Use it before an A/B test, not instead of one.
 
-Architecture considerations include feature flags with consistent bucketing, back-end enforcement so clients cannot self-select variants, and idempotent logging of assignments for analysis. When models differ in cost, cap concurrent exposure of expensive arms and monitor infrastructure saturation as a first-class outcome.
+## The idea in plain English
+
+A bakery wants to know whether a new croissant recipe sells better. Selling it only on Saturday and the old one on Friday proves nothing, because Saturday is busier. So the baker puts both on the counter on the same day and lets customers pick. Each regular customer is always handed the same kind, so nobody gets confused. At closing time the baker counts sales, but also waste, cost and complaints, because a croissant that sells well and costs twice as much to make is not a win. That is an A/B test.
+
+## Core concepts
+
+The running example is Brightpost's support assistant: **200,000 requests a day**. Its success metric is the **resolution rate**: the share of conversations resolved without a person, **70 %** today (an illustrative baseline). Prompt B rewrites the refund instructions.
+
+1. **Randomisation unit.** The thing you assign: a request, a session or a user. Use the user, so one customer never sees two prompts and repeated requests do not count as independent evidence.
+2. **Sticky bucketing.** `bucket = hash(salt + user id) mod 100`. The same user always lands in the same bucket; a new salt per experiment keeps one test's split from lining up with another's.
+3. **Primary metric.** One number decided before launch, such as resolution rate. In LLM products it is often scored by an LLM judge or inferred from behaviour (no repeat contact within 24 hours).
+4. **Guardrail metrics.** Numbers that must not get worse: cost per conversation, p95 latency, harmful-output rate, hand-off rate, and the pass rate on a labelled set of critical intents.
+5. **Minimum detectable effect (MDE).** The smallest lift worth shipping. It sets the sample size: halve it and you need about four times the requests.
+6. **Power and significance.** Significance (α = 0.05) caps false alarms at 5 %; power (0.8) means a real lift of the MDE is found 80 % of the time.
+7. **Exposure log.** A write-once record of which user got which arm, written before the answer. Without it you cannot analyse, or even check the split.
+8. **Sample ratio mismatch (SRM).** A 50/50 test that reaches 50.4 / 49.6 on a large sample is a bug in assignment or logging, not luck. Test the counts against the design before reading any result.
+9. **Novelty effect.** Customers react to something new. A lift in the first days that decays by day seven is not a win.
+
+For the general statistics (variance, power, sequential tests, interference), see [Experimentation & A/B Testing](/ml-system-design/fundamentals/experimentation-and-ab-testing). This page covers what changes for LLMs: outputs differ run to run, the metric is often a judge's score, and cost and latency belong in the decision.
+
+## Architecture
+
+The assignment layer sits in front of the model call. It owns the split; the application never picks a variant itself.
+
+<AnimatedDiagram
+  spec="animated/eval/ab-split"
+  stepper
+  caption="The same user always lands in the same bucket, so a customer never sees the prompt change mid-conversation, and the log records who was exposed before anything is measured. Bucket 37 is an example value."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A request arrives with a user id">
+    The id comes from the sign-in or a stable cookie, never from the client's own choice of variant.
+  </StepCard>
+  <StepCard n={2} title="The id is hashed into one of 100 buckets">
+    Buckets 0 to 49 get prompt A and 50 to 99 get prompt B. User 8812 hashes to bucket 37 in this example, so every one of her requests goes to A for the life of the test. Changing the split to 90/10 moves only the bucket boundary.
+  </StepCard>
+  <StepCard n={3} title="The assignment is logged">
+    The log row (user, experiment, arm, time) is written before the model answers and is idempotent, so a retry does not create a second row.
+  </StepCard>
+  <StepCard n={4} title="Each arm is scored and compared">
+    Answers are scored by the judge and joined to the log by user id. The primary metric and the guardrails are computed per arm.
+  </StepCard>
+</StepCards>
+
+## Deep dive
+
+### How many requests you need
+
+For a yes/no metric like resolution, the standard two-proportion formula gives the requests per arm, with p₁ the baseline, p₂ = p₁ + δ the target, q = 1 − p, and 7.849 = (1.960 + 0.842)² for α = 0.05 (two-sided) and power 0.8:
+
+`n = 7.849 × (p₁q₁ + p₂q₂) ÷ δ²`
+
+<AnimatedDiagram
+  spec="animated/eval/ab-sample-size"
+  stepper
+  caption="A 5-point lift needs 1,248 requests per arm; a 2-point lift needs 8,077. A noisy judge makes every lift look smaller and the test longer. The 10 percent flip rate is illustrative."
+/>
+
+**How to read it.** The solid curve is the requirement for a perfect metric. Moving left (a smaller lift) is expensive: the need grows with 1 ÷ δ². The dashed curve is the same test when a judge scores the outcome.
+
+**The numbers.** From 70 %, a 5-point lift (0.70 to 0.75): 7.849 × (0.21 + 0.1875) ÷ 0.0025 = **1,248** per arm. A 2-point lift: 7.849 × (0.21 + 0.2016) ÷ 0.0004 = **8,077**. A 10-point lift: **291**. As a cross-check, the common rule of thumb 16σ² ÷ δ² gives 16 × 0.21 ÷ 0.0025 = 1,344. These counts assume independent, error-free outcomes, which an LLM product rarely has:
+
+- **Judge noise.** Suppose the judge flips 10 % of its verdicts at random (illustrative). The observed rate is 0.10 + 0.8 × the true rate, so 0.70 reads as 0.66 and 0.75 as 0.70. The 5-point lift shrinks to 4 and the need rises to **2,131** per arm, 1.7 times more. Measure the judge against people first (see [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) and [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback)).
+- **Repeat users.** If each customer sends 4 requests whose outcomes correlate at 0.3 (illustrative), the design effect is 1 + (4 − 1) × 0.3 = 1.9, and 1,248 becomes about 2,370 requests. Count users, or cluster the standard errors.
+- **Rare guardrails.** To see an escalation rate of 2 % rise to 2.5 % needs 7.849 × (0.0196 + 0.024375) ÷ 0.000025 = **13,807** per arm, ten times the primary metric's need. Guardrails, not the headline, set the duration.
+
+Sample size is a minimum, not a schedule. Brightpost could reach 1,248 requests in minutes, but traffic differs by weekday and by hour, so run **whole weeks**.
+
+### What to measure, and what is different for LLMs
+
+- **Outputs are not deterministic.** The same user and prompt can get different answers. That adds noise but not bias, because randomisation spreads it across both arms. Keep temperature the same in both, and log model version and sampling settings.
+- **The metric may be a judge.** Judges have position, length and self-preference biases (Zheng et al., 2023). If prompt B writes longer answers, a length-biased judge scores it higher for the wrong reason. Pair the judge with behavioural metrics (re-contact within 24 hours, hand-off) and spot-check disagreements.
+- **Cost and latency are outcomes.** A prompt that adds 600 tokens raises the input bill; one that asks for step-by-step reasoning raises time to first token. Report cost per conversation and p95 latency per arm, with limits agreed in advance.
+- **Novelty fades.** Compare the first two days with the last two. Ship on the later number.
+- **Intervals, not points.** Report the difference with a confidence interval; Miller (2024) shows how to compute error bars for model comparisons.
+- **Peeking.** Looking daily and stopping at the first p < 0.05 inflates false positives. Fix the duration up front, or use a sequential method built for continuous monitoring (Johari et al., 2015).
+
+### Shadow traffic against a live A/B test
+
+<AnimatedDiagram
+  spec="animated/eval/ab-shadow-vs-ab"
+  stepper
+  caption="In shadow mode the candidate is judged on real requests but no customer sees it, so there is no risk and no outcome data; in an A/B test customers see it, so you learn what they do and the risk is real."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Shadow: the new prompt runs on a copy">
+    Every request still gets prompt A's answer. A copy goes to prompt B, and B's answer goes only to the judge. The judge scores A and B on the same requests, which makes the comparison paired and cuts noise. You pay for a second model call on every shadowed request, and you learn nothing about what a customer would do.
+  </StepCard>
+  <StepCard n={2} title="A/B: some customers see the new prompt">
+    The router splits users, each user gets one answer, and what they do next (resolved, retried, handed off, thumbs down) flows into the metrics. This is the only mode that measures real outcomes, and a bad prompt reaches real customers.
+  </StepCard>
+</StepCards>
+
+Use shadow first to catch crashes, format errors, cost and latency surprises on live traffic. Then ramp an A/B test from a small share, with a kill switch (see [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment)). Shadow cannot test anything the customer's reaction decides, and tool-calling agents are risky to shadow, because the copy must not issue a real refund.
+
+### Sequential tests and bandits
+
+A **sequential test** keeps the false-positive rate valid when you check results during the run, so you can stop early for a large win or a clear loss. It needs a method chosen in advance; plain p-values checked daily do not qualify. A **bandit** shifts traffic towards the arm that is winning. It suits many prompt variants and a fast reward such as a click on a suggested reply. It under-explores risky tails, gives noisier estimates of the losing arms and makes load uneven, so use a fixed split for rare or high-risk outcomes and anything that needs a clean causal readout. Cap how much traffic an expensive arm can take, and watch infrastructure saturation as an outcome.
+
+### Worked example: Brightpost tests a new refund prompt
+
+Prompt B moves the refund policy to the top and adds "ask for the order number first". The hypothesis, written before launch: resolution rate rises by at least 5 points (to 75 %) with no guardrail breached.
+
+1. **Plan.** Sample size 1,248 per arm; judge noise raises it to 2,131; repeat users raise it further, to about 4,000 (illustrative). Brightpost sends 20 % of users into the test, 10 % to each arm: 20,000 requests a day per arm. The sample is reached within a day, so the duration is set by weekly cycles: **7 days**.
+2. **Shadow first.** On the first day B runs as shadow on 5 % of requests. The judge finds no format errors, and B's average prompt is 150 tokens longer.
+3. **Assign.** Users hash into buckets 0 to 9 (A) and 10 to 19 (B); the rest see A and are not in the analysis. SRM check on day 1: 20,030 against 19,970 requests, fine.
+4. **Readout (illustrative).** After 7 days, 140,000 requests per arm:
+
+| Metric | A | B | Verdict |
+| --- | --- | --- | --- |
+| Resolution rate (primary), all 7 days | 70.1 % | 74.5 % | +4.4 points |
+| Days 1 to 2 only | 70.2 % | 76.3 % | +6.1 points: novelty |
+| Days 6 to 7 only | 70.0 % | 73.8 % | +3.8 points: the number to trust |
+| Cost per conversation | £0.031 | £0.034 | +10 %, within the agreed 15 % |
+| p95 latency | 2.9 s | 3.0 s | limit 3.5 s |
+| Hand-off rate | 11.0 % | 10.2 % | better |
+
+The early lift of 6.1 points was partly novelty, and the seven-day average of 4.4 points still includes it. The settled lift is 3.8 points, below the 5-point goal but clearly above zero: on the last two days alone (about 40,000 requests per arm) the 95 % interval is roughly 3.2 to 4.4 points, before adjusting for repeat users. The team ships B because the guardrails hold and the lift is real, then rolls it out in steps and keeps watching with [online production evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
+
+<Callout tone="red" title="What breaks">
+  A second team launches an experiment that also routes users by `hash(user id) mod 100`, with the same salt. Buckets 0 to 9 are now both "prompt B" and "new retriever", and nobody can tell which change moved the metric. Use a different salt per experiment, and keep a registry of what runs when.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Fixed 50/50 A/B | Clean causal readout; simple to explain | Half the traffic sees the worse arm; needs the full sample | Rare, risky or high-stakes outcomes; executive reporting |
+| Small canary split (5 to 10 %) | Limits harm | Needs longer to reach the sample | Risky changes such as a new model |
+| Shadow traffic | No user risk; paired scoring | No user outcomes; second model cost | Before any A/B test; format, cost and latency checks |
+| Sequential test | Stops early when the effect is large | Needs statistical care | Fast iteration with a monitored dashboard |
+| Multi-armed bandit | Less regret with many variants | Noisy estimates; uneven load | Many prompt variants with a fast reward |
+| Offline eval only | Fast and cheap | Misses user behaviour and novelty | Every change as a first filter; see [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) |
+
+## Real-world examples
+
+- **Online controlled experiments at scale.** Kohavi, Tang and Xu's book (2020) documents the practice at large web companies: sticky randomisation by user, SRM checks, guardrail metrics and the slow decay of novelty effects.
+- **LLM gateways with traffic splitting.** Gateways such as LiteLLM and Portkey can route a share of traffic to a second prompt or model and log which one answered, which is the assignment layer of this page (vendor docs, November 2026).
+- **Shadow deployment** is a common first step before a model or prompt reaches users, because the candidate sees real traffic and its answers are discarded.
+- **Sequential monitoring.** Always-valid inference (Johari et al., 2015) was designed for A/B platforms where teams look at results every day.
+
+## Common pitfalls
+
+- **Assigning per request.** A customer sees A, then B, in one conversation, and one user's many requests are counted as independent.
+- **A judge you have not checked.** It may reward length or its own style and make a worse prompt look better.
+- **No guardrails.** A 4-point lift that raises p95 latency past the SLO or doubles cost is not a win.
+- **Stopping at the first significant day.** Peeking inflates false positives, and novelty inflates the effect.
+- **Reusing a salt.** Two experiments share buckets and confound each other.
+- **Changing two things.** A new prompt and a new model in one arm tell you nothing about either.
+
+## How to answer in an interview
+
+1. State the hypothesis, the unit (user), the primary metric and the MDE.
+2. Describe assignment: salted hash into buckets, server-side, with an exposure log and an SRM check.
+3. Size the test: use the two-proportion formula, then add judge noise, repeat users and rare guardrails.
+4. Name the LLM-specific risks: non-determinism, judge bias, cost and latency, novelty; run whole weeks.
+5. Place it in the release path: offline eval, shadow, small ramp, then A/B with a kill switch.
+
+**What interviewers listen for:** sticky user-level assignment, a number for the sample size, guardrails with limits, and awareness that the judge is a measurement instrument with its own error.
+
+**Red flags:** randomising per request, "run it until it is significant", a single metric with no cost or latency guardrail, and treating shadow traffic as a replacement for measuring users.
+
+## Further reading
+
+- [Trustworthy Online Controlled Experiments (Kohavi, Tang and Xu, 2020)](https://www.cambridge.org/core/books/trustworthy-online-controlled-experiments/D97B26382EB0EB2DC2019A7A7B518F59)
+- [Always Valid Inference: Bringing Sequential Analysis to A/B Testing (Johari et al., 2015)](https://arxiv.org/abs/1512.04922)
+- [Adding Error Bars to Evals (Miller, 2024)](https://arxiv.org/abs/2411.00640)
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- Related pages: [Experimentation & A/B Testing](/ml-system-design/fundamentals/experimentation-and-ab-testing) · [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you choose metrics and guardrails for an A/B test comparing two system prompts for a customer-facing assistant?" category="Experimentation">
-    Pick a primary metric aligned with the product goal such as successful task completion or customer satisfaction proxy, and define guardrails on latency, cost per conversation, harmful output rate, human handoff rate, and regression on critical intents from a labeled mini-eval. Precommit to stopping rules and duration, and segment readouts by cohorts like language or plan tier to catch hidden harms.
+  <InterviewQuestion question="Why run an A/B test for a prompt change instead of comparing this week with last week?" category="Concepts" level="Junior">
+    A before-and-after comparison measures the change plus everything else that moved between the two weeks: a sale, a holiday, a different mix of questions, or a silent update to the provider's model. An A/B test runs both prompts at the same time on randomly split users, so those factors hit both arms equally and the only systematic difference is the prompt. That is what lets you claim the prompt caused the difference.
   </InterviewQuestion>
-  <InterviewQuestion question="What statistical pitfalls appear when analyzing LLM experiments with high variance outcomes?" category="Statistics">
-    High variance widens confidence intervals and demands larger samples; peeking without sequential correction inflates false positives; multiple metrics increase family-wise error unless adjusted; Simpson's paradox can appear if traffic mix shifts during the test. Use preanalysis plans, cluster standard errors if users contribute repeated sessions, and validate with offline held-out sets when online signals are noisy.
+  <InterviewQuestion question="How do you choose metrics and guardrails for an A/B test comparing two system prompts for a customer-facing assistant?" category="Concepts" level="Junior">
+    Pick one primary metric tied to the product goal, such as task completion or resolution rate, and write it down before launch. Add guardrails with agreed limits: cost per conversation, p95 latency, harmful-output rate, hand-off rate to a person, and the pass rate on a labelled mini-eval of critical intents. Precommit to the duration and the stopping rule, and break the readout down by cohorts such as language or plan tier to catch harm hidden in an average.
   </InterviewQuestion>
-  <InterviewQuestion question="When would you use a multi-armed bandit instead of a fixed 50-50 A/B allocation for prompt selection?" category="Architecture">
-    Use bandits when you have many candidates, exploration cost is tolerable, and the reward signal is frequent enough for learning within the experiment window, such as click-through on suggested replies. Prefer fixed A/B for rare or high-risk outcomes, when you need clean causal readouts for executive reporting, or when infrastructure cannot handle uneven unpredictable load from adaptive routing without autoscaling headroom.
+  <InterviewQuestion question="How would you assign users to variants, and what do you log?" category="Architecture" level="Mid">
+    Compute a bucket from a salted hash of the user id, so each user always sees the same variant, and map bucket ranges to arms. Do it on the server, not in the client, so users cannot choose a variant, and use a different salt for each experiment so tests do not share buckets. Write an idempotent exposure row (user, experiment, arm, time, model and prompt version) before the model answers. Check that the observed split matches the design with a sample-ratio test before reading results.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost resolves 70 % of conversations. How many requests per arm do you need to detect a 5-point lift, and what could make that number larger?" category="Scaling" level="Mid">
+    With α = 0.05 and power 0.8, the two-proportion formula gives 7.849 × (0.21 + 0.1875) ÷ 0.0025, about 1,248 per arm. It grows if the metric is scored by a noisy judge, because misclassified verdicts shrink the observed lift; a 10 % random flip rate raises it to about 2,131. It also grows if one user contributes many requests, by the design effect, and for rare guardrail events such as escalations. I would still run whole weeks, because traffic varies by weekday.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use shadow traffic instead of, or before, an A/B test?" category="Trade-offs" level="Mid">
+    Shadow traffic runs the candidate on copies of live requests and never shows its answer, so it carries no customer risk and lets a judge compare both prompts on the same requests. It catches format errors, cost and latency surprises. It cannot measure what a customer does, so it cannot show a resolution gain, and it doubles model cost on the shadowed share. Use it as the first stage before a small A/B ramp, and be careful with agents whose tool calls have side effects.
+  </InterviewQuestion>
+  <InterviewQuestion question="What statistical pitfalls appear when analysing LLM experiments, and how do you avoid them?" category="Failure modes" level="Senior">
+    High variance widens intervals and demands more samples. Peeking and stopping at the first significant result inflates false positives, so fix the duration or use a sequential method. Many metrics raise the chance of a false win unless you correct for it. Repeat users make requests dependent, so cluster the standard errors or analyse per user. Traffic mix shifting during the test can mislead a pooled average, and a split that drifts from its design points to an assignment bug. Pre-register the analysis and validate noisy online signals against an offline set.
+  </InterviewQuestion>
+  <InterviewQuestion question="Prompt B beats A on the judge score but loses on hand-offs and thumbs-down. What do you do?" category="Failure modes" level="Senior">
+    Distrust the judge before the behaviour. The usual suspects are a length or style bias in the judge, a rubric that does not match what customers value, and a novelty effect. Read a sample of disagreements by hand, compare the judge with human labels on those cases, and look at the early days against the late days. Do not ship on the judge alone: customer behaviour is the closer measure of the goal. Then fix the judge or the rubric, and rerun or re-score the test.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use a multi-armed bandit instead of a fixed 50/50 split for prompt selection?" category="Trade-offs" level="Senior">
+    Use a bandit when there are many candidates, trying a poor one is cheap, and the reward arrives fast enough to learn within the window, such as a click on a suggested reply. Prefer a fixed split for rare or high-risk outcomes, when you need a clean causal estimate to report, or when the infrastructure cannot absorb uneven load from adaptive routing. Constrain a bandit with caps on risky or expensive arms and a floor of exploration, because a pure bandit under-explores and gives noisy estimates for the arms it abandons.
   </InterviewQuestion>
 </InterviewQuestions>

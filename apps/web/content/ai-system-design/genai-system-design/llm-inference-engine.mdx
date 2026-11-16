@@ -1,24 +1,236 @@
 ---
 title: LLM Inference Engine
 description: Serving stack patterns for high-throughput large language model inference, from memory layout to batching and decoding optimizations.
+updated: 2026-11-15
 ---
 
-Modern LLM serving engines such as vLLM, TensorRT-LLM, and Text Generation Inference exist to squeeze useful tokens per second from expensive GPUs. The dominant cost after weights are loaded is memory bandwidth and attention: autoregressive decoding spends most time on matrix multiplies and on managing the key-value cache that grows linearly with sequence length for every active sequence. Engines therefore focus on memory-efficient KV storage, batching many requests together, and reducing redundant computation across users.
+Engines such as vLLM, SGLang and TensorRT-LLM exist to get the most useful tokens per second out of expensive GPUs. Interviewers ask about them because two ideas, continuous batching and a paged KV cache, explain most of the gap between a demo server and a production one, and because a strong candidate can do the memory arithmetic on a whiteboard.
 
-PagedAttention virtualizes the KV cache into non-contiguous blocks similar to an OS paging allocator, reducing fragmentation when concurrent requests have different lengths. Continuous batching, sometimes called iteration-level scheduling, adds new sequences to the running batch as others finish prefill or decode steps, which improves GPU utilization compared to static batching that waits for the slowest member. Together these techniques materially raise throughput on variable-length production traffic.
+## TL;DR
 
-Speculative decoding uses a smaller draft model or n-gram heuristics to propose multiple tokens per step, which the large model verifies in parallel, trading extra compute for fewer large-model forward passes when drafts are often correct. Prefix caching reuses KV blocks for shared system prompts or tool schemas so repeated prefixes do not recompute from scratch. Quality-of-service features may include separate queues for interactive versus batch workloads, max concurrency limits, and preemption policies.
+- An inference engine is **one process that loops**: every iteration the scheduler picks a batch, the GPU runs **one forward pass** for all of it, and the sampler adds **one token to every request**.
+- **Continuous batching** (iteration-level scheduling, from Orca) lets a request leave the batch the moment it finishes and a waiting one take its slot. Static batching makes everyone wait for the longest answer.
+- The **KV cache**, not the weights, limits how many requests fit. Reserving one contiguous slab per request for the longest possible answer wastes most of it: earlier systems used only **20.4–38.2 %** of their KV memory for real tokens.
+- **PagedAttention** (vLLM) stores the cache in **fixed blocks of 16 tokens** handed out on demand, so only a request's last block has empty slots. vLLM reported **2–4× the throughput** of FasterTransformer and Orca at the same latency.
+- **Prefix caching**, **chunked prefill**, **preemption** and **speculative decoding** are refinements on the same loop; engine families differ mostly in which of these they do best and which hardware they run on.
 
-Throughput and latency pull in opposite directions: large batches improve MFU but increase queueing delay for short requests. Production sizing requires percentile latency targets, not averages, and often pairs an engine with request prioritization, load shedding under overload, and autoscaling that understands GPU fragmentation.
+## The idea in plain English
+
+Picture a ferry that crosses a river every two minutes with eight seats. A bad ferry company waits until all eight passengers reach the far bank and walk to their cars before loading anyone new, and it books each passenger a whole row in case they bring luggage. A good one fills each seat the moment it empties, and hands out luggage space one locker at a time as people actually bring bags. The inference engine is the good ferry company: each crossing is one forward pass, the seats are batch slots, and the lockers are KV cache blocks.
+
+## Core concepts
+
+1. **Iteration.** One forward pass of the model over every request in the batch. A request in decode gains one token per iteration; a request in prefill processes its whole prompt in its first iteration.
+2. **Prefill and decode.** Prefill reads the prompt in large matrix multiplications and is compute-bound; it sets time to first token. Decode makes one token per request per iteration, re-reads the weights and the cache each time and is memory-bandwidth-bound; it sets tokens per second. See [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms).
+3. **KV cache.** Every token's keys and values, per layer and per KV head, kept so the model does not recompute them. Its size per token is 2 × layers × KV heads × head size × bytes per value, and it grows by one entry per token for every running request.
+4. **Static batching.** A fixed group of requests starts together and the batch ends when its longest member ends. Finished slots sit idle and new arrivals wait for the whole batch.
+5. **Continuous batching.** The scheduler re-forms the batch at every iteration: finished requests return at once and waiting requests join. Orca (Yu et al., 2022) called it iteration-level scheduling; TensorRT-LLM calls it in-flight batching.
+6. **Paged KV cache.** The cache is split into fixed-size blocks that need not sit next to each other in GPU memory. A **block table** per request maps its logical blocks (0, 1, 2, …) to physical ones, as an operating system maps virtual pages.
+7. **Admission and preemption.** The scheduler only admits a request when it can find blocks for it. When the pool runs dry mid-generation, it pauses some requests and gets their memory back.
+8. **Sampling and detokenising.** The sampler turns each request's logits into one token (greedy, temperature, top-p; see [Decoding and Sampling](/ai-system-design/genai-system-design/decoding-and-sampling)). The detokeniser turns token ids back into text and streams it.
+
+## Architecture
+
+The figure follows one iteration through the parts of one engine process.
+
+<AnimatedDiagram
+  spec="animated/serving/engine-anatomy"
+  stepper
+  caption="Every iteration runs the same loop: the scheduler picks a batch, the block manager finds memory for it, one forward pass and one sampling step add a token to every request."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A request arrives and waits in the queue">
+    Brightpost's chat service sends a prompt to the engine's HTTP server, which tokenises it into about 2,200 token ids and puts it in the request queue. Nothing runs on the GPU yet.
+  </StepCard>
+  <StepCard n={2} title="The scheduler picks this iteration's batch">
+    Before every forward pass the scheduler chooses which requests run: everything already decoding, plus as many waiting requests as the token budget and memory allow. vLLM admits in arrival order (first come, first served).
+  </StepCard>
+  <StepCard n={3} title="The block manager gives each request its KV blocks">
+    A new request needs blocks for its whole prompt; a decoding request needs a new block each time its last one fills. The block manager takes them from a free list and records them in the request's block table.
+  </StepCard>
+  <StepCard n={4} title="One forward pass runs the whole batch">
+    The GPU runs every layer once for all scheduled tokens together. Attention kernels read each request's keys and values through its block table and write the new token's keys and values into its last block.
+  </StepCard>
+  <StepCard n={5} title="The sampler picks one token per request">
+    The forward pass returns one row of logits per request. The sampler applies that request's settings (temperature, top-p, stop strings, a JSON schema if one was set) and picks the next token.
+  </StepCard>
+  <StepCard n={6} title="Tokens stream out and the loop repeats">
+    The detokeniser turns new tokens into text and streams them to the client. A request that hit its end token or token limit leaves the batch and its blocks go back to the free list; everything else goes round again.
+  </StepCard>
+</StepCards>
+
+Everything outside this loop (load balancing across replicas, autoscaling, the gateway) belongs to the fleet; see [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) and [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway).
+
+## Deep dive
+
+### Continuous batching
+
+Batching pays because every request in a batch shares one read of the weights. The catch is that answers end at different times: "Yes, it ships tomorrow" is 8 tokens and a refund walk-through is 600. The figure compares the two ways of handling that on four slots.
+
+<AnimatedDiagram
+  spec="animated/serving/continuous-batching"
+  stepper
+  caption="The static batch idles three slots while it waits for B; the continuous batch fills every slot and finishes six answers in the time the static one finishes four."
+/>
+
+**How to read it.** Each column is one iteration and each row a batch slot; a cell is one request advancing by one token. In the static batch, A, C and D finish early and their slots show "idle" until B ends at iteration 8, so E waits eight iterations to start. In the continuous batch, E takes A's slot at iteration 4, the very next iteration after A finishes.
+
+**The numbers.** Over iterations 1 to 8 the static batch keeps 3 + 8 + 4 + 6 = 21 of 32 slot-iterations busy (66 %) and finishes 4 answers; the continuous batch keeps all 32 busy and finishes 6. The lengths are illustrative; real answers vary far more, which makes the gap wider.
+
+Orca made this work with **selective batching**: operations that treat tokens independently (the linear layers, layer norm, the feed-forward network) run on all tokens flattened together, while attention runs per request, so requests with different lengths share one forward pass without padding. Orca reported **36.9×** the throughput of NVIDIA FasterTransformer at the same latency on GPT-3 175B.
+
+### Paged KV cache (PagedAttention)
+
+Continuous batching only helps if memory can hold the extra requests. A request's final length is unknown when it arrives, so earlier systems reserved one contiguous slab for the longest allowed sequence. The vLLM paper names three kinds of waste in that scheme: slots reserved for tokens that do not exist yet, **internal fragmentation** (reserved slots that are never used because the answer ends early) and **external fragmentation** (gaps between slabs of different sizes). Its profiling found only 20.4–38.2 % of KV memory holding real token states.
+
+PagedAttention keeps each request's cache in fixed-size blocks, hands a new block out only when the last one fills, and finds them through the block table. Every block is the same size, so external fragmentation disappears; only the last block of each request can have empty slots. Blocks also make sharing cheap: parallel samples of one prompt point at the same prompt blocks and copy a block only when they write to it (copy-on-write). vLLM's default block size is **16 tokens**; the paper found smaller blocks underuse the GPU's parallelism and larger ones bring back internal fragmentation.
+
+### Worked example: Brightpost's answer in GPU memory
+
+Brightpost serves an 8B model shaped like Llama 3.1 8B (32 layers, 8 KV heads, head size 128, 16-bit values) on one 80 GB GPU. Its typical request is 2,200 prompt tokens and a 250-token answer; at the peak of 12 requests a second, each taking about 1.5 s, about **18 answers are in flight** (12 × 1.5).
+
+<AnimatedDiagram
+  spec="animated/serving/paged-kv-cache"
+  stepper
+  caption="A slab sized for the longest answer leaves 70 % of itself unwritten; blocks handed out on demand waste only the last block's empty slots, so the same pool holds 132 answers instead of 40."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Contiguous: reserve the longest possible answer up front">
+    One token's keys and values take 2 × 32 × 8 × 128 × 2 bytes = 131,072 bytes = 128 KiB. With the engine's maximum length at 8,192 tokens, the slab is 8,192 × 128 KiB = 1 GiB. When the answer ends, 2,450 tokens × 128 KiB = 306.25 MiB is in use (29.9 %); 5,742 tokens' worth, 717.75 MiB, was never written.
+  </StepCard>
+  <StepCard n={2} title="Paged: hand out 16-token blocks as tokens arrive">
+    A block is 16 × 128 KiB = 2 MiB. Admission needs ⌈2,200 ÷ 16⌉ = 138 blocks for the prompt. Decoding adds a block every 16 tokens, 16 more in all, so the finished answer holds ⌈2,450 ÷ 16⌉ = 154 blocks = 308 MiB, scattered anywhere in the pool.
+  </StepCard>
+  <StepCard n={3} title="The only slack is the last block">
+    Block 153 holds 2,450 − 153 × 16 = 2 tokens, so 14 slots × 128 KiB = 1.75 MiB are empty: 0.57 % of what the answer holds, against 70.1 % for the slab.
+  </StepCard>
+  <StepCard n={4} title="What fits in a 40 GiB KV pool">
+    Of the 80 GB, 16 GB holds the weights; after activations and headroom, say 40 GiB is left for the cache (illustrative): 20,480 blocks. As slabs it holds 40 GiB ÷ 1 GiB = 40 answers at once; as blocks, ⌊20,480 ÷ 154⌋ = 132, which is 3.3 times as many.
+  </StepCard>
+</StepCards>
+
+**What it means for Brightpost.** Both layouts hold the 18 answers in flight at the peak. The difference is headroom: with slabs, request 41 queues at about 2.2 times the peak; with blocks the GPU takes about 7 times the peak (132 ÷ 18) before anyone waits. Read the other way, slabs would need 3.3 GPUs' worth of memory for the concurrency one paged GPU gives. Bigger batches also mean more tokens per weight read, which is where the throughput gain comes from.
+
+Brightpost's engine settings follow from these numbers. A launch command for vLLM (flag names from the vLLM engine-arguments docs, November 2026; the values are Brightpost's choices):
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct \
+  --max-model-len 8192 \
+  --block-size 16 \
+  --gpu-memory-utilization 0.9 \
+  --max-num-seqs 128 \
+  --max-num-batched-tokens 8192 \
+  --enable-prefix-caching \
+  --enable-chunked-prefill
+```
+
+`--max-model-len` caps prompt plus answer at 8,192 tokens; with paging it is a limit, not a reservation. `--block-size` sets 16 tokens per block (2 MiB here). `--gpu-memory-utilization` is the share of GPU memory the engine may use for weights, activations and cache. `--max-num-seqs` caps requests per iteration just under the 132 that fit, and `--max-num-batched-tokens` is the per-iteration token budget that chunked prefill works within (see below).
+
+<Callout tone="red" title="What breaks">
+  A burst past 132 answers in flight, or a few 8,000-token prompts, empties the free list mid-generation. The scheduler must then preempt: it pauses the newest requests and either copies their blocks to CPU memory or throws them away and recomputes them later. Either way those customers see their stream stall for hundreds of milliseconds. Watch free-block count and preemptions per minute, not only GPU utilisation.
+</Callout>
+
+### Prefix caching
+
+Every Brightpost prompt starts with the same 200-token instructions. With 16-token blocks those fill 12 full blocks (192 tokens) that every request could share instead of recomputing. vLLM identifies each full block by a hash of its tokens and of everything before it, so two requests with the same prefix map to the same physical blocks; freed blocks stay cached and are evicted least-recently-used. SGLang's RadixAttention keeps the cached prefixes in a radix tree, which suits agents and multi-call programs that branch from shared history. This is the engine-side mechanism behind provider [prompt caching](/ai-system-design/genai-system-design/prompt-caching); put stable text first and per-user text last, or nothing matches.
+
+### Chunked prefill and the token budget
+
+A 30,000-token prompt prefilled in one iteration makes that iteration long, and every other user's next token waits for it: their streams stutter. Chunked prefill caps the tokens per iteration (a token budget, `max-num-batched-tokens` in vLLM, `max_num_tokens` in TensorRT-LLM, whose default has been 8,192 since v0.11) and spreads a long prompt over several iterations, mixed with other requests' decode tokens. The budget trades time to first token for the long prompt against smooth streaming for everyone else; TensorRT-LLM also schedules requests already generating before new prompts.
+
+### Preemption when blocks run out
+
+vLLM serves first come, first served and preempts the newest requests first. Because a request needs all its blocks to continue, it evicts all of a request's blocks or none. It then either **swaps** them to CPU memory and back, or **recomputes** them later as one prefill over the prompt plus the tokens generated so far, which is often faster than the original decode. Admission control is the cheaper fix: keep enough free blocks that preemption stays rare.
+
+### Speculative decoding inside the engine
+
+A small draft model or an n-gram lookup proposes several tokens and the large model checks them in one forward pass, so one iteration can add more than one token per request. Inside the engine this means extra KV blocks for draft tokens and a scheduler that knows some sequences advance by several tokens. The mechanics and when it pays are on [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding).
+
+### Engine families (as of November 2026)
+
+| Engine | Batching and KV memory | What stands out | Runs on | Reach for it when |
+| --- | --- | --- | --- | --- |
+| vLLM | Continuous batching, PagedAttention, prefix caching, chunked prefill | Widest model and quantisation support (FP8, INT4, GPTQ, AWQ, GGUF); OpenAI-compatible server | NVIDIA and AMD GPUs, x86 and Arm CPUs, plug-ins for others | You want a general-purpose open engine and a large community |
+| SGLang | Continuous batching, RadixAttention prefix reuse | Built for multi-call and agent workloads with shared prefixes | NVIDIA, AMD, Google TPU, Intel, Ascend, Apple silicon | Many requests share long histories, tools or few-shot prefixes |
+| TensorRT-LLM | In-flight batching, paged KV cache, chunked context | NVIDIA's engine, now PyTorch-native, with FP8 and FP4 paths | NVIDIA GPUs | You run only NVIDIA and want the last few per cent, with more tuning |
+| Text Generation Inference (TGI) | Continuous batching, paged attention | In maintenance mode; the repository was archived on 21 March 2026 | NVIDIA, AMD, Gaudi, Inferentia, TPU | Existing deployments only; Hugging Face points new work to vLLM or SGLang |
+| llama.cpp (`llama-server`) | Continuous batching on by default, parallel slots | GGUF files with 1.5- to 8-bit integer quantisation, no dependencies | CPU, Apple silicon (Metal), CUDA, Vulkan, CPU+GPU split | Laptops, edge boxes and low-concurrency internal tools |
+
+Sources: each project's documentation and repository, checked 15 November 2026. Throughput rankings change with every release, so benchmark your own model, prompt lengths and hardware before choosing; see [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization) for the formats.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Larger batch (higher `max-num-seqs`) | More tokens per weight read, higher throughput per GPU | Each iteration takes longer, so per-token latency rises | Throughput-bound or offline work |
+| Larger token budget per iteration | Long prompts finish prefill sooner | Other users' streams stall during big prefills | Few long prompts, latency targets that allow it |
+| Larger KV block | Fewer table entries, better kernel efficiency | More empty slots in each last block | Long answers; keep 16 unless measured |
+| Recompute on preemption | No CPU memory traffic | Repeats prefill work | Short prompts, fast GPUs |
+| Swap on preemption | Keeps work already done | Limited by CPU–GPU bandwidth | Long prompts, plenty of host memory |
+| Quantised KV cache (FP8) | About twice the requests in the same pool | Small accuracy risk to measure | Memory-bound at the target concurrency |
+
+## Real-world examples
+
+- **Orca** (Seoul National University and FriendliAI, OSDI 2022) introduced iteration-level scheduling and selective batching and reported 36.9× the throughput of FasterTransformer at the same latency on GPT-3 175B.
+- **vLLM** (UC Berkeley, SOSP 2023) measured 20.4–38.2 % useful KV memory in earlier systems against 96.3 % with PagedAttention, and 2–4× their throughput at the same latency; the gain grew with longer sequences and larger models.
+- **SGLang** (Zheng et al., 2023) reported up to 6.4× higher throughput than earlier systems on structured, multi-call programs, much of it from reusing cached prefixes.
+- **Text Generation Inference** moved to maintenance mode and its repository was archived on 21 March 2026, a reminder to keep an engine behind an OpenAI-compatible API so it can be swapped.
+
+## Common pitfalls
+
+- Sizing the GPU from the weights alone. The KV pool decides concurrency; do the per-token arithmetic for your model and prompt lengths.
+- Setting the maximum length to the model's full context "just in case". With paging it costs nothing per request, but a few huge prompts can still drain the pool and trigger preemption.
+- Reading high GPU utilisation as healthy. A GPU can be busy and still deliver poor tokens per second if batches are small or preemptions are frequent.
+- Putting the user's text or a timestamp before the shared instructions, so prefix caching never hits.
+- Comparing engines on someone else's benchmark. Prompt and answer lengths change the ranking.
+- Ignoring per-request sampling settings in the batch: one request with a large `n` or beam search multiplies its blocks.
+
+## How to answer in an interview
+
+1. Draw the loop: queue, scheduler, one forward pass, sampler, detokeniser, with the KV block manager beside the scheduler.
+2. Explain prefill against decode and why decode is memory-bandwidth-bound, so batching is where the throughput comes from.
+3. Contrast static and continuous batching with a small slot grid, and name Orca's iteration-level scheduling.
+4. Do the KV arithmetic: bytes per token, slab against blocks, how many requests fit in the pool, and what PagedAttention removes.
+5. Close with operations: token budget and chunked prefill, prefix caching, preemption, and the metrics you would watch.
+
+**What interviewers listen for:** the KV cache, not compute, limits concurrency; a number for bytes per token; a clear reason why continuous batching and paging go together.
+
+**Red flags:** "just add more GPUs" with no memory arithmetic, treating batch size as free, or not knowing what happens when the cache runs out.
+
+## Further reading
+
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., SOSP 2023)](https://arxiv.org/abs/2309.06180)
+- [Orca: A Distributed Serving System for Transformer-Based Generative Models (Yu et al., OSDI 2022)](https://www.usenix.org/conference/osdi22/presentation/yu)
+- [SGLang: Efficient Execution of Structured Language Model Programs (Zheng et al., 2023)](https://arxiv.org/abs/2312.07104)
+- [vLLM documentation: engine arguments and automatic prefix caching](https://docs.vllm.ai/en/latest/)
+- [TensorRT-LLM: paged attention, in-flight batching and scheduling](https://nvidia.github.io/TensorRT-LLM/features/paged-attention-ifb-scheduler.html)
+- Related pages: [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [Efficient Attention](/ai-system-design/genai-system-design/efficient-attention) · [Long Context, Ring Attention & KV Quantization](/ai-system-design/genai-system-design/long-context-ring-attention-and-kv-quantization) · [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why does naive static batching waste GPU capacity for LLM decoding?" category="Performance">
-    Static batches form a group of requests that advance in lockstep; the batch effective size shrinks as sequences finish at different lengths, leaving SIMD lanes idle. Padding to the longest sequence wastes compute on shorter ones. Continuous batching refills the batch each iteration so the GPU stays fuller, and paged KV reduces memory holes that would otherwise cap concurrency.
+  <InterviewQuestion question="Why does naive static batching waste GPU capacity for LLM decoding?" category="Concepts" level="Junior">
+    A static batch starts a fixed group of requests together and ends only when the longest one finishes. Requests that finish early leave their slots idle, and new arrivals wait for the whole batch, which adds queueing delay. Padding every request to the longest length wastes compute as well. Continuous batching re-forms the batch at every iteration, so a finished request leaves at once and a waiting one takes its slot; a paged KV cache then frees enough memory to keep those extra slots filled.
   </InterviewQuestion>
-  <InterviewQuestion question="Where does prefix caching help most in a typical RAG or agent deployment?" category="Architecture">
-    It helps when many requests share long identical prefixes such as system instructions, retrieved context templates, or repeated tool definitions. Those shared tokens amortize prefill cost across requests. It helps less when every user message is unique and placed early in the prompt with little shared structure, so measure hit rates before assuming large wins.
+  <InterviewQuestion question="Where does prefix caching help most in a typical RAG or agent deployment?" category="Architecture" level="Mid">
+    It helps when many requests share long identical prefixes such as system instructions, tool definitions or a fixed few-shot block, because those tokens are prefilled once and their KV blocks reused. Agents gain twice, since every turn of one conversation repeats the history before it. It helps little when the unique part, such as the user's message or retrieved passages, comes early in the prompt, because matching stops at the first different token. Order prompts from most to least stable and measure the hit rate before counting on the savings.
   </InterviewQuestion>
-  <InterviewQuestion question="What operational metrics would you watch when rolling out speculative decoding?" category="Implementation">
-    Track acceptance rate of draft tokens, end-to-end latency percentiles, tokens per second per dollar, and error rates from verification mismatches. Watch GPU memory for holding two models if draft is separate, and monitor tail latency if speculation adds variance. Compare quality on golden prompts because aggressive drafting can interact badly with certain sampling configurations.
+  <InterviewQuestion question="What does PagedAttention fix, and what does the block size trade off?" category="Concepts" level="Mid">
+    Without paging, an engine reserves one contiguous slab per request sized for the longest allowed sequence, which wastes reserved slots, slots never used when answers end early, and gaps between slabs of different sizes; the vLLM paper measured only 20.4 to 38.2 percent of KV memory holding real tokens. PagedAttention stores the cache in fixed blocks handed out on demand and found through a per-request block table, so only each request's last block has empty slots. Small blocks waste less but give the attention kernel smaller pieces of work and longer tables. Large blocks bring back internal fragmentation, which is why vLLM defaults to 16 tokens.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many concurrent requests fit on one GPU? Walk through the estimate." category="Scaling" level="Mid">
+    Start with bytes per token of KV cache: 2 for keys and values, times layers, KV heads, head size and bytes per value. For a 32-layer model with 8 KV heads of size 128 in 16-bit, that is 128 KiB per token. Multiply by tokens per request (prompt plus answer, here 2,450) for about 306 MiB, or 308 MiB in 16-token blocks. Divide the memory left after weights and activations, say 40 GiB, to get about 132 requests, then check it against the concurrency you need from Little's law: arrival rate times time per request.
+  </InterviewQuestion>
+  <InterviewQuestion question="The engine runs out of KV blocks in the middle of generation. What happens, and how do you prevent it?" category="Failure modes" level="Senior">
+    The scheduler must preempt: vLLM pauses the most recently arrived requests and frees all of their blocks at once, because a request cannot continue with only some of them. It later restores them either by swapping the blocks back from CPU memory or by recomputing them as one prefill over the prompt plus the tokens generated so far. Users of preempted requests see their streams stall. Prevent it with admission control that keeps free blocks in reserve, a sensible maximum length and token budget, a quantised KV cache if memory is the limit, and alerts on preemption rate and free blocks rather than GPU utilisation alone.
+  </InterviewQuestion>
+  <InterviewQuestion question="One customer sends a 30,000-token prompt and every other user's stream stutters. Why, and what do you change?" category="Scaling" level="Senior">
+    In a single iteration the engine prefilled all 30,000 tokens, so that forward pass took far longer than a normal decode step and every other request waited for it before getting its next token. Chunked prefill fixes this by capping tokens per iteration and spreading the long prompt over several iterations mixed with everyone's decode tokens. The cap is a trade-off: smaller chunks keep streams smooth but delay the long request's first token. For a workload with many long prompts, consider separate replicas or disaggregated prefill and decode so the two phases stop competing.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational metrics would you watch when rolling out speculative decoding?" category="Trade-offs" level="Senior">
+    Track the acceptance rate of draft tokens, because speculation only pays when most drafts are accepted; rejected drafts are normal but cost compute. Watch time to first token and inter-token latency percentiles, tokens per second per GPU, and cost per million tokens against the baseline. A separate draft model also needs GPU memory and KV blocks, which lowers the batch the engine can hold, so watch free blocks and preemptions. Compare output quality on a golden set across sampling settings, since speculation should leave the output distribution unchanged and any drift points to a bug.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you choose between vLLM, SGLang, TensorRT-LLM and llama.cpp?" category="Trade-offs" level="Mid">
+    Start from the hardware and the workload, not a leaderboard. On mixed or non-NVIDIA GPUs with a wide range of models, vLLM is the default; with many calls sharing long prefixes, such as agents, SGLang's prefix reuse is a strong fit. On NVIDIA only, TensorRT-LLM can give the best numbers in exchange for more tuning. On CPUs, Apple silicon or edge devices with few users, llama.cpp with a quantised GGUF model is the practical choice. In every case benchmark your own prompt and answer lengths and keep an OpenAI-compatible API in front so the engine can be swapped.
   </InterviewQuestion>
 </InterviewQuestions>

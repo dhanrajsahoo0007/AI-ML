@@ -75,19 +75,16 @@ How to choose in practice:
 
 ### The ReAct loop
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant M as LLM
-    participant T as Tools
-    U->>M: Question
-    loop Until the model has enough information
-        M->>M: Thought: what do I need next?
-        M->>T: Action: search("...") or calculator(...)
-        T-->>M: Observation: result
-    end
-    M-->>U: Final answer grounded in observations
-```
+ReAct turns one prompt into a loop: the model writes a thought, asks for a tool, reads the result and goes again. Here it handles a support request: "My kettle arrived cracked. It's order 4471. Can I get my money back?"
+
+<AnimatedDiagram
+  spec="animated/agents/react-trace"
+  stepper
+  minWidth={620}
+  caption="Each loop is one thought, one tool call and one result; the loop ends on the first turn with no tool call."
+/>
+
+**How to read it.** Each row is one model call. Green is the model's thought, teal is the tool it asks for, and blue is what the tool returned. The prompt's job is to make that pattern easy to follow: name the tools, say when to use each, and say when to stop. The full walk-through of this run, with the JSON messages, is on [Agent architectures](/ai-system-design/genai-system-design/agent-architectures).
 
 ### Self-consistency in one picture
 

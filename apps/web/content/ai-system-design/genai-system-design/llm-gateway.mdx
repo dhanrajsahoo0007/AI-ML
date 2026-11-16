@@ -2,43 +2,271 @@
 title: "LLM Gateway"
 description: "The layer between applications and model providers: one API, keys, routing, fallbacks, limits, caching, logging and guardrails."
 icon: route
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** The layer between applications and model providers: one API, keys, routing, fallbacks, limits, caching, logging and guardrails.
+Once a second team starts calling a model, someone asks who holds the provider keys, who pays for which tokens and what happens when the provider is down. Interviewers ask about LLM gateways to see whether you can answer those three questions in one place, and whether you know what that place costs in latency and in risk.
 
 ## TL;DR
 
+- An **LLM gateway** is a proxy between your apps and the model providers. Apps send **one request format** with a **team key**; the gateway holds the provider keys and translates.
+- It counts **tokens as well as requests**. A daily **budget** caps what a team spends; a **per-minute limit** caps how fast it spends it.
+- On a **429** or a timeout it **retries with backoff, then falls back** to another provider, and rests the failing one for a while. Every retry is paid for in the user's wait.
+- The same choke point carries an **exact-match cache**, **guardrails** on the prompt and the answer, and **one log line per call** with key, tokens, cost and latency.
+- Routing and limits add a few milliseconds. **Guardrails dominate the overhead**, and the gateway itself must be stateless and replicated, or it becomes the outage.
+
 ## The idea in plain English
+
+Think of a company travel desk. Staff do not book flights with their own cards. The desk holds the company's accounts with three airlines, checks each department's travel budget before it books, puts you on another airline when your flight is cancelled, refuses a booking that breaks the travel policy and keeps every receipt for finance. Nobody has to know which airline's website works how. An LLM gateway is that desk for model calls.
 
 ## Core concepts
 
+The running example is Brightpost's support assistant: **200,000 requests a day**, **12 requests/s** at peak, each about **2,200 tokens in and 250 out**. Two other Brightpost teams call models too: a nightly catalogue writer and a labs team trying out new ideas.
+
 ### Why teams add a gateway
+
+Without one, every app embeds a provider SDK and a provider key. Three problems follow. Keys are copied into several services and rotated in several places. No one can see the total spend until the invoice, or stop one team from using up the organisation's rate limit at the provider. Switching or adding a provider means changing every app. A gateway moves keys, limits, routing and logs out of the apps into one service they all call. It is the LLM-specific version of an [API gateway](/system-design/fundamentals/api-gateway): the general page covers authentication and routing; this page covers what is different when the unit of cost is a token.
 
 ### A unified API across providers
 
+Providers differ in request shape (where the system prompt goes, how tools are declared), in streaming events, in error codes and in how they count tokens. The gateway exposes one shape, usually the OpenAI-compatible chat format, and translates on the way out and back. Apps ask for a **model alias** such as `support-answer`, not a vendor's model id, so the platform team can repoint the alias without a deploy. Translation is never perfect: a feature that only one provider has (a cache-control field, a reasoning setting) either passes through untouched or is dropped, and the gateway's docs should say which.
+
 ### Keys, budgets and quotas
+
+Each team gets its own **virtual key**, issued by the gateway and mapped to an owner. The gateway checks every request against two kinds of limit stored per key: a **budget** over a day or a month, and a **rate limit** in tokens or requests per minute.
+
+<AnimatedDiagram
+  spec="animated/serving/gateway-budgets"
+  caption="A daily budget caps what a team can spend; a per-minute limit caps how fast it can spend it. Labs hit its budget, so the gateway refused the last third of a runaway script before any provider billed it."
+/>
+
+**How to read it.** Orange is input tokens, green is output tokens, and each bar is drawn against its own limit line. Support and the catalogue writer are inside their daily budgets. A labs test script stuck in a loop asked for 45 M tokens against a 30 M budget; everything past the line was refused with a 429, so the red part was never sent to a provider. The bottom bar is a different kind of limit: how many tokens the support key may send in one minute at peak.
+
+**The numbers.** Support: 200,000 × 2,200 = 440 M in, 200,000 × 250 = 50 M out, 490 M of 600 M. Catalogue: 20,000 descriptions × 800 in and × 400 out = 16 M + 8 M = 24 M of 40 M (illustrative). Labs: 45 − 30 = 15 M refused. Peak per minute: 12 × 60 = 720 requests × 2,450 tokens = 1,764,000 tokens a minute against an illustrative 2,000,000, so a surge of more than about 13 % over the peak (2,000,000 ÷ 1,764,000 = 1.13) starts drawing 429s. Count input and output separately where the provider does: Anthropic, for example, limits input and output tokens per minute separately.
+
+Issuing the labs key looks like this in LiteLLM's proxy API (as of November 2026). LiteLLM sets budgets in US dollars, so the 30 M tokens become a dollar figure from its price table; the values are illustrative:
+
+```bash
+curl http://gateway.internal:4000/key/generate \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key_alias": "team-labs",
+    "team_id": "labs",
+    "models": ["support-answer", "small-answer"],
+    "max_budget": 60,
+    "budget_duration": "1d",
+    "tpm_limit": 200000,
+    "rpm_limit": 120
+  }'
+```
+
+<Callout tone="red" title="What breaks">
+  The gateway cannot know a request's output tokens before the answer is written. A budget checked only before the call lets a team overshoot by every request already in flight. Reserve an estimate (the prompt's tokens plus `max_tokens`) when the request starts and settle the real count when it ends; LiteLLM does this by default.
+</Callout>
 
 ### Routing, retries and fallbacks
 
+**Routing** picks a model for each request: by the alias the app asked for, by cost (easy questions to a small model, see [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)), by region or by how loaded each provider is. **Retries** repeat a failed call to the same model. **Fallback** sends it to a different one. A provider says "too many requests" with HTTP **429**, often with a `retry-after` header in seconds; a timeout says nothing at all.
+
+<AnimatedDiagram
+  spec="animated/serving/gateway-fallback"
+  stepper
+  caption="The answer still arrives, but its first token comes at 3.45 s instead of 0.4 s: every retry and timeout is paid for in the user's wait."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Provider A is overloaded and answers 429">
+    The support app sends one chat request with its team key. The gateway sends it on in provider A's format, and 50 ms later A refuses it with 429 and `retry-after: 1`. The refusal is fast and honest, so it is safe to try again.
+  </StepCard>
+  <StepCard n={2} title="Wait as told, retry once, time out">
+    The gateway waits the full second, as told, and retries at 1.05 s. A accepts the call but sends no first token within the 2 s deadline, so the gateway gives up on it. Retrying A again would spend more of the user's patience on the provider that is struggling.
+  </StepCard>
+  <StepCard n={3} title="Send the same request to provider B">
+    At 3.05 s the gateway translates the same request into B's format. B's first token arrives 400 ms later, at 3.45 s, and the answer streams back with a header saying which provider served it. The user gets an answer, about 3 s later than usual.
+  </StepCard>
+  <StepCard n={4} title="Leave A alone for a while">
+    After a few failures the gateway puts A in a 30 s cooldown and sends the next requests straight to B. Without it, every request would pay the 3 s detour until A recovered.
+  </StepCard>
+</StepCards>
+
+**The numbers.** First token = 50 ms (429) + 1,000 ms (wait) + 2,000 ms (timeout) + 400 ms (B) = 3,450 ms, against 400 ms on a normal day (illustrative timings). The two settings that decide that number are the wait before a retry and the first-token deadline. For an interactive app, keep retries to one and the deadline short; a nightly batch can wait minutes.
+
+The same policy in Portkey's config format (as of November 2026): one retry on A that honours `retry-after`, then fallback on 429, 408 or 503. Portkey's `request_timeout` is the nearest setting to the figure's first-token deadline: it caps the whole call, in milliseconds, and turns a slow call into a 408. The provider slugs are placeholders.
+
+```json
+{
+  "strategy": { "mode": "fallback", "on_status_codes": [429, 408, 503] },
+  "targets": [
+    {
+      "provider": "@provider-a",
+      "retry": { "attempts": 1, "on_status_codes": [429], "use_retry_after_headers": true },
+      "request_timeout": 2000
+    },
+    { "provider": "@provider-b" }
+  ]
+}
+```
+
+<Callout tone="red" title="What breaks">
+  Not every 429 is temporary. Anthropic returns 429 when an organisation reaches its monthly spend cap, with no `retry-after`, and retries fail until the next month. A gateway that retries every 429 the same way turns a billing problem into a retry storm; read the error details, and fall back or fail fast.
+</Callout>
+
 ## Architecture
+
+Brightpost's gateway, built one job at a time. Each step adds one thing the apps no longer have to do themselves.
+
+<AnimatedDiagram
+  spec="animated/serving/gateway-architecture"
+  stepper
+  caption="The apps stop holding provider keys; every limit, cache, route, check and log lives in one place they all call."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Every app calls a provider with its own key">
+    The support assistant, the catalogue writer and the labs prototypes each hold a copy of provider A's key and call it directly. It works until labs' loop uses up the organisation's rate limit and support starts getting 429s. Nobody can see which team spent what until the invoice.
+  </StepCard>
+  <StepCard n={2} title="One gateway, one API, team keys">
+    Apps now send one request format with a team key to the gateway, which holds the provider keys and translates for A or B. Rotating a provider key is one change. The gateway still forwards everything it is given.
+  </StepCard>
+  <StepCard n={3} title="Budgets and rate limits per team key">
+    Before each call the gateway reads the key's token counts from a shared store such as Redis, and after it adds the real usage. Labs' runaway script is stopped at 30 M tokens; support keeps its headroom. A repeated question still costs a full model call.
+  </StepCard>
+  <StepCard n={4} title="Answer repeated requests from a cache">
+    An exact-match cache keyed on a hash of the whole request returns a stored answer for a byte-identical request, such as the catalogue job re-run on an unchanged product. Personal requests ("my order 4471") are marked not cacheable. Every request still goes to the same large model, however easy it is.
+  </StepCard>
+  <StepCard n={5} title="Route easy questions to a small model; fall back to B">
+    Easy questions ("what are your opening hours?") go to a self-hosted small model; hard ones stay on A. B is no longer a second route but the fallback from the sequence above. Nothing yet checks what goes into the prompt or comes out of the model.
+  </StepCard>
+  <StepCard n={6} title="Check the prompt and the answer">
+    Guardrails scan the prompt for card numbers and other personal data before it leaves Brightpost, and the answer for policy breaches before it reaches the customer. One policy now covers every app. The platform team still cannot answer "what did support spend yesterday, and on what?"
+  </StepCard>
+  <StepCard n={7} title="Log every call with its key, tokens and cost">
+    One log line per call: key, alias, provider served, tokens in and out, cost, latency, cache hit, fallback taken. Spend per team, the fallback rate and the 429 rate are now queries, not guesses.
+  </StepCard>
+</StepCards>
 
 ## Deep dive
 
 ### Caching, logging and guardrails at the gateway
 
+**Caching.** The cheap, safe cache at the gateway is exact-match: hash the provider, model and whole request body, and serve the stored answer for an identical request. Cloudflare AI Gateway works this way. It pays off for repeated system calls (batch re-runs, retries of the same prompt) more than for customers, who rarely type the same thing twice. A semantic cache (similar questions share an answer) hits more often and can serve a wrong answer; it belongs where the app can decide what "the same question" means, see [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching). Provider-side [prompt caching](/ai-system-design/genai-system-design/prompt-caching) is different again: the provider reuses work on a repeated prompt prefix, and the gateway's job is only not to break it by reordering the prompt.
+
+**Logging.** One structured line per call is the raw material for chargeback ([Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution)), for dashboards ([LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability)) and for audit. Decide early whether prompts and answers are logged in full: they contain customers' personal data, so store them redacted, with a short retention and access control, or store only hashes and token counts.
+
+**Guardrails.** The gateway is the one place every prompt passes, so it is where organisation-wide checks go: personal data redaction before a prompt leaves the company, blocked topics, prompt-injection classifiers, and output checks before an answer is returned. App-specific rules (Brightpost's refund limit) stay in the app, which knows the context. See [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety).
+
 ### Latency overhead and high availability
+
+Every request now takes one extra hop. Routing and limit checks cost little; checks that read the text cost more.
+
+<AnimatedDiagram
+  spec="animated/serving/gateway-overhead"
+  caption="Against the full answer the gateway is a sliver; against the first token it is 6 %, and most of it is the guardrail, not the routing."
+/>
+
+**How to read it.** The top chart is one support request that misses the cache. The three gateway steps before the provider call are slivers next to the 1,500 ms answer. The zoomed chart below gives them their own scale: the key and cache checks take 3 ms each, and the input guardrail takes the other 20 ms. The log line is written after the reply, so the user never waits for it.
+
+**The numbers.** Sent at 3 + 3 + 20 = 26 ms. First token at 26 + 400 = 426 ms: the gateway adds 26 ÷ 426 = 6 %. Reply done at 26 + 1,500 + 10 = 1,536 ms: the gateway adds 36 ÷ 1,536 = 2.3 %. All gateway timings are illustrative. For scale, LiteLLM publishes a proxy overhead of 2 ms at the median and 8 ms at p95 at 1,170 requests/s on four instances, measured against a mock provider with its database and Redis turned off; real overhead grows with every check you switch on.
+
+High availability follows from where state lives. Keep gateway replicas **stateless** behind a load balancer and put counters in a shared store, so any replica can serve any key. Decide what happens when that store is down: **fail open** (serve without budget checks for a few minutes) protects the product; **fail closed** protects the bill. Brightpost fails open for support and closed for labs. Run replicas in every region the apps run in, and stream responses straight through: a gateway that buffers a whole answer before forwarding it erases the point of streaming. For the general patterns, see [Load Balancing & Autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling) and [Multi-Region & Edge Deployment](/ai-system-design/genai-system-design/multi-region-edge-deployment).
+
+### Worked example: one refund question on sale day
+
+At 11:00 on sale day Brightpost's support assistant is at its 12 requests/s peak, and provider A is overloaded by its other customers. A customer writes: "My kettle arrived cracked. It's order 4471. Can I get my money back?" Follow it through the seven steps of the architecture figure.
+
+1. **Key and limits (3 ms).** The request carries the `team-support` key and asks for `support-answer`. The key's minute counter is at 1,764,000 of 2,000,000 tokens and the day's count is well inside 600 M, so it passes; the gateway reserves 2,200 + 250 tokens.
+2. **Cache (3 ms).** The request names an order, so the app marked it not cacheable: the lookup misses by design and nothing personal is stored.
+3. **Input guardrail (20 ms).** No card number or email address in the text; the prompt goes out unchanged.
+4. **Route.** A refund question is not "easy", so the router keeps it on the large model at provider A.
+5. **Retry and fall back.** A answers 429; the gateway waits 1 s, retries, gets no first token in 2 s and sends the request to B. The customer sees the first word at about 3.45 s instead of 0.43 s. A goes into its 30 s cooldown.
+6. **Output guardrail (10 ms).** The answer must not say the £42 refund is done, because refunds over £30 need a person's approval; it says a support agent will confirm, so it passes.
+7. **Log.** One line: `team-support`, `support-answer`, served by B, 2,200 in, 250 out, fallback taken, first token 3,450 ms. Settling the counter replaces the reservation with the real 2,450 tokens.
+
+**The numbers.** If A stays overloaded for 10 minutes, 10 × 60 × 12 = 7,200 support requests arrive. With a 30 s cooldown there are 20 windows; if about 3 requests per window pay the slow path before A is benched again, that is 60 slow answers, under 1 %. Without the cooldown, all 7,200 would wait about 3.45 s for their first token (illustrative).
 
 ### Build versus buy
 
+Most teams should not write a gateway from scratch: the hard parts are the provider translations and their edge cases (streaming events, tool calls, token counting), and those change every month. The choices, as of November 2026:
+
+- **Open source, self-hosted** (LiteLLM's proxy, Agent Router, formerly Envoy AI Gateway): your data stays in your network and you can change the code; you run the replicas, the database and the upgrades.
+- **Managed** (Cloudflare AI Gateway, Portkey's hosted gateway): nothing to run and analytics out of the box; every prompt passes through a third party, so check where it is processed and what is logged.
+- **Plugins on an API gateway you already run** (Kong AI Gateway): one gateway for REST and LLM traffic and one set of operators; LLM features arrive at the vendor's pace.
+- **Build your own**: only when the gateway is your product, or when compliance or scale rules out the others. Even then, start from an open-source proxy.
+
+Whichever you pick, keep the apps on a standard request format and model aliases, so you can change the gateway later without touching them. The [LLM Platform & Gateway case study](/genai-system-design/case-studies/llm-platform-gateway) puts this gateway inside a whole internal platform, with tenants, chargeback, shared evaluations and governance.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Central gateway service | One place for keys, limits, routing and logs; apps stay simple | An extra hop; a new critical service to run | Two or more teams, or any production traffic |
+| Client library in each app | No extra hop; no new service | Limits and keys per app; every change is a redeploy | One app, one team, early prototypes |
+| Retry, then fall back to another provider | Survives a provider outage | Slower answers on failover; prompts and answers differ between models | Customer-facing paths with an evaluated second model |
+| Inline guardrails at the gateway | One policy for every app; personal data never leaves | Adds tens of milliseconds to every call | Regulated data, many apps |
+| Fail open on a counter-store outage | The product keeps answering | Spend is unchecked for a while | Customer-facing keys with a hard provider cap behind them |
 
 ## Real-world examples
 
+All as of November 2026, from each product's own docs:
+
+- **LiteLLM proxy** (open source): virtual keys and teams with `max_budget` in US dollars, `budget_duration`, `tpm_limit` and `rpm_limit`; retries a model group `num_retries` times before falling back; puts a deployment that fails more than `allowed_fails` calls into a cooldown of `cooldown_time` seconds.
+- **Portkey**: retries up to 5 times with waits of 1, 2, 4, 8 and 16 s, by default on 429, 500, 502, 503, 504 and 529; falls back on any non-2xx response unless `on_status_codes` narrows it; timeouts in milliseconds return 408.
+- **Cloudflare AI Gateway**: a managed proxy with analytics of requests, tokens and cost, rate limiting, retries and model fallback; its cache is exact-match on a SHA-256 hash of the request, with semantic caching listed as future work.
+- **Kong AI Gateway**: AI plugins on Kong, including AI Rate Limiting Advanced, AI Semantic Cache, AI Prompt Guard and AI Sanitizer, which redacts personal data before the prompt reaches the provider.
+- **Agent Router** (formerly Envoy AI Gateway, renamed on 9 September 2026 when it joined the Agentic AI Foundation): built on Envoy Gateway, with one OpenAI-compatible API for models and MCP tools; its resource names and `aigw` CLI did not change.
+
 ## Common pitfalls
+
+- Rate limits in requests per minute only: one 50,000-token prompt costs the same as a 50-token one, and a long-document feature drains the provider's token limit.
+- Retrying at every layer: if the app's SDK, the gateway and the provider client each retry 3 times, one failure becomes up to 27 calls. Turn off SDK retries behind the gateway.
+- Falling back to a model nobody has evaluated with your prompts. The fallback should pass the same golden set as the primary.
+- Logging full prompts and answers forever, which turns the gateway's log into the biggest store of customer personal data in the company.
+- A gateway that buffers whole responses, so streaming apps lose their fast first token.
+- One shared key for every team "for now", which makes chargeback and the labs-loop outage impossible to trace.
 
 ## How to answer in an interview
 
+1. Say why: keys, spend and outages need one owner once there is more than one app.
+2. Draw apps → gateway → providers, then add jobs one at a time: team keys, token budgets, cache, routing and fallback, guardrails, logs.
+3. Give the numbers: tokens per minute at peak against the limit, and the first-token cost of one retry and one fallback.
+4. Cover failure of the gateway itself: stateless replicas, a shared counter store, fail open or closed per key.
+5. Close with build versus buy and keeping apps on aliases so the gateway can change.
+
+**What interviewers listen for:** limits counted in tokens with both a budget and a rate, a fallback policy with a latency cost attached, and an answer for what happens when the gateway breaks.
+
+**Red flags:** retrying every error forever, fallback to an unevaluated model, or a gateway that becomes a single point of failure.
+
 ## Further reading
+
+- [Budgets and rate limits for teams and keys (LiteLLM docs)](https://docs.litellm.ai/docs/proxy/users) · [Fallbacks, retries and cooldowns (LiteLLM docs)](https://docs.litellm.ai/docs/proxy/reliability) · [Benchmarks (LiteLLM docs)](https://docs.litellm.ai/docs/benchmarks)
+- [Automatic retries (Portkey docs)](https://portkey.ai/docs/product/ai-gateway/automatic-retries) · [Fallbacks (Portkey docs)](https://portkey.ai/docs/product/ai-gateway/fallbacks)
+- [AI Gateway overview and caching (Cloudflare docs)](https://developers.cloudflare.com/ai-gateway/features/caching/)
+- [Kong AI Gateway (Kong docs)](https://developer.konghq.com/ai-gateway/)
+- [Agent Router joins the Agentic AI Foundation (AAIF, 9 September 2026)](https://aaif.io/blog/agent-router-joins-aaif)
+- [Rate limits, response headers and spend caps (Anthropic docs)](https://platform.claude.com/docs/en/api/rate-limits)
+- Related pages: [LLM Platform & Gateway case study](/genai-system-design/case-studies/llm-platform-gateway) · [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling) · [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) · [API Gateways (cloud)](/cloud/networking/api-gateways)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why put an LLM gateway in front of model providers instead of calling them from each app?" category="Concepts" level="Junior">
+    A gateway gives one place for the provider keys, so apps hold only their own team key and a leaked key can be revoked without touching the provider. It counts tokens per team, so one team cannot use up the organisation's rate limit or budget. It offers one request format and model aliases, so switching or adding a provider is a configuration change. And it logs every call with its key, tokens and cost, which makes spend and failures visible before the invoice arrives.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do LLM gateways limit tokens rather than only requests?" category="Concepts" level="Junior">
+    Cost and provider limits scale with tokens, and requests vary by orders of magnitude in size: a 50-token question and a 50,000-token document summary are both one request. Providers enforce tokens per minute, often input and output separately, so a gateway that counts only requests lets one long-document feature exhaust the shared limit. Gateways therefore keep a token budget per day or month and a tokens-per-minute rate per key, reserving an estimate when the call starts and settling the real count when it ends.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the retry and fallback policy for a customer-facing chat assistant behind a gateway." category="Failure modes" level="Mid">
+    Retry only errors that are likely to pass on a second try: 429 with a retry-after, 503 and timeouts, and honour retry-after rather than a fixed wait. Keep it to one retry with a short first-token deadline, because each retry and timeout adds directly to the user's wait; one 429, a 1 s wait, a 2 s timeout and a fallback already turn 0.4 s into about 3.5 s. Then fall back to a second provider whose model has passed the same evaluation set. After a few failures, bench the failing provider for a cooldown so later requests go straight to the fallback, and alert on the fallback rate.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should guardrails run: in the gateway or in each application?" category="Trade-offs" level="Mid">
+    Checks that apply to every app belong in the gateway: personal data redaction before a prompt leaves the company, blocked topics and prompt-injection classifiers, because one policy then covers every caller and nothing slips through a team that forgot. Checks that need business context belong in the app, such as Brightpost's rule that refunds over £30 need approval. The cost is latency on every call, often tens of milliseconds for a classifier, so measure it against the time-to-first-token target and stream output checks chunk by chunk rather than buffering the answer.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your gateway's counter store (Redis) goes down. What should happen to traffic?" category="Failure modes" level="Senior">
+    It depends on the key, and it should be decided before the outage. For customer-facing keys, fail open for a bounded time: keep serving with local in-memory counters per replica (the limit divided by the number of replicas) and alert, because a broken support assistant costs more than a few minutes of unchecked spend, and the provider's own limits still cap the worst case. For internal or experimental keys, fail closed and return a clear error. Either way the gateway replicas should stay stateless so the counter store is the only thing to recover, and the spend log lets you reconcile afterwards.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you keep the gateway itself from becoming a single point of failure and a latency tax?" category="Scaling" level="Senior">
+    Run stateless replicas behind a load balancer in every region the apps run in, with shared state only in a replicated counter store, and treat the gateway as tier-zero infrastructure with its own SLO and on-call. Keep the hot path to in-memory key lookups and one counter round trip, stream responses through without buffering, and write logs asynchronously after the reply. Measure overhead as a span on every request; routing and limits should cost a few milliseconds, and the larger part usually comes from guardrails, which you budget explicitly against time to first token. Finally, keep a documented bypass so a critical app can call a provider directly if the gateway fleet fails.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you build your own LLM gateway or adopt one?" category="Architecture" level="Senior">
+    Adopt one unless the gateway is the product or a hard constraint rules out every option. The difficult, ever-changing work is in provider translations, streaming formats, tool calls and token counting, which open-source proxies such as LiteLLM and managed gateways such as Cloudflare AI Gateway or Portkey already track. Choose self-hosted open source when data must stay in your network, a managed gateway when you want nothing to operate and accept a third party on the data path, and AI plugins on your existing API gateway when you want one operator team. Keep apps on a standard request format and model aliases so the choice can be reversed.
+  </InterviewQuestion>
+</InterviewQuestions>

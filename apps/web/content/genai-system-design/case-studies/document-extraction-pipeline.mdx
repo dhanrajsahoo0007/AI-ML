@@ -2,43 +2,228 @@
 title: "Case Study: Document Extraction Pipeline"
 description: "Design a pipeline that turns invoices, contracts and forms into structured data, with confidence scores and human review."
 icon: file-text
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Design a pipeline that turns invoices, contracts and forms into structured data, with confidence scores and human review.
+"Design a system that reads our supplier invoices and enters them into the ERP." Every finance, insurance and legal team has a version of this prompt. A model can read an invoice in seconds; the hard part is knowing which of its answers to trust, because one wrong total pays a supplier the wrong amount. The design is a pipeline in which the model proposes values and rules, scores and people decide.
 
 ## TL;DR
 
+- Pipeline: **ingest → classify and split → OCR and layout → extract to a schema → validate and score → auto-post or human review → ERP**.
+- A **vision-language model** (a model that reads page images as well as text) fills a **versioned JSON schema** per document type.
+- **Validation rules** (lines add up, VAT is right, the supplier and purchase order exist) catch errors that confidence scores miss.
+- A **confidence threshold** per field routes doubtful invoices to a clerk, who checks only the flagged fields.
+- **People are most of the cost.** At Brightpost's illustrative volumes the models cost under 10 US dollars per 1,000 invoices and review costs 225, so the **straight-through rate** is the number to move.
+- Every correction becomes a labelled example: the **evaluation set** that measures accuracy and catches drift.
+
 ## The idea in plain English
+
+Think of a new accounts clerk with a very fast pair of eyes. They sort the morning's post into invoices, credit notes and junk, read each invoice into a form, check that the numbers add up and that the supplier is real, and post it. When a date is smudged or a purchase order number is handwritten, they put a sticky note on that box and pass it to a colleague. Each time the colleague fixes a sticky note, the clerk learns what they got wrong.
 
 ## Core concepts
 
 ### Requirements and document types
 
+The running example is **Brightpost's finance team**. Brightpost, the online shop whose help centre the RAG pages use, receives about **12,000 supplier invoices a month**, mostly PDFs by email, some scans and phone photos. The mix (illustrative): 85% invoices, 8% credit notes, 5% statements, 2% other. Contracts and forms use the same pipeline with their own schemas.
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Take documents by email and upload", notes: "Digital PDFs, scans and phone photos" },
+    { id: "F2", requirement: "Recognise the document type and split files", notes: "One PDF may hold three invoices" },
+    { id: "F3", requirement: "Extract header fields and line items to a fixed schema", notes: "12 header fields, about 5 lines of 4 fields" },
+    { id: "F4", requirement: "Check totals, VAT, supplier and purchase order", notes: "Against the ERP's records" },
+    { id: "F5", requirement: "Send doubtful invoices to a clerk", notes: "Show only the flagged fields, beside the page" },
+    { id: "F6", requirement: "Post each approved invoice to the ERP exactly once", notes: "Keyed by supplier and invoice number" },
+  ]}
+/>
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Accuracy", target: "99.5% of posted fields correct", why: "A wrong total is a wrong payment" },
+    { id: "N2", property: "Straight-through rate", target: "70% at launch, 85% within a year", why: "Review time is most of the cost" },
+    { id: "N3", property: "Throughput", target: "960 invoices on a month-end day, each posted within 4 hours", why: "The books close on time" },
+    { id: "N4", property: "Audit", target: "Every field traceable to its page region, model version and approver", why: "Auditors ask" },
+  ]}
+/>
+
+<EstimateTable
+  rows={[
+    { quantity: "Volume", assumption: "12,000 invoices a month × 2 pages", result: "24,000 pages a month" },
+    { quantity: "Month-end peak", assumption: "40% arrive in the last 5 working days", result: "4,800 / 5 = 960 invoices a day" },
+    { quantity: "Fields", assumption: "12 header + 5 line items × 4", result: "32 fields per invoice, 384,000 a month" },
+    { quantity: "Review", assumption: "30% of invoices × 90 seconds", result: "3,600 invoices, 90 clerk-hours a month" },
+    { quantity: "Manual entry today", assumption: "12,000 × 6 minutes", result: "1,200 clerk-hours a month" },
+  ]}
+  note="All figures are illustrative."
+/>
+
+The pipeline turns 1,200 hours of typing into 90 hours of checking. Every point of straight-through rate is worth about 3 clerk-hours a month, which is why most of the design effort goes into trustworthy confidence scores.
+
 ### Ingestion, OCR and layout parsing
+
+Ingest reads the finance inbox and an upload page, stores each original unchanged in the document store, and gives it an id. A classifier labels the type and splits files that hold several documents; cloud services offer this as a separate step (Google Document AI lists custom classifier and splitter processors). Digital PDFs carry their text; scans and photos need **optical character recognition (OCR)**, and invoices also need **layout**: which words form a table row, which number sits under "Total". LayoutLM (Xu et al., 2019) showed that modelling text and its position on the page together improves form and receipt understanding. The same principle, shown on a help article:
+
+<AnimatedDiagram
+  spec="animated/rag/parse-layout"
+  stepper
+  caption="Parsing decides what the next stage can see: drop the noise, keep tables and their headers whole."
+/>
+
+**How to read it.** A page is a set of blocks, not a stream of words. Parsing drops what does not matter and keeps each table with its header, so a value stays attached to its column. For an invoice the table is the line items, and the header row says which number is the quantity and which is the price. More on parsers in [Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking).
 
 ### Schema-guided extraction
 
+Each document type has a **versioned JSON schema**: field names, types, formats (ISO dates, two-decimal amounts), enums (currency codes) and which fields are required or may be null. The extractor gets the page images, the OCR words with their boxes and the schema, and must return JSON that matches it; providers' structured-output modes enforce the schema while decoding (see [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)). For each field it also returns the page and box it read the value from, so a reviewer can see the source. A [vision-language model](/ai-system-design/genai-system-design/vision-language-models) reads the image directly; OCR-free models such as Donut (Kim et al., 2021) go further and skip the OCR step, avoiding its cost and its errors.
+
 ### Validation and confidence scoring
 
+A model's answer is a proposal. Two independent signals decide whether to trust it.
+
+<AnimatedDiagram
+  spec="animated/rag/doc-extract-invoice-fields"
+  stepper
+  caption="The model proposes every field; the sums and the threshold decide that a clerk checks two fields, not twenty-four."
+/>
+
+**How to read it.** The scan on the left becomes the fields on the right, each with a value and a confidence bar. The dashed line is the 0.90 threshold. The date is printed "03/11/2026", which a UK supplier means as 3 November, but the format is ambiguous; the purchase order number is handwritten. Both fall below the line. The rules then check what the scores cannot: the lines add up and the VAT is right.
+
+**The numbers.** 800 + 240 + 200 = 1,240.00; VAT 20% × 1,240.00 = 248.00; 1,240 + 248 = 1,488.00. This invoice has 12 + 3 × 4 = 24 fields, and 2 fall below 0.90, so the clerk checks 2 fields and the other 22 post as read.
+
+A confidence can come from the model's token probabilities for the value, from agreement between two extraction passes, from OCR word confidences, or from a service that returns one (Amazon Textract's AnalyzeExpense gives a confidence for every field). Whatever the source, **calibrate it** on labelled invoices so that 0.90 means right about 90% of the time.
+
 ## Architecture
+
+Start from the smallest pipeline that posts an invoice, then add one part at a time. Each step closes a gap the step before it left open.
+
+<AnimatedDiagram
+  spec="animated/rag/doc-extract-architecture"
+  stepper
+  caption="The model only proposes values; rules and a confidence threshold decide which invoices post on their own and which wait for a clerk."
+/>
+
+**How to read it**, one card per step. Zones follow the site's case-study colours: the core pipeline is green, supporting services teal, stores violet, background work orange, and the finance team's own ERP neutral.
+
+<StepCards>
+  <StepCard n={1} title="Upload a PDF, get the fields into the ERP">
+    Ingest stores the original and sends the file to the extractor, which turns it into JSON that is posted to the ERP. Each posting is keyed by supplier and invoice number, so a retry never pays twice ([F1](#req-F1), [F6](#req-F6)). The gap: one PDF can hold three invoices, or a statement that must not be paid.
+  </StepCard>
+  <StepCard n={2} title="Classify each file and split it into documents">
+    A classifier labels each document (invoice, credit note, statement, other) and splits multi-document files, passing a document id on ([F2](#req-F2)). A statement never reaches the invoice schema. The gap: scans and photos have no text layer, and the extractor misreads skewed tables.
+  </StepCard>
+  <StepCard n={3} title="Read scans with OCR and layout">
+    An OCR and layout stage returns every word with its box and groups them into lines, key-value pairs and table rows ([F1](#req-F1)). The extractor now sees both the image and the words in place. The gap: the JSON's shape drifts from one invoice to the next, and the ERP rejects it.
+  </StepCard>
+  <StepCard n={4} title="Extract to a versioned schema">
+    The schema store holds one versioned schema per document type, and the extractor must fill it exactly ([F3](#req-F3)). Changing a field means a new schema version, tested on the evaluation set first. The gap: valid JSON can still hold a wrong total.
+  </StepCard>
+  <StepCard n={5} title="Validate and score every field">
+    The validator checks the sums and the VAT, looks up the supplier and the purchase order in the ERP, rejects duplicates, and attaches a calibrated confidence to each field ([F4](#req-F4)). Only invoices that pass every rule with every field at 0.90 or more post on their own. The gap: the rest have nowhere to go.
+  </StepCard>
+  <StepCard n={6} title="Send doubtful invoices to a clerk">
+    The review queue shows the page with the flagged fields highlighted; the clerk fixes them, and the corrected invoice goes back through the validator before posting ([F5](#req-F5), [N1](#req-N1)). About 30% of invoices come here at launch. The gap: nobody knows whether accuracy is holding.
+  </StepCard>
+  <StepCard n={7} title="Measure accuracy and drift">
+    Every decision and every correction goes to the accuracy monitor. Corrections become labelled examples in the evaluation set, and the monitor tracks field accuracy, straight-through rate and calibration per supplier ([N1](#req-N1), [N2](#req-N2)).
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Confidently wrong fields. A model can read "1,488.00" as "1,468.00" at 0.97, above the threshold. If the only gate is confidence, it posts. Fix: never let confidence replace the rules (the lines would not add up), sample a share of auto-posted invoices for audit, and recalibrate when the audit finds errors above the line.
+</Callout>
 
 ## Deep dive
 
 ### The human review queue
 
+The queue is a product for clerks, not a dump of failures. Show the page beside the form, jump to each flagged field, and highlight the box the value came from. Order the queue by payment due date, not arrival. Record every change as a label (field, old value, new value, clerk, time). Two anti-patterns: asking clerks to re-check fields above the threshold, which makes the model pointless, and letting them approve without looking, which makes the threshold pointless. Watch the time per invoice and the share of flagged fields that clerks change: if they almost never change one, raise that field's threshold. More patterns are in [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
+
 ### Batch processing, throughput and cost
+
+Invoices are not urgent to the second, so most of this pipeline is batch work. The month-end day is the design point.
+
+<AnimatedDiagram
+  spec="animated/rag/doc-extract-cost"
+  stepper
+  caption="The models cost less than ten dollars per thousand invoices; the people who check them cost over two hundred, so the straight-through rate is the number to move."
+/>
+
+**How to read it.** The bars are to scale. OCR and the LLM are slivers; clerk review is the long bar. Step 3 shows what raising the straight-through rate from 70% to 85% does.
+
+**The numbers.** LLM: 4,000 input tokens × 1 per million + 600 output tokens × 4 per million = 0.0064 US dollars per invoice. OCR: 2 pages at 1.50 per 1,000 pages = 0.003. Review: 90 seconds at 30 dollars an hour = 0.75 per reviewed invoice, × 30% = 0.225. Per invoice 0.23, or about 2,800 dollars a month against 36,000 for manual entry. Throughput: at 8 seconds per invoice (illustrative) and 8 parallel workers, the 960-invoice peak day takes 960 × 8 / 8 = 960 seconds, 16 minutes. Batch APIs cut the model cost further; Anthropic's Message Batches API charges 50% less and returns results within 24 hours. That suits the steady flow; month-end invoices use the real-time path to meet the 4-hour target. See [Batch vs Real-Time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference).
 
 ### Accuracy measurement and drift
 
+Measure at the field level, on a held-out set of corrected invoices, after normalising (dates to ISO, amounts to two decimals):
+
+- **Field accuracy:** the share of fields whose value matches the corrected one, per field type. Totals and dates matter more than addresses.
+- **Straight-through rate:** the share of invoices posted with no human touch.
+- **Escape rate:** the share of auto-posted invoices with an error, from a 2% audit sample (about 170 invoices a month at 70%).
+- **Calibration:** of fields scored 0.90 to 0.95, how many were right.
+
+Drift arrives as a new supplier template, a supplier that changes its layout, or a new VAT rate. Track every metric **per supplier**: an overall 97% can hide one large supplier at 60%. When a supplier drops, its invoices go to review automatically, and their corrections become examples for the next prompt or schema version.
+
 ## Trade-offs
+
+| Decision | Option A | Option B | Default here |
+| --- | --- | --- | --- |
+| Extractor | Prebuilt invoice API | VLM with your schema | Prebuilt for standard fields; VLM for custom fields and other types |
+| Reading the page | OCR then text LLM | VLM on the image (+ OCR words) | Both: words for exact digits, image for layout |
+| Routing | One invoice-level score | Per-field thresholds + rules | Per field, with rules always on |
+| Timing | Real-time per document | Nightly batch | Batch, with a real-time lane at month-end |
+| Improving | Fine-tune a model | Better prompts, schemas, examples | Prompts first; fine-tune when corrections number in thousands |
 
 ## Real-world examples
 
+- **Amazon Textract AnalyzeExpense** extracts invoice and receipt fields and line items into a standard taxonomy, with a confidence score for each.
+- **Google Document AI** offers an Invoice Parser for header fields and line items, and custom classifier, splitter and extractor processors.
+- **Azure AI Document Intelligence** has a prebuilt invoice model that returns structured JSON and supports invoices in 27 languages.
+- Accounts-payable automation products wrap the same pipeline in a review screen and ERP connectors.
+
 ## Common pitfalls
+
+- Trusting confidence scores that were never calibrated.
+- Skipping validation rules because the model "usually gets totals right".
+- Posting without an idempotency key, so a retry pays an invoice twice.
+- Making clerks re-key whole invoices instead of fixing flagged fields.
+- Measuring accuracy overall but not per supplier, so drift hides.
+- Throwing away corrections instead of turning them into the evaluation set.
 
 ## How to answer in an interview
 
+1. Clarify document types, volume and peaks, fields, the cost of an error, and the target straight-through rate.
+2. Draw the pipeline: ingest, classify, OCR and layout, schema extraction, validation, routing, review, export.
+3. Go deep on confidence: where scores come from, calibration, thresholds per field, and the rules that back them up.
+4. Do the cost arithmetic and show that review time dominates.
+5. Close with evaluation from corrections, per-supplier drift and audit sampling.
+
+**What interviewers listen for:** schema-first extraction, rules plus calibrated confidence, a review loop that produces labels, and cost tied to the straight-through rate.
+
+**Red flags:** "the LLM extracts the fields and we post them", with no validation, threshold or review.
+
 ## Further reading
+
+- [LayoutLM: Pre-training of Text and Layout for Document Image Understanding (Xu et al., 2019)](https://arxiv.org/abs/1912.13318)
+- [OCR-free Document Understanding Transformer (Donut) (Kim et al., 2021)](https://arxiv.org/abs/2111.15664)
+- [Analyzing invoices and receipts (Amazon Textract)](https://docs.aws.amazon.com/textract/latest/dg/invoices-receipts.html)
+- [Processor list (Google Document AI)](https://docs.cloud.google.com/document-ai/docs/processors-list)
+- [Invoice data extraction (Azure AI Document Intelligence)](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/invoice)
+- [Batch processing (Anthropic)](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Walk through a pipeline that turns supplier invoices into ERP entries." category="Architecture" level="Junior">
+    Ingest documents from email and upload and store the originals. Classify each document and split multi-document files. Run OCR and layout analysis, then have a vision-language model fill a versioned JSON schema with each field's value, confidence and source location. Validate totals, tax, supplier and purchase order against the ERP, post invoices that pass every rule with every field above the threshold, and send the rest to a review queue whose corrections feed an evaluation set.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you decide which extracted invoices can be posted without a human?" category="Trade-offs" level="Mid">
+    Combine calibrated per-field confidence with validation rules. An invoice posts on its own only if every field is above its threshold and every rule passes: line items sum to the subtotal, tax matches the rate, the supplier and purchase order exist, and it is not a duplicate. Set thresholds per field from a labelled set so that the error rate on auto-posted invoices stays below the target, and audit a sample of auto-posted invoices to check it.
+  </InterviewQuestion>
+  <InterviewQuestion question="The model returns 0.97 confidence on a total that is wrong. What does your design do?" category="Failure modes" level="Mid">
+    The validation rules catch it: the line items no longer add up to the total, or the tax no longer matches, so the invoice goes to review despite the score. If no rule covers the field, the audit sample of auto-posted invoices finds it, and the correction goes into the evaluation set and into recalibrating that field's confidence.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does the money go in a document extraction pipeline, and how would you reduce it?" category="Trade-offs" level="Senior">
+    Usually into human review, not models: OCR and an LLM cost cents per document while a reviewed invoice costs a clerk a minute or more. Raise the straight-through rate with better layout input, schema and prompt fixes for the fields clerks change most, per-field thresholds and supplier-specific examples, and make review faster by showing only flagged fields. Use batch inference for documents that are not urgent.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you detect that extraction quality is drifting?" category="Evaluation" level="Senior">
+    Turn every human correction into a labelled example and track field accuracy, straight-through rate, escape rate on an audit sample, and calibration per supplier and per field over time. Alert when a supplier's metrics drop, which usually means a new template, and route that supplier's invoices to review until a schema or prompt fix passes the evaluation set.
+  </InterviewQuestion>
+</InterviewQuestions>

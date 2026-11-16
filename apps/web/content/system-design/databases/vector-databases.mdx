@@ -75,7 +75,19 @@ client.query_points(
 
 ## Why it's fast: approximate nearest neighbors
 
-Comparing the query to every vector (exact k-NN) is O(n). At 100M vectors that's too slow. ANN indexes trade a little recall for a huge speed-up:
+Comparing the query to every vector (exact k-NN) is O(n). At 100M vectors that's too slow. ANN indexes trade a little recall for a huge speed-up.
+
+The figures below use a small collection, 3,600 help-article chunks with 1,536 numbers each, so every point can be drawn. The same arithmetic scales to 100M. First, how much work an index saves on one query.
+
+<AnimatedDiagram
+  spec="animated/rag/exact-vs-ann"
+  stepper
+  caption="The index buys a 12-fold cut in work by never looking at most vectors, which is also how it can miss one."
+/>
+
+**How to read it.** Each tile stands for 60 vectors. The orange question vector is the query. Step 1 is exact search: the query is compared with every tile, so the result is always right. Step 2 is an ANN index of the IVF kind (see the table below): it compares the query with 60 cluster centres, then opens only the 4 nearest clusters. The red tile is the price: a true neighbour in a cluster the search never opens. Recall is the share of the true top-k that the index returns.
+
+**The numbers.** Exact: 3,600 vectors × 1,536 multiply-adds = 5,529,600 per query. ANN: 60 centres + 4 × 60 vectors = 300 comparisons, 460,800 multiply-adds, 12 times less. At 100M vectors, exact search is 100,000,000 × 1,536 ≈ 154 billion multiply-adds per query, which is why large collections need an index.
 
 | Index | Idea | Trade-off |
 |---|---|---|
@@ -83,6 +95,22 @@ Comparing the query to every vector (exact k-NN) is O(n). At 100M vectors that's
 | **IVF** | Cluster vectors, then search only the nearest few clusters | Less memory; tune how many clusters to probe |
 | **Product quantization (PQ)** | Compress each vector to a few bytes | Much less memory; lower recall |
 | **DiskANN** | A graph index kept on SSD | Billions of vectors without all of them in RAM |
+
+HNSW is the index Qdrant and Weaviate build by default and one of pgvector's two index types, so it is worth watching one search.
+
+<AnimatedDiagram
+  spec="animated/rag/hnsw-layers"
+  stepper
+  caption="The upper layers get the search near the query in a few long hops; only the bottom layer is searched carefully."
+/>
+
+**How to read it.** Every vector is a point in layer 0, linked to its near neighbours; about 1 in M points also appears in the layer above, so upper layers are sparse with long links (step 1). The search enters at the top and hops greedily to whichever neighbour is closer to the query (step 2), drops a layer where it can get no closer (step 3), and at layer 0 keeps a list of the best `ef_search` candidates instead of one path (step 4). It returns the k nearest it found (step 5). A larger `ef_search` explores more points: better recall, slower queries.
+
+**The numbers.** With M = 16 (a common default, illustrative here), layer 1 holds about 3,600 ÷ 16 = 225 points and layer 2 about 3,600 ÷ 256 ≈ 14, so the drawn index has three layers. At 100M vectors, 16⁶ ≈ 16.8M, so the graph has about seven layers: the number of layers grows with the logarithm of the collection, which keeps the hops per query small.
+
+<Callout tone="red" title="What breaks">
+  Memory. HNSW wants the vectors and the graph in RAM. At 100M vectors of 1,536 float32 numbers that is 100,000,000 × 6,144 bytes ≈ 614 GB of vectors, plus up to 32 links × 4 bytes = 128 bytes per point in layer 0, about 13 GB. Fix: quantize the vectors (PQ or scalar quantization), shard across nodes, or use a disk-based graph such as DiskANN.
+</Callout>
 
 You tune **recall vs latency**. Exploring more of the graph (HNSW `ef_search`) or probing more clusters (IVF `nprobe`) means better results but slower queries.
 

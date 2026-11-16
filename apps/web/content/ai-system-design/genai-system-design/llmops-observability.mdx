@@ -1,6 +1,8 @@
 ---
 title: LLMOps and Observability
 description: Running LLM applications in production, covering tracing, prompt and model versioning, offline and online evaluation, feedback loops, drift, cost and releases.
+icon: activity
+updated: 2026-11-15
 ---
 
 LLMOps is MLOps for systems whose behavior is shaped by prompts, retrieved data, tools and third-party models that change underneath you. Interviewers want to hear how you would know when quality drops, why it dropped, and how you ship changes safely.
@@ -37,21 +39,25 @@ Running an LLM app without observability is like running a restaurant without re
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    APP["LLM application"] -->|"spans: retrieval, LLM calls,<br/>tools, tokens, latency"| TRACE[("Trace store")]
-    TRACE --> DASH["Dashboards: quality, latency,<br/>cost, errors by version"]
-    TRACE --> SAMPLE["Sample production traces"]
-    SAMPLE --> JUDGE["Online eval: LLM judge,<br/>human review queue"]
-    USERFB["User feedback"] --> JUDGE
-    JUDGE --> FAIL["Failure cases"]
-    FAIL --> DATASET[("Versioned eval datasets")]
-    DATASET --> CI["CI: offline evals on every change"]:::accent
-    REG["Prompt / model / config registry"] --> CI
-    CI -->|"pass"| ROLLOUT["Canary / A-B rollout with flags"]
-    ROLLOUT --> APP
-    DASH --> ALERT["Alerts: drift, cost, error spikes"]
-```
+Where does each piece of LLMOps sit? The map below is the whole loop for the Brightpost support assistant: a build path along the top, a serving path along the bottom, and a trace store that feeds both back.
+
+<AnimatedDiagram
+  spec="animated/llmops/llmops-lifecycle"
+  stepper
+  caption="Top row: data to a registered model version. Bottom row: a request through the gateway, the engine and the guardrails to an answer. The dashed line turns every request into a trace, and traces feed evaluation and the next round of data."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Build: data to registry">
+    5,000 resolved tickets tune the model for Brightpost's tone and refund policy. The 200-ticket golden set checks it, and the passing version goes into the registry.
+  </StepCard>
+  <StepCard n={2} title="Serve: user to answer">
+    The registered version runs on GPUs behind a gateway. At peak it carries 12 requests a second, and guardrails check each answer of about 250 tokens.
+  </StepCard>
+  <StepCard n={3} title="Trace and feed back">
+    Every request leaves a trace. Sampled traces are scored and become evaluations on real traffic, and failures become new data.
+  </StepCard>
+</StepCards>
 
 The operating loop:
 
@@ -63,16 +69,48 @@ The operating loop:
 
 ## Deep dive
 
+### What changes from MLOps
+
+LLMOps keeps the MLOps loop (data, train, test, release, monitor) and changes what is inside it.
+
+<AnimatedDiagram
+  spec="animated/llmops/mlops-vs-llmops"
+  caption="Behaviour comes from more places, correctness is graded rather than counted, and cost is paid per token."
+/>
+
+**How to read it.** Each row is one question and the two answers. The model is often a third party's, so a provider can change it under a name you call, and the prompt and retrieved documents shape behaviour as much as weights do. Brightpost pays for 440 M input and 50 M output tokens a day, so cost is a first-class metric next to quality.
+
 ### What a single trace contains
 
-```mermaid
-flowchart LR
-    REQ["Request id, user, feature,<br/>prompt version, model version"] --> R["Retrieval span:<br/>query, doc ids, scores"]
-    R --> L1["LLM span: prompt tokens,<br/>output tokens, latency"]
-    L1 --> T["Tool span: name, args,<br/>result, errors"]
-    T --> L2["LLM span: final answer"]
-    L2 --> FB["Feedback + eval scores<br/>attached later"]:::accent
-```
+A trace is a tree of timed spans. The root holds the request id, user, feature, and prompt and model versions; each child is one step.
+
+<AnimatedDiagram
+  spec="animated/llmops/trace-span-tree"
+  caption="One request as a trace. The model call is 1,500 of 1,695 ms; the customer sees the first token at 535 ms. Only the model call is Brightpost's measured target; the other timings are illustrative."
+/>
+
+**How to read it.** Read from the top. Gateway, cache lookup, retrieval, model call and guardrail each get a row on a shared time axis. The model call is 1,500 ÷ 1,695 = 88.5 % of the request, so that is where a slow request is usually slow. Attributes on each span carry the retrieval query and document ids, token counts, tool name and arguments, and errors. Feedback and judge scores are attached later, to the same trace id. The span fields, redaction and sampling are on [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging).
+
+### Metrics, logs and traces, plus what LLM systems add
+
+The three classic signals each answer a different question. A metric says that something is wrong, a log line says what exactly happened, and a trace says where the time went. The same trace id joins the log line and the span.
+
+<AnimatedDiagram
+  spec="animated/cloud/three-signals"
+  stepper
+  caption="One request leaves a metric, a log line and a span, and each answers a different question. The example is from the cloud section; the idea is the same for an LLM call."
+/>
+
+**What LLM systems add.** Two signals the classic three do not cover. **Evaluations** score the content of an answer (faithfulness, tone, policy), because a fast, error-free response can still be wrong. **Feedback** (thumbs, edits, retries, escalations) says what the customer thought. Both attach to the trace id, so one search shows the request, its cost and its quality. For the general case see [Observability on the Cloud](/cloud/operations/observability-on-the-cloud).
+
+### Worked example: a bad refund answer, found and fixed
+
+At 200,000 requests a day Brightpost cannot read every trace. It keeps all of them for a few days, scores a sample with a judge (a 1 % sample would be 2,000 traces a day; illustrative), and always keeps slow or failed ones. A customer replies "that is not what I was told" to an answer about order 4471, a £42 kettle. That feedback attaches to the trace. The trace shows the retrieved article was the old returns policy, so the fault is in retrieval, not the model. The team adds the case to the golden set (now 201), fixes the index, and CI runs the whole suite before the canary starts. Next week's drift check confirms the pass rate holds. Each step is one box on the map above: trace, evaluation, data, registry, rollout.
+
+### The pages in this group
+
+- Observability: [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging) · [Latency & Token Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring) · [Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution) · [Drift Detection](/ai-system-design/genai-system-design/drift-detection) · [Alerting & Dashboards](/ai-system-design/genai-system-design/alerting-dashboards).
+- Release pipelines: [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines) · [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control) · [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance).
 
 ### Key metrics
 
@@ -125,6 +163,7 @@ flowchart LR
 - [Hidden Technical Debt in Machine Learning Systems (Sculley et al., 2015)](https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems)
 - [Judging LLM-as-a-Judge (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
 - [RAGAS (Es et al., 2023)](https://arxiv.org/abs/2309.15217)
+- Related pages: [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging) · [Drift Detection](/ai-system-design/genai-system-design/drift-detection) · [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines)
 
 <InterviewQuestions>
   <InterviewQuestion question="What should you log for every LLM request?" category="Concepts" level="Junior">
@@ -144,5 +183,11 @@ flowchart LR
   </InterviewQuestion>
   <InterviewQuestion question="How would you attribute and control LLM costs across teams?" category="Failure modes" level="Senior">
     Tag every request with team, feature and customer, aggregate tokens and cost per tag, set budgets and alerts, and show cost per successful task next to quality. Use quotas and rate limits per tenant, and review the most expensive features for routing, caching or prompt reductions.
+  </InterviewQuestion>
+  <InterviewQuestion question="A slow request is reported. How do you find where the time went?" category="Failure modes" level="Mid">
+    Open its trace and read the span tree from the root. Each step (gateway, cache, retrieval, model call, guardrail) has its own duration, so the longest span is the first suspect. In Brightpost's example the model call is 1,500 of 1,695 ms, so the model or its prompt length is the likely cause. Compare with p95 for the same feature to see whether this is one slow request or a trend.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do evaluations and feedback add to metrics, logs and traces?" category="Concepts" level="Senior">
+    The classic three say that a request was slow or failed, what happened, and where the time went. They cannot say whether the answer was right. Evaluations score content (faithfulness, tone, policy) on sampled traces, and feedback shows what users thought. Both attach to the trace id, so one trace shows the request, its cost and its quality. Without them an LLM app can be fast, green on every dashboard and still wrong.
   </InterviewQuestion>
 </InterviewQuestions>

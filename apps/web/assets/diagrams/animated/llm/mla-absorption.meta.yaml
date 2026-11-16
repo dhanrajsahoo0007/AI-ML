@@ -1,0 +1,22 @@
+title: "Weight absorption in MLA, as matrix products"
+alt: >-
+  Matrix products drawn to scale, built in four steps. Top left, in a teal panel about keys, step 1 shows the naive
+  score for head i and cached token j: a short blue query vector q_i times a wide lavender W_UK matrix, 128 by 512,
+  times a tall pink latent column c_j of 512 numbers; a bracket under W_UK and c_j reads "equals k_j, rebuilt per
+  token", and red text says this costs 65,536 multiply-adds for every cached token, every head, every step. Step 2
+  regroups the same product: a bracket under q_i and W_UK reads "once per new token", and an arrow leads to one wide
+  blue vector q prime i of 512 numbers, which is multiplied by c_j; green text says each cached token then costs 512
+  multiply-adds, one dot product. Top right, in a violet panel about values, step 3 shows the same move for the
+  output: naively, every cached value is rebuilt as W_UV times c_j, 65,536 multiply-adds per token per head; absorbed,
+  the latents are mixed first, as the weighted sum of a_ij times c_j, and W_UV is applied once per head, with W_O
+  following as usual. At the bottom, step 4 shows why RoPE needs a separate key: with RoPE on the key, a red rotation
+  R of j minus t sits between q_i and W_UK and changes for every cached token, so nothing can be folded. On the right,
+  DeepSeek-V2's fix writes the score as q prime i times c_j plus a small blue q_R times a small teal k_R, so position
+  lives only in the 64-number term and the 512-number part stays absorbed.
+caption: >-
+  Matrix multiplication is associative, so MLA multiplies the query by W_UK once and scores each cached latent
+  directly; RoPE would put a position-dependent rotation in the middle, which is why the RoPE key is kept separate.
+  Drawn to scale for one head of DeepSeek-V2.
+tags: [llm, attention, mla, kv-cache, rope, inference, genai]
+source: original
+created: 2026-11-15
