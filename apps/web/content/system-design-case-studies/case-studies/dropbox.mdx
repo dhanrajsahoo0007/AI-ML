@@ -1,12 +1,673 @@
 ---
 title: "Design Dropbox"
-description: "File sync, chunking and deduplication, metadata and conflict handling."
+description: "File sync: 4 MB blocks addressed by hash, a commit protocol, a journal per folder, conflicted copies and durable block storage."
 logo: systems/dropbox
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a file sync service: a file saved on one device appears on the user's other devices, and large files upload efficiently.
+The hard parts are never losing a byte out of 500 PB, moving only the bytes that changed, and keeping devices that go offline and edit the same file from overwriting each other.
 
-**What it will cover:** file sync, chunking and deduplication, metadata and conflict handling.
+- Interviewers use this question to see whether you separate metadata from bytes, make one step the moment a version becomes real, and can say what happens offline, on retry and on conflict.
 
-**Patterns used:** [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a file sync service like Dropbox. A file saved on one device appears on the user's other devices, and large files upload efficiently."
+  level="Senior"
+  minutes={45}
+  bankId="design-file-sync"
+  tests={[
+    "Separating metadata from file bytes, and storing each where it belongs",
+    "Uploading only what changed, with retries that are always safe",
+    "Sync across devices that go offline, and conflicts that never lose data",
+    "Durability at hundreds of petabytes, justified against cost",
+  ]}
+  clarify={[
+    { q: "How big can a file be?", a: "Up to 50 GB; most files are under 4 MB." },
+    { q: "How many users and devices?", a: "100 million daily users with 3 devices each: 300 million devices." },
+    { q: "Is sharing between users in scope?", a: "No: one user's folders. A namespace still models a folder, so sharing can be added later." },
+    { q: "Is version history needed?", a: "Yes: any version from the last 30 days can be restored." },
+    { q: "What if two devices edit the same file offline?", a: "Keep both: the second becomes a conflicted copy." },
+    { q: "How fast must a change reach the other devices?", a: "Under 10 s for a small file on a device that is online." },
+  ]}
+  outOfScope={["Sharing and permissions", "Previews and thumbnails", "Search inside files", "Editing in the browser"]}
+/>
+
+## Overview
+
+- Files are cut into **4 MB blocks** named by their **SHA-256 hash**; a version of a file is an ordered **block list**.
+- A **commit** sends the block list first; the server answers with the blocks it lacks, the client uploads only those, and the version becomes real in **one transaction**.
+- Metadata lives in a **relational database sharded by namespace**; blocks live in an **object store** and never change.
+- Every commit appends a row to its namespace's **journal**; each device keeps a **cursor**, is woken by a **long poll**, then **pulls** the rows after it.
+- A commit names the **revision it started from**; a stale one becomes a **conflicted copy**, never an overwrite.
+- New blocks are copied to **two zones** before the commit is acknowledged; sealed buckets are **erasure-coded** across three zones and **scrubbed** all the time.
+
+<Numbers
+  items={[
+    { value: "500 PB", label: "stored", hint: "100 M users × 5 GB" },
+    { value: "35,000/s", label: "commits at peak", hint: "3 × 11,600/s" },
+    { value: "0.4%", label: "of a 1 GB file resent", hint: "one 4 MB block after a small edit" },
+    { value: "0", label: "committed files lost" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Upload and download files of any size", notes: "Up to 50 GB; an interrupted upload resumes." },
+    { id: "F2", requirement: "Sync across devices", notes: "A change on one device appears on the user's other devices." },
+    { id: "F3", requirement: "Offline edits and conflicts", notes: "Edit offline; two edits of one file never lose either." },
+    { id: "F4", requirement: "Version history", notes: "Restore any version from the last 30 days." },
+    { id: "F5", requirement: "Tell devices about changes", notes: "Within seconds, without every device polling constantly." },
+  ]}
+/>
+
+- Out of scope: sharing and permissions, previews, search inside files, editing in the browser.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Durability", target: "0 committed files lost; 11 nines per block per year", why: "A lost file is the one failure users never forgive." },
+    { id: "N2", property: "Commit latency", target: "p99 under 300 ms, file bytes excluded", why: "The desktop shows a file as synced only after the commit." },
+    { id: "N3", property: "Sync latency", target: "p99 under 10 s for a small change, device online", why: "Users save on one device and open on the next." },
+    { id: "N4", property: "Bandwidth", target: "A small in-place edit to a 1 GB file uploads at most 4 MB", why: "Home uplinks are slow; 1 GB at 20 Mbit/s is 7 minutes." },
+    { id: "N5", property: "Availability", target: "99.99% for commit and download; 99.9% for notifications", why: "A late notification costs seconds; a failed commit leaves a file unsynced." },
+    { id: "N6", property: "Scale", target: "300 M devices, 35,000 commits/s at peak, 500 PB", why: "The numbers below." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Devices", assumption: "100 M daily users × 3 devices", result: "300 M devices; 100 M online at peak" },
+    { quantity: "Stored", assumption: "100 M users × 5 GB; assume 20% of blocks are duplicates", result: "500 PB logical, 400 PB unique" },
+    { quantity: "Raw disk", assumption: "400 PB × 1.5 (erasure code) against × 3 (copies)", result: "600 PB against 1,200 PB" },
+    { quantity: "Commits", assumption: "100 M × 10 saved files a day ÷ 86,400 s", result: "11,600/s; peak 3 × ≈ 35,000/s" },
+    { quantity: "New bytes", assumption: "500 KB missing per commit × 1,000,000,000 a day", result: "0.5 PB a day: 5.8 GB/s, 17 GB/s at peak" },
+    { quantity: "Blocks per file", assumption: "1 GB ÷ 4 MB; 32-byte hash each", result: "256 blocks; an 8 KB block list" },
+    { quantity: "File rows", assumption: "100 M users × 2,000 files × 300 bytes, × 2 for 30 days of versions", result: "120 TB: 256 shards of under 0.5 TB" },
+    { quantity: "Block index", assumption: "400 PB ÷ 4 MB blocks × 64 bytes", result: "100 billion entries, 6.4 TB" },
+    { quantity: "Metadata reads", assumption: "10 reads per commit × 35,000/s; 90% from cache", result: "350,000/s; 35,000/s reach the database" },
+    { quantity: "Long polls", assumption: "100 M online devices, renewed every 90 s; 100,000 per server", result: "1.1 M renewals/s; 1,000 notification servers" },
+  ]}
+  note="Bytes dominate storage; metadata dominates requests."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Metadata: 10 reads per commit (lists, block lists, browsing); a block is written once and read by about 2 other devices | A metadata cache; blocks written once, never updated |
+| D2 | Peak against average | Daily peak 3 × average; a notification outage makes 100 M devices list at once: 167,000 lists/s if spread over 10 minutes | Back-off hints and jitter on clients; "nothing changed" answered from cache |
+| D3 | Consistency per operation | Commit strong per namespace; blocks immutable, so any copy is right; notifications may be late | A transactional metadata store; blocks need no consensus |
+| D4 | Latency target | Commit p99 300 ms (N2); a change elsewhere p99 10 s (N3) | Bytes off the commit path; notify, then pull |
+| D5 | Durability | The defining driver: 0 committed files lost, 11 nines per block (N1) | Two zones before the ack; erasure coding; constant verification |
+| D6 | Ordering | Per namespace: devices must apply changes in commit order; nothing needs a global order | A journal id per namespace, assigned in the commit transaction |
+| D7 | Duplicates | A gift: the same content has the same hash and is stored once; a repeated commit must return the first result | Content addressing; an idempotency key on commit |
+| D8 | Data size and growth | 500 PB, 0.5 PB a day; recent blocks are read most, old ones rarely | 4 MB blocks; replicate new data, erasure-code old data |
+| D9 | Fan-out shape | One commit wakes about 2 other devices; one to few | A wake-up per namespace, then each device pulls on its own |
+| D10 | Contention | One file edited on two devices: rare, but the second writer must not erase the first | A parent-revision check; a conflicted copy |
+| D11 | Geography | One home region per user for metadata; blocks spread over 3 zones; residency rules out of scope | Zones, not regions, carry durability |
+| D12 | Availability and degradation | 99.99% commit and download; under stress, slow notifications and prefetch first, never the commit check | Devices fall back to slower polls; commits keep their guarantees |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/commit` | Sync client | After a local change: file id, path, parent revision, block list, `Idempotency-Key` |
+| `PUT /v1/blocks/{hash}` | Sync client | For each block the commit said is missing; body up to 4 MB |
+| `GET /v1/blocks/{hash}` | Sync client | For each block a pulled change needs and the device lacks |
+| `POST /v1/list` | Sync client | Namespace and cursor; returns changes after it, a new cursor and `has_more` |
+| `POST /v1/longpoll` | Sync client | Every cursor the device follows; returns `changed` or times out after 90 s |
+| `GET /v1/files/{id}/revisions` | Sync client, web | Version history (F4) |
+| `POST /v1/files/{id}/restore` | Sync client, web | Commit an old revision's block list as the newest revision |
+
+```http
+POST /v1/commit
+Idempotency-Key: c9
+{ "ns": 42, "file_id": "f42", "path": "/report.pdf", "parent_rev": 7,
+  "blocks": ["9f2c…", "41ab…", "e07d…"], "size": 12582912 }
+
+200 OK        { "status": "need_blocks", "missing": ["9f2c…", "e07d…"] }
+200 OK        { "status": "committed", "rev": 8, "journal_id": 9006 }
+409 Conflict  { "error": "stale_parent", "current_rev": 8 }
+```
+
+- **Idempotency:** the commit's `Idempotency-Key` is stored in the same transaction as the revision; a retry returns the first `rev` and `journal_id`. A block `PUT` is idempotent by construction: the server checks the body's SHA-256 against the name, so a resent block lands on the same key.
+- **Errors:** `409` the parent revision is stale (conflict); `410` the cursor is older than the kept journal (reset and re-list); `429` with `Retry-After`, and a `backoff` field on long polls, when the server sheds load.
+- **Pagination:** `list` returns at most 1,000 changes and `has_more`; the client calls again with the new cursor.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Files and revisions | Relational database (<TechIcon id="oss/mysql" /> MySQL, <TechIcon id="oss/postgresql" /> PostgreSQL), sharded | Parent check, new revision and journal row in one transaction (D3, D5, D10) | `ns_id` | Strong | A wide-column store: no transaction across the file row and the journal |
+| Journal | Same shard as the files | Ids assigned in the commit transaction, in commit order (D6) | `ns_id` | Strong | A log as the source of truth: a second write that can fail after the commit |
+| Block index | Key-value store sharded by hash (<TechIcon id="oss/rocksdb" /> RocksDB-based, or sharded MySQL) | 100 billion point lookups by hash; a hash spreads load evenly (D7, D8) | `block_hash` | Strong per key | Inside the namespace shards: a block shared by two namespaces has no single home |
+| Blocks | Object store, replicated then erasure-coded | 500 PB, written once, read rarely (D5, D8) | `block_hash` | Immutable | A database: 500 PB of blobs in B-tree pages |
+| Hot metadata, pending block lists | In-memory cache (<TechIcon id="oss/redis" /> Redis) | 350,000 reads/s (D1) | `ns_id` | Deleted on commit | Read replicas: 350,000 queries/s still reach disks, and lag breaks read-your-writes |
+| Change feed | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | One journal append, many notification servers, replay after a restart (D9) | `ns_id` | Ordered per namespace | Polling the journal tables for 300 M cursors |
+| Device state | Embedded database on the device (SQLite) | Ids, hashes and the cursor survive restarts (F2, F3) | none | Local | Rehashing 5 GB on every start |
+
+```sql
+-- Metadata DB, sharded by ns_id (a user's root folder; later, one shared folder).
+CREATE TABLE files (
+  ns_id bigint, file_id bigint,     -- file_id never changes on rename or move
+  path text, rev bigint, size bigint,
+  blocklist bytea,                  -- 32-byte SHA-256 per 4 MB block, in order
+  deleted boolean,
+  PRIMARY KEY (ns_id, file_id), UNIQUE (ns_id, path)
+);
+CREATE TABLE revisions (ns_id bigint, file_id bigint, rev bigint, blocklist bytea,
+  created_at timestamptz, PRIMARY KEY (ns_id, file_id, rev));       -- kept 30 days
+CREATE TABLE journal (ns_id bigint, journal_id bigint,             -- the cursor
+  file_id bigint, rev bigint, op text,                             -- add | edit | move | delete
+  PRIMARY KEY (ns_id, journal_id));
+CREATE TABLE commit_keys (ns_id bigint, idem_key text, rev bigint, journal_id bigint,
+  PRIMARY KEY (ns_id, idem_key));                                   -- kept 24 h
+```
+
+```text
+Block index, sharded by block_hash:
+  block_hash (32 bytes) -> { bucket_id, offset, length, refcount, zones, durable: bool }
+```
+
+- **Commit:** one transaction on the namespace's shard: update `files` where `rev = parent_rev`, insert the revision, append the journal row, store the key.
+- **List after a cursor:** `SELECT … FROM journal WHERE ns_id = ? AND journal_id > ? ORDER BY journal_id LIMIT 1000`.
+- **Which blocks are missing:** a batch point lookup of the hashes in the block index; only entries marked `durable` count.
+- **Restore:** read the old revision's block list and commit it as a new revision; no bytes move.
+
+Each device follows a namespace with one number, and the server keeps one journal per namespace.
+
+<AnimatedDiagram spec="animated/dropbox/journal-cursor" stepper caption="The server keeps one journal per namespace and each device keeps one number: pulling after the cursor is all a device needs to catch up." />
+
+**How to read it:**
+
+- Blue cells are journal rows, one per commit; green cells are rows a device has applied, grey cells rows still to pull.
+- Step 2 is a laptop catching up after a wake-up; step 3 is a phone whose cursor is older than the journal the server still keeps.
+
+**The numbers:** the laptop pulls 9008 − 9005 = 3 rows; 1,000,000,000 journal rows a day at about 100 bytes is 100 GB a day, so 30 days of journal is 3 TB across 256 shards.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Upload the whole file (F1)
+
+The smallest design: the client sends the whole file to one service, which stores the bytes and a row.
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={1} caption="Step 1: the metadata service takes the whole file, writes the bytes to the object store and a row to the metadata database." />
+
+- **Adds:** the desktop sync client, a load balancer, the **metadata service**, the metadata database, the object store.
+- **Flow:**
+  1. The desktop sends `PUT /files/report.pdf` with the whole body.
+  2. The service writes the bytes to the object store, then a file row with the new revision.
+- **Why this and not that:** metadata and bytes already live in different stores: rows are small and change, bytes are large and do not (D8).
+- **The gap:** a small edit to a 1 GB file resends 1 GB; a dropped link at 900 MB starts over; 17 GB/s of bytes flow through the tier that must answer commits in 300 ms (N4, D4).
+
+<PremiumBreak />
+
+### Step 2: Split files into blocks named by their hash (F1, N4)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={2} caption="Step 2: the client puts 4 MB blocks to the block service, which stores each one by its SHA-256 hash and records it in the block index." />
+
+- **Adds:** the **block service** and the **block index**; the whole-file upload goes away.
+- **Flow:**
+  1. The client cuts the file into 4 MB blocks and hashes each with SHA-256.
+  2. It sends `PUT /blocks/{hash}` for every block; the block service checks the hash, writes the block and records it in the index.
+  3. The client saves the ordered list of hashes at the metadata service.
+- **Why this and not that:** a small in-place edit now resends one 4 MB block, 0.4% of a 1 GB file; an upload resumes at the next block; the same content is stored once (D7, D8, N4). Bytes go to the block service, so the metadata tier carries only rows (D4).
+- **Why 4 MB:** 1 GB is 256 blocks and an 8 KB list; 64 KB blocks would be 16,384 hashes and 16,384 requests per gigabyte.
+- **The gap:** the saved list may name a block that never arrived; the client also uploads blocks the server already holds.
+
+### Step 3: The commit protocol (F1, F4)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={3} caption="Step 3: the client commits the block list first; the metadata service asks which blocks are missing, and only those are uploaded." />
+
+- **Adds:** the commit check between the metadata service and the block service.
+- **Flow:**
+  1. The client commits the block list, its parent revision and an `Idempotency-Key`.
+  2. The metadata service asks which hashes are missing; if any are, it answers `need_blocks`.
+  3. The client uploads only those blocks, then commits again.
+  4. In one transaction the service writes the new revision and appends a journal row.
+- **Why this and not that:** a version exists only when every block it names is stored, so no device can ever see a file it cannot download (D5). A rename or a copy commits with zero bytes uploaded. Old revisions stay in the `revisions` table, which is version history (F4).
+- **The gap:** the user's laptop does not know anything changed.
+
+### Step 4: Sync: a journal per namespace, notify, then pull (F2, F5)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={4} caption="Step 4: new journal rows flow through the change log to the notification service, which wakes the laptop's long poll; the laptop pulls the changes after its cursor." />
+
+- **Adds:** the laptop, the **change log** and the **notification service**.
+- **Flow:**
+  1. The commit's journal row is captured from the metadata database onto the change log, keyed by namespace.
+  2. The notification server that holds the laptop's long poll for namespace 42 answers `changed`.
+  3. The laptop calls `list` with its cursor, gets the new rows and block lists, and fetches only the blocks it lacks.
+  4. It stores the new cursor and opens the next long poll.
+- **Why this and not that:** polling 300 M devices every 30 s is 10 M requests/s that are nearly all empty; pushing file contents fails for offline devices. A wake-up carries one bit, and the pull by cursor can be repeated safely (D9, F5).
+- **The gap:** the client must know what changed locally, and a moved file must not look like a delete and a new file.
+
+### Step 5: The client: watch the folder, keep a local index (F2, F3)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={5} caption="Step 5: the desktop watches its folder and keeps a local index of file ids, block hashes and its cursor." />
+
+- **Adds:** the **local index** on each device.
+- **Flow:**
+  1. The operating system's file events (inotify, FSEvents, ReadDirectoryChangesW) say which paths changed; a slow rescan catches missed events.
+  2. The client compares size and modified time with the index and rehashes only files that differ.
+  3. A moved file keeps its `file_id`, so the client commits a move, not a delete plus an add.
+- **Why this and not that:** hashing every file on start is 5 GB at 500 MB/s, 10 s of disk per device per start; the index makes it near zero. Stable ids keep history and in-flight edits attached to a file through renames (F3).
+- **The gap:** two devices that edit the same file offline will both commit.
+
+### Step 6: Conflicts become a conflicted copy (F3)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={6} caption="Step 6: a commit names the revision it started from and succeeds only if that revision is still current." />
+
+- **Adds:** nothing new: the commit becomes a conditional update on `rev = parent_rev`.
+- **Flow:**
+  1. The first device to reconnect commits; the revision moves from 7 to 8.
+  2. The second commits with parent 7 and gets `409`.
+  3. It saves its version as a new file, "plan (Laptop's conflicted copy).docx", and pulls revision 8.
+- **Why this and not that:** last writer wins silently erases an edit; a merge needs to understand the file's format, which a sync service does not (D10).
+- **The gap:** every block sits in one place; one lost disk loses files.
+
+### Step 7: Durable block storage (N1)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={7} caption="Step 7: storage jobs keep new blocks as full copies in two zones, erasure-code sealed buckets across three, scrub disks and collect garbage." />
+
+- **Adds:** **storage jobs**.
+- **Flow:**
+  1. A new block is acknowledged only when copies exist in two zones; only then is it `durable` in the index.
+  2. Blocks are packed into 1 GB buckets; a week after a bucket is sealed it is erasure-coded into 6 data and 3 parity fragments across three zones, and the copies are deleted.
+  3. Jobs scrub every disk, sample-read new blocks, and delete blocks no revision has referenced for 30 days.
+- **Why this and not that:** three full copies of 400 PB is 1,200 PB of disk; the code is 600 PB and still survives a whole zone (D5, D8). Recent blocks, the ones read most, stay as fast full copies.
+- **The gap:** 350,000 metadata reads/s reach the database, and a big new file appears on the laptop only after its whole upload ends.
+
+### Step 8: A metadata cache and streaming sync (N3, D1)
+
+<AnimatedDiagram spec="animated/dropbox/architecture" step={8} caption="Step 8: a metadata cache serves hot rows and the block lists of uploads still in progress, so other devices can start downloading early." />
+
+- **Adds:** the **metadata cache**.
+- **Flow:**
+  1. Hot namespace listings, file rows and each namespace's latest journal id are read from the cache; a commit deletes the keys it changed.
+  2. While a large new file uploads, the metadata service keeps its pending block list in the cache.
+  3. The laptop's `list` returns the pending list, and it prefetches blocks already stored; when the commit lands it is nearly done.
+- **Why this and not that:** 90% of 350,000 reads/s never reach a shard (D1). A 1 GB file at 20 Mbit/s takes about 400 s to upload; without prefetch the laptop waits all of it and then downloads (N3).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/dropbox/architecture" stepper caption="File sync: blocks addressed by hash, one commit that makes a version real, a journal per namespace that devices follow with a cursor, and blocks kept in several zones." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Desktop and laptop sync clients, the local index | Watch folders, hash blocks, commit, follow cursors |
+| **Edge** | Load balancer | TLS, routing by path, long idle timeouts for long polls |
+| **Sync core** | Metadata service, notification service | Commit and version history; wake devices when a namespace changes |
+| **Block services** | Block service, storage jobs | Put and get blocks by hash; replicate, encode, scrub, collect garbage |
+| **Async pipeline** | Change log | Carry every journal append to the notification servers |
+| **Storage** | Metadata cache, metadata database, block index, object store | Hot rows; files, revisions and journal; hash to location; the bytes |
+
+Saving a 12 MB file on the desktop and seeing it on the laptop:
+
+1. The watcher sees `report.pdf` change; three 4 MB blocks hash to h1, h2, h3; the index says h2 is unchanged.
+2. `POST /v1/commit` with parent revision 7: the reply is `need_blocks` h1, h3.
+3. The desktop puts h1 and h3 (8 MB) to the block service; both land in two zones.
+4. The second commit writes revision 8 and journal row 9006 in one transaction.
+5. The row reaches the change log; the laptop's long poll answers `changed`.
+6. The laptop lists after 9005, gets row 9006, downloads h1 and h3, verifies them and moves its cursor to 9006.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST over HTTPS, with long polls for changes
+
+- **Choice:** REST for commit, list and blocks; `POST /v1/longpoll` holds a request open up to 90 s and answers `changed` or times out.
+- **Why:** every action is a request and a response that can be retried (commit with a key, blocks by hash), and a wake-up carries one bit (D7, D9).
+- **Why not WebSockets:** they would save the 1.1 M renewals/s, but each server then owns 100,000 stateful sockets, and a deploy drops them all at once; a long poll ends every 90 s anyway, so a deploy is routine.
+- **Why not pushing file contents:** a third of devices are offline at any time, and contents are megabytes; the pull by cursor works the same for a device that was away a second or a month.
+- **Why not polling `list` every 30 s:** 10 M requests/s, nearly all empty, and still 15 s late on average (D4).
+- **Why not gRPC or GraphQL:** gRPC streaming is a fair choice for the desktop but not for browsers without a proxy; GraphQL adds nothing to a handful of fixed calls.
+
+### Load balancer: layer 7, with long idle timeouts
+
+- **Choice:** an HTTP (layer-7) load balancer that routes by path: `/commit`, `/list` to the metadata service; `/blocks` to the block service; `/longpoll` to notification servers, with a 120 s idle timeout.
+- **Why:** path routing keeps 17 GB/s of block traffic away from the commit path (D4); least-connections suits long polls, least-outstanding-requests suits commits.
+- **Why not layer 4:** it cannot route by path, so blocks and commits would share servers.
+- **Why not one route for everything:** a slow block upload would hold a worker that a 300 ms commit needs (D12).
+
+### CDN: installers and the web app only, never blocks
+
+- **Choice:** a CDN serves the client installers, updates and the web app's static files.
+- **Why:** a client update goes to 300 M devices; the edge absorbs it (D2).
+- **Why not blocks through the CDN:** a block is private and read by about 2 devices, so an edge cache would rarely hit, and private bytes would sit at every edge (D1).
+- **Upgrade path:** public shared links, out of scope here, are the case where a CDN in front of blocks pays.
+
+### Metadata service: stateless, routed by namespace
+
+- **Choice:** stateless servers that route each call to the shard owning its `ns_id` and run the commit transaction there.
+- **Why:** every commit touches one namespace, so it is one transaction on one shard (D3, D6); servers scale by adding more.
+- **Why not clients writing to the database:** the parent check, missing-block check and key check must run in one place the client cannot skip.
+- **Why not file bytes through it:** at 17 GB/s it would need hundreds of servers sized for bandwidth, and a big upload would slow every commit (D4).
+
+### Metadata database: relational, sharded by namespace
+
+- **Choice:** <TechIcon id="oss/mysql" /> MySQL or <TechIcon id="oss/postgresql" /> PostgreSQL, 256 shards by `ns_id`; files, revisions, journal and commit keys of one namespace on one shard.
+- **Why:** a commit is a conditional update, an insert and an append that must all happen or none (D3, D5, D10); the journal id comes from the same transaction, so order per namespace is free (D6). 120 TB fits in 256 shards of under 0.5 TB.
+- **Why not a wide-column store (Cassandra):** lightweight transactions are per partition and cost several round trips, and the file row and the journal row would need one atomic write across tables.
+- **Why not one unsharded database:** 120 TB and 35,000 commits/s exceed one primary.
+- **Why not distributed SQL (Spanner, CockroachDB):** a sound choice that removes manual resharding, but every write pays consensus latency, and nothing here needs a cross-shard transaction.
+
+### Block index: a key-value store sharded by hash
+
+- **Choice:** a key-value store keyed by SHA-256, such as a <TechIcon id="oss/rocksdb" /> RocksDB-based store or sharded MySQL; value: bucket, offset, length, reference count, zones, `durable`.
+- **Why:** 100 billion entries (6.4 TB) answered by point lookups; random hashes spread load evenly with no hot shard (D8, D10).
+- **Why not in the namespace shards:** after dedup one block belongs to many files, so no single namespace owns it.
+- **Why not a Bloom filter alone:** a false positive would say the server has a block it lacks, and a committed file would point at nothing (D5); a filter may only answer "definitely missing".
+
+### Object store: immutable blocks, replicated then erasure-coded
+
+- **Choice:** an object store of 4 MB blocks packed into 1 GB buckets: full copies in two zones first, 6 + 3 erasure coding across three zones after a week. How such a store works inside is the [S3](/system-design-case-studies/case-studies/s3) case study.
+- **Why:** 500 PB that is written once and read rarely; immutability means copies never disagree, so durability is a placement problem, not a consensus problem (D3, D5, D8).
+- **Why not a cloud object store bought per request:** the right call at small scale; at hundreds of petabytes, per-gigabyte storage and egress prices are the largest bill and owning the disks pays.
+- **Why not a distributed file system (HDFS):** its name node keeps every file in memory, and 100 billion blocks is far beyond one name node.
+- **Why not blobs in the database:** 500 PB inside database pages costs replication, backups and buffer cache for bytes that never change.
+
+### Change log: Kafka, fed from the journal
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `ns_id`, filled by change data capture from the journal tables.
+- **Why:** the log sees exactly what committed; notification servers consume the partitions for the namespaces they hold polls for and can replay after a restart (D6, D9).
+- **Why not publishing from the metadata service after commit:** a crash between the commit and the publish leaves devices asleep until their poll times out (the dual-write problem).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is gone; there is no replay for a restarted server.
+
+### Notification service: an in-memory map of waiting polls
+
+- **Choice:** servers that keep `ns_id → waiting polls` in memory, 100,000 polls each, 1,000 servers at peak.
+- **Why:** a wake-up must reach a device in about a second, and a missed one costs at most one 90 s poll, because the device pulls by cursor anyway (D4, D12).
+- **Why not storing polls in a database:** they live 90 s and are rebuilt by the next poll; persistence buys nothing.
+- **Why not mobile push only (APNs, FCM):** right as the wake-up for phones that sleep; desktops stay online, and a long poll we run ourselves keeps the 10 s target in our hands (N3).
+
+### Metadata cache: Redis, cache-aside, deleted on commit
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis keyed by namespace: latest journal id, hot listings, file rows, pending block lists.
+- **Why:** 90% of 350,000 reads/s are served from memory; "is there anything after cursor 9008?" is one key read, which is what keeps a reconnect storm off the shards (D1, D2).
+- **Why not read replicas:** still 350,000 queries/s on disk-backed servers, and replica lag can hide a device's own commit.
+- **Why not a cache updated in place:** two commits racing to write the cache can leave the older value; deleting keys on commit and refilling on read cannot.
+
+### Storage jobs: background workers
+
+- **Choice:** workers that replicate, seal and encode buckets, scrub disks, verify placement and collect blocks with no references.
+- **Why:** each job is slow, retryable and off the user's path; durability comes from them running all the time (D5).
+- **Why not erasure-code at write time:** a 4 MB block would be written as 9 fragments in three zones before the ack, slower commits for the data read most; a sealed 1 GB bucket encodes once.
+- **Why not delete a block when its count reaches zero:** a commit may be about to reference it; a grace period and a second check make a wrong delete impossible to race.
+
+### Ids: content hashes, file ids, journal ids
+
+- **Choice:** blocks are named by SHA-256 of their content; files by a 64-bit id from the shard (shard prefix plus sequence); journal rows by a sequence per namespace.
+- **Why:** a content name makes dedup and safe retries free (D7); a file id survives moves (F3); a per-namespace sequence orders exactly what a device must apply in order (D6).
+- **Why not the path as identity:** a rename would look like a delete and a new file, and an edit racing a move would land at a path that no longer exists.
+- **Why not one global sequence:** a single counter for 35,000 commits/s, for an order no reader needs.
+
+## Deep dives
+
+### The commit protocol: send the list, upload what is missing, retry safely
+
+- **The rule:** a version becomes real only when its commit transaction commits; blocks uploaded without a commit are invisible and are collected after 24 h.
+- **List first:** the commit carries every hash, so the server's answer is the exact upload plan; a rename, a copy or a restore uploads nothing.
+- **Only durable blocks count:** the missing-block check reads index entries marked `durable` (copies in two zones), so a commit can never name a block that a disk failure could still lose (D5).
+- **Retries:** a block `PUT` is safe to repeat because the name is the content's hash; a commit is safe to repeat because its `Idempotency-Key` is stored in the same transaction and a retry returns the first result (D7).
+- **Large files:** 50 GB is 12,800 blocks and a 400 KB list; the client uploads 4 to 8 blocks in parallel, and after a crash it commits again and the server names what is still missing.
+- **Dedup scope:** dedup within the user's own namespaces. Across users, a `need_blocks` answer would tell anyone whether some other user stores a given file.
+
+A file becomes a list of hashes; the [pattern page](/system-design/patterns/blob-storage-and-chunking)'s figure shows resume and dedup with 16 MB chunks, and this design uses 4 MB.
+
+<AnimatedDiagram spec="animated/patterns/blob-chunks" stepper caption="Hash every chunk and the file becomes a list of hashes: a drop resends only the missing chunks, and a copy sends nothing at all." />
+
+**How to read it:** step 3 is a resume after a dropped link; step 4 is a duplicate that moves no bytes.
+
+The commit itself, with the server deciding what to upload:
+
+<AnimatedDiagram spec="animated/dropbox/blocklist-commit" stepper caption="Send the block list first and upload only the blocks the server lacks; a retried commit with the same key returns the first result." />
+
+<StepCards>
+  <StepCard n={1} title="Commit, need blocks, upload, commit">
+    The desktop commits h1, h2, h3 for a 12 MB file. The server already holds h2, so it asks for h1 and h3 only; the second commit writes revision 8 and journal row 9006 in one transaction.
+  </StepCard>
+  <StepCard n={2} title="The reply is lost: retry, same result">
+    The reply to the second commit never arrives. The desktop retries with the same key c9; the server finds the key already applied and returns revision 8 and row 9006 again, writing nothing.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 2 of 3 blocks move, 8 MB instead of 12 MB; at 35,000 commits/s with 3 hashes each, the block index answers about 105,000 lookups/s, spread over every hash shard.
+
+<Callout tone="red" title="What breaks">
+  A commit that only checks that a block was uploaded, not that it is durable in two zones, can publish a file whose only copy sits on a disk that then fails. Every device that pulls it gets an error, and the data is gone.
+</Callout>
+
+### Sync correctness: the journal, moves and conflicts
+
+- **One order per namespace:** journal ids come from the commit transaction, so every device applies changes in exactly the order they committed (D6).
+- **Wake-ups may be lost:** the notification is a hint; the pull by cursor is the truth, so a lost wake-up costs at most one 90 s poll and a duplicate costs one empty `list`.
+- **Moves by id:** the journal records `move f42 to /archive`; a device that edited f42 commits by id and the edit lands at the new path.
+- **Conflicts by revision:** a commit is `UPDATE files … WHERE rev = :parent`; zero rows means someone else committed first, and the client keeps its bytes as a conflicted copy (D10).
+- **Applying a remote change safely:** download to a temporary file, check every block's hash, check the local file still has the hash the index recorded, then rename into place. A local edit made in the meantime becomes a conflicted copy on the device.
+- **Delete against edit:** keep the edit; a sync service must never be the reason a user's work disappears.
+
+<AnimatedDiagram spec="animated/dropbox/conflict" stepper caption="A commit names the revision it started from: the second writer gets a conflicted copy instead of overwriting, and a stable file id lets an edit follow a move." />
+
+<StepCards>
+  <StepCard n={1} title="Same parent: the second writer gets a copy">
+    Both devices edited f42 from revision 7. The desktop commits first and makes revision 8; the laptop's commit with parent 7 is refused, so it saves its bytes as a conflicted copy and pulls revision 8.
+  </StepCard>
+  <StepCard n={2} title="Move and edit: the id follows the file">
+    The desktop moves f42 to /archive; the path changes, the id does not. The laptop's next edit names f42 and revision 9, so it lands at the new path as revision 10.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- A phone back after a week, 300 rows behind, needs one `list` page of 300 rows.
+- A cursor older than the 30 days of kept journal gets `410` and a full listing of its 2,000 files instead.
+
+<Callout tone="red" title="What breaks">
+  Last writer wins looks fine in a demo and silently deletes the first editor's work in production. Any write path that replaces a file without checking the revision it started from will lose data.
+</Callout>
+
+### Durability: replicate, then erasure-code, then verify all the time
+
+- **Write path:** a block is acknowledged when three copies exist, two in zone A and one in zone B; only then is it `durable` (D5).
+- **Seal and encode:** blocks pack into 1 GB buckets; a week after sealing, a bucket becomes 6 data and 3 parity fragments, three per zone, and the copies are deleted.
+- **Rebuild:** a failed disk's fragments are rebuilt from the other fragments of each bucket, spread over many disks so the rebuild is fast.
+- **Verify all the time:** scrub each disk against checksums every two weeks; read back a sample of new blocks after a minute, a day and a week; walk the block index and confirm every block sits where it should; walk the files and confirm every block they name exists.
+- **Delete carefully:** a block is deleted only when no revision has referenced it for 30 days and a second, independent check agrees; deleted data stays in a trash area for a further week.
+
+<AnimatedDiagram spec="animated/dropbox/replicate-encode" stepper caption="New blocks are copied in full to two zones; sealed buckets are erasure-coded at half the disk, and still readable when a whole zone is down." />
+
+<StepCards>
+  <StepCard n={1} title="New blocks: three copies, two zones">
+    A new bucket is held as three full copies, two in zone A and one in zone B: 3 GB of disk for 1 GB of data, and fast to read while the data is new and most often read.
+  </StepCard>
+  <StepCard n={2} title="Sealed: 6 data + 3 parity, three per zone">
+    A week later the bucket becomes nine fragments of 167 MB, three in each zone: 1.5 GB of disk. Any six of the nine rebuild the bucket.
+  </StepCard>
+  <StepCard n={3} title="A zone is lost: decode from the six left">
+    Zone C goes down with d5, d6 and p3. Reads decode d5 and d6 from the six fragments in zones A and B while storage jobs rebuild the three lost ones.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 600 PB of coded data ÷ 20 TB disks is 30,000 disks; at 1% failing a year that is 300 failures, about 6 a week.
+- Rebuilding a 20 TB disk reads 6 × 20 TB = 120 TB; spread over 1,000 disks at 50 MB/s each (50 GB/s) that is 2,400 s, 40 minutes.
+- Scrubbing a 20 TB disk at 100 MB/s takes 200,000 s, 2.3 days, so a two-week cycle spends about 16% of each disk's time on checking.
+
+<Callout tone="red" title="What breaks">
+  After a zone loss, 6 + 3 across three zones has no margin left: one more failed disk in the other zones loses buckets. Rebuild first, and use a wider code or a fourth zone if a zone outage can outlast the rebuild.
+</Callout>
+
+### Worked example: a 1 GB video edited on the desktop, opened on the laptop
+
+1. 09:00:00: the watcher sees `holiday.mov` (1 GB) change; size and time differ, so the client rehashes 256 blocks at 500 MB/s: 2 s. Only h117 differs.
+2. 09:00:02: commit with parent revision 3: `need_blocks` h117. The desktop puts 4 MB at 20 Mbit/s: 32 Mbit ÷ 20 = 1.6 s.
+3. 09:00:04: the second commit writes revision 4 and journal row 9010 in about 50 ms.
+4. 09:00:05: the row reaches the change log and the laptop's long poll answers within about 1 s.
+5. 09:00:06: the laptop lists after 9009, sees that only h117 is new, downloads 4 MB at 100 Mbit/s (0.3 s), verifies it and renames the file into place.
+
+**The numbers:**
+
+- About 6 s end to end, inside N3's 10 s; 8 MB crossed the network instead of 2 GB.
+- Had the edit inserted one byte at the start, every later 4 MB boundary would shift and all 256 blocks would change: the cost of fixed blocks.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Chunking | Whole file, fixed 4 MB blocks, content-defined chunks | Fixed 4 MB blocks | D8, N4 | An insertion shifts every later block | Insert-heavy files dominate upload bytes |
+| Metadata store | Eventual key-value store, sharded relational, distributed SQL | Relational, sharded by namespace | D3, D5, D6, D10 | Resharding by hand; no cross-namespace transaction | Running shards costs more than consensus latency |
+| Telling devices | Polling, pushing contents, notify then pull | Long-poll wake-up, then pull by cursor | D9, D12, F5 | One extra round trip per change | Phones: use the OS push service as the wake-up |
+| Conflicts | Last writer wins, automatic merge, conflicted copy | Conflicted copy | D10, F3 | The user resolves it by hand | A file type with a known merge, such as plain text |
+| Block durability | Three copies forever, erasure code at write, copies then code | Copies in two zones, code after a week | D5, D8, N1 | 3 × disk for a week of new data; encoding jobs | New data is a large share of stored data |
+| Dedup scope | None, per user, across all users | Per user's namespaces | D7, D8 | Savings from identical files across users | A proof-of-ownership step makes cross-user dedup safe |
+| Upload path | Through the metadata service, a block service, signed URLs to a cloud store | A block service that checks hashes | D4, D5, D8 | Another tier to run | Scale small enough to rent the object store |
+| Journal scope | One global log, per user, per namespace | Per namespace | D6, D9 | Cross-namespace order is undefined | Never: no reader needs a global order |
+| File identity | Path, stable id | Stable 64-bit id | D10, F3 | An id map on every client | Never |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | 4 MB blocks named by hash; the block service and object store | Upload only what changed; store each block once |
+| [Idempotency](/system-design/patterns/idempotency) | Commit keys; blocks named by content | Every retry after a timeout must be harmless |
+| [Consistency Models and CAP](/system-design/patterns/consistency-models) | Strong commits, immutable blocks, late notifications | Each piece gets only the consistency it needs |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Commit only if `rev = parent` | Two devices must not overwrite each other |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Metadata by namespace; block index by hash | 120 TB of rows and 100 billion hashes |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | Journal rows captured onto the change log | A commit and its notification cannot drift apart |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The change log | Many notification servers, replay after a restart |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | File ids, journal ids, content hashes | Identity that survives moves and orders changes |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | `backoff` on long polls, `429` with `Retry-After` | Survive a reconnect storm of 100 M devices |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Another cloud drive | Blocks by hash, commit, journal and cursor | Sharing makes a namespace per shared folder; permissions on every call |
+| Photo backup | Content hashes, upload only what is missing, durable storage | One direction, so no conflicts; thumbnails and a CDN for viewing |
+| Syncing a reading position or a game save | Journal per user, cursor per device, notify then pull | Tiny state: no blocks; a conflict can take the furthest position |
+| A large-file upload service | Resumable blocks, hash checks, commit at the end | No sync and no journal; one uploader, one file |
+| Source control (Git) | Content-addressed blobs, commits naming a parent | Conflicts are merged line by line, because the format is known |
+
+## How real systems do it
+
+- **2014:** Dropbox's streaming sync post: every file is split into 4 MB blocks hashed with SHA-256; the client commits the block list, the server replies with the blocks it needs, the client uploads them and commits again, and the commit adds a row to the Server File Journal. Prefetching blocks of uncommitted files gave up to 2 × faster sync between clients.
+- **2016:** Dropbox's Magic Pocket: an immutable block store keyed by the SHA-256 of blocks up to 4 MB; the block index is a sharded MySQL cluster; each block is stored in at least two separate zones; blocks are grouped into 1 GB buckets, and recent data is replicated first and erasure-coded later.
+- **2016:** Dropbox's Edgestore, its metadata store, runs on MySQL (InnoDB), gives strong consistency by default, and holds several trillion entries at millions of queries per second.
+- **2016:** Dropbox's Pocket Watch: a disk scrubber sweeps each disk about every 1 to 2 weeks, a watcher samples 1% of written blocks and reads them back over a month, and verification is over half of the load on disks and databases.
+- **2020:** Dropbox rewrote its sync engine (Nucleus, in Rust) around a client-server protocol redesigned for strong consistency, with globally unique ids for files and folders and deterministic, pseudorandom simulation tests. The same year, compressing blocks cut upload bandwidth by about 30%.
+- **2025:** Dropbox's help centre: a conflicted copy is created when the same file is edited in two places at once, or offline while it changes elsewhere; it is named with the editor, "conflicted copy" and the date. Its API docs (read 2026): clients follow a folder with a cursor and a long poll that returns when something changes.
+- **Where this design differs:** the 6 + 3 code across three zones, the cache and the Kafka change log are this page's choices to size the system, not published Dropbox details; the protocol, the journal and the zone rule follow the posts above.
+
+## Failure modes & pitfalls
+
+- **A commit that names a block that is not durable:** downloads fail with "block not found"; alert on any such error; check `durable` in the block index before committing.
+- **Reconnect storm after a notification outage:** 100 M devices list at once, 167,000 lists/s; watch new-connection rate; return `backoff` with jitter, answer "nothing after your cursor" from the cache, shed listing before commits.
+- **Last writer wins anywhere:** an edit silently disappears; count conflicted copies and compare against user reports; check the parent revision on the server and the local hash before replacing a file on the device.
+- **Garbage collection racing a commit:** a block deleted just as a new revision references it is lost for good; reconcile the block index against all revisions; delete only after a grace period, a second check and a trash week.
+- **A hot namespace:** a script writing 1,000 files/s slows every namespace on its shard; watch per-namespace commit rate; rate-limit per namespace and move it to its own shard.
+- **A cursor older than the journal:** the device gets `410` and lists 2,000 files; watch the reset rate; keep 30 days of journal.
+- **Silent corruption on disk:** a block no longer matches its hash; the scrubber finds it before a user does; rebuild it from the other fragments.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify file size, devices, sharing, version history, conflicts, sync latency; write F1 to F5 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 500 PB, 35,000 commits/s, 256 blocks for 1 GB, 120 TB of metadata, 100 M long polls.
+3. **Minutes 10 to 15:** API and data model: the commit call, blocks by hash, the journal; say metadata is strong and blocks are immutable.
+4. **Minutes 15 to 25:** Steps 1 to 4: whole file, blocks, the commit protocol, notify then pull.
+5. **Minutes 25 to 35:** Steps 5 to 8: the client index, conflicts, durability, cache and prefetch.
+6. **Minutes 35 to 45:** one deep dive: the commit protocol, sync correctness or durability; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** chunking with hashes, metadata separate from bytes, a device cursor, a conflicted copy.
+- **Senior:** the commit as the one moment a version becomes real, idempotent retries, notify then pull, why metadata is relational and strong.
+- **Staff:** durability arithmetic (copies against codes, rebuild time), garbage collection safety, the reconnect storm, cross-user dedup as a privacy leak.
+
+**Red flags:** file bytes through the metadata servers; last writer wins; polling every device every few seconds; a design that can commit before the blocks are safe.
+
+## Further reading
+
+- [Streaming File Synchronization](https://dropbox.tech/infrastructure/streaming-file-synchronization) (Dropbox, 2014)
+- [Inside the Magic Pocket](https://dropbox.tech/infrastructure/inside-the-magic-pocket) (Dropbox, 2016)
+- [(Re)Introducing Edgestore](https://dropbox.tech/infrastructure/reintroducing-edgestore) (Dropbox, 2016)
+- [Pocket watch: Verifying exabytes of data](https://dropbox.tech/infrastructure/pocket-watch) (Dropbox, 2016)
+- [Rewriting the heart of our sync engine](https://dropbox.tech/infrastructure/rewriting-the-heart-of-our-sync-engine) (Dropbox, 2020)
+- [Broccoli: Syncing faster by syncing less](https://dropbox.tech/infrastructure/-broccoli--syncing-faster-by-syncing-less) (Dropbox, 2020)
+- [What's a conflicted copy?](https://help.dropbox.com/organize/conflicted-copy) (Dropbox help centre, 2025)
+- [Detecting Changes](https://docs.dropboxapi.com/dropbox-api/docs/detecting-changes) (Dropbox API documentation)
+- Related pages: [S3](/system-design-case-studies/case-studies/s3) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Idempotency](/system-design/patterns/idempotency) · [Object storage](/system-design/databases/object-storage) · [Long polling](/system-design/fundamentals/long-polling)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Your system can only handle a tenth of the incoming requests. What do you do?" category="Scaling" level="Senior">
+  - Find what the extra load is: usually a reconnect storm, every device listing or re-polling at once after an outage.
+  - Answer the cheapest question cheaply: "anything after cursor 9008?" is one cache read, and most answers are "no".
+  - Send `backoff` and `Retry-After` with jitter so devices return spread over minutes, not in one second.
+  - Shed in order: prefetch and listing first, commits and block downloads last; never skip the commit's checks.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens when a device is offline for a week and then reconnects?" category="Architecture" level="Mid">
+  - Its local edits were recorded in the local index; it commits each one with the revision it started from.
+  - It lists the journal after its cursor and applies the changes in order, downloading only blocks it lacks.
+  - Any file changed both locally and remotely becomes a conflicted copy, so neither edit is lost.
+  - If the cursor is older than the kept journal, the server answers `410` and the device lists the whole namespace.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do two devices avoid overwriting each other's changes?" category="Concepts" level="Mid">
+  - Every commit names its parent revision, and the server updates the file only where `rev = parent`.
+  - The second device to commit gets `409` with the current revision.
+  - On the device, a remote change replaces a file only if the local file still has the hash the index recorded.
+  </InterviewQuestion>
+  <InterviewQuestion question="How are conflicts resolved?" category="Trade-offs" level="Mid">
+  - Keep both: the losing version is saved as a new file named as a conflicted copy, and the user decides.
+  - Last writer wins is simpler but silently erases one person's work.
+  - Automatic merging needs to understand the file format; a sync service sees only bytes.
+  - Delete against edit keeps the edit.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the upload API stay idempotent when the client retries?" category="Concepts" level="Mid">
+  - Blocks are named by the SHA-256 of their content, so a resent block lands on the same name and is stored once.
+  - The commit carries an `Idempotency-Key` stored in the same transaction as the new revision.
+  - A retry finds the key and returns the first revision and journal id, writing nothing.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the desktop client detect local changes?" category="Architecture" level="Mid">
+  - It listens to the operating system's file events and runs a slower rescan to catch missed events.
+  - It compares size and modified time with its local index and rehashes only files that differ.
+  - It compares block hashes to find which 4 MB blocks changed, and tracks moves by file id.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why fixed 4 MB blocks rather than content-defined chunks?" category="Trade-offs" level="Senior">
+  - Fixed blocks are simple, cheap to compute, and align with how files are stored and read.
+  - Their weakness is insertion: one byte added near the start shifts every later boundary, so every block changes.
+  - Content-defined chunks cut at boundaries chosen by the bytes themselves, so an insertion changes one or two chunks, at the cost of variable sizes and more CPU.
+  - Choose content-defined chunks when insert-heavy files dominate the upload bytes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure a committed file is never lost?" category="Failure modes" level="Senior">
+  - Acknowledge a block only when copies exist in two zones, and commit only blocks marked durable.
+  - Erasure-code sealed buckets across three zones, so a whole zone can be lost.
+  - Verify all the time: scrub disks, read back samples of new blocks, and check every file's blocks exist where they should.
+  - Delete only after a grace period and a second, independent check.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why keep metadata in a strongly consistent relational store when blocks live in an object store?" category="Trade-offs" level="Senior">
+  - A commit is a conditional update, a new revision and a journal append that must happen together.
+  - The journal id from the same transaction gives each namespace one order for free.
+  - Blocks are immutable and named by content, so any copy is correct and needs no consensus.
+  - Each store gets exactly the consistency its data needs.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Chunking with content hashes, because small edits must not resend whole files.
+  - Idempotency, because every upload and commit is retried after timeouts.
+  - Optimistic concurrency on the parent revision, because two devices edit one file.
+  - Change data capture into a log, because a commit and its notification must not drift apart.
+  </InterviewQuestion>
+</InterviewQuestions>
