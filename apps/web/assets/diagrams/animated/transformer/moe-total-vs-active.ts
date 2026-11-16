@@ -23,6 +23,9 @@ import { ROLE_TONE } from "@/components/diagrams/presets/transformer";
 //   total  = 1,605,636,096 + 45,097,156,608 = 46,702,792,704 ≈ 46.7B ("about 47B")
 //   active = 1,605,636,096 + 2 × 5,637,144,576 = 12,879,925,248 ≈ 12.9B ("about 13B")
 // The bars share one scale: 640 px for the total, so the shared part is 22 px and each expert slot 77 px.
+// Memory, quoted on the page: at 16 bits (2 bytes) per parameter the weights alone take 46,702,792,704 × 2 =
+// 93,405,585,408 bytes ≈ 93.4 GB, more than one 80 GB GPU holds; the active 12,879,925,248 × 2 ≈ 25.8 GB.
+// Total over active: 46.7 / 12.9 ≈ 3.6×.
 
 const D = 4096;
 const HIDDEN = 14336;

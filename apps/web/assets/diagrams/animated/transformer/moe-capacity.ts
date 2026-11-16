@@ -1,5 +1,6 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { ROLE_TONE, block } from "@/components/diagrams/presets/transformer";
+import { BATCH_CHOICE } from "@/components/diagrams/presets/llm-moe";
 
 // Expert capacity and the training losses in a mixture-of-experts layer. Replaces the Mermaid under "Training loop
 // concerns" on the Mixture of Experts page. Bottom to top: a batch of 8 tokens → the router picks one expert per
@@ -15,7 +16,8 @@ import { ROLE_TONE, block } from "@/components/diagrams/presets/transformer";
 // tokens sent to expert i and Pᵢ the fraction of router probability given to it. Router z-loss: ST-MoE (Zoph et al.,
 // 2022, arXiv 2202.08906), which penalizes large router logits for stability.
 //
-// Working: capacity = 8 tokens / 4 experts × capacity factor 1.0 = 2 slots per expert. Router choices (illustrative):
+// Working: capacity = 8 tokens / 4 experts × capacity factor 1.0 = 2 slots per expert. Router choices (the argmax of
+// the illustrative logits in presets/llm-moe, which also computes the balancing loss on them):
 // t1 → E1, t2 → E3, t3 → E1, t4 → E2, t5 → E1, t6 → E4, t7 → E2, t8 → E3. Slots fill in batch order:
 // E1 gets t1, t3 and is full when t5 arrives (t5 dropped); E2 t4, t7; E3 t2, t8; E4 t6 and one empty slot.
 // Tokens per expert: 3, 2, 2, 1 (sum 8); processed 7, dropped 1; slots 8, used 7, empty 1.
@@ -24,7 +26,7 @@ const TOKENS = 8;
 const EXPERTS = 4;
 const CAPACITY_FACTOR = 1.0;
 const CAPACITY = (TOKENS / EXPERTS) * CAPACITY_FACTOR; // 2
-const CHOICE = [0, 2, 0, 1, 0, 3, 1, 2]; // expert index picked for t1 … t8
+const CHOICE = BATCH_CHOICE; // [0, 2, 0, 1, 0, 3, 1, 2]: the top-1 picks of the router logits in presets/llm-moe
 
 // Fill the slots in batch order; tokens that find their expert full are dropped.
 const slots: number[][] = Array.from({ length: EXPERTS }, () => []);

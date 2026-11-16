@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { attend } from "@/components/diagrams/presets/llm-attention";
 import * as arch from "@/components/diagrams/presets/llm-architecture";
 import { HEAD, LOSS, TABLES } from "@/components/diagrams/presets/llm-families";
+import { BALANCE, BATCH_CHOICE, CAPACITY_SWEEP, ROUTING, Z_LOSS } from "@/components/diagrams/presets/llm-moe";
 import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
 
 // The LLM Foundations pages quote these numbers in prose; the presets compute them once. If a constant changes,
@@ -95,5 +96,28 @@ describe("llm-families: BERT on the kettle example", () => {
     expect(TABLES.position).toBe(393_216);
     expect(TABLES.segment).toBe(1_536);
     expect(TABLES.maxPositions).toBe(512);
+  });
+});
+
+describe("llm-moe: routing, balance and capacity", () => {
+  it("top-2 routing renormalizes the two winners", () => {
+    expect(ROUTING.top2).toEqual([1, 4]);
+    expect(ROUTING.top2Weights.map((w) => w.toFixed(4))).toEqual(["0.6225", "0.3775"]);
+    expect(ROUTING.fullTop2.map((w) => w.toFixed(3))).toEqual(["0.337", "0.204"]);
+  });
+
+  it("Switch load-balancing loss on the 8-token batch", () => {
+    expect(BATCH_CHOICE).toEqual([0, 2, 0, 1, 0, 3, 1, 2]);
+    expect(BALANCE.routed).toEqual([3, 2, 2, 1]);
+    expect(BALANCE.loss.toFixed(3)).toBe("1.056");
+    expect(BALANCE.added.toFixed(4)).toBe("0.0106");
+    expect(BALANCE.grad).toEqual([1.5, 1, 1, 0.5]);
+    expect(BALANCE.collapsed).toBe(4);
+  });
+
+  it("capacity factor sweep and z-loss", () => {
+    expect(CAPACITY_SWEEP.map((c) => c.dropped.length)).toEqual([4, 1, 0, 0]);
+    expect(Z_LOSS.z.toFixed(2)).toBe("4.79");
+    expect(Math.round(Z_LOSS.zSharp)).toBe(251);
   });
 });
