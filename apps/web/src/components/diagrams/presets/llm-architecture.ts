@@ -50,7 +50,7 @@ export const TOTAL_TIED = STACKS + EMBED; // 62,984,192
 export const UNTIED_EXTRA = 2 * EMBED; // 37,888,000
 
 /** Values the decoder's self-attention cache holds per token: one key and one value per layer. */
-export const kvPerToken = (nLayers: number, width: number) => 2 * nLayers * width;
+const kvPerToken = (nLayers: number, width: number) => 2 * nLayers * width;
 export const KV_BASE_TOKEN = kvPerToken(layers, dModel); // 6,144
 export const KV_BASE_PROMPT = 3 * KV_BASE_TOKEN; // 18,432 for "<s> Ich liebe"
 export const KV_BASE_PROMPT_BYTES = 2 * KV_BASE_PROMPT; // 36,864
