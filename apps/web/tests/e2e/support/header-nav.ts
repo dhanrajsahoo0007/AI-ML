@@ -11,7 +11,9 @@ export interface HeaderEntry {
 }
 
 export async function desktopHeaderEntries(page: Page): Promise<HeaderEntry[]> {
-  await page.setViewportSize({ width: 1280, height: 900 });
+  // 1440px: the desktop bar starts here when it has eight or more sections (BAR_SIZES in site-header.tsx); below that
+  // width the header is the phone menu.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const bar = page.locator("header nav[aria-label='Main'] > div").nth(0);
   const items = bar.locator(":scope > [aria-haspopup='true'], :scope > span[title], :scope > a[href]");

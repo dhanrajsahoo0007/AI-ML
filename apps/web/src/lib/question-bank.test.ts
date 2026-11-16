@@ -196,5 +196,7 @@ describe("getQuestionsForTopic", () => {
       expect(list.every((x) => x.topics.some((t) => t.href === href))).toBe(true);
       expect(list.every((x) => !x.parent || !ids.has(x.parent.id))).toBe(true);
     }
-  });
+    // About 1.2 s on a laptop, but the default 5 s limit was hit on a busy CI runner (one call per tagged page,
+    // each filtering the whole library), so this test gets more room.
+  }, 30_000);
 });
