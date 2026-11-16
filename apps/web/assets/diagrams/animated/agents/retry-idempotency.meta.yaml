@@ -1,0 +1,16 @@
+title: A timed-out refund retried, without and with an idempotency key
+alt: >-
+  A sequence diagram in four steps with three lanes: the model, the harness and the payments service. Step 1: the
+  model asks for create_refund(4471, 42.00); the harness sends "refund £42, order 4471" to the payments service, which
+  makes refund R-2291, £42 out; the reply is lost and the harness sees a red timeout. Step 2: the harness retries
+  "refund £42"; with no key, the payments service treats it as a new request and makes R-2292, so £84 is out in total.
+  Step 3: a replay of the same run in which the key run_8f3a:toolu_03 was saved in checkpoint cp_3 before the call; the
+  harness sends the refund with that key, the payments service makes R-2291 and saves the key with its reply, and the
+  reply is lost again. Step 4: the harness retries with the same key; the payments service has seen the key and returns
+  the saved reply R-2291, and the model gets "refund R-2291, £42 once".
+caption: >-
+  A timeout does not tell you whether the refund happened. Without a key the retry pays £84 for a £42 kettle; with the
+  same key on both attempts, the second call returns the first result and moves no money.
+tags: [agents, reliability, genai]
+source: original
+created: 2026-11-15
