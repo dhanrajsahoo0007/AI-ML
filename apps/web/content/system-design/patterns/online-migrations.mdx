@@ -1,11 +1,194 @@
 ---
 title: "Zero-Downtime Migrations: Dual Writes, Backfill and Cutover"
-description: "Dual writes, backfills, shadow reads and a cutover you can undo."
+description: "Change the store or the schema under live traffic: expand and contract, dual writes, backfills, compared reads, cutover and the strangler route."
 icon: git-branch
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+The redesign is agreed: orders move from one database to a sharded store. The shop sells around the clock, and nobody knows yet whether the new store returns the same answers.
 
-**What it will cover:** dual writes, backfills, shadow reads and a cutover you can undo.
+- Interviewers ask about online migrations to see whether you can get from today's system to the new one without downtime, and with a way back at every step.
+
+## Overview
+
+- A **big-bang switch** (stop writes, copy, switch) needs a maintenance window and has no way back once writes resume on the new store.
+- **Expand and contract** changes a schema in steps: add the new column or table, write to both, move reads, then remove the old.
+- Moving data follows **four phases**: **dual write** → **backfill** history → **switch reads** after comparing them → **switch writes** and finally delete the old data.
+- **Compared (shadow) reads** run both read paths and log differences before any user sees the new one.
+- Backfills must be **idempotent**, **resumable** and **throttled**, and must not overwrite newer live writes.
+- For a whole service, the **strangler** route puts a router in front and moves one endpoint at a time; an **anti-corruption layer** translates between the old model and the new.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "We take a maintenance window and copy the data across."
+  - **Why the interviewer pushes back:** "The shop sells around the clock, and what if the new store is wrong?"
+  - **The answer that stands out:** dual write first, backfill history with an idempotent, throttled job, compare reads in production, then move reads and finally writes, keeping the old store until the switch is proven. Name the cost: weeks of running two stores and the code to keep them in step.
+</Callout>
+
+## Mental model
+
+- Moving a shop to a new building without closing for a day.
+- First, every new delivery goes to both buildings. Then the old stock is carried across a shelf at a time. Staff check that the shelves match.
+- Customers are sent to the new building only when it is complete, and the old building stays unlocked until nobody needs it.
+
+## Core concepts
+
+- The running example moves Brightpost's orders, **200,000 a day** and about **146,000,000 rows** of history, from one database to an **8-shard** store.
+
+### Expand and contract
+
+- **Expand:** add the new structure next to the old (a new column, table or store) without breaking any reader.
+- **Migrate:** write to both, copy the history, move readers one by one.
+- **Contract:** once nothing uses the old structure, remove it.
+- Every deploy in between is compatible with the one before it, so any step can be rolled back.
+
+## Architecture
+
+The orders' move, phase by phase.
+
+<AnimatedDiagram spec="animated/patterns/migrate-phases" stepper caption="Each phase is small and reversible: write to both, copy history, compare, move reads, then move writes." />
+
+<StepCards>
+  <StepCard n={1} title="Only the old store">
+    The order service reads and writes one database. This is the system before the migration.
+  </StepCard>
+  <StepCard n={2} title="Dual write: new writes go to both">
+    New and changed orders are written to both stores. The old store is still the source of truth; if the new write fails, it is logged and repaired later, not shown to the user. Rollback: stop dual writing.
+  </StepCard>
+  <StepCard n={3} title="Backfill the history">
+    A job scans the old store by id and copies rows into the new store, only where the new copy is older. Rollback: drop the new store and start again.
+  </StepCard>
+  <StepCard n={4} title="Compare reads from both stores">
+    The service reads both stores, returns the old answer and logs any difference. Mismatches are investigated and fixed before anyone relies on the new store.
+  </StepCard>
+  <StepCard n={5} title="Read from the new store">
+    Reads move to the new store once mismatches are near zero; writes still go to both. Rollback: point reads back at the old store.
+  </StepCard>
+  <StepCard n={6} title="Write to the new store only">
+    Writes move to the new store. The old store is kept, frozen or fed in reverse, until the move is proven, then deleted.
+  </StepCard>
+</StepCards>
+
+<PremiumBreak />
+
+## Technical mechanics
+
+### The backfill
+
+- Copy in batches by primary key, recording the last id copied, so the job can stop and resume.
+- Throttle it: a backfill competing with checkout at the sale-day peak is an outage of its own making.
+- Make every copy an **upsert only if newer**: the live dual writes may have written a newer version first.
+
+<AnimatedDiagram spec="animated/patterns/migrate-backfill" stepper caption="The backfill and the live writes race; copying “only if newer” makes the order in which they land not matter." />
+
+**How to read it:**
+
+- Green rows were copied by the backfill; blue rows were written by dual writes, on both sides of the cursor.
+- At id 12 the backfill holds an older version than the new store already has, so it skips the copy.
+
+**The numbers:**
+
+- 146,000,000 rows at 5,000 rows a second: 146,000,000 ÷ 5,000 = 29,200 s, about 8.1 hours.
+- Throttled to 1,000 rows a second during the day and 5,000 at night, the copy takes about two days.
+
+### Compared reads
+
+- Run the old and new read paths on the same request, return the old answer, and record differences with the key and both values.
+- GitHub's Scientist library does exactly this for code paths; Stripe used it to confirm its stores matched before moving reads.
+- Sample a share of traffic if comparing everything costs too much, and keep comparing until mismatches are zero or explained.
+
+### The strangler route for a whole service
+
+- Put a router in front of the old service. Move one endpoint at a time to the new service; the router sends each call to whichever owns it.
+- An **anti-corruption layer** translates between the old service's model and the new one, so the new design is not bent to fit the old.
+- The old service shrinks until nothing routes to it, then it is switched off.
+
+### Worked example: orders to a sharded store
+
+1. **Week 1: dual write.** Every new order is written to both stores; about 200,000 a day.
+2. **Week 1–2: backfill.** 146,000,000 rows copied, throttled, over about two days.
+3. **Week 2–3: compare.** 1 % of the 2,300 reads a second are compared: 23 comparisons a second.
+4. **Week 3: switch reads,** then writes, keeping the old store for a month.
+
+**The numbers:**
+
+- Comparisons a day: 23 × 86,400 ≈ 2,000,000.
+- At a 0.1 % mismatch rate that is about 2,000 mismatches a day: investigate them (often time-zone or rounding bugs) before switching, not after.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Big-bang with a maintenance window | Simple; one cutover | Downtime; no way back once writes resume | Small data, a business that can stop |
+| Dual write + backfill + compare | No downtime; reversible at each step | Weeks of two stores; dual-write code | Live systems that cannot stop |
+| CDC instead of dual writes | No change to the write path | Copies table shapes; lag | Moving to a store fed by the old one's log |
+| Expand and contract (schema) | Each deploy compatible with the last | More deploys | Column and table changes |
+| Strangler route | Moves a service one endpoint at a time | A router and two services for a while | Replacing a whole service |
+
+## Production systems
+
+- **Stripe, "Online migrations at scale"** (as of November 2026): four phases (dual writing, changing reads, changing writes, removing old data) for hundreds of millions of subscription objects; the backfill ran offline from database snapshots on Hadoop, and GitHub Scientist compared the read paths in production.
+- **GitHub Scientist**: runs an old and a new code path side by side, returns the old result and reports any difference.
+- **Strangler Fig** (Martin Fowler; Azure Architecture Center): replace a system piece by piece behind a routing layer; Azure also describes the anti-corruption layer that translates between old and new models.
+- **Used in our case studies:** [Netflix](/system-design-case-studies/case-studies/netflix) · [Instagram](/system-design-case-studies/case-studies/instagram) · [S3](/system-design-case-studies/case-studies/s3)
+
+## Failure modes & pitfalls
+
+- **Backfill before dual writes.** Rows changed during the copy are missed. Start dual writes first.
+- **A backfill that overwrites newer data.** The race at the cursor loses live writes. Upsert only if newer.
+- **Switching reads without comparing.** Users find the bugs. Compare in production first.
+- **Deleting the old store with the cutover.** No way back when a bug appears a week later. Keep it until proven.
+- **An unthrottled backfill at the peak.** The migration causes the outage. Throttle by time of day and load.
+- **Dual writes that fail silently.** The new store drifts. Log and repair failed writes, and keep comparing.
+
+## Interview framework
+
+1. Refuse the maintenance window and say why: the shop never closes, and there is no way back.
+2. Walk the four phases: dual write, backfill, compared reads, switch reads, switch writes.
+3. Make the backfill idempotent, resumable and throttled, with "upsert only if newer".
+4. Give the rollback at every phase.
+5. Do the numbers: rows, copy rate, hours; comparison rate and the mismatch threshold.
+
+**What interviewers listen for:** dual write before backfill, compared reads, and a rollback at each step.
+
+**Red flags:** "copy it over a weekend", or switching writes before reads.
+
+## Further reading
+
+- [Online migrations at scale (Stripe blog)](https://stripe.com/blog/online-migrations)
+- [Scientist (GitHub)](https://github.com/github/scientist)
+- [Strangler Fig Application (Martin Fowler)](https://martinfowler.com/bliki/StranglerFigApplication.html)
+- [Strangler Fig pattern (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig) · [Anti-corruption Layer pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/anti-corruption-layer)
+- Related pages: [Sharding and Partitioning](/system-design/patterns/sharding) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Idempotency](/system-design/patterns/idempotency) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why dual write before backfill?" category="Concepts" level="Mid">
+    - A backfill copies a snapshot; anything written during or after the copy would be missed.
+    - Starting dual writes first means every change from that moment reaches the new store.
+    - The backfill then only has to fill in history, with "only if newer" so it never overwrites a live write.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compared reads show 0.1 % mismatches. What now?" category="Failure modes" level="Senior">
+    - Do not switch reads yet. Group the mismatches by field and cause.
+    - Common causes are rounding, time zones, ordering of lists, dual writes that failed, and rows the backfill skipped.
+    - Fix the cause, repair the affected rows, and keep comparing until mismatches are zero or every one is explained.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is expand and contract?" category="Concepts" level="Junior">
+    - A way to change a schema without downtime: add the new structure, migrate readers and writers to it, then remove the old.
+    - Each deploy stays compatible with the previous one, so every step can be rolled back.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make a backfill safe to run against a live database?" category="Architecture" level="Mid">
+    - Copy in small batches by primary key and record the last id, so it can stop and resume.
+    - Throttle by load and time of day.
+    - Write with "upsert only if newer", so a retry or a race with live writes cannot overwrite newer data.
+  </InterviewQuestion>
+  <InterviewQuestion question="How long does it take to backfill 146 million rows, and how would you shorten it?" category="Scaling" level="Mid">
+    - At 5,000 rows a second, 146,000,000 ÷ 5,000 = 29,200 s, about 8 hours.
+    - Run it in parallel by id range across workers, and run it from a snapshot or replica rather than the primary, as Stripe did offline.
+    - The limit is what the new store can absorb without hurting live traffic.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you replace a whole legacy service without a big-bang rewrite?" category="Trade-offs" level="Senior">
+    - Put a router in front of it and move one endpoint at a time to the new service (the strangler route).
+    - Add an anti-corruption layer so the new service's model does not inherit the old one's quirks.
+    - Compare responses for each moved endpoint, and switch the old service off when nothing routes to it.
+  </InterviewQuestion>
+</InterviewQuestions>
