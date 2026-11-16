@@ -18,6 +18,8 @@ Attention costs grow with context: quadratic compute in prefill and a KV cache t
 - A fixed state cannot hold everything, so pure SSMs are weaker at **copying and exact recall** from long context (Jelassi et al., 2024) and at **5-shot MMLU and phonebook lookup** (Waleffe et al., 2024).
 - **Hybrids** keep a few attention layers for recall: Jamba uses **1 attention layer per 8** plus MoE every other layer (52B total, 12B active, 256K context, **4 GB KV cache vs 32 GB for Mixtral** at 256K). Most hybrids keep attention in **about 1 of every 6 to 10 token-mixing layers**.
 
+<KeyIdea>An SSM swaps attention's growing KV cache for a fixed-size state, so each decoded token costs the same however long the context, but exact recall suffers; production hybrids keep about 1 attention layer in every 6 to 10 mixing layers to win it back.</KeyIdea>
+
 ## Mental model
 
 - Picture two court reporters. The first keeps a transcript of every word and, before each new sentence, rereads the whole thing to decide what matters.
@@ -153,9 +155,14 @@ All the gains below are as reported by the authors, on their hardware and settin
 
 - The pattern: gains are small at a few thousand tokens and grow with context length and batch size, because the KV cache, not the weights, is what grows.
 - Prefill still pays the quadratic cost in every attention layer that remains, so a hybrid's time to first token on a 256K prompt is lower than a Transformer's but not flat.
-- Kernel support matters too: the scan and SSD kernels are newer than FlashAttention, and features such as prefix caching need care, because an SSM state is a snapshot at one position rather than a list of per-token entries.
+
+<Callout tone="red" title="What breaks">
+  Serving support lags behind attention: the scan and SSD kernels are newer than FlashAttention, and features such as prefix caching need care, because an SSM state is a snapshot at one position rather than a list of per-token entries. The fix: save or copy the state at the positions where a cached prefix, a speculative draft or a beam resumes.
+</Callout>
 
 ## Trade-offs
+
+<Compare caption="Transformer, SSM and hybrid designs: what each saves in memory and what it gives up in recall.">
 
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
@@ -164,6 +171,8 @@ All the gains below are as reported by the authors, on their hardware and settin
 | Hybrid SSM + attention | Near-Transformer recall with a KV cache several times smaller | Two kinds of kernels; ratio and placement need tuning | Long-context serving where memory or batch size is the limit |
 | Hybrid + MoE (Jamba, Granite 4.0-H Tiny and Small) | Large capacity at small active compute and small cache | All experts in memory; routing and expert parallelism to run | Large models aimed at long context on limited GPUs |
 | SSM + sliding-window attention (Samba) | Memory constant everywhere; strong length extrapolation | No exact lookup beyond the window | Very long streams where local precision and global gist are enough |
+
+</Compare>
 
 ## Production systems
 
