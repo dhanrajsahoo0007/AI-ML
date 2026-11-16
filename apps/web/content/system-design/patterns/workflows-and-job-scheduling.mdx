@@ -1,11 +1,260 @@
 ---
 title: "Durable Workflows and Distributed Job Scheduling"
-description: "Delay queues, leased workers and durable state machines."
+description: "Run work later, once in effect, even if a worker dies: due-time buckets, leased workers, retries, timing wheels and durable workflows."
 icon: workflow
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Half a million basket holds must expire at 12:10, and the one cron box that expires them dies at row 200,000.
 
-**What it will cover:** delay queues, leased workers and durable state machines.
+- Interviewers ask about job scheduling to see whether you can run work later, once in effect, on a fleet where any machine can die mid-job.
+
+## Overview
+
+- A **job** is work to run later: expire a hold, retry a payment, transcode a video, send a reminder. Its **due time** is when it should run.
+- A distributed scheduler keeps jobs in a **job store bucketed by due time**, with one **scanner** per partition moving due jobs to a queue.
+- Workers **lease** a job for a fixed time. If a worker dies, the lease runs out and another worker gets the job, so delivery is **at least once** and every handler must be **idempotent**.
+- A **durable workflow** (Temporal, AWS Step Functions) runs a multi-step process and records each step in an **event history**, so a new worker can replay it and carry on after a crash.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "A cron job scans the holds table every minute and expires the old ones."
+  - **Why the interviewer pushes back:** "The table has 100 M rows, and the cron node can die mid-run. What happens then, and what if you run two?"
+  - **The answer that stands out:** bucket jobs by due time across partitions, give each partition one scanner, and let workers lease jobs with a timeout and an idempotent handler. Name the cost: a job can run twice, so the handler must check state before it acts.
+</Callout>
+
+## Mental model
+
+- Think of a hotel's wake-up calls: cards sit in a rack with one slot per minute (due-time buckets). Each minute a porter takes the current slot's cards and signs each with the time (a lease).
+- A card still not marked done after 5 minutes goes back for another porter (the lease runs out). Ringing a guest who is already up does no harm (an idempotent handler).
+- A durable workflow is the guest's folio: every charge is written down, so a new receptionist reads it and carries on without charging twice.
+
+## Core concepts
+
+- The running example is Brightpost's flash sale: **500,000 shoppers** arrive at **12:00** for **10,000 kettles**, and each gets a **10-minute hold** (illustrative: a kettle or a waiting-list place). So **500,000 expiry timers** are set by 12:01 and fall due between 12:10 and 12:11.
+
+### Why one cron box fails
+
+- A cron job runs `SELECT … WHERE expires_at < now()` once a minute on one machine. If that machine dies, no run happens until someone replaces it.
+- A second machine on the same schedule runs every job twice, and so does a run that lasts longer than the schedule and overlaps the next.
+
+<AnimatedDiagram spec="animated/patterns/wf-cron-fails" stepper caption="One cron node is a single point of failure, and a second copy on the same schedule turns a missed run into a double release." />
+
+<StepCards>
+  <StepCard n={1} title="One cron node dies mid-run">
+    Cron node A wakes at 12:11 to expire 500,000 holds and dies after 200,000 of them. No later run starts on a dead box, so 300,000 holds stay held and their kettles stay off sale.
+  </StepCard>
+  <StepCard n={2} title="Two cron nodes run the same job">
+    A second node is added for high availability with the same schedule. Both read hold 4471 and both put its kettle back, so the stock goes up by two for one kettle and the shop can sell it twice.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Due in one run: 500,000 rows. Without a good index the run scans every hold ever made: 200,000 orders a day is 73 M a year before abandoned holds, so about 100 M rows.
+- One box with 20 threads at 20 ms a hold (illustrative): 500,000 × 0.02 ÷ 20 = 500 s, so the last kettle comes back more than 8 minutes late.
+
+<PremiumBreak />
+
+### Jobs, leases and at-least-once
+
+- A **lease** (in Amazon SQS, a **visibility timeout**) hides a claimed job from other workers for a fixed time. The worker deletes the job when it finishes.
+- If the worker dies, the lease runs out and the job becomes visible again: nothing is lost, but it may run twice.
+- So every handler is **idempotent**: it acts only if the hold is still held.
+
+### Durable workflows
+
+- Some jobs are many steps with waits between them: reserve stock, wait up to 10 minutes for payment, charge £42, confirm.
+- A **durable workflow** engine stores an **event history** for each run: one event per step started, finished, timer set or signal received.
+- **Activities** are the steps with side effects (a card charge), retried by the engine with backoff.
+- After a crash, a new worker **replays** the workflow code against the history: calls that already happened return their recorded results.
+
+## Architecture
+
+The hold-expiry scheduler, built one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/wf-scheduler" stepper caption="Jobs wait in due-time buckets, a scanner per partition moves due ones to a queue, and a lease that runs out hands a dead worker’s job to another." />
+
+<StepCards>
+  <StepCard n={1} title="Store each job by due time">
+    Checkout writes one expiry job per hold into a job store of 16 partitions, each a sorted set scored by due time. At 8,333 holds a second, writes spread evenly by hashing the hold id.
+  </StepCard>
+  <StepCard n={2} title="A scanner per partition">
+    Each partition has one scanner that polls every second for jobs whose due time has passed and moves them to a ready queue. A scanner owns its partition through a lease, so a dead scanner is replaced in seconds.
+  </StepCard>
+  <StepCard n={3} title="Workers lease jobs">
+    Expiry workers take jobs from the queue with a 30 s lease, expire the hold only if it is still held, and delete the job. Nothing is deleted until the work is done.
+  </StepCard>
+  <StepCard n={4} title="A worker dies: the lease runs out">
+    A worker crashes mid-job and never deletes it. Thirty seconds later the job is visible again and another worker takes it; the conditional expiry makes the second run safe.
+  </StepCard>
+  <StepCard n={5} title="Retry with backoff, then dead-letter">
+    A job that fails goes back into the job store due 1 s, 2 s, then 4 s later. After the fifth failure it moves to the dead letters, and a person is alerted.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### The job store: a delay queue bucketed by due time
+
+- A Redis sorted set per partition holds job ids scored by due time: `ZADD jobs:p7 <due-ms> hold:4471`. Adding a job and finding due ones are both logarithmic.
+- The scanner reads due jobs a page at a time (`ZRANGE … BYSCORE LIMIT 0 1000`) and **claims** each one with `ZREM`; only the caller whose `ZREM` returns 1 enqueues it.
+- In a database, the same job store is a `jobs` table indexed on `(partition, due_at)`, claimed with `SELECT … FOR UPDATE SKIP LOCKED`.
+- A managed queue can do this for short delays: Amazon SQS delays a message by up to 15 minutes, so a 10-minute hold fits but a 24-hour reminder does not.
+
+### Leases, heartbeats and a late first worker
+
+- Pick a lease longer than the usual job, and extend it with a **heartbeat** for long ones. SQS defaults to 30 s and allows at most 12 hours from the first receive.
+- A worker can stall rather than die (a long garbage-collection pause, a hung call) and wake after a second worker has taken the job. The guard is in the data: expire the hold only `WHERE status = 'held'`, in the same transaction that returns the kettle.
+
+<AnimatedDiagram spec="animated/patterns/wf-lease-timeline" stepper caption="A lease turns a dead worker into a delay, not a lost job; the conditional update makes the late first worker harmless." />
+
+<StepCards>
+  <StepCard n={1} title="Claim, heartbeat, stall">
+    Worker A receives the expiry job for hold 4471 with a 30 s lease and extends it once. Then it stalls, misses the next heartbeat, and the lease runs out.
+  </StepCard>
+  <StepCard n={2} title="A second worker, a late first one">
+    Worker B receives the job again, expires the hold, gets one row back and deletes the job. When A wakes and runs the same update, 0 rows change, so the kettle goes back on sale once.
+  </StepCard>
+</StepCards>
+
+### Retries, backoff and the dead-letter state
+
+- Retry with **exponential backoff and jitter** (1 s, 2 s, 4 s, each plus a random fraction), so failed jobs do not all return in the same second.
+- Cap the attempts: a **poison job** (bad data, a bug) fails every time. After the cap, move it to a **dead-letter state** and alert someone.
+- Retry only errors that can pass (a timeout, a 503): a rejected card is a business result, not a retry.
+
+### Timing wheels for many short timers
+
+- A heap or a sorted set costs O(log n) per timer, which adds up with millions of short timers that are mostly cancelled.
+- A **timing wheel** is a ring of slots, one per tick: a timer goes into slot (due − now) ÷ tick, and the clock empties one slot per tick, so adding and removing cost O(1).
+- A **hierarchical** wheel hands longer timers to a coarser wheel, like a clock's hour hand. For Brightpost, 600 one-second slots cover every 10-minute hold, in memory: right for per-node timers, wrong for jobs that must survive a restart.
+
+### Durable workflows: history and replay
+
+- On replay, each command the code issues must match the next event in the history. That is why workflow code must be **deterministic**: no local clock, no random numbers, no direct network calls.
+- Time, randomness and side effects go through the engine's API or into activities, so their results are recorded once. A code change needs a version check, or old runs fail to replay.
+
+<AnimatedDiagram spec="animated/patterns/wf-history" stepper caption="After a crash the workflow code runs again from the top, and the history answers every call it already made." />
+
+<StepCards>
+  <StepCard n={1} title="The history, one event per step">
+    The hold workflow for order 4471 starts, reserves the kettle, starts a 10-minute timer, receives the shopper's payment of £42 and schedules the confirmation. Each of these is one event in an append-only history.
+  </StepCard>
+  <StepCard n={2} title="The worker dies">
+    Worker 1 dies after event 6. The history is stored by the engine, so nothing is lost but the worker's memory.
+  </StepCard>
+  <StepCard n={3} title="Replay: the history answers">
+    Worker 2 runs the code from the top. Each call meets its recorded event, so `reserve()` is not run again, and the workflow carries on with events 7 and 8.
+  </StepCard>
+  <StepCard n={4} title="Non-deterministic code breaks replay">
+    If the code branched on the local clock, the replay can take a different branch. Its commands no longer match the history, and the engine stops the run with a non-determinism error.
+  </StepCard>
+</StepCards>
+
+### Asynchronous request-reply
+
+- Some requests take longer than a client will wait: a data export, a video transcode. The API answers **`202 Accepted`** at once and runs the job behind it.
+- The `202` carries a `Location` header with a **status URL** and a `Retry-After` hint. The status URL answers `200` with `running` until the job ends, then `303 See Other` to the result.
+- A client that can receive calls registers a **callback** instead (see [Webhooks](/system-design/fundamentals/webhooks)), or holds one request open with [long polling](/system-design/fundamentals/long-polling). An `Idempotency-Key` on the `POST` stops a retry from starting a second job.
+
+### Worked example: 500,000 holds expire at 12:10
+
+Follow the holds from the flash sale through the five steps of the Architecture figure.
+
+1. **Store.** Between 12:00 and 12:01 checkout writes 500,000 expiry jobs into 16 partitions, due between 12:10 and 12:11.
+2. **Scan.** From 12:10 each scanner polls once a second, finds its due jobs and claims them onto the ready queue.
+3. **Lease.** Workers take each job for 30 s, run the conditional expiry in about 20 ms (illustrative) and delete it. Holds already paid change 0 rows.
+4. **Crash.** A worker dies holding 20 jobs. Each comes back 30 s later and runs once more, safely.
+5. **Retry.** A job whose database call times out comes back after 1 s, 2 s and 4 s, and goes to the dead letters after the fifth failure.
+
+**The numbers:**
+
+- Rate: 500,000 ÷ 60 s = 8,333 jobs a second created from 12:00, and 8,333 a second due from 12:10.
+- Per scanner: 8,333 ÷ 16 = 521 due jobs per poll, under a page limit of 1,000.
+- In flight: 8,333 a second × 0.02 s = 167 jobs at once (Little's law), so 9 workers of 20 threads (180 slots).
+- Lateness: at most about 1 s (the poll) plus queue time, or about 31 s for the 20 jobs on the dead worker.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Cron on one box | Simple; nothing to run | Single point of failure; overlapping runs; full scans | Small, idempotent housekeeping where a missed run is fine |
+| Managed delay queue (SQS) | No servers; leases and dead letters built in | Delays up to 15 minutes; at-least-once | Short delays such as a 10-minute hold |
+| Own job store and scanners | Any delay; you choose partitions and limits | You run scanners, leases and alerts | Many long-dated jobs: reminders, renewals, exports |
+| In-memory timing wheel | O(1) timers; millions per node | Lost on restart; one node only | Request timeouts, heartbeats, retries within a process |
+| Durable workflow engine | State, timers and retries survive crashes | Deterministic code; history limits; another system | Multi-step processes with waits: checkout, refunds, onboarding |
+
+## Production systems
+
+- **Amazon SQS** (as of November 2026): a delay queue or message timer holds a message back for up to 15 minutes; the visibility timeout defaults to 30 s and stops 12 hours after the first receive, and a standard queue allows about 120,000 messages in flight.
+- **Temporal**: the event history is an append-only, durably stored log; on replay the commands the code issues are compared with it, and a mismatch is a non-deterministic error. A run is terminated past 51,200 events unless it restarts with Continue-As-New, and an activity's default retry starts at 1 s, doubles, caps at 100 s and never stops.
+- **AWS Step Functions**: Standard workflows run up to one year with exactly-once workflow execution; Express workflows run up to five minutes, and asynchronous Express executions are at least once.
+- **Apache Kafka** (Confluent, 2015): the request purgatory moved from a `DelayQueue` to hierarchical timing wheels with a 1 ms tick; in its benchmark at a high timeout rate the old design saturated near 25,000 requests a second and the new one reached about 105,000.
+- **Kubernetes CronJob**: the docs warn that two Jobs or none may be created for one scheduled time, so Jobs should be idempotent.
+- **Used in our case studies:** [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [S3](/system-design-case-studies/case-studies/s3) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler)
+
+## Failure modes & pitfalls
+
+- **A lease shorter than the job.** A slow job is handed to a second worker while the first still runs. Heartbeat to extend the lease, and keep the handler idempotent.
+- **A handler that adds instead of checking.** `stock = stock + 1` on every run releases one kettle twice. Make the change conditional on the hold's state.
+- **Retries with no cap and no backoff.** A poison job retries every second for ever. Use backoff with jitter, a maximum attempt count and a dead-letter state with an alert.
+- **An unowned partition.** A scanner dies and its jobs go late without an error. Own partitions by lease (see [Leader Election and Consensus](/system-design/patterns/leader-election)) and alert on the age of the oldest due job.
+- **Every timer due in one second.** 500,000 holds fall due in one minute because they were made in one minute; plan for that rate. Spread jobs that can wait, such as reminder emails, with jitter.
+
+## Interview framework
+
+1. Say what must happen later and how late is acceptable: holds expire within seconds of 12:10, not minutes.
+2. Replace the cron box: a job store bucketed by due time, one scanner per partition, a ready queue.
+3. Claim with a lease and heartbeats, make the handler idempotent, and add capped retries with backoff and a dead-letter state.
+4. For multi-step processes with waits, use a durable workflow and say why its code must be deterministic.
+
+**What interviewers listen for:** the rate arithmetic (8,333 expiries a second) and a handler that is safe to run twice.
+
+**Red flags:** "a cron job runs every minute", or a lease with no idempotent handler behind it.
+
+## Further reading
+
+- [Amazon SQS visibility timeout (AWS docs)](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
+- [Events and Event History (Temporal docs)](https://docs.temporal.io/workflow-execution/event)
+- [Apache Kafka, Purgatory, and Hierarchical Timing Wheels (Confluent, 2015)](https://www.confluent.io/blog/apache-kafka-purgatory-hierarchical-timing-wheels/)
+- [Choosing workflow type in Step Functions (AWS docs)](https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html)
+- [Asynchronous Request-Reply pattern (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/async-request-reply)
+- Related pages: [Saga and Distributed Transactions](/system-design/patterns/saga) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Idempotency](/system-design/patterns/idempotency) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not run a cron job every minute to expire old holds?" category="Concepts" level="Junior">
+    - One cron machine is a single point of failure: if it dies, no hold expires until someone replaces it.
+    - A second machine on the same schedule runs every job twice, which can put one kettle back on sale twice.
+    - A run that takes longer than a minute overlaps the next one, and a scan of a table with every hold ever made gets slower each month.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a visibility timeout, and what happens if a job takes longer than it?" category="Failure modes" level="Mid">
+    - It is a lease: a received job is hidden from other workers for a fixed time, 30 s by default in SQS, and the worker deletes it when done.
+    - If the job takes longer, the job becomes visible again and a second worker can run it while the first is still going.
+    - Extend the lease with a heartbeat while the job runs, and make the handler idempotent so two runs do no harm.
+  </InterviewQuestion>
+  <InterviewQuestion question="500,000 holds are created in the minute after 12:00, each expiring 10 minutes later. Design the expiry." category="Scaling" level="Senior">
+    - That is 500,000 ÷ 60 = 8,333 expiries a second from 12:10 to 12:11.
+    - Write each job into a job store of 16 partitions scored by due time; one scanner per partition finds about 521 due jobs a second and moves them to a queue.
+    - At 20 ms per expiry, 8,333 × 0.02 = 167 jobs run at once, so 9 workers of 20 threads cover it.
+    - Each worker leases a job for 30 s and expires the hold only if it is still held, so a redelivered job changes nothing.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a durable workflow carry on after the worker running it crashes?" category="Architecture" level="Senior">
+    - The engine stores an append-only event history: every activity scheduled and completed, every timer and signal.
+    - A new worker runs the workflow code from the top, and each call is answered from the history instead of running again.
+    - When the code reaches a step with no event yet, it carries on normally, so a charge that already happened is not repeated.
+    - The code must be deterministic: a branch on the local clock can issue different commands on replay, and the engine stops with a non-determinism error.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you return 202 Accepted with a status URL instead of the result?" category="Architecture" level="Mid">
+    - When the work takes longer than a client will hold a request open, such as a data export or a video transcode.
+    - The `202` carries a `Location` header for the status URL and a `Retry-After` hint for polling.
+    - The status URL returns `running` until the job ends, then redirects to the result with `303 See Other`.
+    - If the client can receive calls, a callback or webhook replaces the polling.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use a timing wheel instead of a priority queue for timers?" category="Trade-offs" level="Mid">
+    - When one node holds a very large number of short timers that are mostly cancelled, such as request timeouts.
+    - A timing wheel adds and removes a timer in O(1) by putting it in a slot per tick; a heap costs O(log n) for each.
+    - The wheel lives in memory, so it suits per-node timers, not jobs that must survive a restart.
+    - Kafka moved its request purgatory to hierarchical timing wheels for this reason.
+  </InterviewQuestion>
+</InterviewQuestions>

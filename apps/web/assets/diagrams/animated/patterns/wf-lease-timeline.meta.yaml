@@ -1,0 +1,14 @@
+title: A lease runs out and a second worker takes the job
+alt: >-
+  A sequence diagram in two steps with four lanes: a grey ready queue, teal workers A and B, and the violet holds
+  database. Step 1: the queue gives worker A the expiry job for hold 4471 with a 30-second lease; A sends one heartbeat
+  that extends it by 30 seconds, then stalls, and its next heartbeat is a red timeout arrow; a note on the queue reads
+  lease runs out. Step 2: the queue gives the same job to worker B as its second receive; B asks the database to expire
+  the hold if it is still held, gets back one row and the kettle back on sale, and deletes the job. Worker A then wakes
+  and sends the same conditional update, which changes 0 rows, so nothing happens twice.
+caption: >-
+  A lease turns a dead worker into a delay, not a lost job; the conditional update makes the late first worker
+  harmless.
+tags: [patterns, workflows, leases, visibility-timeout, idempotency]
+source: original
+created: 2026-11-16
