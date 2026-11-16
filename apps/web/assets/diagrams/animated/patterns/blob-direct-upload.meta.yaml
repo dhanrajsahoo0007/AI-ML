@@ -1,0 +1,15 @@
+title: A direct multipart upload with presigned URLs
+alt: >-
+  A sequence diagram in three steps with four lanes: an orange seller app, a teal upload API, a violet metadata
+  database and a violet object store. Step 1: the seller app asks to upload an 800 MB video; the API writes a pending
+  row, starts a multipart upload in the object store and gets upload id u7, signs 50 part URLs locally with a
+  15-minute lifetime, and returns them; the app sends parts 1 to 30 of 16 MB each straight to the object store and gets
+  an ETag per part. Step 2: part 31 is lost when the link drops, drawn as a red timeout; the app asks the API to resume
+  u7, the API lists the parts the store holds, parts 1 to 30, and returns 20 fresh URLs; the app sends parts 31 to 50.
+  Step 3: the app reports 50 ETags, the API completes the upload into one object and marks the row ready.
+caption: >-
+  The API only signs; the 800 MB go straight to the object store, and after a drop the store’s own list of parts says
+  where to resume.
+tags: [patterns, blob-storage, presigned-url, multipart-upload, resumable-upload]
+source: original
+created: 2026-11-16
