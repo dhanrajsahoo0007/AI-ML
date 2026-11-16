@@ -81,6 +81,7 @@ Adding one cache node to a cluster can empty the whole cache, if keys are placed
 ### Replication and variants
 
 - **Replicas:** walk clockwise from the key and take the next R distinct physical machines, skipping other virtual nodes of the same machine, ideally across zones. Dynamo calls this the **preference list**.
+- **Placing stored data:** the same ring places data, not only cache keys. A Dynamo-style store or a chunked file store hashes each key or chunk to the nodes that hold it, so a new storage node takes over only its share.
 - **Rendezvous hashing** (highest random weight): score every node with `hash(key, node)` and pick the highest. No ring to store, but each lookup scores every node.
 - **Jump hash:** maps a key to one of N numbered buckets with no stored state. It needs buckets numbered 0 to N − 1, so it suits shards you only add to, not machines that fail at random.
 
