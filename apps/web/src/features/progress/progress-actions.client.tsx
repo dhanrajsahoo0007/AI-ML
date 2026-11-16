@@ -32,6 +32,8 @@ interface ProgressActionsProps {
   next?: AdjacentArticle;
 }
 
+const EMPTY_HREFS: readonly string[] = [];
+
 async function syncToggle(contentKey: string, kind: Kind, on: boolean): Promise<boolean> {
   setLocalProgress(contentKey, kind, on);
   try {
@@ -47,9 +49,18 @@ async function syncToggle(contentKey: string, kind: Kind, on: boolean): Promise<
   }
 }
 
-/** Compact "Completed" badge shown in the article header once the learner marks the page complete. */
-export function ArticleCompletedBadge({ contentKey }: { contentKey: string }) {
+/** Interactive "Mark complete" / "Completed" toggle + per-tab X% badge shown in the article header. */
+export function ArticleCompletedBadge({
+  contentKey,
+  sectionLabel,
+  sectionHrefs = EMPTY_HREFS,
+}: {
+  contentKey: string;
+  sectionLabel?: string;
+  sectionHrefs?: readonly string[];
+}) {
   const [complete, setComplete] = useState(false);
+  const stats = useProgressStats(sectionHrefs);
 
   useEffect(() => {
     const sync = () => setComplete(localProgressState(contentKey).complete);
@@ -62,24 +73,36 @@ export function ArticleCompletedBadge({ contentKey }: { contentKey: string }) {
     };
   }, [contentKey]);
 
-  if (!complete) return null;
-
   return (
-    <button
-      type="button"
-      onClick={() => void syncToggle(contentKey, "complete", false)}
-      aria-pressed="true"
-      title="Completed — click to mark unread"
-      data-testid="article-completed-badge"
-      className="ml-3 inline-flex items-center gap-1.5 rounded-full border border-success/60 bg-success/10 px-2.5 py-0.5 align-middle text-xs font-medium text-ink transition-colors hover:border-success"
-    >
-      <CheckCircle2 aria-hidden className="size-3.5 text-success" />
-      Completed
-    </button>
+    <span className="ml-3 inline-flex flex-wrap items-center gap-2 align-middle">
+      <button
+        type="button"
+        onClick={() => void syncToggle(contentKey, "complete", !complete)}
+        aria-pressed={complete}
+        data-testid="article-completed-badge"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+          complete
+            ? "border-success/60 bg-success/10 text-ink hover:border-success"
+            : "border-hairline bg-paper-2 text-ink-2 hover:border-ink hover:text-ink"
+        )}
+      >
+        {complete ? (
+          <CheckCircle2 aria-hidden className="size-3.5 text-success" />
+        ) : (
+          <Circle aria-hidden className="size-3.5" />
+        )}
+        {complete ? "Completed" : "Mark as done"}
+      </button>
+      {stats.total > 0 && (
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {sectionLabel ? `${sectionLabel}: ` : ""}
+          <strong className="font-semibold text-ink">{stats.percent}%</strong> ({stats.completed}/{stats.total})
+        </span>
+      )}
+    </span>
   );
 }
-
-const EMPTY_HREFS: readonly string[] = [];
 
 export function ProgressActions({
   contentKey,

@@ -97,9 +97,9 @@ test.describe("per-tab page completion and percentage progress @core", () => {
     await expect(page.getByTestId("section-progress-banner")).toBeVisible();
     await expect(page.getByTestId("section-progress-percent")).toContainText("% completed");
 
-    // Another tab (genai-system-design) stays at 0% (no banner shown).
+    // Another tab (genai-system-design) stays at 0% (isolated per tab).
     await page.goto("/genai-system-design");
-    await expect(page.getByTestId("section-progress-banner")).toHaveCount(0);
+    await expect(page.getByTestId("section-progress-percent")).toHaveText("0% completed");
   });
 });
 

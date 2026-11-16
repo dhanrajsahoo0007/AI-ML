@@ -1,28 +1,31 @@
 "use client";
 
-import { Check } from "lucide-react";
-import { isCompleted, useCompletedPages, useProgressStats } from "@/lib/completed.client";
+import { Check, CheckCircle2, Circle } from "lucide-react";
+import { isCompleted, useCompletedPages, useProgressStats, useToggleCompleted } from "@/lib/completed.client";
 import { cn } from "@/lib/utils";
 
-/** "4/10 read (40%)" after a card's topic count, once the learner has completed at least one of `hrefs`. */
+/** "4/10 done (40%)" after a card's topic count. Always visible when `hrefs` is non-empty. */
 export function ReadCount({ hrefs }: { hrefs: string[] }) {
   const stats = useProgressStats(hrefs);
-  if (stats.completed === 0) return null;
+  if (stats.total === 0) return null;
   return (
     <span
       data-testid="card-read-count"
       className="ml-2 inline-flex items-center gap-1 normal-case tracking-normal tabular-nums text-ink-2"
     >
-      <Check aria-hidden className="size-3.5 text-success" />
-      {stats.completed}/{stats.total} read ({stats.percent}%)
+      <Check
+        aria-hidden
+        className={cn("size-3.5", stats.completed > 0 ? "text-success" : "text-muted-foreground/60")}
+      />
+      {stats.completed}/{stats.total} done ({stats.percent}%)
     </span>
   );
 }
 
-/** Thin progress bar above a TopicCard footer once the learner has started the group/hub. */
+/** Progress bar above a TopicCard footer. */
 export function CardProgressBar({ hrefs }: { hrefs: string[] }) {
   const stats = useProgressStats(hrefs);
-  if (stats.completed === 0 || stats.total === 0) return null;
+  if (stats.total === 0) return null;
   return (
     <div
       role="progressbar"
@@ -30,7 +33,7 @@ export function CardProgressBar({ hrefs }: { hrefs: string[] }) {
       aria-valuenow={stats.percent}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="mt-5 h-1 w-full overflow-hidden rounded-full bg-paper-2"
+      className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-paper-2"
     >
       <div
         className={cn(
@@ -43,28 +46,77 @@ export function CardProgressBar({ hrefs }: { hrefs: string[] }) {
   );
 }
 
-/** Completion badge on a hub <ModelCard> once its article is marked complete. */
-export function ModelCardDone({ href }: { href: string }) {
-  const done = isCompleted(useCompletedPages(), href);
-  if (!done) return null;
+/** Category-level progress badge + mini progress bar inside <ModelCategory> on hub pages. */
+export function CategoryProgressBadge({ hrefs, title }: { hrefs: string[]; title: string }) {
+  const stats = useProgressStats(hrefs);
+  if (stats.total === 0) return null;
   return (
-    <span
-      data-testid="model-card-done"
-      className="inline-flex items-center gap-1 rounded-full border border-success/60 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-ink"
+    <div
+      data-testid="category-progress"
+      className="inline-flex items-center gap-3 rounded-full border border-hairline bg-paper px-3 py-1 text-xs tabular-nums"
     >
-      <Check aria-hidden className="size-3 text-success" />
-      Done
-    </span>
+      <span className="font-medium text-ink">
+        {stats.percent}% done · {stats.completed}/{stats.total}
+      </span>
+      <div
+        role="progressbar"
+        aria-label={`${title} progress`}
+        aria-valuenow={stats.percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="h-1.5 w-16 overflow-hidden rounded-full bg-paper-2"
+      >
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width] duration-300",
+            stats.percent === 100 ? "bg-success" : "bg-tint"
+          )}
+          style={{ width: `${stats.percent}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
-/** Completion summary inside a <LearningPath> header once at least one step is complete. */
+/** Interactive "Mark done" / "Done" toggle button on a hub <ModelCard>. */
+export function ModelCardDone({ href, title }: { href: string; title?: string }) {
+  const done = isCompleted(useCompletedPages(), href);
+  const toggle = useToggleCompleted();
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle(href, !done);
+      }}
+      aria-pressed={done}
+      aria-label={done ? `Mark ${title ?? "page"} as unread` : `Mark ${title ?? "page"} as done`}
+      data-testid="model-card-done"
+      className={cn(
+        "relative z-10 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+        done
+          ? "border-success/60 bg-success/10 text-ink hover:border-success"
+          : "border-hairline bg-paper-2 text-muted-foreground hover:border-ink hover:text-ink"
+      )}
+    >
+      {done ? <CheckCircle2 aria-hidden className="size-3 text-success" /> : <Circle aria-hidden className="size-3" />}
+      {done ? "Done" : "Mark done"}
+    </button>
+  );
+}
+
+/** Completion summary inside a <LearningPath> header. */
 export function LearningPathProgress({ hrefs }: { hrefs: string[] }) {
   const stats = useProgressStats(hrefs);
-  if (stats.completed === 0) return null;
+  if (stats.total === 0) return null;
   return (
     <span className="ml-2 inline-flex items-center gap-1 tabular-nums text-ink-2" data-testid="learning-path-progress">
-      <Check aria-hidden className="size-3.5 text-success" />
+      <Check
+        aria-hidden
+        className={cn("size-3.5", stats.completed > 0 ? "text-success" : "text-muted-foreground/60")}
+      />
       {stats.completed}/{stats.total} ({stats.percent}%)
     </span>
   );

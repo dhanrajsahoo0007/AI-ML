@@ -1,9 +1,24 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { ModelCardDone } from "@/components/read-count";
+import { CategoryProgressBadge, ModelCardDone } from "@/components/read-count";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
 import { slugify } from "@/lib/doc-headings";
+
+function collectCardHrefs(node: React.ReactNode): string[] {
+  const hrefs: string[] = [];
+  React.Children.forEach(node, (child) => {
+    if (!React.isValidElement(child)) return;
+    const props = child.props as { href?: unknown; children?: React.ReactNode };
+    if (typeof props.href === "string" && props.href.startsWith("/")) {
+      hrefs.push(props.href);
+    }
+    if (props.children) {
+      hrefs.push(...collectCardHrefs(props.children));
+    }
+  });
+  return hrefs;
+}
 
 export function ModelCategory({
   title,
@@ -16,15 +31,20 @@ export function ModelCategory({
   subtitle?: string;
   children: React.ReactNode;
 }) {
+  const cardHrefs = collectCardHrefs(children);
+
   return (
     // The id is the target of the section index, sidebar and header-menu group links (features/docs/groups.ts).
     <div id={slugify(title)} className="mt-16 mb-16 scroll-mt-24 first:mt-0">
       <div className="mb-8">
-        <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-tint-soft text-tint [&_svg]:size-4">
-            {resolveCategoryIcon(icon)}
-          </span>
-          Category
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-tint-soft text-tint [&_svg]:size-4">
+              {resolveCategoryIcon(icon)}
+            </span>
+            Category
+          </div>
+          {cardHrefs.length > 0 && <CategoryProgressBadge hrefs={cardHrefs} title={title} />}
         </div>
         <h2 className="!mt-4 !border-0 !pt-0">{title}</h2>
         {subtitle && <p className="mt-3 max-w-2xl text-muted-foreground">{subtitle}</p>}
@@ -65,8 +85,8 @@ export function ModelCard({
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-tint [&_svg]:size-4">
           {resolveIcon(icon)}
         </span>
-        <span className="flex items-center gap-2">
-          <ModelCardDone href={href} />
+        <span className="flex flex-wrap items-center justify-end gap-2">
+          <ModelCardDone href={href} title={title} />
           {status === "outline" && (
             <span className="rounded-full border border-hairline px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
               Outline
