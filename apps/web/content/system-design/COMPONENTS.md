@@ -437,10 +437,10 @@ Where a pattern shows up in other pages. The list is explicit for now (it is not
   uses={[
     {
       title: "Design a key-value store",
-      href: "/system-design/case-studies/key-value-store",
+      href: "/system-design-case-studies/case-studies/key-value-store",
       note: "Spreads keys across nodes",
     },
-    { title: "Design a distributed cache", href: "/system-design/case-studies/distributed-cache" },
+    { title: "Design a rate limiter", href: "/system-design-case-studies/case-studies/rate-limiter" },
   ]}
 />
 ```
@@ -1339,6 +1339,31 @@ These existed before the curriculum work; listed here so this file is the one pl
 `<PremiumBreak />` marks the end of the free preview on a premium page: everything above it is shown to everyone,
 everything below only to Pro readers. One per page, on its own line with a blank line above and below. Placement per
 page type is in `PAGE-TEMPLATES.md` §1.6. On a free page it renders nothing.
+
+### PatternUseCaseExplorer
+
+The use-case explorer at the top of the patterns hub (`content/system-design/patterns.mdx`, on the line before the
+first `<ModelCategory>`). No props: its data is `src/lib/pattern-catalog.ts` (`PATTERNS`, `USE_CASES`). A tier
+toggle and 13 single-select use-case chips highlight the matching `<ModelCard>`s below (role badge and a one-line
+reason) and dim the rest; each `<ModelCategory>` shows "N match". The highlight is shared through
+`src/lib/pattern-filter.client.ts` and cleared when the hub unmounts. One per hub; use it only on the patterns hub.
+
+```mdx
+<PatternUseCaseExplorer />
+```
+
+### ModelCard `tier`
+
+`<ModelCard tier="advanced" … />` adds the "Advanced · Interview edge" pill beside "Mark done". The page itself
+carries `tier: advanced` in its frontmatter (the article header shows the same pill), and the card in `_index.yaml`
+carries `tier: advanced` after `status`. content-check fails when card and page disagree. Absent means
+foundational; never write `tier: core`.
+
+```mdx
+<ModelGrid>
+  <ModelCard title="Transactional Outbox and Change Data Capture" icon="database" description="One transaction, then a log-tailed relay, so no event is lost." href="/system-design/patterns/outbox-and-cdc" tier="advanced" />
+</ModelGrid>
+```
 
 ### CloudOnly
 

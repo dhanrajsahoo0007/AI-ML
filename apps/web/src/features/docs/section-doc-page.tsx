@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
+import { TierBadge } from "@/components/patterns/tier-badge";
 import { SectionProgressBanner } from "@/components/section-progress-banner.client";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
@@ -66,18 +67,25 @@ export async function SectionDocPage({
   // Articles (pages below a hub) use the docs-style layout: table of contents, updated date, copy for LLM.
   // Hubs stay card grids, and an article can opt out with `layout: classic` in its frontmatter.
   const docsLayout = slug.length > 1 && doc.frontmatter.layout !== "classic";
+  // Advanced pattern pages carry the tier pill in the header, in the paywalled preview too.
+  const tierBadge = !item.isHub && item.data.tier === "advanced" ? <TierBadge className="ml-3 align-middle" /> : null;
   const docs = docsLayout
     ? {
         headings: doc.headings,
         updated: await getUpdatedDate(doc.filePath, doc.frontmatter.updated),
         pagePath: `/${section}/${slugPath}`,
         statusBadge:
-          !preview && !item.isHub ? (
-            <ArticleCompletedBadge
-              contentKey={item.href.slice(1)}
-              sectionLabel={def.label}
-              sectionHrefs={sectionHrefs}
-            />
+          tierBadge || (!preview && !item.isHub) ? (
+            <>
+              {tierBadge}
+              {!preview && !item.isHub && (
+                <ArticleCompletedBadge
+                  contentKey={item.href.slice(1)}
+                  sectionLabel={def.label}
+                  sectionHrefs={sectionHrefs}
+                />
+              )}
+            </>
           ) : undefined,
       }
     : undefined;

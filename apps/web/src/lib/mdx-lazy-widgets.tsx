@@ -11,6 +11,9 @@ export const DatabasePicker = dynamic(() => import("@/components/db/database-pic
 export const DatabaseWorkloadMatrix = dynamic(() =>
   import("@/components/db/workload-matrix").then((m) => m.DatabaseWorkloadMatrix)
 );
+export const PatternUseCaseExplorer = dynamic(() =>
+  import("@/components/patterns/pattern-use-case-explorer").then((m) => m.PatternUseCaseExplorer)
+);
 export const CompareDatabases = dynamic(() =>
   import("@/components/db/compare-databases").then((m) => m.CompareDatabases)
 );

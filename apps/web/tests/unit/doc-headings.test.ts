@@ -91,3 +91,82 @@ describe("genai-system-design house headings and point-wise format", () => {
     expect(violations).toEqual([]);
   });
 });
+
+// The pattern hub follows the same v2 format (plan: plans/patterns-expansion-plan.md §7.6). The guard applies to a
+// page once it is converted: it has an `updated:` key and is not an outline. Unconverted pages pass until their wave.
+describe("system-design patterns v2 headings and point-wise format", () => {
+  const dir = path.join(process.cwd(), "content", "system-design", "patterns");
+  const pages = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".mdx"))
+    .sort()
+    .map((f) => ({ f, text: fs.readFileSync(path.join(dir, f), "utf8") }))
+    .filter(({ text }) => /^updated:/m.test(text) && !/^status:\s*outline/m.test(text));
+  const retired = new Set([
+    "TL;DR",
+    "The idea in plain English",
+    "Deep dive",
+    "Real-world examples",
+    "Common pitfalls",
+    "How to answer in an interview",
+    "Related patterns",
+  ]);
+
+  // Lines outside code fences, with the text of JSX blocks (lines inside an open tag or a component) dropped.
+  const proseLines = (text: string) => {
+    const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+    const out: { line: string; n: number }[] = [];
+    let inCode = false;
+    let jsxDepth = 0;
+    body.split("\n").forEach((line, i) => {
+      const t = line.trim();
+      if (t.startsWith("```")) {
+        inCode = !inCode;
+        return;
+      }
+      if (inCode) return;
+      const opens = (t.match(/<[A-Z][A-Za-z]*\b(?![^>]*\/>)/g) ?? []).length;
+      const closes = (t.match(/<\/[A-Z][A-Za-z]*>/g) ?? []).length;
+      const inJsx = jsxDepth > 0 || t.startsWith("<");
+      jsxDepth = Math.max(0, jsxDepth + opens - closes);
+      if (!inJsx) out.push({ line: t, n: i + 1 });
+    });
+    return out;
+  };
+
+  it("uses Overview and Mental model and no retired heading", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const h2s = proseLines(text)
+        .filter(({ line }) => line.startsWith("## "))
+        .map(({ line }) => line.slice(3).trim());
+      for (const h of h2s) if (retired.has(h)) violations.push(`${f}: retired heading "## ${h}"`);
+      if (!h2s.includes("Overview")) violations.push(`${f}: missing "## Overview"`);
+      if (!h2s.includes("Mental model")) violations.push(`${f}: missing "## Mental model"`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("writes in points: bulleted answers, no Mermaid, no long unbulleted prose", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      for (const m of text.matchAll(/<InterviewQuestion\b[^>]*>([\s\S]*?)<\/InterviewQuestion>/g)) {
+        if (!m[1].trim().startsWith("- ")) violations.push(`${f}: unbulleted <InterviewQuestion> answer`);
+      }
+      if (/^\s*```mermaid/m.test(text)) violations.push(`${f}: Mermaid fence`);
+      for (const { line, n } of proseLines(text)) {
+        const listed = /^(- |\* |\d+\. |\| |#|>)/.test(line);
+        if (!listed && line.length > 200) violations.push(`${f}:${n}: prose line of ${line.length} characters`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("puts the Interview edge callout on every advanced page", () => {
+    const missing = pages
+      .filter(({ text }) => /^tier:\s*advanced\s*$/m.test(text))
+      .filter(({ text }) => !/<Callout\b[^>]*title="Interview edge[^"]*"/.test(text))
+      .map(({ f }) => f);
+    expect(missing).toEqual([]);
+  });
+});

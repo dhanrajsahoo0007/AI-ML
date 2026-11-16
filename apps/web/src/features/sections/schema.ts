@@ -180,6 +180,8 @@ export const frontmatterSchema = z
     description: z.string().min(1),
     icon: z.string().optional(),
     status: z.enum(["outline", "draft", "published"]).optional(),
+    // Pattern difficulty tier; written only as `advanced` (absent means core).
+    tier: z.enum(["core", "advanced"]).optional(),
     access: z.enum(["free", "premium"]).optional(),
     preview: z.number().int().nonnegative().optional(),
     order: z.number().optional(),
@@ -207,6 +209,7 @@ export const navCardSchema = z
     icon: z.string().optional(),
     description: z.string().optional(),
     status: z.enum(["outline", "draft", "published"]).optional(),
+    tier: z.enum(["core", "advanced"]).optional(),
   })
   .strict();
 
