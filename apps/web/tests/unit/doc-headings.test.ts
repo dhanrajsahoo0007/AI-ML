@@ -183,8 +183,8 @@ describe("system-design patterns v2 headings and point-wise format", () => {
   });
 });
 
-// Case studies (plan: plans/case-studies-plan.md §5 and §6.4). A page is held to the format once it is converted:
-// it has `updated:` and no `status: outline`. Every page, outline or not, carries its system logo.
+// Case studies (plan: plans/case-studies-plan.md §5 and §6.4). Every page is converted (`updated:`, no outline) and
+// carries its system logo.
 describe("system-design case studies: interview-grade format", () => {
   const dir = path.join(process.cwd(), "content", "system-design-case-studies", "case-studies");
   const all = fs
@@ -226,6 +226,12 @@ describe("system-design case studies: interview-grade format", () => {
       .split("\n")
       .filter((l) => l.startsWith("|"))
       .slice(2);
+
+  // All 27 pages were written by 2026-11-17 (Waves 2-7), so every page must now carry `updated:` and none may be an
+  // outline; a new case study lands in this format from the start.
+  it("has every page converted: an `updated` date and no outline", () => {
+    expect(all.map(({ f }) => f).filter((f) => !pages.some((p) => p.f === f))).toEqual([]);
+  });
 
   it("gives every case study a system logo", () => {
     expect(all.length).toBe(27);
