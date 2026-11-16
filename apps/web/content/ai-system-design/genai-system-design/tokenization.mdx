@@ -6,6 +6,7 @@ description: How BPE, WordPiece, Unigram and byte-level tokenizers split text, a
 Tokenization determines how raw text becomes integer IDs before an LLM ever sees a prompt.
 
 - Interviewers ask about it because it explains why models struggle with character-level tasks, why non-English languages can cost several times more per sentence, and why changing a tokenizer requires retraining the embedding matrix.
+- This page trains BPE by hand on "low", "lower" and "newest", then encodes new words with it; every number below comes from that example.
 
 ## Overview
 
@@ -15,29 +16,35 @@ Tokenization determines how raw text becomes integer IDs before an LLM ever sees
 - **Byte-level BPE (GPT-2 onward):** Runs merges over raw UTF-8 bytes (256 base symbols), guaranteeing **zero `<unk>` (unknown) tokens** on any input string.
 - **Cost, latency & multilingual fairness:** Because API billing, context windows, and decode steps scale per token, scripts that fragment into many byte/sub-word pieces pay higher cost and higher latency for the same meaning.
 
+<KeyIdea>A tokenizer is an ordered list of merges learned from one corpus: text that corpus saw often becomes a few long tokens, and everything else falls back to short pieces, down to single bytes.</KeyIdea>
+
 ## Mental model
 
 - **LEGO bricks of language:** Using whole words as bricks requires millions of unique pieces and still fails on new names or typos; using single letters requires only 26 bricks but turns every sentence into a massive tower.
 - **Sub-word middle ground:** Common words stay single bricks (`"the"`, `"model"`), while rarer or compound words snap together from reusable sub-pieces (`"token"` + `"ization"`).
-- **Fixed ID lookup:** Once the tokenizer trained, each brick has a permanent integer ID tied to one row of the model's embedding table—changing the bricks scrambles the model's dictionary.
+- **Fixed ID lookup:** Once the tokenizer is trained, each brick has a permanent integer ID tied to one row of the model's embedding table; changing the bricks scrambles the model's dictionary.
 
 ## Core concepts
 
 1. **Vocabulary size ($V$):** Typical sizes range from ~30,000 (BERT) to 100,000–256,000 in modern multilingual LLMs; larger vocabularies compress sequences into fewer tokens (faster decoding) at the cost of a wider embedding and output projection matrix ($V \times d_{\text{model}}$).
-2. **BPE (Byte-Pair Encoding):** Initializes vocabulary with individual characters/bytes, counts all adjacent symbol pairs in the training corpus, merges the most frequent pair into a new token, and repeats until size $V$; inference applies the learned merge table in priority order.
-3. **WordPiece:** Merges the pair $(x, y)$ that maximizes $\frac{\text{count}(xy)}{\text{count}(x)\,\text{count}(y)}$ (maximum likelihood gain under a unigram language model); used in BERT with `##` marking word-internal continuations.
+2. **BPE (Byte-Pair Encoding):** Initializes vocabulary with individual characters/bytes, counts all adjacent symbol pairs in the training corpus, merges the most frequent pair into a new token, and repeats until size $V$; inference applies the learned merge table in priority order. Vocabulary size = alphabet + number of merges (Sennrich et al., 2016, §3.2).
+3. **WordPiece:** Adds the unit that most raises the training data's likelihood (Wu et al., 2016, §4.1), in practice scoring the pair $(x, y)$ as $\frac{\text{count}(xy)}{\text{count}(x)\,\text{count}(y)}$; used in BERT with `##` marking word-internal continuations.
 4. **Unigram language model:** Starts with a large superset of candidate substrings, estimates token probabilities via EM, and iteratively prunes the lowest-impact tokens; supports **subword regularization** by sampling multiple valid segmentations during training.
 5. **SentencePiece:** Language-agnostic tokenizer library that treats input as a raw Unicode stream (encoding spaces as `▁`, U+2581), eliminating language-specific pre-tokenization for languages without whitespace like Chinese or Japanese.
 6. **Byte-level BPE:** Uses the 256 UTF-8 bytes as the base vocabulary so any string, emoji, or binary snippet encodes without `<unk>`, though rare non-Latin characters may split into multiple byte tokens.
 7. **Special & control tokens:** Dedicated IDs for `<|bos|>`, `<|eos|>`, `<|pad|>`, and chat role delimiters (`<|im_start|>user`); mismatching chat templates between training and serving severely degrades instruction following.
-8. **Sizing rule of thumb:** In English prose, **1 token $\approx 4$ characters $\approx 0.75$ words**; source code, JSON, numbers, and low-resource scripts require significantly more tokens per word.
+8. **Sizing rule of thumb:** In English prose, **1 token $\approx 4$ characters $\approx 0.75$ words** (OpenAI's own estimate); source code, JSON, numbers, and low-resource scripts require significantly more tokens per word.
 
 ## Architecture
+
+Text passes through a fixed pipeline before the model sees it; follow one string through it.
 
 <AnimatedDiagram
   spec="animated/transformer/tokenizer-pipeline"
   caption="Follow one string down the pipeline: it is normalized, cut into word chunks, split by BPE into sub-word pieces, mapped to ids, given a <bos> token, and finally each id picks one pink row of the embedding table."
 />
+
+**How to read it:** The grey group is the tokenizer, a separate program; only the pink group is part of the LLM. The violet row, the merge list, is the one step learned from data. Everything after it is a lookup: piece to id, id to embedding row. The split and ids are illustrative.
 
 The inference tokenization pipeline runs five deterministic steps:
 
@@ -47,11 +54,16 @@ The inference tokenization pipeline runs five deterministic steps:
 4. **Chat template & special tokens:** Wrap segments with role headers, tool-call markers, and BOS/EOS control token IDs.
 5. **Embedding lookup:** Map each integer ID to its row vector in the $V \times d_{\text{model}}$ embedding matrix; detokenization reverses the mapping on output IDs.
 
+<Callout tone="red" title="What breaks">
+  Tokenizer and model ship as two artefacts, and nothing checks that they match. A different tokenizer version or normalization at serving gives valid-looking ids that point at the wrong embedding rows; a different chat template puts role markers where the model never saw them. Quality collapses with no error. Pin the tokenizer files to the model checkpoint and render chat prompts with the template stored next to the weights.
+</Callout>
+
 ## Technical mechanics
 
 ### Training BPE, one merge at a time
 
-- **Iterative merge rounds:** Train BPE on three words ("low", "lower", and "newest")—each round counts every adjacent pair, merges the most frequent one (ties go to the pair seen first), and adds the result to the vocabulary.
+- **Iterative merge rounds:** Train BPE on three words ("low", "lower", and "newest"); each round counts every adjacent pair, merges the most frequent one (ties go to the pair seen first), and adds the result to the vocabulary.
+- This is the algorithm of Sennrich et al. (2016) without their end-of-word marker. Pairs never cross a word boundary.
 
 <AnimatedDiagram
   spec="animated/transformer/bpe-merges"
@@ -59,28 +71,114 @@ The inference tokenization pipeline runs five deterministic steps:
   caption="Each merge fuses the most frequent adjacent pair into one new token, so “lo”, then “low”, then “lowe” join the vocabulary; the ordered merge list is the tokenizer."
 />
 
+<StepCards>
+  <StepCard n={1} title="Count every adjacent pair">
+    l + o, o + w and w + e each occur twice; the tie goes to l + o, seen first. Gap: nothing is merged yet.
+  </StepCard>
+  <StepCard n={2} title="Merge l + o into lo">
+    Every l o becomes lo. Now lo + w occurs twice and o + w is gone. Gap: count again.
+  </StepCard>
+  <StepCard n={3} title="Merge lo + w into low">
+    "low" is one token, and every remaining pair occurs once. Gap: frequency no longer separates the candidates.
+  </StepCard>
+  <StepCard n={4} title="Tie-break: merge low + e">
+    The first pair seen, low + e, wins. The merge list is l + o, lo + w, low + e.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 8 starting characters (l, o, w, e, r, n, s, t) + 3 merges = 11 tokens, numbered 0 to 10 in the order they were added.
+
+### Encoding a new word
+
+Training produces a merge list, not a dictionary of words. Encoding splits a word into characters and replays each merge, in learned order, wherever its pair occurs (§3.2). Here are three words the trainer never saw.
+
+<AnimatedDiagram
+  spec="animated/transformer/bpe-encode"
+  stepper
+  caption="The merges replay in the order they were learned: “lowest” shrinks from 6 characters to 3 tokens, “newer” matches no merge and stays at 5, and the “y” in “slowly” has no id at all."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Split into characters">
+    Each character would be its own token. Gap: no merge has run.
+  </StepCard>
+  <StepCard n={2} title="Apply merge 1, l + o">
+    "lowest" and "slowly" gain lo; "newer" has no l. Gap: two merges left.
+  </StepCard>
+  <StepCard n={3} title="Apply merge 2, lo + w">
+    Both lo tokens become low. "newer" still matches nothing. Gap: one merge left.
+  </StepCard>
+  <StepCard n={4} title="Apply merge 3, low + e, and look up ids">
+    Only "lowest" changes, to lowe s t. The "y" of "slowly" never occurred in training, so it has no id.
+  </StepCard>
+</StepCards>
+
+**The numbers:** "lowest" 6 characters → 3 tokens (ids 10, 6, 7); "newer" 5 → 5; "slowly" 6 → 4 tokens, one of them `<unk>`.
+
+- **Frequency, not meaning:** lowe + s + t, not low + est; Sennrich et al. split the unseen "lower" as "low er".
+- **Uneven compression:** text unlike the training data, such as "newer", stays fragmented: the multilingual token tax in miniature.
+- **Unknown characters:** the only symbols unknown at test time (§3.2, footnote 3); byte-level BPE removes them.
+
+### WordPiece and Unigram on the same corpus
+
+WordPiece prefers pairs that occur together more often than their parts predict. On the first count, l + o scores $2 / (2 \times 2) = 0.50$ but s + t scores $1 / (1 \times 1) = 1.00$, because s and t never appear apart. BPE merges l + o first; WordPiece merges s + t first. At inference WordPiece takes the longest vocabulary entry matching the start of the word, then repeats on the rest.
+
+Unigram prunes top-down instead (Kudo, 2018): each round it keeps the tokens whose removal would cost the most likelihood (the paper's example keeps 80%), and always keeps single characters, so every word stays encodable.
+
+### Bytes instead of characters
+
+Covering all of Unicode as base symbols needs over 130,000 entries (Radford et al., 2019, §2.2); byte-level BPE merges UTF-8 bytes instead, from a base of 256. Scripts with several bytes per character pay for it.
+
+<AnimatedDiagram
+  spec="animated/transformer/utf8-bytes"
+  caption="A byte-level tokenizer can read any text, but it starts from one token per byte: the same word costs 3 bytes in English and 9 in Hindi before any merge, and only merges learned from the training data close that gap."
+/>
+
+**How to read it:** Each grey cell is one Unicode code point; the teal cells under it are its UTF-8 bytes, in hex. The right column is the token count before any merge. The "y" that had no id above is byte 79 here.
+
+**The numbers:** "tea" 3 bytes, "чай" 6, "चाय" 9 (3 code points × 3 bytes), "茶" 3, 🍵 4.
+
+Trained on English-heavy data, a tokenizer learns many merges for Latin byte runs and few for Devanagari, so Hindi stays near its byte count. GPT-2 also forbids merges across character categories, except for a leading space, so "dog.", "dog!" and "dog?" do not each take a slot (§2.2). Llama 1, Llama 2 and Gemma keep a SentencePiece vocabulary and fall back to bytes only for characters outside it.
+
 ### Why tokenization causes strange failures
 
-- **Character counting & spelling ("strawberry"):** Because `"strawberry"` encodes as 2–3 sub-word tokens (e.g., `"str"` + `"aw"` + `"berry"`), the model never sees individual character positions unless prompted to space out letters one by one.
-- **Inconsistent number splitting:** Splitting `"1234"` vs `"12345"` into inconsistent 2- or 3-digit chunks breaks column alignment in arithmetic; modern LLMs use either single-digit tokenization (Llama 1/2) or strict 1-to-3 digit right-aligned regex chunks (Llama 3, GPT-4).
-- **Glitch tokens:** Strings abundant in the tokenizer's web crawl (such as Reddit usernames) but filtered out of the LLM training corpus leave their embedding rows nearly uninitialized, causing erratic completions when triggered.
-- **Multilingual token tax:** A sentence in Hindi, Burmese, or Amharic can require **3× to 6× more tokens** than the same sentence in English if the tokenizer corpus was English-heavy—multiplying API cost, TTFT, and decode latency while shrinking effective context length.
+- **Character counting & spelling ("strawberry"):** Because `"strawberry"` encodes as 2–3 sub-word tokens (e.g., `"str"` + `"aw"` + `"berry"`; the exact split depends on the tokenizer), the model never sees individual character positions unless prompted to space out letters one by one.
+- **Inconsistent number splitting:** BPE merges digit runs by frequency, so `"1234"` and `"12345"` can split into unrelated chunks, which breaks column alignment in arithmetic. Llama 1 and 2 and Gemma split numbers into single digits; `cl100k_base`, `o200k_base` and Llama 3 cut digit runs into chunks of up to three from the left (`\p{N}{1,3}`).
+- **Glitch tokens:** Strings abundant in the tokenizer's training text (such as fragments of Reddit usernames in GPT-2's vocabulary) but nearly absent from the LLM training corpus leave their embedding rows nearly untrained, causing erratic completions when triggered (Land and Bartolo, 2024).
+- **Multilingual token tax:** For `cl100k_base`, Petrov et al. (2023) measured 1.6× English's token count for Italian, 2.6× for Bulgarian, 3× for Arabic and up to 15× for Shan, multiplying API cost, TTFT, and decode latency while shrinking effective context length.
+
+<Callout tone="red" title="What breaks">
+  Left-to-right chunking moves digit boundaries with the number's length: 1234 is 123 + 4, but 12345 is 123 + 45, so the units digits never line up. Singh and Strouse (2024) found GPT-3.5 and GPT-4 add far better when commas force right-to-left groups of three. Fix it in the tokenizer (single digits or right-aligned groups) or format numbers before they reach the model.
+</Callout>
 
 ## Trade-offs
+
+Each row trades vocabulary size against sequence length, or robustness against simplicity.
+
+<Compare caption="Tokenizer choices: what each buys and what it costs.">
 
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Small vocabulary (~32K) | Compact embedding/LM head matrix; dense gradient updates per token | Longer token sequences; higher prefill & decode latency | Compact English-focused encoders or edge models |
-| Large vocabulary (100K–256K) | 15–30% shorter sequences; much fairer multilingual & code compression | Larger embedding & output projection memory footprint | Modern frontier & multilingual LLMs (GPT-4o, Llama 3, Gemma) |
+| Large vocabulary (100K–256K) | Shorter sequences (Llama 3: 3.17 → 3.94 characters per token on English); fairer multilingual & code compression | Larger embedding & output projection memory footprint | Modern frontier & multilingual LLMs (GPT-4o, Llama 3, Gemma) |
 | Byte-level BPE | Zero `<unk>` tokens; handles any UTF-8 string or emoji | Rare scripts can fragment into raw UTF-8 bytes | Default for general-purpose autoregressive LLMs |
 | Unigram LM with subword sampling | Exposes model to multiple segmentations during training (robustness to typos) | Slightly more complex EM vocabulary pruning | Multilingual and morphologically rich translation/seq2seq models |
 | Byte-latent / tokenizer-free models | Eliminates tokenizer biases and glitch tokens | Raw byte sequences are 4× longer without dynamic patching | Frontier research (MegaByte, Byte Latent Transformer) |
 
+</Compare>
+
+A larger $V$ adds rows to the embedding and the output projection ($V \times d_{\text{model}}$ each, unless tied); a shorter sequence shrinks the KV cache, the prefill and the decode steps at once.
+
 ## Production systems
 
-- **BERT (WordPiece, ~30K vocab):** Uses greedy longest-match sub-word lookup with `##` continuation prefixes.
-- **GPT-2 / GPT-4 / GPT-4o (`tiktoken` Byte-level BPE):** GPT-2 introduced 50,257-token byte-level BPE; `cl100k_base` (100K) and `o200k_base` (200K) expanded multilingual and code compression while enforcing regex digit limits.
-- **Llama 3 (128K `tiktoken` BPE) & Gemma (256K SentencePiece):** Scaled vocabulary size above 128K specifically to reduce sequence length on code and non-English languages.
+From each model's paper or official code (checked November 2026):
+
+- **BERT (WordPiece, 30,000 tokens):** Uses greedy longest-match sub-word lookup with `##` continuation prefixes.
+- **GPT-2 (byte-level BPE, 50,257 tokens):** Introduced byte-level BPE with the character-category rule.
+- **GPT-4 and GPT-4o (`tiktoken`):** `cl100k_base` (about 100K tokens, GPT-4 and GPT-3.5-turbo) and `o200k_base` (about 200K, GPT-4o) expanded multilingual and code compression while enforcing regex digit limits.
+- **Llama 1 and Llama 2 (SentencePiece BPE, 32K tokens):** Split all numbers into single digits and fall back to bytes for unknown UTF-8 characters.
+- **Llama 3 (128K `tiktoken` BPE):** Scaled the vocabulary to cut sequence length: 100K tokens from `tiktoken` plus 28K added for non-English languages; compression on English rose from 3.17 to 3.94 characters per token over Llama 2.
+- **Gemma (256K SentencePiece):** A subset of the Gemini tokenizer that splits digits, keeps extra whitespace and uses byte-level encodings for unknown tokens.
 
 ## Failure modes & pitfalls
 
@@ -93,9 +191,10 @@ The inference tokenization pipeline runs five deterministic steps:
 
 1. **Explain the sub-word trade-off:** Why character-level (sequences 4× too long) and word-level (huge vocabulary + `<unk>` OOV failures) both lose to sub-word tokenization.
 2. **Walk through BPE mechanics:** Base byte/character alphabet → iterative frequency merges → ordered merge list applied at inference.
-3. **Contrast the main algorithms:** BPE (frequency), WordPiece (likelihood ratio), Unigram LM (top-down pruning + subword regularization), and SentencePiece (raw Unicode stream with `▁`).
-4. **Connect to systems metrics:** Vocabulary size vs sequence length (KV cache size, prefill $O(n^2)$, decode steps, and multilingual token tax).
-5. **Explain concrete failure modes:** Letter counting, digit chunking in arithmetic, glitch tokens, and chat-template special tokens.
+3. **Do it on the whiteboard:** Train three merges on "low", "lower", "newest" (l + o, lo + w, low + e), then encode "lowest" as lowe + s + t.
+4. **Contrast the main algorithms:** BPE (frequency), WordPiece (likelihood ratio: s + t before l + o on the same corpus), Unigram LM (top-down pruning + subword regularization), and SentencePiece (raw Unicode stream with `▁`).
+5. **Connect to systems metrics:** Vocabulary size vs sequence length (KV cache size, prefill $O(n^2)$, decode steps, and multilingual token tax).
+6. **Explain concrete failure modes:** Letter counting, digit chunking in arithmetic, glitch tokens, and chat-template special tokens.
 
 **What interviewers listen for:** Algorithmic clarity on BPE vs WordPiece/Unigram, the trade-off between embedding matrix size ($V \times d$) and sequence length ($n$), and how tokenization impacts multilingual cost and latency.
 
@@ -103,10 +202,18 @@ The inference tokenization pipeline runs five deterministic steps:
 
 ## Further reading
 
-- [Neural Machine Translation of Rare Words with Subword Units — BPE (Sennrich et al., 2015)](https://arxiv.org/abs/1508.07909)
-- [SentencePiece: A simple and language independent subword tokenizer and detokenizer (Kudo & Richardson, 2018)](https://arxiv.org/abs/1808.06226)
+- [Neural Machine Translation of Rare Words with Subword Units — BPE (Sennrich et al., 2016)](https://arxiv.org/abs/1508.07909): §3.2, Algorithm 1.
+- [Language Models are Unsupervised Multitask Learners — GPT-2 (Radford et al., 2019)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf): §2.2, byte-level BPE.
+- [SentencePiece: A simple and language independent subword tokenizer and detokenizer (Kudo & Richardson, 2018)](https://arxiv.org/abs/1808.06226): §3.1, lossless tokenization.
 - [Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates — Unigram LM (Kudo, 2018)](https://arxiv.org/abs/1804.10959)
+- [Japanese and Korean Voice Search — WordPiece (Schuster & Nakajima, 2012)](https://doi.org/10.1109/ICASSP.2012.6289079)
+- [Google's Neural Machine Translation System (Wu et al., 2016)](https://arxiv.org/abs/1609.08144): §4.1, wordpieces.
 - [BERT: Pre-training of Deep Bidirectional Transformers (Devlin et al., 2018)](https://arxiv.org/abs/1810.04805)
+- [Language Model Tokenizers Introduce Unfairness Between Languages (Petrov et al., 2023)](https://arxiv.org/abs/2305.15425)
+- [Tokenization counts: the impact of tokenization on arithmetic in frontier LLMs (Singh & Strouse, 2024)](https://arxiv.org/abs/2402.14903)
+- [Fishing for Magikarp: Automatically Detecting Under-trained Tokens in Large Language Models (Land & Bartolo, 2024)](https://arxiv.org/abs/2405.05417)
+- [Byte Latent Transformer: Patches Scale Better Than Tokens (Pagnoni et al., 2024)](https://arxiv.org/abs/2412.09871)
+- Model facts: [LLaMA (Touvron et al., 2023)](https://arxiv.org/abs/2302.13971), [Llama 2](https://arxiv.org/abs/2307.09288), [The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783), [Gemma](https://arxiv.org/abs/2403.08295), [tiktoken encodings](https://github.com/openai/tiktoken).
 
 <InterviewQuestions>
   <InterviewQuestion question="Why do LLMs use sub-word tokens instead of words or characters?" category="Concepts" level="Junior">
@@ -125,7 +232,7 @@ The inference tokenization pipeline runs five deterministic steps:
   </InterviewQuestion>
   <InterviewQuestion question="Why is an LLM bad at counting the letters in a word?" category="Failure modes" level="Mid">
     - **Sub-word opacity:** The model never receives individual character tokens for common words—it receives 1 to 3 sub-word integer IDs (e.g., `"strawberry"` $\rightarrow$ `["str", "aw", "berry"]`) mapped to dense vectors.
-    - **Implicit spelling burden:** Counting letters in one pass requires the model to memorized the exact character spelling of each token ID inside its weights.
+    - **Implicit spelling burden:** Counting letters in one pass requires the model to have memorized the exact character spelling of each token ID inside its weights.
     - **Practical fix:** Have the model spell the word out with spaces or hyphens first (`s-t-r-a-w-b-e-r-r-y`) so each letter becomes its own token in the context window, or delegate counting to a code/tool call.
   </InterviewQuestion>
   <InterviewQuestion question="How does tokenization affect cost and fairness across languages?" category="Trade-offs" level="Mid">
