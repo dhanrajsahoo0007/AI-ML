@@ -1,0 +1,18 @@
+title: How strong is the sandbox wall? Container, gVisor and microVM
+alt: >-
+  Three columns built in four steps, each with a teal "Agent's command: run_tests, npm install" card on top, two lime
+  wall cards below it, and an arrow down to one grey bar across all three, "Host Linux kernel, shared by every sandbox
+  on the machine". Container: the walls are "Namespaces, cgroups" and "seccomp filter", both host kernel features;
+  under the bar a red box says that to reach the host takes one kernel or runtime bug, citing runc CVE-2024-21626 from
+  January 2024; its cost: same kernel, least overhead. gVisor (runsc): the walls are the Sentry, a user-space kernel
+  in Go, and a small set of host system calls with none passed straight through; reaching the host takes a Sentry bug,
+  then a host bug; its cost: slower on syscall-heavy work. microVM (Firecracker): the walls are its own guest kernel,
+  ringed, and Firecracker with KVM, five devices and a jailer behind; reaching the host takes the guest, the VMM, then
+  the jailer; it boots in under 125 ms with under 5 MiB of overhead each. In the last step a lime bar across the bottom
+  reads "Egress allow-list: registry.npmjs.org only; the walls above stop escapes, not uploads".
+caption: >-
+  Each step puts more code that is not the host kernel between the agent and the host. None of the walls stops an
+  allowed connection from carrying data out, so every layer still needs the egress allow-list.
+tags: [agents, security, sandbox, genai]
+source: original
+created: 2026-11-16
