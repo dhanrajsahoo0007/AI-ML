@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getIconComponent } from "@/lib/icons";
-import { ReadCount } from "@/components/read-count";
+import { CardProgressBar, ReadCount } from "@/components/read-count";
 
 interface TopicCardProps {
   href: string;
@@ -58,6 +58,8 @@ export function TopicCard({
           ))}
         </div>
       )}
+
+      {hrefs && <CardProgressBar hrefs={hrefs} />}
 
       <div className="mt-6 flex items-center justify-between border-t border-hairline pt-5 text-sm">
         <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">

@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
-import { ArrowRight, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { isCompleted, useCompletedPages, useProgressStats } from "@/lib/completed.client";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
 import { BrandMark } from "@/components/brand-mark";
@@ -456,6 +457,11 @@ function SectionPanel({
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => setActiveSlug(slug), 90);
   };
+  const done = useCompletedPages();
+  const sectionAllHrefs = items
+    ? Object.values(items[section.key] ?? {}).flatMap((bs) => bs.flatMap((b) => b.items.map((i) => i.href)))
+    : [];
+  const sectionStats = useProgressStats(sectionAllHrefs);
 
   if (section.comingSoon) {
     return (
@@ -475,7 +481,17 @@ function SectionPanel({
   return (
     <div className="flex max-h-[calc(100vh-6rem)] flex-col">
       <div className="flex items-baseline justify-between gap-4 border-b border-hairline px-6 py-4">
-        <p className="font-display text-xl text-ink">{section.label}</p>
+        <div className="flex items-baseline gap-3">
+          <p className="font-display text-xl text-ink">{section.label}</p>
+          {section.kind === "docs" && sectionStats.completed > 0 && (
+            <span
+              className="text-xs font-medium tabular-nums text-muted-foreground"
+              data-testid={`header-panel-progress-${section.key}`}
+            >
+              {sectionStats.percent}% done · {sectionStats.completed}/{sectionStats.total}
+            </span>
+          )}
+        </div>
         <Link href={section.href} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
           View all <ArrowRight aria-hidden className="size-3.5" />
         </Link>
@@ -534,6 +550,10 @@ function SectionPanel({
             {section.groups.map((group) => {
               const Icon = group.icon ? getIconComponent(group.icon) : undefined;
               const isActive = group.slug === activeSlug;
+              const groupItemHrefs = items
+                ? (items[section.key]?.[group.slug] ?? []).flatMap((b) => b.items.map((i) => i.href))
+                : [];
+              const groupRead = groupItemHrefs.filter((h) => isCompleted(done, h)).length;
               return (
                 <li key={group.slug}>
                   <Link
@@ -556,8 +576,9 @@ function SectionPanel({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{group.title}</span>
                       {group.count > 0 && (
-                        <span className="block text-xs text-muted-foreground">
+                        <span className="block text-xs tabular-nums text-muted-foreground">
                           {group.count} {unit}
+                          {groupRead > 0 && ` · ${groupRead} read`}
                         </span>
                       )}
                     </span>
@@ -610,20 +631,24 @@ function SectionPanel({
                             </p>
                           )}
                           <ul>
-                            {block.items.map((item) => (
-                              <li key={item.href} className="break-inside-avoid">
-                                <Link
-                                  href={item.href}
-                                  aria-current={pathname === item.href ? "page" : undefined}
-                                  className={cn(
-                                    "block py-1 text-sm leading-snug transition-colors hover:text-primary",
-                                    pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
-                                  )}
-                                >
-                                  {item.title}
-                                </Link>
-                              </li>
-                            ))}
+                            {block.items.map((item) => {
+                              const itemDone = isCompleted(done, item.href);
+                              return (
+                                <li key={item.href} className="break-inside-avoid">
+                                  <Link
+                                    href={item.href}
+                                    aria-current={pathname === item.href ? "page" : undefined}
+                                    className={cn(
+                                      "flex items-center justify-between gap-2 py-1 text-sm leading-snug transition-colors hover:text-primary",
+                                      pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
+                                    )}
+                                  >
+                                    <span>{item.title}</span>
+                                    {itemDone && <Check aria-hidden className="size-3.5 shrink-0 text-success" />}
+                                  </Link>
+                                </li>
+                              );
+                            })}
                           </ul>
                         </div>
                       );

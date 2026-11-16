@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { clearAllLocalProgress } from "@/features/progress/sync-account-progress.client";
 
 // Account page actions. Plain same-origin fetches (the route() wrapper checks Origin and the session).
 
@@ -26,7 +27,10 @@ export function SignOutEverywhereButton() {
         onClick={async () => {
           setBusy(true);
           const res = await fetch("/api/account/sessions", { method: "DELETE" }).catch(() => null);
-          if (res?.ok) return window.location.assign("/");
+          if (res?.ok) {
+            clearAllLocalProgress();
+            return window.location.assign("/");
+          }
           setError("Couldn't sign out everywhere. Please try again.");
           setBusy(false);
         }}
@@ -102,7 +106,10 @@ export function DeleteAccountForm() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ confirm: typed }),
         }).catch(() => null);
-        if (res?.ok) return window.location.assign("/?account=deleted");
+        if (res?.ok) {
+          clearAllLocalProgress();
+          return window.location.assign("/?account=deleted");
+        }
         const err = res ? await errorOf(res) : undefined;
         if (err?.code === "reauth_required") return window.location.assign(REAUTH_URL);
         setError(err?.message ?? "Couldn't delete your account. Please try again.");

@@ -3,11 +3,13 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
+import { sectionLeafItems } from "@/lib/progress-stats";
+import { docsKind } from "./kind";
 import { loadDocItems } from "./source";
 import { TopicQuestions } from "@/components/mdx/question-bank";
 import { isPremiumDoc, premiumAnswerCategories } from "@/features/paywall";
 import { Paywall } from "@/features/paywall/public";
-import { ProgressActions } from "@/features/progress/progress-actions.client";
+import { ArticleCompletedBadge, ProgressActions } from "@/features/progress/progress-actions.client";
 import { getSection } from "@/features/sections";
 import type { BreadcrumbItem, ContentSection } from "@/types/content";
 
@@ -27,7 +29,8 @@ export async function SectionDocPage({
 }) {
   const slugPath = slug.join("/");
   const def = getSection(section);
-  const item = def && loadDocItems(def).find((i) => i.slug === slugPath);
+  const items = def ? loadDocItems(def) : [];
+  const item = items.find((i) => i.slug === slugPath);
   if (!def || !item) notFound();
   const premium = isPremiumDoc(def, item);
   if (preview && !premium) notFound();
@@ -41,13 +44,23 @@ export async function SectionDocPage({
   ];
   if (slug.length > 1) {
     // Link the hub only when it exists (test fixtures have no hub page).
-    const hubExists = loadDocItems(def).some((i) => i.isHub && i.slug === slug[0]);
+    const hubExists = items.some((i) => i.isHub && i.slug === slug[0]);
     crumbs.push({
       label: slug[0].replaceAll("-", " "),
       ...(hubExists ? { href: `/${section}/${slug[0]}` } : {}),
     });
   }
   crumbs.push({ label: doc.frontmatter.title ?? slugPath });
+
+  const leafItems = !item.isHub ? sectionLeafItems(docsKind.nav(def, items)) : [];
+  const sectionHrefs = leafItems.map((i) => i.href);
+  const currentIdx = leafItems.findIndex((i) => i.href === item.href);
+  const prev =
+    currentIdx > 0 ? { title: leafItems[currentIdx - 1].title, href: leafItems[currentIdx - 1].href } : undefined;
+  const next =
+    currentIdx >= 0 && currentIdx < leafItems.length - 1
+      ? { title: leafItems[currentIdx + 1].title, href: leafItems[currentIdx + 1].href }
+      : undefined;
 
   // Articles (pages below a hub) use the docs-style layout: table of contents, updated date, copy for LLM.
   // Hubs stay card grids, and an article can opt out with `layout: classic` in its frontmatter.
@@ -57,6 +70,7 @@ export async function SectionDocPage({
         headings: doc.headings,
         updated: await getUpdatedDate(doc.filePath, doc.frontmatter.updated),
         pagePath: `/${section}/${slugPath}`,
+        statusBadge: !preview && !item.isHub ? <ArticleCompletedBadge contentKey={item.href.slice(1)} /> : undefined,
       }
     : undefined;
 
@@ -74,7 +88,20 @@ export async function SectionDocPage({
         title={doc.frontmatter.title ?? slugPath}
         description={doc.frontmatter.description}
         docs={docs}
-        after={preview ? <Paywall path={item.href} /> : <ProgressActions contentKey={item.href.slice(1)} />}
+        after={
+          preview ? (
+            <Paywall path={item.href} />
+          ) : !item.isHub ? (
+            <ProgressActions
+              contentKey={item.href.slice(1)}
+              sectionLabel={def.label}
+              sectionHref={def.href}
+              sectionHrefs={sectionHrefs}
+              prev={prev}
+              next={next}
+            />
+          ) : undefined
+        }
       >
         {doc.body}
         {!preview && <TopicQuestions href={item.href} locked={(q) => premiumAnswers.has(q.category)} />}

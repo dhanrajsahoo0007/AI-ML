@@ -7,10 +7,12 @@ interface SectionIndexProps {
   breadcrumbLabel: string;
   title: string;
   subtitle: string;
+  /** Optional banner rendered above the topic card grid (e.g. per-section progress bar). */
+  banner?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function SectionIndex({ breadcrumbLabel, title, subtitle, children }: SectionIndexProps) {
+export function SectionIndex({ breadcrumbLabel, title, subtitle, banner, children }: SectionIndexProps) {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: breadcrumbLabel }]} />
@@ -18,6 +20,8 @@ export function SectionIndex({ breadcrumbLabel, title, subtitle, children }: Sec
       <FadeIn>
         <PageHeader className="mt-10 mb-12 border-b border-hairline pb-12 sm:mb-16" title={title} lead={subtitle} />
       </FadeIn>
+
+      {banner}
 
       <StaggerChildren className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" itemClassName="h-full">
         {children}
