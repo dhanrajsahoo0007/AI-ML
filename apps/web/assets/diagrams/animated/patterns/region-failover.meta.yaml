@@ -1,0 +1,17 @@
+title: Failing over from London to Frankfurt
+alt: >-
+  A sequence diagram in five steps with five lanes: orange shoppers, grey DNS, a violet London database, a violet
+  Frankfurt database and a green failover tool. Step 1: a shopper's order to London and the tool's health check both
+  time out, drawn as red timeouts, and a note says checks from three places fail. Step 2: the tool asks Frankfurt how
+  far behind it is, Frankfurt answers 2 seconds at the cut, and a note says the on-call engineer decides to fail
+  over. Step 3: the tool sends London a fence with epoch 8, which times out, then promotes Frankfurt, which answers
+  that it is the writer at epoch 8. Step 4: the tool points the shop's DNS name at Frankfurt, a note says resolvers
+  keep the old answer for up to 60 seconds, then a shopper resolves the name, gets Frankfurt, places an order there
+  and gets ok. Step 5: London comes back claiming to be the writer at epoch 7, is told it is stale and must rejoin as
+  a replica, and its 600 unsent orders are sent to Frankfurt for reconciliation.
+caption: >-
+  Failover is a decision, a fence, a promotion and a DNS change; the orders still in flight when London died come
+  back only through reconciliation.
+tags: [patterns, multi-region-and-failover, failover, fencing, dns-ttl]
+source: original
+created: 2026-11-16

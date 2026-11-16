@@ -1,11 +1,262 @@
 ---
 title: "Multi-Region, Active-Active and Failover"
-description: "Home regions, cross-region replication, RPO, RTO and failover."
+description: "Home regions, cross-region replication, RPO, RTO and failover: which region takes each write, what a failover loses, and who decides."
 icon: globe
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Brightpost runs in one London region, and when that region goes down at the noon sale, every order fails. The copy in Frankfurt is promoted in a hurry and is missing the last two seconds of orders.
 
-**What it will cover:** home regions, cross-region replication, RPO, RTO and failover.
+- Interviewers ask about multi-region design to see whether you can say which region takes each write, how much data a failover loses, and who decides to pull the switch.
+
+## Overview
+
+- A **region** is a cloud provider's group of data centres in one metro area; a **zone** is one building (or a few) inside it. A second region survives losing every zone at once.
+- **Active-passive:** one region takes writes and the other holds a copy. **Active-active:** both regions serve shoppers, and the hard part is the writes.
+- A **home region** per user takes all of that user's writes, so two regions never write the same cart.
+- Cross-region copies are usually **asynchronous**: the copy trails by the **replication lag**. The **RPO** (recovery point objective) is how much data you may lose, and with asynchronous copies it equals the lag at the moment of failure.
+- The **RTO** (recovery time objective) is how long you may be down: detection, a decision, promotion and moving traffic. DNS caching alone adds up to one TTL.
+- **Fence** the old primary before you promote the new one, or both regions accept writes (**split brain**).
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "We replicate the database to a second region."
+  - **Why the interviewer pushes back:** "Which region takes writes, and what do you lose when you fail over?"
+  - **The answer that stands out:** give each shopper a home region that takes all their writes, and state the cost of asynchronous replication: 2 s of lag at 300 orders/s loses up to 600 orders, and DNS alone keeps RTO above the 60 s TTL. Say who decides to fail over and how the old primary is fenced.
+</Callout>
+
+## Mental model
+
+- Think of a bakery chain with a shop in each of two cities. Each regular's home shop keeps their order book, and the other shop receives a photocopy of every page a little later.
+- If the home shop floods, the other shop opens the photocopy. It is missing the orders written since the last copy arrived.
+- Shops are regions, the order book is a user's rows, the photocopy is asynchronous replication, the missing pages are the RPO, and the time to reopen across town is the RTO.
+
+## Core concepts
+
+- The running example: Brightpost runs in **London** (home) and **Frankfurt**, with **40 app servers** and a sale-day peak of **300 orders/s**. The 2 s replication lag and the 60 s DNS TTL are illustrative.
+
+### Why a second region
+
+- A standby database in a second zone survives a lost building. It shares the region's power, network and the provider's control plane, so it does not survive a lost region.
+- There are three reasons to add a region: surviving a **regional outage**, **latency** for users far from London, and **data residency** (laws that say where data must stay).
+- Name which one you are solving: residency data must never leave its region, so it cannot be copied elsewhere for failover.
+
+<AnimatedDiagram spec="animated/patterns/region-one-fails" stepper caption="A standby in a second zone survives a lost building, not a lost region: when London goes down, every order fails." />
+
+**How to read it:**
+
+- Step 1 is Brightpost today: one load balancer, 40 app servers and a primary with a synchronous standby in zone B.
+- Step 2 takes the whole region away: the red outage reaches both zones, so the standby goes down with the primary.
+
+**The numbers:**
+
+- At the 300 orders/s peak, every minute London is down is 300 × 60 = 18,000 orders not taken.
+- The zone standby loses nothing (it is synchronous), but it cannot take over when the region is gone.
+
+<PremiumBreak />
+
+### Active-passive against active-active
+
+- Three ways to run two regions differ in one thing above all: which region may write a given row.
+- When two regions may write the same cart at once, replication must pick a winner when the copies meet.
+
+<AnimatedDiagram spec="animated/patterns/region-topologies" caption="Home regions keep two serving regions without write clashes: each cart has exactly one region that may write it." />
+
+**How to read it:**
+
+- Read across a row to compare the three topologies on one question.
+- The red cell is the only place data is lost silently: two writes to one cart, and last writer wins drops one.
+
+**The numbers:**
+
+- Active-passive: Frankfurt needs room for all 40 app servers' work within the RTO, either running warm or ready to scale.
+- Active-active: two regions that must each carry the whole shop if the other fails can each run at no more than 50 % of their capacity.
+
+### Home regions
+
+- Store each shopper's home region in a small **global directory**: user id to region. Every request looks it up once and routes writes there.
+- Reads can come from any region, stale by up to the lag; writes for a user's cart, orders and addresses go to the home region only.
+- Choose the home at sign-up, by location or by residency. Moving a user is a small migration: stop their writes, copy, flip the directory entry.
+- Rows that belong to no single user, such as the kettle's stock during the flash sale, need one owner region too, or a strongly consistent store.
+
+### Replication, RPO and RTO
+
+- **Synchronous** replication makes each commit wait until the other region has the write: RPO 0, and every write pays a cross-region round trip.
+- **Asynchronous** replication returns at once and ships the write afterwards: fast commits, and RPO equals the lag at the moment of failure.
+
+<AnimatedDiagram spec="animated/patterns/region-rpo" stepper caption="With asynchronous replication, the lag at the moment of failure is the data you lose: 2 s at 300 orders a second is 600 orders." />
+
+**How to read it:**
+
+- The blue row is what London committed; the violet row is what Frankfurt has applied, 2 s behind.
+- At the red cut, the 2 s in flight never arrive. The green synchronous row has nothing in flight, and pays for it on every commit.
+
+**The numbers:**
+
+- One cell is 0.5 s × 300 orders/s = 150 orders. The lag is 4 cells.
+- Lost at the cut: 2 s × 300 orders/s = 600 orders.
+
+<Callout tone="red" title="What breaks">
+  Lag grows with load, so it is largest at the noon sale, when a failure costs most. Alarm on lag, not only on errors.
+</Callout>
+
+## Architecture
+
+A failover from London to Frankfurt, in the order it happens.
+
+<AnimatedDiagram spec="animated/patterns/region-failover" stepper caption="Failover is a decision, a fence, a promotion and a DNS change; the orders still in flight when London died come back only through reconciliation." />
+
+<StepCards>
+  <StepCard n={1} title="London stops answering">
+    Shoppers' orders to London time out, and so do the failover tool's health checks. Checks from three places agree, so this is not one checker's network blip.
+  </StepCard>
+  <StepCard n={2} title="A person decides to fail over">
+    The tool asks Frankfurt how far behind it was at the cut: 2 s. The on-call engineer weighs 600 orders at risk against minutes of downtime and decides to fail over.
+  </StepCard>
+  <StepCard n={3} title="Fence London, promote Frankfurt">
+    The fence carries a new epoch, 8, and cannot reach London. Frankfurt is promoted at epoch 8, so anything still stamped epoch 7 is refused from now on.
+  </StepCard>
+  <StepCard n={4} title="Point shoppers at Frankfurt">
+    The shop's DNS name now points at Frankfurt, but resolvers keep the old answer for up to the 60 s TTL. After that, orders land in Frankfurt and succeed.
+  </StepCard>
+  <StepCard n={5} title="London returns: count the lost orders">
+    London comes back still believing it is the writer at epoch 7. It is told it is stale and rejoins as a replica, and its 600 unsent orders go to reconciliation instead of being merged blindly.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Who decides to fail over
+
+- One failed health check cannot tell "London is down" from "the path between the checker and London is down".
+- Detect automatically from several places, and require them to agree. Let a person make the cross-region decision, with a runbook and one button.
+- Automate failover inside a region (seconds, no data loss); keep a person in the loop across regions, and never fail back automatically.
+
+### Fencing and split brain
+
+- **Split brain:** London is alive but cut off from the checker. It keeps taking orders from shoppers who reach it while Frankfurt takes orders too.
+- Fence with an **epoch**, a number raised at every promotion. Storage and app servers refuse writes stamped with an older epoch (the same idea as a fencing token in [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking)).
+- Fence at the traffic layer as well: a region-level switch in global config that stops London's app servers taking writes.
+- Agreeing on one epoch is a consensus problem; see [Leader Election and Consensus](/system-design/patterns/leader-election).
+
+### Write conflicts in active-active
+
+- **Last writer wins** keeps the version with the later timestamp and drops the other silently. Clock skew can make the earlier write win (see [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks)).
+- **Merge functions** combine both versions: a cart as a set of added and removed items keeps both shoppers' changes.
+- **Synchronous agreement** refuses the second write instead, at the price of a cross-region round trip on every write.
+- Home regions avoid the question for user data; keep conflict handling for the few rows that truly need two writers.
+
+### What is global and what stays regional
+
+- **Global:** identity (a shopper must log in from either region), the user-to-region directory, the product catalogue (read-mostly, copied everywhere).
+- **Payments:** a retried charge may land in the other region, so its idempotency key must be visible there. Keep payment records in a strongly consistent store, or rely on the provider deduplicating by key.
+- **Regional:** carts, orders and sessions in the home region; caches, which start cold after a failover and send more load to the database.
+
+### Failing back
+
+- Rebuild London as a replica of Frankfurt. Reconcile the unsent orders from London's log or a snapshot of its old volume, one by one.
+- Fail back as a planned **switchover**: wait for the lag to reach zero, then swap roles, which loses nothing.
+- Practise both directions on a schedule. A failover that has never been run does not work when you need it.
+
+### Worked example: London fails at the noon sale
+
+At 12:00:00 on sale day London goes dark with Frankfurt 2 s behind; follow the five steps of the Architecture figure.
+
+1. **London stops answering.** Health checks every 10 s from three places fail three times in a row: detection takes about 30 s.
+2. **A person decides.** The on-call engineer is paged, confirms the lag is 2 s and approves the failover: say 4 minutes.
+3. **Fence and promote.** Frankfurt is promoted at epoch 8 and London's region switch is turned off: say 1 minute.
+4. **Move traffic.** The DNS record now points at Frankfurt; resolvers that cached London keep it for up to the 60 s TTL (see [DNS](/system-design/fundamentals/dns)).
+5. **Count the loss.** When London returns, its 600 unsent orders go to reconciliation, and shoppers whose orders vanished are contacted or refunded.
+
+**The numbers:**
+
+- RPO: 2 s × 300 orders/s = up to 600 orders at risk.
+- RTO floor: even with instant detection and promotion, cached DNS answers keep some shoppers on London for up to 60 s.
+- RTO here: 30 s + 240 s + 60 s + 60 s = 390 s, 6.5 minutes. At the peak that is 390 × 300 = 117,000 orders that fail or wait.
+- The person's 4 minutes is the largest term: a rehearsed runbook shrinks it more than any database setting.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Active-passive, async copy | Simple; one writer, no conflicts | Second region idle; RPO = lag; RTO in minutes | Most systems; disaster recovery for a one-writer database |
+| Active-active, home regions | Both regions serve; no conflicts for user data | A directory to run; shared rows need one owner; moving a user is a migration | Users spread over regions; latency matters |
+| Active-active, write anywhere | Any region writes; lowest write latency | Last writer wins drops writes; clocks decide | Data where the last write is good enough: preferences, presence |
+| Synchronous across regions | RPO 0; no lost orders | Every write pays a cross-region round trip; usually three regions | Money, stock, anything that must not be lost |
+
+## Production systems
+
+- **Amazon Aurora Global Database** (as of November 2026): one primary region writes and up to 10 secondary regions serve reads, with replication lag typically under a second. An unplanned failover may lose unreplicated writes (RPO typically seconds, RTO minutes) and fences the old primary only on a best-effort basis; a planned switchover waits for sync and loses nothing.
+- **Amazon DynamoDB global tables** (as of November 2026): the default mode replicates asynchronously, typically within a second, and resolves concurrent writes to one item by last writer wins. The strong mode replicates synchronously to at least one other region for an RPO of zero, and needs exactly three regions.
+- **Google Cloud Spanner** multi-region configurations: two read-write regions with two replicas each and a witness in a third region; the default leader region handles writes, and each write needs a quorum that can span regions. Multi-region instances carry a 99.999 % availability SLA.
+- **CockroachDB** `REGIONAL BY ROW` tables: each row's home region sits in a hidden `crdb_region` column, by default the region that inserted it. Surviving a whole region needs at least 3 regions and adds at least a round trip to the nearest region to every write.
+- **Used in our case studies:** [Netflix](/system-design-case-studies/case-studies/netflix) · [Instagram](/system-design-case-studies/case-studies/instagram) · [S3](/system-design-case-studies/case-studies/s3)
+
+## Failure modes & pitfalls
+
+- **"RPO zero" on paper with asynchronous replication.** The real RPO is the lag. Measure it, alarm on it and state the loss as lag × write rate.
+- **Automatic failover on one health check.** A blip between checker and region starts a data-losing failover. Require checks from several places and a person's decision.
+- **No fence.** The old primary keeps writing and the regions diverge. Raise the epoch and turn off the old region's writes before you promote.
+- **Global data left in one region.** Logins or payment keys live only in London, so Frankfurt cannot serve anyone. Copy identity everywhere and keep payment keys where both regions see them.
+- **A failover never rehearsed.** DNS TTLs, cold caches and Frankfurt's capacity are discovered during the outage. Fail over on a schedule, and fail back too.
+
+## Interview framework
+
+1. Ask why a second region: outage, latency or residency.
+2. Pick the topology and say who takes each write: active-passive, or active-active with a home region per user.
+3. State RPO as lag × write rate and RTO as detection + decision + promotion + DNS TTL, with numbers.
+4. Walk through the failover: who decides, how the old primary is fenced, how traffic moves.
+5. Say what is global (identity, directory, payment keys) and how you fail back.
+
+**What interviewers listen for:** a home region per user, an RPO stated as lag × write rate, and a named person or rule that decides to fail over.
+
+**Red flags:** "active-active" with no word on conflicts, or "RPO zero" with asynchronous replication.
+
+## Further reading
+
+- [Using switchover or failover in Amazon Aurora Global Database (AWS docs)](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html)
+- [How DynamoDB global tables work (AWS docs)](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html)
+- [Regional and multi-region configurations (Spanner docs)](https://docs.cloud.google.com/spanner/docs/instance-configurations)
+- [Table localities (CockroachDB docs)](https://docs.cockroachlabs.com/docs/stable/table-localities)
+
+<CloudOnly>
+
+- The same designs on AWS, Google Cloud and Azure: [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) · [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies) · [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+
+</CloudOnly>
+
+- Related pages: [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Zero-Downtime Migrations: Dual Writes, Backfill and Cutover](/system-design/patterns/online-migrations)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between RPO and RTO?" category="Concepts" level="Junior">
+    - RPO, the recovery point objective, is how much data you may lose, measured in time: with asynchronous replication it is the lag when the primary dies.
+    - RTO, the recovery time objective, is how long you may be down: detection, the decision, promotion and moving traffic.
+    - They are traded separately: synchronous replication buys RPO 0 with slower writes, and a warm standby buys a short RTO with money.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two regions both accept a write to the same cart. What happens?" category="Failure modes" level="Senior">
+    - Each region commits locally, and replication meets two versions of one cart a moment later.
+    - With last writer wins (DynamoDB global tables' default, for example), the later timestamp wins and the other change disappears silently; skewed clocks can even keep the older one.
+    - A merge function (the cart as a set of adds and removes) keeps both, and a synchronous mode refuses the second write instead.
+    - The better design avoids the clash: the cart lives in its owner's home region, and only that region writes it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you assign users to regions, and how do you move one?" category="Architecture" level="Mid">
+    - Pick a home region at sign-up, by location or by residency rules, and store it in a small global directory.
+    - Route every write for that user to the home region; serve reads locally if a little staleness is acceptable.
+    - To move a user, pause their writes, copy their rows, flip the directory entry and resume: a small migration, not a config change.
+  </InterviewQuestion>
+  <InterviewQuestion question="Replication lag is 2 s and the sale peaks at 300 orders a second. What do you lose if London fails, and how would you lose less?" category="Scaling" level="Senior">
+    - Up to 2 × 300 = 600 orders committed in London that never reached Frankfurt.
+    - Lower the lag by sizing the link and the replica for the noon peak, or cap it: some databases can block commits when every replica is too far behind (Aurora PostgreSQL's `rds.global_db_rpo`), trading availability for a bounded loss.
+    - For orders and payments that must not be lost, replicate synchronously and pay the cross-region round trip on each write.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should cross-region failover be automatic?" category="Trade-offs" level="Senior">
+    - Detection should be automatic, from several places that must agree, so a blip at one checker does not count.
+    - The decision usually belongs to a person: an unplanned failover loses the lag's writes and risks split brain, so it is worth a minute of judgement.
+    - Make the action one tested button with fencing built in. Fully automatic failover is reasonable only with RPO 0 and reliable fencing, and never with automatic failback.
+  </InterviewQuestion>
+  <InterviewQuestion question="London comes back after a failover. How do you fail back?" category="Failure modes" level="Mid">
+    - Do not let London resume as a writer: it is stale and may hold writes Frankfurt never saw.
+    - Rebuild it as a replica of Frankfurt, and reconcile its unsent writes from its log or a snapshot of its old volume.
+    - When the lag reaches zero, run a planned switchover, which waits for sync and loses nothing.
+  </InterviewQuestion>
+</InterviewQuestions>
