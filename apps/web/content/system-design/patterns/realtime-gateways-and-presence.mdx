@@ -1,11 +1,258 @@
 ---
 title: "Real-Time Connection Gateways and Presence"
-description: "Gateway fleets, session routing, presence and reconnect cursors."
+description: "How a message finds one socket among many gateways: session registries, per-user channels, presence heartbeats, reconnect cursors and draining."
 icon: activity
-status: outline
+updated: 2026-11-16
 tier: advanced
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Each shopper holds a socket on one of twelve gateways, and an order update for shopper A lands on a gateway that has never heard of A. The update is dropped without a trace.
 
-**What it will cover:** gateway fleets, session routing, presence and reconnect cursors.
+- Interviewers ask about real-time gateways to see whether you can route a message to one socket among many machines, and keep that route correct when gateways crash, deploy and reconnect thousands of clients.
+
+## Overview
+
+- A **gateway** is a server whose only job is to hold open connections (WebSockets, server-sent events) and pass messages in and out. The protocol is covered in [WebSockets](/system-design/fundamentals/websockets), the choice of method in [Choosing a real-time method](/system-design/fundamentals/choosing-realtime).
+- A gateway can write only to sockets it holds. A sender needs a **route** to the right gateway: a **session registry** (user → gateway) or a **pub/sub channel** per user or per room.
+- Routes go stale when a gateway dies. Registry entries carry a **TTL** or hang off the gateway's **lease**, so a dead gateway's entries expire on their own.
+- **Presence** (who is online) is a lossy aggregate of heartbeats. Heartbeats refresh a TTL; only status changes are pushed, and only to watchers who can see them.
+- A crash or deploy sends tens of thousands of clients back at once. **Jittered reconnects**, a **last-seen cursor** and **draining** keep that from becoming an outage.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Clients keep a WebSocket to the chat server."
+  - **Why the interviewer pushes back:** "There are a thousand chat servers. How does B's message reach A's socket on another machine?"
+  - **The answer that stands out:** a session registry maps each user to a gateway, with entries tied to the gateway's lease, or each gateway subscribes to a per-user channel on a broker. Name the cost: one lookup or one subscription per user, stale routes for up to one TTL after a crash, and a reconnect cursor so nothing is lost in between.
+</Callout>
+
+## Mental model
+
+- Think of a hotel with twelve receptions, one per wing. A guest checks in at one desk, and only that desk can put a note under the guest's door.
+- A courier with a parcel for room 4471 who walks into the wrong reception gets nowhere. The front office keeps a list: guest, wing (the session registry).
+- Or each wing has a pigeonhole per guest it hosts, and couriers drop parcels into a central sorter that knows which wing claimed which pigeonhole (pub/sub).
+- When a wing closes, its guests move to other wings and re-register; the old entries must lapse, or couriers keep walking to a locked door.
+
+## Core concepts
+
+- The running example is Brightpost at **12:00** on sale day: **500,000 shoppers** hold a socket for the kettle sale and their order tracking. Gateways cap at **50,000 sockets** each (the figure on [WebSockets](/system-design/fundamentals/websockets)), with a heartbeat every **30 s**.
+
+### Stateful gateways behind a balancer
+
+- A socket is one long TCP connection, so it stays on the gateway where it landed. The balancer works at layer 4 or passes the upgrade through, and keeps no record of who is where.
+- The gateway authenticates at the handshake, holds the socket, runs heartbeats and forwards every inbound message to stateless services. Business logic stays out, so gateways rarely deploy.
+- The producers of messages (the order service, the chat service, a courier's location feed) are elsewhere. None of them holds a socket, so each needs a route.
+- Sticky sessions do not solve this: they keep one client on one gateway, but say nothing about how another service finds that gateway.
+
+### Presence: a lossy aggregate of heartbeats
+
+- Each client heartbeats every 30 s over its socket. The gateway refreshes the user's presence entry with a TTL of about two intervals (60 s).
+- A missing entry means offline, with a "last seen" time. Presence may be a minute out of date, so it lives in a fast in-memory store, never in the message store.
+- The cost is not the heartbeats, which are writes that nobody sees. It is pushing each **status change** to everyone watching that user.
+
+<AnimatedDiagram spec="animated/patterns/rt-presence" stepper caption="Heartbeats only refresh a TTL; the cost is in pushing each status change to every watcher, and showing it only to watchers who have the person on screen cuts it tenfold." />
+
+<StepCards>
+  <StepCard n={1} title="Heartbeats refresh a TTL">
+    500,000 sockets beating every 30 s make 16,667 heartbeats a second. Each one refreshes a 60 s TTL in the presence store and is pushed to nobody.
+  </StepCard>
+  <StepCard n={2} title="Every change to every watcher">
+    Suppose these were chat users with sessions of 10 minutes and 50 watchers each (illustrative). That is 1,667 status changes a second, and 83,333 pushes a second if every watcher hears every change.
+  </StepCard>
+  <StepCard n={3} title="Only watchers who can see it">
+    Push a change only to watchers who have the person on screen, say 5 of 50. The pushes fall to 8,333 a second, and a watcher who opens a list fetches the current state once.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Heartbeats: 500,000 ÷ 30 s = 16,667 a second, about 1,389 per gateway across 12.
+- Status changes: 500,000 sessions of 600 s = 833 connects and 833 disconnects a second, 1,667 changes in all.
+- Fan-out: 1,667 × 50 = 83,333 pushes a second unthrottled; 1,667 × 5 = 8,333 on-screen only.
+
+<PremiumBreak />
+
+### Throttling presence
+
+- **Debounce offline.** Announce "offline" only after the TTL lapses, so a phone that drops and reconnects inside 60 s never flaps.
+- **On-screen only.** Subscribe a client to the presence of the users it is showing, and unsubscribe when they scroll away.
+- **Coalesce.** Batch a watcher's presence changes into one message every few seconds; a status that flips twice inside the window sends nothing.
+- **Cap big rooms.** In a room of 10,000, show a count, not 10,000 dots. A count can be recomputed once a second.
+
+## Architecture
+
+The figure adds a route between the service that has a message and the gateway that holds the socket, then breaks a gateway.
+
+<AnimatedDiagram spec="animated/patterns/rt-routing" stepper caption="A gateway can write only to sockets it holds, so the sender needs a route: a registry lookup or a per-user channel, and both must forget a dead gateway." />
+
+<StepCards>
+  <StepCard n={1} title="No route: the wrong gateway">
+    Shopper A's socket is on gateway 2. The order service has "4471 shipped" for A and hands it to gateway 1, which holds no socket for A. The update is dropped.
+  </StepCard>
+  <StepCard n={2} title="A session registry">
+    When A's socket opens, gateway 2 writes `A = gw 2` to the session registry. The order service reads A's entry and pushes to gateway 2. The registry is now on every message's path, and its entries can outlive the gateway.
+  </StepCard>
+  <StepCard n={3} title="Or a pub/sub channel per user">
+    Instead of a registry, gateway 2 subscribes to `user:A` on a broker. The order service publishes once, and the broker delivers to whichever gateway subscribed. No lookup, but the broker now holds one subscription per connected user.
+  </StepCard>
+  <StepCard n={4} title="A gateway dies, its entries expire">
+    Gateway 2 crashes and stops refreshing, so A's entry expires after its TTL. A reconnects through the balancer to gateway 1, which writes `A = gw 1`. Until the TTL lapses, a sender can still look up the dead route.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Session registry against pub/sub
+
+- **Registry:** a key per user, `session:A → gw 2` plus device ids, in Redis or a similar store. The sender looks up and calls the gateway over an internal RPC.
+- **Pub/sub per user:** the gateway subscribes to `user:A` on connect. Redis pub/sub is **at most once**: a message published while the subscriber is disconnected is lost, so it is a doorbell, not a mailbox.
+- **Pub/sub per room:** each gateway subscribes once to `room:42` if any member is local, and the broker sends one copy per gateway, not per phone. Redis 7.0 sharded pub/sub (`SPUBLISH`) keeps a channel's traffic on one shard.
+- Either way, the durable copy lives in a log or database first. The route only rings the bell; the [Messenger design](/system-design-case-studies/case-studies/facebook-messenger) stores, then delivers, then falls back to a mobile push when no route exists.
+
+### When a gateway dies: TTLs and leases
+
+- **Per-user TTL:** each entry expires unless refreshed. Refreshing on every heartbeat costs 16,667 writes a second at Brightpost's peak.
+- **Gateway lease:** attach every entry to the gateway's lease. In etcd, all keys on a lease are deleted when it expires, so one keep-alive per gateway keeps 41,667 entries alive.
+- **Check on delivery:** store a gateway generation number with each entry. A restarted gateway with a new generation rejects pushes meant for the old one, and the sender falls back to the log and a push notification.
+
+### Reconnects, jitter and catch-up
+
+- A crashed gateway's clients all notice within one heartbeat and return at once. A random first delay (0 to 5 s), doubling on each failure, spreads the herd.
+- Every event carries a per-stream sequence number. The client reconnects with the last one it saw, and the new gateway replays the gap from the log.
+
+<AnimatedDiagram spec="animated/patterns/rt-reconnect" stepper caption="The app reconnects with the last event it saw, and the gateway fills the gap from the log; a cursor older than the log gets a snapshot instead." />
+
+<StepCards>
+  <StepCard n={1} title="A gateway dies mid-stream">
+    Gateway 2 pushes event 3 (packed) for order 4471, then dies. Events 4 and 5 land in the order event log while the app has no socket.
+  </StepCard>
+  <StepCard n={2} title="Reconnect with a cursor">
+    The app waits a random 0 to 5 s and connects to gateway 7 with `after = 3`. Gateway 7 reads 4 and 5 from the log and sends them before live events resume.
+  </StepCard>
+  <StepCard n={3} title="Cursor too old: a snapshot">
+    An app away for two days sends a cursor the log no longer holds. Gateway 7 asks the order service for the current state and sends a snapshot at event 6, then live events from there.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Without jitter: 41,667 handshakes inside about a second on 11 gateways.
+- With 0 to 5 s jitter: 41,667 ÷ 5 = 8,333 a second, about 758 per surviving gateway.
+
+### Draining a gateway for a deploy
+
+- Take the gateway out of the balancer so it accepts no new sockets, then close its sockets in batches with close code 1001 ("going away").
+- Clients reconnect elsewhere with their cursor. Over 10 minutes, 41,667 sockets is about 69 reconnects a second.
+- Drain one gateway at a time: 12 gateways at 10 minutes each is a 2-hour deploy, which is why logic lives in stateless services, not gateways.
+
+### Worked example: Brightpost order tracking at 12:00
+
+At 12:00, 500,000 shoppers have the sale or their order page open. Follow one update, "4471 shipped", through the four steps of the Architecture figure.
+
+1. **Size the tier.** 500,000 ÷ 50,000 = 10 gateways at the cap; run 12, so each holds about 41,667 and losing one leaves 11 at about 45,455.
+2. **Registry.** On connect, each gateway writes `session:A → gw 2` on its lease. The order service looks up A and pushes to gateway 2: one lookup and one RPC per order event.
+3. **Pub/sub for the sale counter.** The kettle's stock count goes to every sale page. Each gateway subscribes once to `room:kettle`, and the stock service publishes the count once a second, not once per order.
+4. **Gateway 2 dies.** Its lease lapses within one keep-alive window, its entries vanish, and its 41,667 shoppers reconnect with jitter and their last event number.
+
+**The numbers:**
+
+- Memory: 41,667 sockets × 30 KB ≈ 1.25 GB per gateway.
+- Heartbeats: 500,000 ÷ 30 s = 16,667 a second; with entries on 12 gateway leases, the registry takes 12 keep-alives, not 16,667 writes.
+- Registry size: 500,000 entries × about 100 bytes = 50 MB, which fits on one node.
+- Order updates: at the 300 orders a second sale peak, 300 lookups and 300 pushes a second.
+- Stock counter: one publish a second becomes 12 broker deliveries and 500,000 frames a second, about 41,667 per gateway. Publishing on each of 300 orders a second would make 150,000,000.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Session registry | One lookup, a direct push; doubles as an online list | A lookup per message; stale routes until a TTL lapses | Point-to-point messages on a large fleet |
+| Pub/sub channel per user | No lookup; a dead gateway's subscriptions go with its broker connection | One subscription per user on the broker; at most once | A moderate fleet with a broker already in place |
+| Pub/sub channel per room | One publish reaches each gateway once | Every subscribed gateway gets every message in the room | Group chats, live counters, broadcasts |
+| Per-user TTL entries | Simple; each entry heals itself | A refresh write per heartbeat | Small fleets |
+| Entries on a gateway lease | One keep-alive per gateway; a crash clears all its entries | Needs a store with leases, or a generation check | Large fleets |
+
+## Production systems
+
+- **Slack** (Engineering blog, 2023): gateway servers hold client WebSockets and subscribe to the channel servers that own each channel, found by consistent hashing. Users are hashed to presence servers, and clients receive presence updates only for users visible on screen.
+- **Discord Gateway** (developer docs, as of November 2026): the Hello event sets `heartbeat_interval` (45,000 ms in the example), and the first heartbeat waits that interval times a random jitter. Every dispatch carries a sequence number, and a Resume sends the session id and last sequence to replay missed events.
+- **LinkedIn presence** (Engineering blog, 2018): clients heartbeat every d seconds, an entry expires after d + ε, and one Akka actor per online member fires the offline check after d + 2ε. They report under 200 ms at p99 for status updates.
+- **Amazon API Gateway WebSocket APIs** (quotas, as of November 2026): 500 new connections a second per account per Region by default, a 2-hour maximum connection and a 10-minute idle timeout.
+- **Phoenix** (2015): one 40-core, 128 GB machine held 2 million WebSocket connections after the team sharded its PubSub server and broadcasts.
+- **Used in our case studies:** [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Tinder](/system-design-case-studies/case-studies/tinder) · [Zillow](/system-design-case-studies/case-studies/zillow)
+
+## Failure modes & pitfalls
+
+- **Registry entries with no expiry.** A crashed gateway leaves users "online" and routes pointing at nothing. Put entries on a TTL or the gateway's lease.
+- **Treating pub/sub as delivery.** Redis pub/sub drops messages for a disconnected subscriber. Write to a log first and replay from the client's cursor.
+- **Reconnect storms.** 41,667 clients returning in one second can tip the other gateways over. Add 0 to 5 s of jitter and exponential backoff.
+- **Pushing every heartbeat or every status flip.** Presence fan-out swamps the gateways. Debounce offline, push on-screen only, and coalesce.
+- **Business logic in gateways.** Every release drains every gateway. Keep gateways thin and deploy the logic in stateless services.
+- **Restarting all gateways at once.** 500,000 sockets drop together. Drain one gateway at a time over minutes.
+
+## Interview framework
+
+1. Size the tier: concurrent sockets ÷ sockets per gateway, plus room to lose one.
+2. Route messages: a session registry or a pub/sub channel per user, and a channel per room for broadcasts; say which and why.
+3. Handle gateway death: TTLs or a lease, and a generation check on delivery.
+4. Make delivery reliable: store first, sequence numbers, a reconnect cursor, a snapshot when the cursor is too old.
+5. Price presence and deploys: heartbeats per second, fan-out per status change, jitter and draining.
+
+**What interviewers listen for:** the sentence "a gateway can only write to sockets it holds", followed by a route with an expiry and a cursor.
+
+**Red flags:** sticky sessions as the routing answer, or pub/sub with no durable store behind it.
+
+## Further reading
+
+- [Real-time Messaging (Slack Engineering, 2023)](https://slack.engineering/real-time-messaging/)
+- [Gateway (Discord developer docs)](https://docs.discord.com/developers/events/gateway)
+- [Now You See Me, Now You Don't: LinkedIn's Real-Time Presence Platform (LinkedIn Engineering, 2018)](https://www.linkedin.com/blog/engineering/product-design/now-you-see-me-now-you-dont-linkedins-real-time-presence-platf)
+- [Redis Pub/Sub (Redis docs)](https://redis.io/docs/latest/develop/pubsub/)
+- [The Road to 2 Million Websocket Connections in Phoenix (Phoenix blog, 2015)](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
+- Related pages: [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why can't a backend service write to a user's WebSocket directly?" category="Concepts" level="Junior">
+    - A WebSocket is one TCP connection held by one gateway process, and only that process can write to it.
+    - The backend service holds no sockets, and with many gateways it does not know which one has the user.
+    - So it needs a route: look the user up in a session registry, or publish to a channel the user's gateway subscribed to.
+  </InterviewQuestion>
+  <InterviewQuestion question="Session registry or a pub/sub channel per user: how do you choose?" category="Architecture" level="Mid">
+    - A registry costs one lookup per message and gives you an online list for free; a channel costs one broker subscription per connected user and no lookup.
+    - A registry's entries can outlive a crashed gateway until a TTL or lease lapses; a channel's subscriptions disappear with the gateway's broker connection.
+    - For broadcasts to rooms, use a channel per room either way, so the broker sends one copy per gateway.
+    - Neither is durable on its own: store the message first and let the client catch up by cursor.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does presence work, and why is it allowed to be wrong?" category="Concepts" level="Mid">
+    - Each client heartbeats every 20 to 30 s; the gateway refreshes a presence entry with a TTL of about two intervals.
+    - A missing entry means offline, so a dead phone shows offline within about a minute without any explicit signal.
+    - Being a minute late is acceptable, so presence stays in a fast in-memory store and never blocks message delivery.
+  </InterviewQuestion>
+  <InterviewQuestion question="Size a gateway tier for 500,000 concurrent sockets with a heartbeat every 30 s." category="Scaling" level="Senior">
+    - At about 50,000 sockets a gateway, 10 are the minimum; run 12, about 41,667 each, so losing one leaves 11 at about 45,455.
+    - Memory: 41,667 × 30 KB ≈ 1.25 GB per gateway, plus one file handle per socket.
+    - Heartbeats: 500,000 ÷ 30 = 16,667 a second, about 1,389 per gateway; refresh registry entries through 12 gateway leases, not 16,667 writes.
+    - Plan for a crash: 41,667 reconnects spread over 5 s is about 758 handshakes a second per surviving gateway.
+  </InterviewQuestion>
+  <InterviewQuestion question="A gateway holding 41,667 sockets crashes. Walk through what happens." category="Failure modes" level="Senior">
+    - Clients miss a heartbeat and reconnect after a random 0 to 5 s delay, landing on other gateways through the balancer.
+    - The dead gateway's registry entries expire with its lease; until then, a sender that hits the dead route falls back to the log and a mobile push.
+    - Each client sends its last-seen sequence number, and the new gateway replays the gap from the log or sends a snapshot.
+    - Presence debouncing keeps 41,667 users from flashing offline and back.
+  </InterviewQuestion>
+  <InterviewQuestion question="Presence updates are swamping your gateways. What do you change?" category="Trade-offs" level="Senior">
+    - Stop pushing heartbeats; push only status changes, and debounce offline until the TTL lapses.
+    - Push a change only to watchers who have the person on screen: 5 of 50 watchers cuts the pushes tenfold.
+    - Coalesce a watcher's changes into one message every few seconds, and show counts instead of dots in big rooms.
+    - The cost is presence that can be a few seconds stale, which users accept.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a client avoid missing messages across a reconnect?" category="Failure modes" level="Mid">
+    - Every message is stored first and carries a sequence number per conversation or stream.
+    - On reconnect the client sends the last number it saw, and the gateway reads everything after it from the log.
+    - If the cursor is older than the log keeps, the gateway sends a snapshot of the current state and continues from there.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you deploy a new gateway version without dropping 500,000 users at once?" category="Architecture" level="Senior">
+    - Drain one gateway at a time: remove it from the balancer, then close its sockets in batches with close code 1001.
+    - Over 10 minutes, 41,667 sockets is about 69 reconnects a second, which the other gateways absorb easily.
+    - Clients resume with their cursor, so nothing is lost; 12 gateways take about 2 hours.
+    - Keep business logic in stateless services so gateways rarely need a deploy at all.
+  </InterviewQuestion>
+</InterviewQuestions>
