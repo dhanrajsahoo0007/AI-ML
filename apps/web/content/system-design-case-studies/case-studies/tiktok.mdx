@@ -1,14 +1,665 @@
 ---
 title: "Design TikTok"
-description: "Short-video feeds, upload pipelines and a ranking-driven For You page."
+description: "A For You feed of short videos: retrieval and ranking in 250 ms, prefetch so the next video plays at once, and a model that learns within minutes."
 logo: systems/tiktok
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a short-video app whose main screen is an endless feed chosen for each viewer, and which learns from every swipe within minutes.
+The hard parts are picking 10 videos out of 500,000,000 in 250 ms, starting the next video with no wait, and closing the loop from a swipe to the model in minutes instead of a day.
 
-**What it will cover:** short-video feeds, upload pipelines and a ranking-driven For You page.
+- Interviewers use this question to see whether you can split a recommender into retrieval and ranking under a latency budget, and build the event pipeline that teaches it.
 
-**Related reading on this site:** [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems)
+## The interview question
 
-**Patterns used:** [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+<InterviewPrompt
+  prompt="Design TikTok: an endless feed of short videos chosen for each user, which learns from what they watch within minutes."
+  level="Senior"
+  minutes={45}
+  bankId="design-recommendation-system"
+  tests={[
+    "Two-stage retrieval and ranking inside a latency budget",
+    "An event pipeline that turns swipes into training data",
+    "Prefetch, so the next video plays at once",
+    "Saying why for every store, cache and log you draw",
+  ]}
+  clarify={[
+    { q: "Only followed accounts, or a feed chosen for each viewer?", a: "Chosen for each viewer (For You); a Following tab is the simpler variant in Step 1." },
+    { q: "How fast must it learn?", a: "A swipe should change what that viewer sees within 10 minutes." },
+    { q: "How big is it?", a: "100,000,000 daily viewers, 1,000,000 uploads a day, 500,000,000 videos eligible to show." },
+    { q: "How long are the videos?", a: "15 to 60 s, 30 s on average; viewers watch 20 s on average before swiping." },
+    { q: "Do we design upload and transcoding?", a: "Briefly: two boxes here; the YouTube design covers them in depth." },
+    { q: "May the feed repeat a video?", a: "Not within 30 days, unless the viewer replays it." },
+  ]}
+  outOfScope={["Live streams", "Shop", "Direct messages", "Search", "Comments", "Moderation models"]}
+/>
+
+## Overview
+
+- The feed is not stored: each page of 10 is **chosen on request** by a funnel: retrieval finds 2,000 candidates from 5 sources, a light ranker keeps 200, a heavy ranker scores them, a rerank picks 10.
+- The funnel fits a **250 ms** budget, and the app asks for the next page while **3 videos** are still queued, so the viewer never waits for it.
+- Serving state lives in memory: a **feature store** for profiles and counters, **parameter servers** for embedding tables, an **ANN index** (approximate nearest neighbour) for similar videos.
+- Every swipe becomes an **event** on a durable log; a **stream joiner** labels the features the ranker used with what the viewer did, and an **online trainer** syncs changed embeddings to serving **every minute**.
+- Videos play from a **CDN**; the app **prefetches** the first 1 MB of the next two videos, so a swipe starts playback from the phone.
+- A **Bloom filter per viewer** keeps seen videos out, and a **content embedding** gives each new video a first audience before anyone has watched it.
+
+<Numbers
+  items={[
+    { value: "35,000/s", label: "feed pages at peak", hint: "11,600/s × 3" },
+    { value: "1.7 M/s", label: "events at peak", hint: "5 per play" },
+    { value: "250 ms", label: "to build one page", hint: "p99, server side" },
+    { value: "≈ 3 min", label: "from a swipe to the model", hint: "7 at worst" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "The For You feed", notes: "Endless pages of 10, chosen for the viewer and fetched ahead." },
+    { id: "F2", requirement: "Upload a short video", notes: "15 to 60 s; playable within minutes of upload." },
+    { id: "F3", requirement: "Record interactions", notes: "Watch time, finish, replay, like, share, follow, skip." },
+    { id: "F4", requirement: "Learn within minutes", notes: "A swipe changes the viewer's next pages." },
+    { id: "F5", requirement: "A first audience for new videos", notes: "Shown to a small matched audience before it has any history." },
+  ]}
+/>
+
+- Out of scope: live streams, shop, direct messages, search, comments, moderation models.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Next video starts", target: "p99 under 200 ms after a swipe", why: "A wait breaks the scroll; the start must already be on the phone." },
+    { id: "N2", property: "Feed page", target: "p99 under 250 ms, server side", why: "Room for the funnel; the 60 s head start hides it from the viewer." },
+    { id: "N3", property: "Learning freshness", target: "A swipe reaches the serving model within 10 minutes (p99)", why: "Interest changes inside one session." },
+    { id: "N4", property: "Event loss", target: "Under 0.1 % of events", why: "Training tolerates a little loss; events are not money." },
+    { id: "N5", property: "Availability", target: "99.95 % for the feed", why: "A plainer feed beats an error screen." },
+    { id: "N6", property: "Repeats", target: "0 in a session; under 1 in 1,000 within 30 days", why: "A repeat feels broken." },
+    { id: "N7", property: "Cold start", target: "A new video reaches its first 500 viewers within 1 hour", why: "Creators upload again only if someone watches." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Plays", assumption: "100,000,000 viewers × 100 videos a day", result: "10,000,000,000 a day ≈ 116,000/s" },
+    { quantity: "Feed pages", assumption: "10,000,000,000 ÷ 10 a page ÷ 86,400 s", result: "≈ 11,600/s; × 3 at the evening peak ≈ 35,000/s" },
+    { quantity: "Ranker work at peak", assumption: "35,000 pages/s × 1,500 light and 200 heavy scores", result: "52,500,000 light and 7,000,000 heavy scores/s" },
+    { quantity: "Events", assumption: "5 per play × 10,000,000,000", result: "50,000,000,000 a day ≈ 580,000/s; peak ≈ 1,700,000/s" },
+    { quantity: "Event bytes", assumption: "50,000,000,000 × 200 B; 7 days on the log × 3 replicas", result: "10 TB a day; 210 TB on the log" },
+    { quantity: "Training examples", assumption: "1 per play × 1 KB of logged features", result: "10 TB a day" },
+    { quantity: "Uploads", assumption: "1,000,000 a day ÷ 86,400 s", result: "≈ 12/s: 10,000 plays per upload" },
+    { quantity: "Video storage", assumption: "1,000,000 × 15 MB (4 renditions of 30 s)", result: "15 TB a day ≈ 5.5 PB a year" },
+    { quantity: "Delivery", assumption: "10,000,000,000 plays × 4 MB (20 s at 1.5 Mbit/s)", result: "40 PB a day ≈ 3.7 Tbit/s on average" },
+    { quantity: "Seen filter", assumption: "3,000 ids (100 a day × 30 days) at 9.6 bits each for 1 % false positives", result: "3.6 KB per viewer; 360 GB in all" },
+    { quantity: "Embedding table", assumption: "600,000,000 ids × 64 floats × 4 B; × 3 with optimiser state", result: "154 GB; ≈ 460 GB in memory" },
+  ]}
+  note="Serving is heavy on compute and memory; the event stream is the biggest write path; the CDN carries the bytes."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 10,000 plays per upload, yet every play writes 5 events: 1,700,000 appends/s at peak | Serving from memory and the CDN; events on their own append-only log |
+| D2 | Peak against average | Evening peak 3 × average; a viral video can take 1 % of all plays within an hour | Size for 35,000 pages/s; hot-key defences for one video's rows |
+| D3 | Consistency per operation | The feed and the model may be minutes stale; the viewer's own like and follow read their writes | Eventual almost everywhere; the app sends what it has shown with each page request |
+| D4 | Latency target | Next video p99 200 ms (N1); a page p99 250 ms (N2) | Prefetch on the phone; a fixed time budget per funnel stage |
+| D5 | Durability | An uploaded video is never lost; events may lose 0.1 % (N4) | Replicated blob store for videos; a replicated log and client retries for events |
+| D6 | Ordering | Per viewer within a session (session features read the last swipes); no global order | Partition the log by viewer id |
+| D7 | Duplicates | A repeated video is annoying (N6); a duplicate event slightly biases training | A seen filter on the serving path; event ids deduplicated in the joiner |
+| D8 | Data size and growth | 10 TB of events and 15 TB of video a day; serving state is hundreds of GB | Serving state in memory, sharded; history in object storage |
+| D9 | Fan-out shape | One viral video sits in millions of candidate lists within an hour: a hot key | Replicate hot rows, cache them in each ranker, count by stream aggregation |
+| D10 | Contention | Not a driver here: no item takes concurrent writes that must agree; counts are summed in the stream | Append and aggregate; no locks |
+| D11 | Geography | Viewers worldwide; some countries require their data to stay at home | Serving in several regions; one event log per region; residency decides where history lives |
+| D12 | Availability and degradation | 99.95 % (N5); under stress drop the heavy ranker first, then serve a cached popular feed | A fallback per stage; never an empty screen |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/feed?cursor=…` | Viewer app | When 3 videos are left in its queue |
+| `POST /v1/events` | Viewer app | Every 10 s or 20 events, whichever comes first |
+| `POST /v1/videos/{id}/like`, `POST /v1/follows` | Viewer app | On tap |
+| `POST /v1/uploads` | Creator app | Returns a resumable upload URL (see YouTube) |
+| CDN `GET` of segments | Video player | To play, and to prefetch the next two videos |
+| `Retrieve`, `Rank` (gRPC, internal) | Feed service | Once per page, with a deadline each |
+
+```http
+GET /v1/feed?cursor=c7
+Authorization: Bearer <session>
+X-Shown: v812,v77,v9031
+
+200 OK
+{ "cursor": "c8",
+  "items": [ { "video_id": "v4410", "request_id": "r-5d1", "creator_id": "c19",
+               "duration_s": 27, "manifest": "https://cdn.example/v4410/manifest" } ] }
+
+POST /v1/events
+{ "batch_id": "b-77f", "events": [ { "event_id": "e-1", "request_id": "r-5d1",
+    "video_id": "v4410", "type": "watch", "watched_ms": 21400 } ] }
+202 Accepted
+```
+
+- **Idempotency:** a retry with the same cursor returns the same page (kept 5 minutes); `event_id` is unique, so a resent batch is deduplicated in the joiner.
+- **Pagination:** an opaque cursor holds the session and the page number; there is no offset, because the feed is generated, not stored.
+- **`request_id`:** set by the ranker on every item and sent back with every event about it; it is the join key of the learning loop.
+- **Errors:** `429` with `Retry-After` on events (the app keeps the batch); `503` on the feed makes the app show its cached fallback page.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Video metadata, follows | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra) behind a cache | Key and range reads only; multi-region writes (D1, D11) | `video_id`; `user_id` for follows | Eventual; the creator reads from the home region | Sharded relational: works, but no query here needs a join |
+| Online features | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | 1,500 lookups per page inside 30 ms (D4) | `entity_id` | Seconds stale | A disk-based store: tail latency on 1,500 reads per page |
+| Embedding tables | Parameter servers: sharded in-memory hash tables | Updated every minute, read on every score (D4, N3) | hash of the feature id | Minutes stale | A database: each training step rewrites millions of rows |
+| Video vectors for retrieval | ANN index (HNSW graph, in memory) | Nearest 1,000 of 500,000,000 in 20 ms (D4) | `video_id`, scatter-gather | Rebuilt hourly, new videos inserted | Exact search: 32 billion multiply-adds per request |
+| Seen filter | Bloom filter per viewer in the in-memory store | 3.6 KB per viewer, one read per page (D7, D8) | `viewer_id` | The app's shown ids cover the lag | An exact set: 24 KB per viewer, 6.7 × the memory |
+| Events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | 1,700,000 appends/s, replay, many readers (D1, D6) | `viewer_id` | Ordered per viewer | A work queue: one reader per message, no replay |
+| Training history | Object storage, columnar files | 10 TB a day, read in bulk (D8) | date and hour | Append only | Keeping it on the log: 7 days of disk at 3 replicas is the costly tier |
+| Video files | Blob store, served by the CDN | 15 TB a day in, 40 PB a day out (D8) | `video_id` | Read after write | A database: never for large binary objects |
+
+The two tables in the wide-column store, and the key layout of the in-memory store:
+
+```sql
+CREATE TABLE videos (
+  video_id    bigint PRIMARY KEY,   -- partition key: point reads when hydrating a page
+  creator_id  bigint, duration_s int, status text,   -- 'processing' | 'live' | 'removed'
+  renditions  list<text>, language text, created_at timestamp
+);
+
+CREATE TABLE follows_by_user (
+  user_id     bigint,               -- partition key: one viewer's follows
+  followed_at timestamp,            -- clustering key, newest first
+  creator_id  bigint,
+  PRIMARY KEY (user_id, followed_at, creator_id)
+) WITH CLUSTERING ORDER BY (followed_at DESC);
+
+-- In-memory store keys (Redis), one shard by key hash:
+--   feat:user:<viewer_id>   -> hash: 30-day interests, session vector, country, language
+--   feat:video:<video_id>   -> hash: plays, finish rate, likes in the last hour (from the joiner)
+--   seen:<viewer_id>:<yyyymm> -> 3.6 KB Bloom filter bits, 7 hashes
+--   page:<cursor>           -> the 10 video ids served, TTL 5 minutes
+```
+
+- **Hydrate a page:** 10 point reads by `video_id`, served from the cache for almost every video.
+- **Following tab:** read `follows_by_user` for one viewer, then each followed creator's newest videos.
+- **Score a page:** one multi-get of `feat:user` and 1,500 of `feat:video`, grouped by shard.
+- **Check seen:** read this month's and last month's filter; a hit in either drops the candidate.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Followed accounts, newest first (F1)
+
+The smallest feed: show the newest videos from accounts the viewer follows, and play them from a CDN.
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={1} caption="Step 1: the feed service reads followed accounts' newest videos from the metadata store; videos play from a CDN in front of the blob store." />
+
+- **Adds:** the API gateway, the feed service, the video metadata store (videos and follows), the blob store and a CDN.
+- **Flow:**
+  1. The app calls `GET /v1/feed`; the feed service reads the viewer's follows and each creator's newest videos.
+  2. It merges them newest first and returns 10, with a cursor.
+  3. The player fetches each video from the CDN; a miss pulls it from the blob store.
+- **Why this and not that:** merging on read (fan-out on read) costs nothing on upload, and a viewer follows a few hundred accounts, so the merge is small (D9).
+- **The gap:** a new viewer follows nobody and sees an empty screen; F1 asks for videos chosen for the viewer, from anyone.
+
+<PremiumBreak />
+
+### Step 2: Candidates, then a ranker (F1, N2)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={2} caption="Step 2: retrieval gathers candidates from several sources; the ranker, the design's centre, scores them and the feed service keeps the best 10." />
+
+- **Adds:** the **retrieval** service and the **ranker**; the feed service now only orchestrates and hydrates.
+- **Flow:**
+  1. Retrieval asks several sources in parallel: similar to what the viewer watched, followed creators, trending in the viewer's region, new videos.
+  2. The ranker predicts, for each candidate, how long the viewer will watch and whether they will finish, like or share.
+  3. The feed service takes the top 10, hydrates them from the metadata store and returns the page.
+- **Why this and not that:** no model can score 500,000,000 videos in 250 ms; cheap retrieval cuts the field to 2,000, so the expensive model sees only those (D4, N2).
+- **The gap:** both stages need the viewer's tastes and each video's numbers in memory, in milliseconds.
+
+### Step 3: Features and embeddings in memory (F1, N2)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={3} caption="Step 3: retrieval asks an ANN index of video embeddings; the ranker reads embedding vectors from parameter servers and features from a feature store." />
+
+- **Adds:** the **ANN index**, the **parameter servers** (the embedding tables) and the **feature store**.
+- **Flow:**
+  1. The viewer's embedding (a vector of 64 numbers for their tastes) goes to the ANN index, which returns the nearest 1,000 video vectors.
+  2. The ranker reads each candidate's embedding from the parameter servers and its counters (plays, finish rate in the last hour) from the feature store.
+- **Why this and not that:** a vector lookup is a dot product, so similar videos are found by geometry, not by hand-written rules; every read is from memory, because 1,500 reads must finish in 30 ms (D4, D8).
+- **The gap:** nothing learns yet: the model only knows what it was trained on yesterday.
+
+### Step 4: The event pipeline (F3)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={4} caption="Step 4: the app batches events to a collector, which appends them to an event log keyed by viewer; a joiner labels impressions and updates counts in the feature store." />
+
+- **Adds:** the **event collector**, the **event log** and the **joiner**.
+- **Flow:**
+  1. The app batches watch time, likes and swipes and sends them every 10 s or 20 events.
+  2. The collector checks the session and appends them to the log, partitioned by viewer id.
+  3. The joiner matches each event with the features the ranker logged for the same `request_id`, emits a labelled example, and updates per-video counts in the feature store.
+- **Why this and not that:** 1,700,000 events/s at peak is an append-only stream with several readers (joiner, counters, history), so a durable log fits; a database would index rows nobody looks up (D1, D8).
+- **The gap:** examples pile up, but the model still updates once a day.
+
+### Step 5: Online training, synced every minute (F4, N3)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={5} caption="Step 5: a trainer learns from the joined examples and pushes changed parameters to the serving parameter servers every minute." />
+
+- **Adds:** the **trainer**.
+- **Flow:**
+  1. The trainer reads labelled examples from the joiner as they arrive and takes a training step about every minute.
+  2. Every 60 s it pushes the embedding rows that changed (sparse parameters) to the serving parameter servers.
+  3. The dense network weights, which move slowly, are pushed once a day after an offline check.
+- **Why this and not that:** a viewer who skips three cooking videos should stop seeing them in this session, not tomorrow (F4, N3); sending only changed rows is about 2 GB a minute instead of 460 GB.
+- **The gap:** there is no way to add videos yet, and each swipe still waits for a network fetch.
+
+### Step 6: Upload, and prefetch to play at once (F2, N1)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={6} caption="Step 6: creators upload through the upload service into the blob store; the app plays from the CDN and prefetches the start of the next two videos." />
+
+- **Adds:** the **creator app** and the **upload** service; the app now **prefetches**.
+- **Flow:**
+  1. The creator uploads in resumable chunks; the upload service stores the original and transcodes it into 4 renditions (see the YouTube design for this pipeline).
+  2. The app keeps a queue of 10 videos and asks for the next page when 3 are left.
+  3. While one video plays, the app fetches the first 1 MB of the next two from the CDN.
+- **Why this and not that:** 1 MB is about 5 s of video at 1.5 Mbit/s, so a swipe starts from the phone's buffer (N1); prefetching whole videos would waste a quarter of all bandwidth (Deep dive 3).
+- **The gap:** nothing stops the ranker from choosing a video the viewer saw yesterday.
+
+### Step 7: The seen filter (F1, N6)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={7} caption="Step 7: the ranker drops candidates found in the viewer's Bloom filter of seen videos." />
+
+- **Adds:** the **seen filter**, a Bloom filter per viewer per month.
+- **Flow:**
+  1. Before scoring, the ranker reads this month's and last month's filter and drops every candidate found in either.
+  2. Served ids are added when the page goes out; the `X-Shown` header covers anything the pipeline has not caught up with.
+- **Why this and not that:** a Bloom filter never misses a seen video, and its only error drops 1 % of unseen ones, which costs nothing with 1,500 candidates left (D7, N6).
+- **The gap:** a brand-new video has no watches, so no embedding learned from behaviour, and retrieval never finds it.
+
+### Step 8: Cold start for a new video (F5)
+
+<AnimatedDiagram spec="animated/tiktok/architecture" step={8} caption="Step 8: a content model embeds each new video from its frames, sound and text and inserts it into the ANN index." />
+
+- **Adds:** the **content model**.
+- **Flow:**
+  1. After transcoding, the content model turns the video's frames, sound and caption into a vector in the same space as the others.
+  2. The vector goes into the ANN index within minutes, and a new-video source reserves about 10 % of each page's candidates.
+  3. The video is shown to a small matched audience (for example 500 viewers); if its finish rate beats similar videos, retrieval widens its reach.
+- **Why this and not that:** a content vector puts the video near viewers who like similar videos on its first view; a random audience would waste views and mislead the trainer (F5, N7).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/tiktok/architecture" stepper caption="A short-video feed: retrieve candidates, rank them with features and embeddings, play from a CDN with prefetch, and learn from every swipe within minutes." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Viewer app, creator app | Play, prefetch, batch events; record and upload |
+| **Edge** | API gateway, event collector, CDN | Auth and routing; take in events; serve video segments |
+| **Feed and ranking** | Feed service, retrieval, ranker | Build each page: find candidates, score them, pick 10 |
+| **Serving** | ANN index, parameter servers, upload, content model | Similar videos, embedding tables; take in and embed new videos |
+| **Learning loop** | Event log, joiner, trainer | Turn swipes into labelled examples; update the model every minute |
+| **Storage** | Video metadata, feature store, seen filter, blob store | Videos and follows; features and counters; seen videos; video files |
+
+One page for one viewer at 21:00, step by step:
+
+1. The app has 3 videos left, so it calls `GET /v1/feed?cursor=c7` with the ids it has shown.
+2. The feed service asks retrieval for candidates: 1,000 from the ANN index, 300 from followed creators, 300 trending, 200 new, 200 fresh in the viewer's language.
+3. The ranker drops the 500 the seen filter knows, scores 1,500 with the light model, keeps 200, scores those with the heavy model, and returns them ranked with a `request_id` each.
+4. The feed service applies the diversity rules, hydrates 10 videos and returns page c8 in about 230 ms.
+5. The app prefetches the first 1 MB of the next two videos; every watch and swipe goes back as events and reaches the model in about 3 minutes.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for the app, gRPC inside, events in batches
+
+- **Choice:** REST over HTTPS for the app (`GET /v1/feed`, `POST /v1/events`); gRPC with deadlines between the feed service, retrieval and the ranker.
+- **Why:** the app pulls a page when it needs one, so request and response is enough; inside, one page makes 5 to 10 calls in 250 ms, and gRPC carries a deadline on each (D4, N2).
+- **Why not WebSockets or server push:** the app knows when its queue runs low; a push channel to 100,000,000 phones would carry a page a minute.
+- **Why not GraphQL:** two fixed shapes (a page, an event batch); nothing to gain from client-chosen fields.
+- **Why not one event per request:** 1,700,000 requests/s at peak; batches of 20 make it 85,000/s and save the phone's battery.
+
+### Load balancer: layer 7 at the edge, client-side inside
+
+- **Choice:** an HTTP (layer-7) load balancer that routes `/feed`, `/events` and `/uploads` to separate server pools; inside, gRPC clients balance across servers themselves, per request.
+- **Why:** separate pools mean an event storm cannot starve feed requests (D12); gRPC keeps long-lived HTTP/2 connections, so balancing per connection would pin a ranker client to one server.
+- **Why not layer 4 at the edge:** it cannot route by path, and the three paths have very different costs.
+- **Why not a central proxy for internal calls:** one more hop inside a 250 ms budget, for 35,000 pages × 2 calls a second.
+
+### CDN: video segments, pulled on demand
+
+- **Choice:** a CDN serves video segments and manifests; an edge pulls a video from the blob store on its first request and keeps it while it is popular.
+- **Why:** 3.7 Tbit/s on average cannot come from one origin; short videos are watched in bursts, so most plays are of videos already at the edge (D1, D9).
+- **Why not push every new video to every edge:** 1,000,000 uploads a day, most watched a few hundred times; pull and popularity decide what stays.
+- **Why not serve from the origin:** the bytes would cross regions, and N1 needs the first segment close to the phone.
+- **Never cached:** feed pages (personal) and events.
+
+### Feed service: stateless, with a page cache by cursor
+
+- **Choice:** stateless servers that call retrieval and the ranker, apply the diversity rules, hydrate and keep each page in the in-memory store for 5 minutes under its cursor.
+- **Why:** the feed is generated per request, so nothing needs to live on the server; the page cache makes a retry return the same 10 videos (D7).
+- **Why not store a feed per viewer (fan-out on write):** a stored list is stale the moment the model learns (F4), and most of it is never read.
+
+### Retrieval and the ANN index: HNSW in memory, sharded
+
+- **Choice:** five candidate sources run in parallel, each with a 40 ms deadline; the main one is an ANN index (an HNSW graph) of 500,000,000 video vectors, sharded by `video_id`.
+- **Why:** nearest-neighbour search on 64-number vectors finds similar videos in about 20 ms, tuned to find about 95 % of the true nearest (D4); new videos are inserted within minutes (F5).
+- **Why not exact search:** 500,000,000 × 64 = 32 billion multiply-adds per request.
+- **Why not a search engine's vector field (<TechIcon id="oss/elasticsearch" /> Elasticsearch):** it works at small scale, but a 40 ms p99 at 35,000 queries/s is cheaper on a dedicated in-memory index.
+- **Why not precomputed candidate lists per viewer:** stale within minutes, which defeats F4.
+
+### Ranker: a light model, then a heavy one on GPUs
+
+- **Choice:** a light model (a dot product of the viewer's and the video's vectors) on 1,500 candidates; a heavy multi-task model on GPUs, with requests batched, on the best 200.
+- **Why:** the heavy model is too costly for 1,500 at 35,000 pages/s; the light model keeps the 200 it would have ranked highest (D4, N2).
+- **Why not the heavy model on all 1,500:** 52,500,000 heavy scores/s instead of 7,000,000: 7.5 × the GPUs.
+- **Why not rank offline once a day:** fresh signals from the session (the last three swipes) would be ignored (F4).
+
+### Feature store: an in-memory key-value store
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis Cluster for online features: the viewer's profile and session, each video's counters for the last hour; offline features stay in object storage.
+- **Why:** 1,500 reads per page inside 30 ms means memory, grouped into one multi-get per shard (D4); counters arrive from the joiner every few seconds (D3).
+- **Why not <TechIcon id="oss/apache-cassandra" /> Cassandra:** fine for durable data, but disk reads put the p99 of 1,500 lookups well over 30 ms.
+- **Why not compute counters in the request:** counting a video's plays means scanning events; the stream does it once for everyone.
+- **Hot keys:** a viral video's row is read on most pages; each ranker caches it locally for 10 s, so the shard sees one read per ranker per 10 s (D9).
+
+### Parameter servers: sharded in-memory embedding tables
+
+- **Choice:** sharded hash tables of embeddings keyed by the raw id, with no collisions, rows that expire after weeks without use, and a minimum count before an id gets a row; a training copy and a serving copy.
+- **Why:** new videos and viewers appear every second, so the table must grow without two ids sharing a row (D8, F5); only changed rows are synced, about 2 GB a minute (N3).
+- **Why not a fixed-size table with hashed ids:** two videos that collide share one vector, and their signals mix.
+- **Why not reload the whole model every few minutes:** 460 GB per copy; moving it every minute is not possible.
+
+### Event log: Kafka, partitioned by viewer
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topics for actions and for the features the ranker used, partitioned by `viewer_id`, 3 replicas, 7 days kept.
+- **Why:** 1,700,000 appends/s, ordered per viewer, read by the joiner, the counters and the history writer, and replayable after a bug (D1, D6, D8).
+- **Why not a work queue (<TechIcon id="oss/rabbitmq" /> RabbitMQ, SQS):** each message goes to one consumer and is deleted; we need several readers and replay.
+- **Why not write events into a database:** append-only data at this rate pays for indexes nobody reads.
+
+### Event collector: stateless intake
+
+- **Choice:** stateless HTTP servers that check the session, stamp the server time and append each batch to the log.
+- **Why:** the app cannot be trusted with log credentials, and a collector can shed load with `429` while the app keeps its batch (D12, N4).
+- **Why not let the app write to the log directly:** no client authentication or protocol for phones, and no place to drop junk.
+
+### Joiner: a stream processor with keyed state
+
+- **Choice:** <TechIcon id="oss/apache-flink" /> Flink, keyed by `request_id`, with state in <TechIcon id="oss/rocksdb" /> RocksDB; it waits for the outcome (the next swipe) or at most 5 minutes, and drops duplicate `event_id`s.
+- **Why:** labels arrive seconds to minutes after the impression, and a crash must not lose the waiting state; checkpoints save it with the log offsets (N3, D7).
+- **Why not a batch join in the warehouse:** hourly at best, which breaks N3.
+- **Why not keep the features in the ranker until the outcome arrives:** ranker memory would grow with every page, and a restart would lose it.
+
+### Trainer: online for sparse rows, daily for the rest
+
+- **Choice:** a trainer that reads the example stream continuously and syncs changed embedding rows every 60 s; a daily retrain from object storage refreshes the dense weights after an offline check.
+- **Why:** embeddings for viewers and videos change fastest; the dense layers move slowly and are riskier to push (F4, N3).
+- **Why not daily training only:** a whole day of swipes is ignored (N3).
+- **Why not push dense weights every minute:** much larger, and one bad step reaches every page within a minute.
+
+### Seen filter: a Bloom filter per viewer
+
+- **Choice:** one 3.6 KB Bloom filter per viewer per month in the in-memory store; read the current and the previous month.
+- **Why:** no false negatives, so a seen video is always caught; 1 % of unseen candidates are wrongly dropped, which is harmless (D7, N6).
+- **Why not an exact set of ids:** 24 KB per viewer, 2.4 TB in all, 6.7 × the memory.
+- **Why not a counting Bloom filter:** nothing is ever removed; monthly filters age out instead.
+
+### Video metadata: wide-column store behind a cache
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra for videos and follows, replicated to every region, with a cache in front for hydration.
+- **Why:** every read is by key or by key and time; 12 uploads/s is tiny, while 350,000 hydrations/s at peak come from the cache (D1, D11).
+- **Why not sharded relational (<TechIcon id="oss/mysql" /> MySQL):** it works, but no query needs a join, and multi-region writes are simpler in a store built for them; the YouTube design shows the relational option.
+
+### Blob store: object storage for originals and renditions
+
+- **Choice:** an object store keyed by `video_id`, with the original and 4 renditions; the CDN is its only reader at scale.
+- **Why:** 15 TB a day of large immutable files, replicated so an upload is never lost (D5, D8).
+- **Why not files on the upload servers:** a server failure loses videos, and the CDN needs one origin.
+
+## Deep dives
+
+### Two-stage retrieval and ranking inside 250 ms
+
+- **The rule:** each stage costs more per video and sees fewer videos; the expensive model never sees more than 200.
+- **Retrieval:** five sources with quotas (ANN 1,000, followed 300, trending 300, new 200, language-fresh 200), each with a 40 ms deadline; a source that misses it is skipped for this page, not waited for.
+- **Light ranker:** a dot product of the viewer vector and each video vector, both already in memory, so 1,500 scores cost about 20 ms.
+- **Heavy ranker:** one model with four heads (watch time, finish, like, share) on 200 candidates; a weighted sum of the four gives one score.
+- **Rerank:** rules, not a model: no two videos in a row from one creator or one sound, at least one exploration slot, blocked creators removed.
+
+<AnimatedDiagram spec="animated/tiktok/funnel" stepper caption="Each stage is more expensive per video and sees fewer videos: 500,000,000 to 2,000 to 200 to a page of 10." />
+
+**How to read it:** each row is one stage; the width shows how many videos it handles, and the note on the right its time and count.
+
+The 250 ms is split into a fixed budget per stage, so one slow part cannot eat the others' time.
+
+<AnimatedDiagram spec="animated/tiktok/latency-budget" stepper caption="The heavy ranker takes a third of the budget, so it only ever sees 200 videos; the page is ready at 230 ms of 250." />
+
+**The numbers:**
+
+- Find: 10 + 15 + 40 + 10 = 75 ms; rank: 30 + 20 + 80 + 10 + 15 = 155 ms; 230 ms in all, 20 ms under N2.
+- The page is requested with 3 videos left: 3 × 20 s = 60 s of head start, so the viewer never sees the 230 ms.
+
+<Callout tone="red" title="What breaks">
+  Waiting for every retrieval source turns one slow shard into a slow page: with 5 sources each slow 1 time in 100, about 5 % of pages wait on a straggler. Give each source a deadline and serve the page without it.
+</Callout>
+
+### The real-time learning loop
+
+- **Log at serving time:** the ranker writes the exact features it used, with the `request_id`, to the log; training on features fetched later would teach the model on data it never saw (training and serving skew).
+- **Join on the outcome:** the joiner holds each impression until the outcome is known (the next swipe, or a finish) or for at most 5 minutes; a watch of 21 s of a 27 s video becomes a label.
+- **Late and duplicate events:** a duplicate `event_id` is dropped; an event after the window is kept for the daily retrain, not the online one.
+- **Sync sparse often, dense rarely:** changed embedding rows go to serving every 60 s; dense weights daily after an offline check.
+- **Guard the loop:** if online metrics fall, stop the sync and serve the last good snapshot; snapshots are taken every hour.
+
+<AnimatedDiagram spec="animated/tiktok/feedback-loop" stepper caption="One swipe becomes a labelled example and changes the ranker in about 3 minutes, 7 at worst." />
+
+<StepCards>
+  <StepCard n={1} title="Serve, and log what the ranker saw">
+    The ranker returns page c8 and writes the features of each of the 10 videos to the log under request id r-5d1.
+  </StepCard>
+  <StepCard n={2} title="The viewer acts: events in batches">
+    The viewer watches v4410 for 21 s and swipes. The app sends both events within 10 s, and the collector appends them to the viewer's partition.
+  </StepCard>
+  <StepCard n={3} title="Join into a labelled example">
+    The joiner finds the features for r-5d1 and the watch and swipe that followed, and emits one example: these features, watched 78 %, not liked.
+  </StepCard>
+  <StepCard n={4} title="Train, then sync every 60 s">
+    The trainer folds the example into its next step and pushes the changed rows of the viewer and the video to the serving parameter servers. The next page uses them.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Typical: 10 s batch + 30 s until the swipe + 60 s training step + 60 s sync = 160 s ≈ 2.7 minutes.
+- Worst: 10 + 300 + 60 + 60 = 430 s ≈ 7.2 minutes, inside N3's 10 minutes.
+- Sync size: at peak 21,000,000 plays a minute touch about 7,000,000 distinct viewer and video rows × 256 B ≈ 1.8 GB a minute.
+
+<Callout tone="red" title="What breaks">
+  A feedback loop amplifies its own mistakes: a bug that over-scores one topic fills pages with it, and the clicks it gets teach the model more of the same. Keep exploration slots, watch topic diversity per page, and roll back to the hourly snapshot.
+</Callout>
+
+### Prefetch, pagination and the seen filter
+
+- **Fetch the page early:** ask for page c8 with 3 videos left in the queue; a slow page is hidden by 60 s of playing time.
+- **Prefetch only the start:** the first 1 MB (about 5 s) of the next two videos; the rest streams while the video plays.
+- **A cursor, not an offset:** the page is generated, so "offset 30" means nothing; the cursor names the session and page, and the server keeps each page for 5 minutes so a retry gets the same 10 videos.
+- **Seen ids from two places:** the server adds the 10 served ids to the filter when the page goes out; the app's `X-Shown` list covers the seconds before the pipeline catches up.
+
+<AnimatedDiagram spec="animated/tiktok/prefetch" stepper caption="The next page is asked for 60 seconds before it is needed, and a retry with the same cursor gets the same 10 videos." />
+
+<StepCards>
+  <StepCard n={1} title="Fetch ahead, then prefetch the start">
+    With 3 videos left, the app asks for the page after c7. The feed service drops the 500 candidates the filter knows, records the 10 it serves, and returns c8; the app fetches the first 1 MB of the next two.
+  </StepCard>
+  <StepCard n={2} title="Lost response: same cursor, same page">
+    The response never arrives. The app retries with c7 and gets the same page c8 from the 5-minute page cache, so nothing is repeated or skipped.
+  </StepCard>
+</StepCards>
+
+The seen filter is a Bloom filter: a few bits per video, with one kind of error. The pattern's figure shows it with 16 bits.
+
+<AnimatedDiagram spec="animated/patterns/bloom-bits" stepper caption="A 0 in any checked bit proves the key was never added; three 1s set by other keys give the one wrong answer, a false positive." />
+
+**How to read it:** for a seen filter, "never added" means "not seen: keep the candidate"; the false positive drops an unseen video, which costs one candidate out of 1,500.
+
+**The numbers:**
+
+- Filter: 3,000 ids × 9.6 bits = 3.6 KB per viewer at 1 % false positives, with 7 hashes.
+- Prefetch waste at the end of a session: 2 × 1 MB; 500,000,000 sessions a day × 2 MB = 1 PB a day, 2.5 % of the 40 PB delivered.
+- Prefetching the next 5 whole videos instead: 5 × 4 MB × 500,000,000 = 10 PB a day, 25 %.
+
+### Worked example: one swipe at 21:00
+
+1. 21:00:00: viewer u7 has 3 videos left and requests page c8; the funnel takes 2,000 candidates to 10 in 230 ms.
+2. 21:01:00: u7 reaches v4410, the first video of c8; its first 1 MB is already on the phone, so it starts in about 40 ms.
+3. 21:01:21: u7 swipes after 21 s of 27 s; the app sends the watch and swipe events by 21:01:30.
+4. 21:01:31: the joiner matches them with request r-5d1 and emits an example labelled "watched 78 %" (21 ÷ 27).
+5. 21:02:00: the trainer's next step includes it; at 21:03:00 the changed rows for u7 and v4410 reach serving.
+6. 21:03:20: with 3 videos of c8 left (7 × 20 s after 21:01:00), u7 requests c9, ranked with the updated vectors: 2 minutes after the swipe.
+
+**The numbers:** the page path costs 230 ms once every 200 s per viewer (10 videos × 20 s); the learning path costs one 200-byte event per action and 256 bytes per changed row a minute.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| When to rank | Precompute feeds daily, rank on request | Rank on request from candidates found in memory | D4, F4, N3 | 7,000,000 heavy scores/s of GPU at peak | Viewers who open the app rarely: precompute their first page |
+| Funnel shape | One model on all candidates, two rankers | Retrieval, light ranker, heavy ranker, rules | D4, N2 | Recall lost at each cut | Cheaper models make the heavy one affordable on 1,500 |
+| Training cadence | Daily batch, online with minute sync | Online for sparse rows, daily for dense weights | F4, N3, D3 | A streaming pipeline to run and guard | A/B tests show online gives no gain |
+| Event transport | Database writes, work queue, durable log | Log partitioned by viewer | D1, D6, D8 | 210 TB of log storage | Never at 1,700,000 events/s |
+| Join location | Ranker memory, warehouse batch, stream joiner | Stream joiner keyed by request id | N3, D7 | Keyed state and checkpoints to operate | Labels arrive days later (purchases): add a disk-backed store |
+| Embedding table | Fixed size with hashed ids, collisionless with expiry | Collisionless, expiring rows, minimum count | D8, F5 | Memory grows with new ids | Memory per shard runs out |
+| Seen filter | Exact set, Bloom filter | Bloom filter per viewer per month | D7, D8, N6 | 1 % of unseen candidates dropped | A small catalogue where every candidate counts |
+| Prefetch depth | None, next 5 whole videos, first 1 MB of next 2 | First 1 MB of the next 2 | D4, N1, D8 | Two fast swipes in a row may wait | On Wi-Fi prefetch more; on metered data less |
+| Degradation | Fail the page, degrade per stage | Heavy ranker off first, then a cached popular feed | D12, N5 | Worse pages during an incident | Never: an empty screen loses the viewer |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | The joiner; per-video counters | Labels and counts from 1,700,000 events/s within minutes |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The event log and its readers | Several readers, replay, order per viewer |
+| [Caching](/system-design/patterns/caching) | CDN, metadata cache, page cache, ranker-local hot rows | 3.7 Tbit/s and 350,000 hydrations/s |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | A viral video's feature row and CDN objects | One video in millions of candidate lists |
+| [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) | The seen filter | No repeats in 3.6 KB per viewer |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | The Following tab, merged on read | No stored timelines to keep fresh |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Upload and renditions | Large immutable files, resumable uploads |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | A deadline per source and stage; degradation order | A page waits on 5 to 10 internal calls |
+| [Idempotency](/system-design/patterns/idempotency) | Cursor retries, event ids | A retry must not repeat or double-count |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Short-video feed in another app | The funnel, the learning loop, prefetch, the seen filter | Nothing structural; sources and weights differ |
+| News recommendation | Retrieval and ranking, event log, online training | Items expire in hours, so freshness is a source; text, not video |
+| Ad click prediction | Logged features, the joiner, minute sync of sparse rows | Labels (purchases) arrive days later: a long join window; an auction after ranking |
+| Music radio | Next-item ranking from session signals, prefetch | Prefetch audio; licensing rules in the rerank |
+| A Following feed (Twitter) | Cursor pages, CDN for media | Candidates come from follows; fan-out on write for most accounts |
+
+## How real systems do it
+
+- **ByteDance, 2022 (Monolith paper):** a recommendation system with a collisionless embedding table built on cuckoo hashing; ids expire after a period without use, and an id needs a minimum count before it gets a row. The paper names its BytePlus Recommend product, not TikTok.
+- **ByteDance, 2022 (Monolith paper):** online training reads user actions and features from Kafka; a Flink job joins them into training examples, looking features up in memory first and in an on-disk key-value store for late actions.
+- **ByteDance, 2022 (Monolith paper):** sparse parameters sync to serving at a minute-level interval and dense ones daily, because dense variables move much more slowly; on the public Criteo data, syncing every 30 minutes gave an online AUC of 79.80 against 79.66 for every 5 hours.
+- **ByteDance, 2022 (VLDB):** ByteGraph, a distributed graph database for the graph data that ByteDance products such as TikTok, Douyin and Toutiao generate: tens of billions of vertices and trillions of edges, adjacency lists in edge-trees, geographic replication.
+- **YouTube, 2016 (RecSys):** a deep candidate-generation model followed by a separate deep ranking model, the two-stage split used here.
+- **Instagram, 2023:** Explore retrieves hundreds of items from billions, a two-tower first-stage ranker with cached embeddings recalls thousands, a heavier multi-task model scores the best 100, and a final rerank applies integrity and diversity rules such as no items from the same author in a sequence.
+- **Where this design differs:** TikTok publishes nothing used here about its funnel sizes, video storage or CDN, so the funnel follows the YouTube and Instagram papers, the learning loop follows Monolith, and every number on this page is a round estimate.
+
+## Failure modes & pitfalls
+
+- **Training on features read later:** the model learns from values it never saw at serving time; compare logged and recomputed features; log features with the `request_id` at serving.
+- **The sync pushes a bad model:** engagement drops within minutes; watch watch time per page against the last hour; stop the sync and roll back to the hourly snapshot.
+- **A retrieval shard is slow:** pages time out; watch p99 per source; give each source a deadline and serve without it.
+- **Seen ids only from the pipeline:** a fast swiper sees a repeat while events are still in flight; count repeats per session; send shown ids with every page request.
+- **A viral video on one feature shard:** that shard's p99 climbs; watch per-key read rates; cache hot rows in each ranker for 10 s.
+- **The joiner falls behind:** freshness slips past 10 minutes; watch consumer lag on the log; add partitions and joiner slots, and shed the least useful event types first.
+- **A closed loop on one topic:** pages fill with one theme; watch distinct topics per page; keep exploration slots and diversity rules.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify For You against Following, freshness, scale, video length, repeats; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 35,000 pages/s, 1,700,000 events/s, 3.7 Tbit/s, 250 ms per page.
+3. **Minutes 10 to 15:** API (cursor, events with `request_id`) and the stores.
+4. **Minutes 15 to 25:** Steps 1 to 3: from a Following feed to retrieval and ranking with features in memory.
+5. **Minutes 25 to 35:** Steps 4 to 8: the event pipeline, online training, prefetch, the seen filter, cold start.
+6. **Minutes 35 to 45:** one deep dive: the latency budget, the learning loop or prefetch and the seen filter.
+
+**What interviewers listen for:**
+
+- **Mid:** retrieval then ranking, a cursor, a CDN, events on a log.
+- **Senior:** a time budget per stage, logged features and a join on `request_id`, minute sync of embeddings, a Bloom seen filter and its error direction.
+- **Staff:** feedback loops and exploration, training and serving skew, degradation order, hot videos, cost of prefetch.
+
+**Red flags:** one model scoring every video; storing a feed per viewer; training once a day for a "within minutes" requirement; prefetching whole videos; no plan for new videos.
+
+## Further reading
+
+- [Monolith: Real Time Recommendation System With Collisionless Embedding Table](https://arxiv.org/html/2209.07663) (ByteDance, 2022)
+- [ByteGraph: A High-Performance Distributed Graph Database in ByteDance](https://vldb.org/pvldb/vol15/p3306-li.pdf) (PVLDB 15, 2022)
+- [Deep Neural Networks for YouTube Recommendations](https://research.google/pubs/deep-neural-networks-for-youtube-recommendations/) (RecSys, 2016)
+- [Scaling the Instagram Explore recommendations system](https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/) (Meta Engineering, 2023)
+- Related pages: [YouTube](/system-design-case-studies/case-studies/youtube) · [Instagram](/system-design-case-studies/case-studies/instagram) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems) · [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why split recommendation into retrieval and ranking instead of scoring every video?" category="Concepts" level="Mid">
+  - 500,000,000 videos cannot be scored by any model in 250 ms.
+  - Retrieval uses cheap signals (vector similarity, follows, trending) to cut the field to 2,000.
+  - The heavy model then spends its budget on 200 videos, where its accuracy matters.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk me through the latency budget of one feed request." category="Architecture" level="Senior">
+  - Gateway 10 ms, viewer features and seen filter 15 ms, retrieval 40 ms with a deadline per source, filter 10 ms.
+  - Candidate features 30 ms, light ranker 20 ms, heavy ranker on 200 for 80 ms, rerank 10 ms, hydrate 15 ms: 230 ms.
+  - The page is fetched with 3 videos left, so the viewer never waits on it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a swipe change the model within minutes?" category="Architecture" level="Senior">
+  - The ranker logs the features it used with a `request_id`; the app sends events carrying the same id.
+  - A stream joiner matches them into a labelled example within seconds to 5 minutes.
+  - An online trainer syncs changed embedding rows to serving every minute; dense weights go daily.
+  - Typical end to end: about 3 minutes; worst about 7.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why log features at serving time instead of looking them up when you train?" category="Trade-offs" level="Senior">
+  - Features change between serving and training: a video's like count may double in 10 minutes.
+  - Training on the later values teaches the model on inputs it never saw (training and serving skew).
+  - Logging costs about 1 KB per impression, 10 TB a day, and removes the skew.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid showing a video the viewer has already seen?" category="Concepts" level="Mid">
+  - Keep a Bloom filter per viewer per month: 3.6 KB for 3,000 videos at 1 % false positives.
+  - It never misses a seen video; its only error drops an unseen candidate, which is harmless.
+  - The app sends the ids it has shown with each page request, covering pipeline lag.
+  </InterviewQuestion>
+  <InterviewQuestion question="How much should the app prefetch?" category="Trade-offs" level="Mid">
+  - The next page when 3 videos are left: 60 s of head start for a 250 ms request.
+  - Only the first 1 MB of the next two videos, about 5 s each, so a swipe starts from the buffer.
+  - Whole videos would waste about 25 % of delivered bytes at session ends; this costs about 2.5 %.
+  </InterviewQuestion>
+  <InterviewQuestion question="A new video has no views. How does anyone ever see it?" category="Architecture" level="Senior">
+  - A content model embeds its frames, sound and caption into the same vector space, so the ANN index can return it at once.
+  - A new-video source reserves about 10 % of candidates for such videos.
+  - It is shown to a small matched audience first; a finish rate above similar videos widens its reach.
+  </InterviewQuestion>
+  <InterviewQuestion question="One video goes viral. What gets hot, and how do you protect it?" category="Scaling" level="Senior">
+  - Its feature row is read on most pages, so one feature-store shard takes the load; cache it in each ranker for 10 s.
+  - Its counters take thousands of increments a second; the stream sums them in windows and writes one value.
+  - The CDN serves its segments from every edge; the origin sees one pull per edge.
+  </InterviewQuestion>
+  <InterviewQuestion question="The ranker's GPUs are overloaded. What degrades first?" category="Failure modes" level="Senior">
+  - Skip the heavy ranker and serve the light ranker's order: worse pages, still personal.
+  - Then cut retrieval to the cheapest sources and fewer candidates.
+  - Last, serve a cached popular feed per region; never an empty screen.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why a durable log for events rather than a database or a work queue?" category="Trade-offs" level="Mid">
+  - 1,700,000 appends/s at peak, never updated: a database would pay for indexes nobody reads.
+  - The joiner, the counters and the history writer each need every event; a work queue gives each message to one reader.
+  - The log keeps 7 days, so a bug in the joiner can be fixed and replayed.
+  </InterviewQuestion>
+</InterviewQuestions>
