@@ -150,7 +150,8 @@ describe("system-design patterns v2 headings and point-wise format", () => {
   it("writes in points: bulleted answers, no Mermaid, no long unbulleted prose", () => {
     const violations: string[] = [];
     for (const { f, text } of pages) {
-      for (const m of text.matchAll(/<InterviewQuestion\b[^>]*>([\s\S]*?)<\/InterviewQuestion>/g)) {
+      // Attributes may contain ">" ("R + W > N"), so skip quoted attribute values when finding the end of the tag.
+      for (const m of text.matchAll(/<InterviewQuestion\b(?:[^>"]|"[^"]*")*>([\s\S]*?)<\/InterviewQuestion>/g)) {
         if (!m[1].trim().startsWith("- ")) violations.push(`${f}: unbulleted <InterviewQuestion> answer`);
       }
       if (/^\s*```mermaid/m.test(text)) violations.push(`${f}: Mermaid fence`);
