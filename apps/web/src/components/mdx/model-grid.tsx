@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { CategoryProgressBadge, ModelCardDone } from "@/components/read-count";
+import { SystemLogo } from "@/components/case-studies/system-logo";
 import { PatternCardMatch, PatternCategoryMatchCount } from "@/components/patterns/pattern-card-match";
 import { TierBadge } from "@/components/patterns/tier-badge";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
@@ -76,6 +77,7 @@ export function ModelCard({
   href,
   status,
   tier,
+  logo,
 }: {
   title: string;
   icon: string;
@@ -85,6 +87,8 @@ export function ModelCard({
   status?: "outline";
   /** "advanced" adds the "Advanced · Interview edge" pill (pattern hub). */
   tier?: "core" | "advanced";
+  /** Case-study system logo (an id under assets/logos, e.g. "systems/messenger"); replaces the icon tile. */
+  logo?: string;
 }) {
   // The pattern explorer marks each card through <PatternCardMatch>: dimmed when filtered out (hover or focus to
   // peek), tinted with an inset ring when it matches. Idle on every other hub. Dimming is a muted title and a faded
@@ -99,9 +103,13 @@ export function ModelCard({
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-4">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-tint transition-opacity group-has-[[data-pattern-match=dim]]:opacity-40 [&_svg]:size-4">
-          {resolveIcon(icon)}
-        </span>
+        {logo ? (
+          <SystemLogo id={logo} />
+        ) : (
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-tint transition-opacity group-has-[[data-pattern-match=dim]]:opacity-40 [&_svg]:size-4">
+            {resolveIcon(icon)}
+          </span>
+        )}
         <span className="flex flex-wrap items-center justify-end gap-2">
           <ModelCardDone href={href} title={title} />
           {status === "outline" && (

@@ -182,6 +182,10 @@ export const frontmatterSchema = z
     status: z.enum(["outline", "draft", "published"]).optional(),
     // Pattern difficulty tier; written only as `advanced` (absent means core).
     tier: z.enum(["core", "advanced"]).optional(),
+    // Case-study system logo: an asset id under assets/logos (systems/<slug> or companies/<slug>).
+    logo: z.string().min(1).optional(),
+    // Generic case studies: up to three logo ids of the real systems the design is modelled on.
+    modelledOn: z.array(z.string().min(1)).max(3).optional(),
     access: z.enum(["free", "premium"]).optional(),
     preview: z.number().int().nonnegative().optional(),
     order: z.number().optional(),
@@ -210,6 +214,7 @@ export const navCardSchema = z
     description: z.string().optional(),
     status: z.enum(["outline", "draft", "published"]).optional(),
     tier: z.enum(["core", "advanced"]).optional(),
+    logo: z.string().min(1).optional(),
   })
   .strict();
 

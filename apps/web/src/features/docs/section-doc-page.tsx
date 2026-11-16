@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
 import { TierBadge } from "@/components/patterns/tier-badge";
+import { SystemLogo } from "@/components/case-studies/system-logo";
 import { SectionProgressBanner } from "@/components/section-progress-banner.client";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
@@ -69,6 +70,9 @@ export async function SectionDocPage({
   const docsLayout = slug.length > 1 && doc.frontmatter.layout !== "classic";
   // Advanced pattern pages carry the tier pill in the header, in the paywalled preview too.
   const tierBadge = !item.isHub && item.data.tier === "advanced" ? <TierBadge className="ml-3 align-middle" /> : null;
+  // Case studies: the system's logo beside the title and, for generic systems, the real systems it is modelled on.
+  const logoId = typeof item.data.logo === "string" ? item.data.logo : undefined;
+  const modelledOn = Array.isArray(item.data.modelledOn) && !item.isHub ? (item.data.modelledOn as string[]) : [];
   const docs = docsLayout
     ? {
         headings: doc.headings,
@@ -106,6 +110,17 @@ export async function SectionDocPage({
         title={doc.frontmatter.title ?? slugPath}
         description={doc.frontmatter.description}
         docs={docs}
+        logo={logoId && !item.isHub ? <SystemLogo id={logoId} size="lg" className="sm:size-14" /> : undefined}
+        headerExtra={
+          modelledOn.length > 0 ? (
+            <p className="mt-5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Modelled on</span>
+              {modelledOn.map((id) => (
+                <SystemLogo key={id} id={id} size="sm" title={id.split("/").pop()?.replaceAll("-", " ")} />
+              ))}
+            </p>
+          ) : undefined
+        }
         after={
           preview ? (
             <Paywall path={item.href} />

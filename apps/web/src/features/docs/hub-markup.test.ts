@@ -28,4 +28,12 @@ describe("parseHubMarkup", () => {
     expect(cat.cards[1]).not.toHaveProperty("tier");
     expect(Object.keys(cat.cards[1])).toEqual(["title", "href", "icon", "description"]);
   });
+
+  it("reads logo on a card and puts it after tier", () => {
+    const [c] = parseHubMarkup(
+      `<ModelCategory title="Chat"><ModelGrid><ModelCard logo="systems/messenger" title="Design Messenger" href="/x/messenger" icon="bot" tier="advanced" status="outline" /></ModelGrid></ModelCategory>`
+    );
+    expect(Object.keys(c.cards[0])).toEqual(["title", "href", "icon", "status", "tier", "logo"]);
+    expect(c.cards[0].logo).toBe("systems/messenger");
+  });
 });
