@@ -6,6 +6,7 @@ import { rehypeHeadingIds, slugify, type DocHeading } from "@/lib/doc-headings";
 // Lines outside code fences, with the text of JSX blocks (lines inside an open tag or a component) dropped.
 function proseLines(text: string) {
   const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+  const offset = text.slice(0, text.length - body.length).split("\n").length - 1;
   const out: { line: string; n: number }[] = [];
   let inCode = false;
   let jsxDepth = 0;
@@ -17,10 +18,12 @@ function proseLines(text: string) {
     }
     if (inCode) return;
     const opens = (t.match(/<[A-Z][A-Za-z]*\b(?![^>]*\/>)/g) ?? []).length;
-    const closes = (t.match(/<\/[A-Z][A-Za-z]*>/g) ?? []).length;
+    // A multi-line self-closing tag (`<InterviewPrompt` … `/>`) closes on a line with no tag of its own.
+    const selfClose = !/<[A-Z]/.test(t) && /\/>$/.test(t) ? 1 : 0;
+    const closes = (t.match(/<\/[A-Z][A-Za-z]*>/g) ?? []).length + selfClose;
     const inJsx = jsxDepth > 0 || t.startsWith("<");
     jsxDepth = Math.max(0, jsxDepth + opens - closes);
-    if (!inJsx) out.push({ line: t, n: i + 1 });
+    if (!inJsx) out.push({ line: t, n: i + 1 + offset });
   });
   return out;
 }
