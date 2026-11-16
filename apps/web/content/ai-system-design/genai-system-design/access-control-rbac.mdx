@@ -4,9 +4,9 @@ description: Apply role-based access control across ML stacks, secure model endp
 updated: 2026-11-15
 ---
 
-A language model will do what its text asks, so it must never be the part that decides who is allowed to do what. Interviewers ask about access control to see whether you put the decision in code that knows the user, and whether you can say which model, which tool and which data each user may reach.
+A language model follows whatever text it reads, so it must never decide permissions. Interviewers check whether you enforce access in identity-aware code across models, tools, and data.
 
-## TL;DR
+## Overview
 
 - **Role-based access control (RBAC)** gives each user a role and each role a set of permissions. For an LLM system the permissions sit on three axes: **which models** a caller may use, **which tools** may run, and **which data** the tools may read.
 - **The model holds no authority.** The service fixes the user's identity from the session token, shows the model only the tools of that role, and the **tool gateway** checks every call against the user, not against the model's request.
@@ -14,9 +14,12 @@ A language model will do what its text asks, so it must never be the part that d
 - **Default deny.** A model, tool or scope not listed for the role is refused. Short-lived, audience-scoped tokens limit the damage when one leaks.
 - Retrieval has its own filter, covered on [Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy). This page is about the calls around it.
 
-## The idea in plain English
+## Mental model
 
-A hotel gives each guest a key card. The card opens that guest's room and the gym, nothing else. The front desk can program any card, so the desk is careful about whose name goes on it. Now put a very helpful concierge in the lobby who can carry out any request. If the concierge uses a master key for each errand, any guest can say "fetch the bag from room 5122" and get it. The fix is not a more suspicious concierge. The fix is that the concierge carries the guest's own card, so the lock does the refusing.
+- **Scoped key cards:** A hotel gives each guest a key card that opens only that guest's room and the gym, and the front desk carefully verifies whose name goes on each card.
+- **The helpful concierge:** An LLM assistant is a lobby concierge who willingly carries out any verbal request.
+- **Master-key failure:** If the concierge uses a master key for every errand, any guest can say "fetch the bag from room 5122" and get a stranger's luggage.
+- **The fix:** Rather than training a more suspicious concierge, require the concierge to carry the guest's own key card so the room lock refuses unauthorized requests.
 
 ## Core concepts
 
@@ -63,11 +66,12 @@ default: deny
 
 This follows `rbac-model`: one row per role, three axes, default deny. The model names are illustrative.
 
-## Deep dive
+## Technical mechanics
 
 ### The authorisation path
 
-A request crosses several services, and each one needs the user's identity, not the model's say-so. The chat service verifies the session token once, then attaches the user id and role to every downstream call: the retrieval filter, the tool gateway and the audit record.
+- **Identity over model say-so:** A request crosses several services, and each one needs the user's verified identity rather than the model's request.
+- **Verify once, propagate everywhere:** The chat service verifies the session token once, then attaches the user id and role to every downstream call: the retrieval filter, the tool gateway and the audit record.
 
 <AnimatedDiagram
   spec="animated/safety/rbac-authz-path"
@@ -90,11 +94,13 @@ A request crosses several services, and each one needs the user's identity, not 
   </StepCard>
 </StepCards>
 
-**What the model never sees.** The user id on the tool call is added by the chat service, not written by the model, and credentials for downstream systems resolve out of band from a vault. Neither is in the prompt, so a prompt cannot leak or rewrite them.
+- **Server-injected user ID:** The user id on the tool call is added by the chat service, not written by the model.
+- **Out-of-band secrets:** Credentials for downstream systems resolve out of band from a vault; neither the user id nor credentials sit in the prompt, so a prompt cannot leak or rewrite them.
 
 ### The confused deputy
 
-A **deputy** is a program that acts on someone's behalf with its own authority. It is **confused** when it can be talked into using that authority for a caller who does not hold it. Norm Hardy described the pattern in 1988 for a compiler that could write to a billing file; an LLM assistant is a new case with a new input: any text the model reads.
+- **Definition:** A **deputy** is a program that acts on someone's behalf with its own authority; it is **confused** when it can be talked into using that authority for a caller who does not hold it.
+- **LLM parallel:** Norm Hardy described the pattern in 1988 for a compiler that could write to a billing file; an LLM assistant is a new case whose untrusted input is any text the model reads.
 
 <AnimatedDiagram
   spec="animated/safety/rbac-confused-deputy"
@@ -102,9 +108,10 @@ A **deputy** is a program that acts on someone's behalf with its own authority. 
   caption="The service is the deputy: it holds more authority than the customer. Acting with the customer’s own token removes the extra authority, so the model’s request cannot use it."
 />
 
-Brightpost's chat service holds a service key that can refund any order, because staff workflows need it. A customer pastes a "shipping note" that tells the assistant to refund order 5122. The model asks for it, the service calls the order system with its own key, and the order system pays: it trusts the caller, and the caller is the service. Prompt-injection filters (see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)) lower the chance that the note works; they do not make the call safe. Access control makes the call safe.
-
-Two fixes work together. **Call as the user:** exchange the session for a token that names user 1847 and only their orders (OAuth 2.0 Token Exchange, RFC 8693, defines delegation and impersonation for this), so the order system's own ownership check refuses 5122. **Shrink the service key:** remove the ability to refund arbitrary orders from the chat path entirely.
+- **How the attack works:** Brightpost's chat service holds a service key that can refund any order for staff workflows. When a customer pastes a "shipping note" asking to refund order 5122, the model requests it, the service calls the order system with its broad key, and the order system pays because it trusts the service.
+- **Why filters are not enough:** Prompt-injection filters (see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)) lower the chance that the note works, but only access control makes the call safe.
+- **Fix 1 — Call as the user:** Exchange the session for a token that names user 1847 and only their orders (OAuth 2.0 Token Exchange, RFC 8693, defines delegation and impersonation for this), so the order system's own ownership check refuses 5122.
+- **Fix 2 — Shrink the service key:** Remove the ability to refund arbitrary orders from the chat path entirely.
 
 <Callout tone="red" title="What breaks">
   The service key is the real weak point. Every prompt-injection filter can be bypassed some of the time; a key that works on every order turns each bypass into a stranger's refund. This is the "excessive agency" risk in the OWASP Top 10 for LLM Applications (LLM06:2025): too much functionality, too many permissions, or too much autonomy.
@@ -112,15 +119,20 @@ Two fixes work together. **Call as the user:** exchange the session for a token 
 
 ### Who may call which model
 
-Not every caller needs the largest model. The gateway issues each team or service a virtual key with a model list, a budget and a rate limit (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)). LiteLLM's proxy, for example, takes a `models` list when it generates a key. Model access is also a data question: an evaluation judge model that reads customer transcripts belongs to the roles allowed to see those transcripts.
+- **Scoped virtual keys:** Not every caller needs the largest model; the gateway issues each team or service a virtual key with a model list, a budget and a rate limit (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)).
+- **Proxy enforcement:** LiteLLM's proxy, for example, takes a `models` list when it generates a key.
+- **Data-coupled model access:** Model access is also a data question: an evaluation judge model that reads customer transcripts belongs only to the roles allowed to see those transcripts.
 
 ### Securing the ML control plane
 
-RBAC reaches past the chat path. Decide who may trigger training on production-tenant data, who may promote a model (see [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance)) and who may read evaluation artifacts, which can hold real tickets with personal data. Use separate service accounts for training and serving, give training jobs short-lived workload identity instead of keys on a virtual machine, and grant time-limited elevation for promotion. In a service mesh (Istio, Envoy), authorisation policies state which services may call an inference pod and which routes they may use.
+- **Lifecycle permissions:** RBAC reaches past the chat path to control who may trigger training on production-tenant data, who may promote a model (see [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance)) and who may read evaluation artifacts holding real tickets with personal data.
+- **Workload identity and elevation:** Use separate service accounts for training and serving, give training jobs short-lived workload identity instead of keys on a virtual machine, and grant time-limited elevation for promotion.
+- **Service-mesh policies:** In a service mesh (Istio, Envoy), authorisation policies state which services may call an inference pod and which routes they may use.
 
 ### Caching authorisation decisions
 
-Checking the identity provider on every token costs latency, so inference paths cache decisions. Revocation then lags by the cache lifetime. Keep the lifetime short (seconds to a few minutes), and let a revocation event flush the cache for high-risk roles.
+- **Latency vs revocation lag:** Checking the identity provider on every token costs latency, so inference paths cache decisions and revocation lags by the cache lifetime.
+- **Short TTL and cache flush:** Keep the cache lifetime short (seconds to a few minutes), and let a revocation event flush the cache immediately for high-risk roles.
 
 ### Worked example: a stranger's refund, twice
 
@@ -141,14 +153,14 @@ The refusal came from code that knew the user. The model's text decided nothing.
 | Cache authorisation decisions | Low latency | Stale after revocation | Hot paths, with a short lifetime |
 | Human approval for high impact | Stops irreversible mistakes | Slows the customer | Refunds over the limit, mass emails, transfers |
 
-## Real-world examples
+## Production systems
 
 - **Kubernetes RBAC** grants permissions through roles and bindings, and has no deny rules: access exists only where a rule allows it.
 - **LiteLLM proxy** issues virtual keys that carry a list of allowed models, plus budgets and rate limits per key or team.
 - **OAuth 2.0 Token Exchange** (RFC 8693) lets a service swap one token for another that names the original user and the acting service, which is the mechanism for calling as the user.
 - **Brightpost** builds the tool list from the role, adds the customer id in the chat service, and holds any refund over £30 for a support agent.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **A shared service account for everything.** The audit log shows the account, the data layer cannot check ownership, and one injection reaches all data.
 - **Letting the model fill in the user id.** The model writes text an attacker can influence; the service must add the id.
@@ -157,7 +169,7 @@ The refusal came from code that knew the user. The model's text decided nothing.
 - **Long-lived tokens with no audience.** A leaked token works everywhere for months.
 - **Checking only at the edge.** The gateway authorises the call, but each downstream service must check too (defence in depth).
 
-## How to answer in an interview
+## Interview framework
 
 1. State the principle: the model proposes, code decides, using the identity of the user.
 2. Name the three axes (models, tools, data) and show one role as a row of permissions, with default deny.
@@ -180,27 +192,43 @@ The refusal came from code that knew the user. The model's text decided nothing.
 
 <InterviewQuestions>
   <InterviewQuestion question="What is RBAC, and what does it control in an LLM application?" category="Concepts" level="Junior">
-    RBAC gives users roles and roles permissions, so code asks "may this role do this?" instead of listing people. In an LLM application the permissions sit on three axes: which models a caller may use, which tools may run, and which data those tools may touch. The role sets all three, and anything not listed is refused. The model itself holds none of the authority.
+    - **Role-based mapping:** RBAC gives users roles and roles permissions, so code asks "may this role do this?" instead of listing individual people.
+    - **Three permission axes:** Controls which models a caller may use, which tools may run, and which data those tools may touch.
+    - **Default deny, zero model authority:** The role sets all three axes, anything not listed is refused, and the model itself holds none of the authority.
   </InterviewQuestion>
   <InterviewQuestion question="How would you secure a multi-tenant model serving API?" category="Architecture" level="Mid">
-    Require tenant-scoped tokens with an explicit audience and a short life, enforce quotas and rate limits per tenant, and keep tenant-specific adapters or LoRA weights in separate storage namespaces. Check that retrieval queries cannot cross tenant boundaries. Log the tenant id and request id without storing payloads unless policy allows, test the authentication paths regularly, and alert on unusual token use, which can signal a stolen key.
+    - **Tenant-scoped credentials:** Require tenant-scoped tokens with an explicit audience and short lifetime, and enforce quotas and rate limits per tenant.
+    - **Storage and retrieval isolation:** Keep tenant-specific adapters or LoRA weights in separate storage namespaces, and verify that retrieval queries cannot cross tenant boundaries.
+    - **Safe logging and alerting:** Log the tenant id and request id without storing payloads unless policy allows, test authentication paths regularly, and alert on unusual token use that may signal a stolen key.
   </InterviewQuestion>
   <InterviewQuestion question="Where does RBAC plug into the MLOps control plane?" category="Architecture" level="Mid">
-    It applies to experiment tracking, notebooks, feature stores, registries and orchestrators such as Kubernetes. Pass the caller's identity through the pipeline, so data access uses the person or service that started the job, not a shared superuser. Training and serving use different service accounts. Promotion grants time-limited elevation only when needed, and evaluation artifacts that hold real tickets get their own read permission.
+    - **Pipeline coverage:** Applies across experiment tracking, notebooks, feature stores, model registries and orchestrators such as Kubernetes.
+    - **Identity propagation and split accounts:** Pass the caller's identity through the pipeline so data access uses the person or service that started the job rather than a shared superuser, and use separate service accounts for training and serving.
+    - **Elevation and artifact access:** Grant time-limited elevation for model promotion only when needed, and require dedicated read permissions for evaluation artifacts holding real customer tickets.
   </InterviewQuestion>
   <InterviewQuestion question="What implementation details reduce the risk of LLM tool abuse?" category="Failure modes" level="Mid">
-    Implement tools as server-side functions with fixed allow-lists, not shell access, and validate arguments against a strict JSON schema. Bind each session to a vault handle so secrets resolve outside the model context. Log each invocation with structured fields, cap recursion depth and parallel calls, and require human confirmation for irreversible actions such as large refunds, transfers or mass emails.
+    - **Allow-listed server functions:** Implement tools as server-side functions with fixed allow-lists rather than shell access, and validate arguments against a strict JSON schema.
+    - **Out-of-band secrets:** Bind each session to a vault handle so secrets resolve outside the model context.
+    - **Execution limits and human gates:** Log each invocation with structured fields, cap recursion depth and parallel calls, and require human confirmation for irreversible actions such as large refunds, transfers or mass emails.
   </InterviewQuestion>
   <InterviewQuestion question="Why is checking permissions on the model's output not enough?" category="Trade-offs" level="Mid">
-    By the time the output exists, the model may already have called a tool or read restricted text. An output check can remove a citation but not an action that has happened or text the model has paraphrased. Authorisation belongs before the action: the tool gateway checks the user, the object and the limit on every call. Output checks are a second layer for what the user is shown.
+    - **Actions already executed:** By the time the output exists, the model may already have called a state-changing tool or read restricted text.
+    - **Paraphrased leaks:** An output filter can strip a citation, but it cannot undo a completed action or catch restricted facts the model has paraphrased.
+    - **Pre-action enforcement:** Authorisation belongs before the action at the tool gateway (checking user, object and limit on every call), while output checks serve only as a second layer for display.
   </InterviewQuestion>
   <InterviewQuestion question="Explain the confused deputy using an LLM assistant. How do you fix it?" category="Failure modes" level="Senior">
-    The assistant's service holds a key that can refund any order. A pasted note makes the model ask for a refund on order 5122, and the order system pays because the caller is the trusted service. The service had more authority than the customer, and the text borrowed it. Fix it by calling tools as the user, with a token that names user 1847 so the ownership check refuses 5122, and by removing the arbitrary-refund power from the service key on the chat path.
+    - **The vulnerability:** The assistant's service holds a broad key that can refund any order; when a pasted note tricks the model into requesting a refund on order 5122, the order system pays because it trusts the service caller.
+    - **Fix 1 — Call as the user:** Exchange the session for a user-scoped token naming user 1847 so the downstream ownership check refuses order 5122.
+    - **Fix 2 — Shrink the service key:** Remove arbitrary-refund authority from the chat service key entirely.
   </InterviewQuestion>
   <InterviewQuestion question="Roles are too coarse and attribute-based rules are too complex. How do you choose?" category="Trade-offs" level="Senior">
-    Use both in layers. Roles give a small, reviewable set for coarse questions: which tools exist for this caller. Attributes handle what roles cannot say: only orders this user owns, only up to £30, only in this region. Keep the attribute rules in one policy service, test them with a table of cases, and have each data store enforce ownership itself. If attribute rules grow hard to explain, that is a sign to add a role.
+    - **Layer both approaches:** Use roles as a small, reviewable set for coarse questions (which tools exist for this caller) and attributes for fine-grained checks (only orders this user owns, up to £30, in this region).
+    - **Centralise and test:** Keep attribute rules in one policy service, test them against a table of cases, and have each data store enforce ownership itself.
+    - **Refactor trigger:** When attribute rules become too hard to explain, promote the common pattern into a named role.
   </InterviewQuestion>
   <InterviewQuestion question="A revoked employee still reached the inference API for ten minutes. What happened and what do you change?" category="Scaling" level="Senior">
-    Most likely a cached authorisation decision or a token that lived longer than the revocation. Shorten token lifetimes, use the audience claim so tokens only work on one service, and let a revocation event invalidate caches for sensitive roles. Accept a short window for ordinary roles and remove it for high-risk ones with introspection on each call. Review the audit log for what the account did in the window.
+    - **Root cause:** A cached authorisation decision or a bearer token whose TTL outlived the revocation event.
+    - **Immediate fixes:** Shorten token lifetimes, enforce the audience claim so tokens work on only one service, and wire revocation events to flush caches for sensitive roles.
+    - **Tiered introspection and audit:** Accept a brief cache window for ordinary roles, require per-call introspection for high-risk roles, and audit the logs for every action taken during the ten-minute window.
   </InterviewQuestion>
 </InterviewQuestions>

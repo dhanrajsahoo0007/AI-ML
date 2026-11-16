@@ -4,9 +4,13 @@ description: "Adapting retrieval models to your domain: training pairs, hard neg
 icon: target
 ---
 
-An off-the-shelf embedding model has read the whole web but never your help centre. It ranks "Change your password" above the article that actually answers "How do I reset my password if I lost my phone?", because the words overlap. Fine-tuning the retriever on your own questions teaches it which near misses are wrong. This page covers where the training data comes from, why the negatives matter more than the positives, which loss to use, and how to ship the new model without breaking search.
+An off-the-shelf embedding model has read the whole web but never your help centre.
 
-## TL;DR
+- It ranks "Change your password" above the article that actually answers "How do I reset my password if I lost my phone?", because the words overlap.
+- Fine-tuning the retriever on your own questions teaches it which near misses are wrong.
+- This page covers where the training data comes from, why the negatives matter more than the positives, which loss to use, and how to ship the new model without breaking search.
+
+## Overview
 
 - Fine-tune retrieval when the **right chunk is in the index but ranked too low** on your own questions, after chunking, hybrid search and a stock reranker have been tried.
 - Training data is **(question, passage) pairs**: from search logs where the user found the answer, and from **synthetic questions** an LLM writes for each chunk.
@@ -14,17 +18,23 @@ An off-the-shelf embedding model has read the whole web but never your help cent
 - Bi-encoders train with an **in-batch contrastive loss** (InfoNCE, `MultipleNegativesRankingLoss`); cross-encoder rerankers train on **(question, passage, label)**.
 - Gate on **recall@k and nDCG on a held-out set**. A new embedding model means **re-embedding every chunk** into a new index, shadow testing, then switching; a new reranker does not.
 
-## The idea in plain English
+## Mental model
 
-A new librarian knows every book ever printed but not your shop. Asked about a lost phone, they hand over "Change your password", because it mentions passwords. You train them by showing real questions with the right answer, and, more usefully, with the wrong answer they would have picked. "Not that one, this one" teaches more than any number of obviously unrelated books. The risk is a lazy answer key: if one of the "wrong" books is actually right, you have taught them a mistake.
+- A new librarian knows every book ever printed but not your shop.
+- Asked about a lost phone, they hand over "Change your password", because it mentions passwords.
+- You train them by showing real questions with the right answer, and, more usefully, with the wrong answer they would have picked.
+- "Not that one, this one" teaches more than any number of obviously unrelated books.
+- The risk is a lazy answer key: if one of the "wrong" books is actually right, you have taught them a mistake.
 
 ## Core concepts
 
-The running example is Brightpost's help centre: **1,200 articles** in **3,600 chunks**, the main question "How do I reset my password if I lost my phone?", and its three relevant chunks at ranks 2, 4 and 7 of today's results.
+- The running example is Brightpost's help centre: **1,200 articles** in **3,600 chunks**, the main question "How do I reset my password if I lost my phone?", and its three relevant chunks at ranks 2, 4 and 7 of today's results.
 
 ### When off-the-shelf retrieval is not enough
 
-General embedding models learn "similar" from web text, where "change your password" and "reset your password" are near neighbours. In a help centre they are different procedures. When your evaluation set shows that kind of miss again and again, the model's notion of similarity is the problem, and only training changes it.
+- General embedding models learn "similar" from web text, where "change your password" and "reset your password" are near neighbours.
+- In a help centre they are different procedures.
+- When your evaluation set shows that kind of miss again and again, the model's notion of similarity is the problem, and only training changes it.
 
 <AnimatedDiagram
   spec="animated/rag/contrastive-training"
@@ -32,7 +42,12 @@ General embedding models learn "similar" from web text, where "change your passw
   caption="Easy negatives teach almost nothing; the near miss is where the loss, and the learning, comes from."
 />
 
-**How to read it.** Step 1 is today's space: the hard negative "Change your password" (0.82) sits closer to the question than the answer (0.77). Step 2 shows one training example pulling the positive in and pushing the near miss out, while the unrelated chunks barely move. Step 3 is the space after training on many such examples. Fine-tuning is the last lever, not the first: check chunking, hybrid search ([Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)) and a stronger stock model ([Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection)) before training anything.
+**How to read it:**
+
+- Step 1 is today's space: the hard negative "Change your password" (0.82) sits closer to the question than the answer (0.77).
+- Step 2 shows one training example pulling the positive in and pushing the near miss out, while the unrelated chunks barely move.
+- Step 3 is the space after training on many such examples.
+- Fine-tuning is the last lever, not the first: check chunking, hybrid search ([Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)) and a stronger stock model ([Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection)) before training anything.
 
 ### Building query and passage pairs
 
@@ -52,7 +67,15 @@ Random negatives are too easy: no model confuses a password question with "Track
   caption="The best negatives are the current model's own wrong answers, and the ones it ranks highest are also the most likely to be unlabelled right answers."
 />
 
-**How to read it.** Step 1 retrieves the top 8 with the current model. Step 2 marks the labelled answers as positives and sets them aside. Step 3 keeps the highest-scoring wrong chunks as hard negatives. Step 4 is the check that matters: a cross-encoder scores each candidate, and "Locked out after failed sign-ins" scores 0.62. It may well tell a locked-out user what to do, so it is dropped rather than taught as wrong. That check comes from RocketQA (Qu et al., 2021): on MS MARCO, a manual look at top-retrieved passages that were not labelled positive found about 70% were actually positives or highly relevant, so the authors kept only passages the cross-encoder scored below 0.1. ANCE (Xiong et al., 2020) takes mining further and refreshes the negatives during training from an index that is updated as the model learns.
+**How to read it:**
+
+- Step 1 retrieves the top 8 with the current model.
+- Step 2 marks the labelled answers as positives and sets them aside.
+- Step 3 keeps the highest-scoring wrong chunks as hard negatives.
+- Step 4 is the check that matters: a cross-encoder scores each candidate, and "Locked out after failed sign-ins" scores 0.62.
+- It may well tell a locked-out user what to do, so it is dropped rather than taught as wrong.
+- That check comes from RocketQA (Qu et al., 2021): on MS MARCO, a manual look at top-retrieved passages that were not labelled positive found about 70% were actually positives or highly relevant, so the authors kept only passages the cross-encoder scored below 0.1.
+- ANCE (Xiong et al., 2020) takes mining further and refreshes the negatives during training from an index that is updated as the model learns.
 
 <Callout tone="red" title="What breaks">
   Training on false negatives teaches the model to push real answers away, and recall drops on exactly the questions you tuned for. Filter candidates with a cross-encoder or a score margin below the positive, and hand-check a sample of mined negatives before every run.
@@ -68,9 +91,19 @@ A bi-encoder (the embedding model, which encodes the question and each passage s
   caption="Every other passage in the batch is a free negative, but an easy one; the mined column that outscores the positive is where the loss comes from."
 />
 
-**How to read it.** Rows are questions, columns are passages, cells are similarities. Step 1 fills the diagonal, each question with its own passage. Step 2 scores every question against every other passage in the batch: those are free negatives, costing no extra encoding. Step 3 adds the mined hard negatives as extra columns; for the first question, "Change your password" outscores the positive. The loss is a softmax over each row with the diagonal as the right answer, known as InfoNCE or `MultipleNegativesRankingLoss` in sentence-transformers.
+**How to read it:**
 
-**The numbers.** With the library's default scale of 20 (temperature 0.05), row 1 with in-batch negatives only: −ln(e^15.4 ÷ (e^15.4 + e^6 + e^5)) ≈ 0.0001. Adding the hard negatives (e^16.4 among them) raises it to 1.31, and the batch mean goes from 0.0004 to 0.56. Bigger batches give more free negatives, which is why the cached variant of the loss exists.
+- Rows are questions, columns are passages, cells are similarities.
+- Step 1 fills the diagonal, each question with its own passage.
+- Step 2 scores every question against every other passage in the batch: those are free negatives, costing no extra encoding.
+- Step 3 adds the mined hard negatives as extra columns; for the first question, "Change your password" outscores the positive.
+- The loss is a softmax over each row with the diagonal as the right answer, known as InfoNCE or `MultipleNegativesRankingLoss` in sentence-transformers.
+
+**The numbers:**
+
+- With the library's default scale of 20 (temperature 0.05), row 1 with in-batch negatives only: −ln(e^15.4 ÷ (e^15.4 + e^6 + e^5)) ≈ 0.0001.
+- Adding the hard negatives (e^16.4 among them) raises it to 1.31, and the batch mean goes from 0.0004 to 0.56.
+- Bigger batches give more free negatives, which is why the cached variant of the loss exists.
 
 ## Architecture
 
@@ -106,19 +139,31 @@ Training is one stage in a loop that starts with logs and ends with a new index 
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### Fine-tuning a cross-encoder reranker
 
-A cross-encoder reads the question and the chunk as one input and outputs one score, so it can see that "lost my phone" and "change your password" do not fit; a bi-encoder never sees them together (the side-by-side figure is on [Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)). It trains on (question, passage, label) rows with binary cross-entropy, or on listwise losses over a ranked list. Nogueira and Cho (2019) showed a BERT cross-encoder improving MRR@10 on MS MARCO by 27% (relative) over the previous best. Training data comes from the same pipeline: mined hard negatives become label-0 rows next to the label-1 positives. A tuned reranker changes no vectors, so it ships without re-indexing, but it reorders only what the retriever found: it cannot rescue a chunk outside the top 100.
+- A cross-encoder reads the question and the chunk as one input and outputs one score, so it can see that "lost my phone" and "change your password" do not fit; a bi-encoder never sees them together (the side-by-side figure is on [Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)).
+- It trains on (question, passage, label) rows with binary cross-entropy, or on listwise losses over a ranked list.
+- Nogueira and Cho (2019) showed a BERT cross-encoder improving MRR@10 on MS MARCO by 27% (relative) over the previous best.
+- Training data comes from the same pipeline: mined hard negatives become label-0 rows next to the label-1 positives.
+- A tuned reranker changes no vectors, so it ships without re-indexing, but it reorders only what the retriever found: it cannot rescue a chunk outside the top 100.
 
 ### Evaluating with recall and nDCG
 
-Recall@k asks whether the right chunks are in the top k at all; nDCG@k also rewards putting them near the top (definitions and the worked example on [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)). For the main question today, relevant chunks sit at ranks 2, 4 and 7: recall@5 = 2 ÷ 3 = 0.67 and nDCG@10 = 0.65. If training moves them to ranks 1, 2 and 3, both become 1.0. Report the averages over all 300 held-out questions, per category, against v1 on the same questions: an illustrative good run moves recall@5 from 0.71 to 0.84. Check a general benchmark too, because a model tuned hard on one domain can forget others.
+- Recall@k asks whether the right chunks are in the top k at all; nDCG@k also rewards putting them near the top (definitions and the worked example on [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+- For the main question today, relevant chunks sit at ranks 2, 4 and 7: recall@5 = 2 ÷ 3 = 0.67 and nDCG@10 = 0.65.
+- If training moves them to ranks 1, 2 and 3, both become 1.0.
+- Report the averages over all 300 held-out questions, per category, against v1 on the same questions: an illustrative good run moves recall@5 from 0.71 to 0.84.
+- Check a general benchmark too, because a model tuned hard on one domain can forget others.
 
 ### Re-indexing and rollout after a model change
 
-A fine-tuned embedding model is a new model: its vectors live in a different space from v1's. Every chunk must be re-embedded, and each question must be embedded by the same model as the index it searches; mixing the two returns nonsense without any error. Build index v2 next to v1, dual-write new and changed chunks to both while a backfill re-embeds the rest (1.44 million tokens for Brightpost), compare the two on a copy of live questions, then flip the alias. Keep v1 for the rollback window; switching back is the same flip. The full pattern, with its own figure, is on [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline).
+- A fine-tuned embedding model is a new model: its vectors live in a different space from v1's.
+- Every chunk must be re-embedded, and each question must be embedded by the same model as the index it searches; mixing the two returns nonsense without any error.
+- Build index v2 next to v1, dual-write new and changed chunks to both while a backfill re-embeds the rest (1.44 million tokens for Brightpost), compare the two on a copy of live questions, then flip the alias.
+- Keep v1 for the rollback window; switching back is the same flip.
+- The full pattern, with its own figure, is on [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline).
 
 ## Trade-offs
 
@@ -129,19 +174,19 @@ A fine-tuned embedding model is a new model: its vectors live in a different spa
 | Negatives | In-batch only: free, too easy | Mined hard: strong signal, false-negative risk |
 | Base model | Tune the current model: cheaper | Tune a stronger base: bigger gain, more re-validation |
 
-## Real-world examples
+## Production systems
 
 - **Dense Passage Retrieval** (Karpukhin et al., 2020) trained a dual encoder on question and passage pairs and beat BM25 by 9 to 19 points of top-20 accuracy; its best model used in-batch gold passages plus one BM25 negative.
 - **sentence-transformers** (from Sentence-BERT, Reimers and Gurevych, 2019) ships `MultipleNegativesRankingLoss` for pairs or triplets, `GISTEmbedLoss`, which uses a guide model to filter false negatives, and a `mine_hard_negatives` utility with score caps and margins.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Evaluating on synthetic questions written by the same LLM that wrote the training data.
 - Mining negatives with no false-negative filter.
 - Querying a new index with the old model, or mixing vectors from two models in one index.
 - Tuning the embedding model when the misses were at the reranking stage, or the reverse.
 
-## How to answer in an interview
+## Interview framework
 
 1. Say when: the right chunk exists but ranks low on your own eval set, after cheaper fixes.
 2. Describe the data: pairs from logs and synthetic questions, a held-out set kept apart.
@@ -166,15 +211,23 @@ A fine-tuned embedding model is a new model: its vectors live in a different spa
 
 <InterviewQuestions>
   <InterviewQuestion question="When is it worth fine-tuning an embedding model instead of using an off-the-shelf one?" category="Trade-offs" level="Mid">
-    When the evaluation set shows the right chunks are in the index but ranked too low, often below near misses that share words with the question, and cheaper fixes have not closed the gap: better chunking, hybrid search with BM25, a stronger stock model and a stock reranker. You also need enough in-domain questions, real or synthetic, and a held-out set to prove the gain. If the right chunks are missing from the index entirely, training will not help.
+    - When the evaluation set shows the right chunks are in the index but ranked too low, often below near misses that share words with the question, and cheaper fixes have not closed the gap: better chunking, hybrid search with BM25, a stronger stock model and a stock reranker.
+    - You also need enough in-domain questions, real or synthetic, and a held-out set to prove the gain.
+    - If the right chunks are missing from the index entirely, training will not help.
   </InterviewQuestion>
   <InterviewQuestion question="How do you mine hard negatives, and what can go wrong?" category="Concepts" level="Mid">
-    Retrieve the top candidates for each training question with the current model, remove the labelled positives, and keep the highest-scoring remaining passages as negatives. The danger is false negatives: passages that do answer the question but were never labelled. Training on them pushes real answers away. Filter candidates with a cross-encoder or a margin below the positive's score, and hand-check a sample.
+    - Retrieve the top candidates for each training question with the current model, remove the labelled positives, and keep the highest-scoring remaining passages as negatives.
+    - The danger is false negatives: passages that do answer the question but were never labelled.
+    - Training on them pushes real answers away. Filter candidates with a cross-encoder or a margin below the positive's score, and hand-check a sample.
   </InterviewQuestion>
   <InterviewQuestion question="Would you fine-tune the retriever or the reranker first?" category="Trade-offs" level="Senior">
-    Look at where the misses are. If the right chunk is in the top 100 but not the top 5, tune the reranker: it needs only labelled pairs and ships without re-indexing. If the right chunk is not in the top 100 at all, the reranker never sees it, so the bi-encoder must improve, which means re-embedding the whole corpus and a migration. Tuning the reranker first is usually the cheaper step to ship and to roll back.
+    - Look at where the misses are. If the right chunk is in the top 100 but not the top 5, tune the reranker: it needs only labelled pairs and ships without re-indexing.
+    - If the right chunk is not in the top 100 at all, the reranker never sees it, so the bi-encoder must improve, which means re-embedding the whole corpus and a migration.
+    - Tuning the reranker first is usually the cheaper step to ship and to roll back.
   </InterviewQuestion>
   <InterviewQuestion question="How do you roll out a fine-tuned embedding model safely?" category="Architecture" level="Mid">
-    Gate it offline first: recall@k and nDCG on a held-out set against the current model, per question category. Then build a second index with every chunk re-embedded by the new model, dual-write new content to both, and send a copy of live queries to the new index to compare results. Switch traffic with an alias so rollback is one flip, and make sure queries are embedded by the same model as the index they search.
+    - Gate it offline first: recall@k and nDCG on a held-out set against the current model, per question category.
+    - Then build a second index with every chunk re-embedded by the new model, dual-write new content to both, and send a copy of live queries to the new index to compare results.
+    - Switch traffic with an alias so rollback is one flip, and make sure queries are embedded by the same model as the index they search.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -4,9 +4,11 @@ description: "How tokens, sentences and documents become vectors, what distance 
 icon: binary
 ---
 
-An embedding is a list of numbers that stands for a piece of text. Texts with similar meaning get similar lists, so "find related text" becomes "find nearby points". Every retrieval system on these pages rests on that one idea.
+- An embedding is a list of numbers that stands for a piece of text.
+- Texts with similar meaning get similar lists, so "find related text" becomes "find nearby points".
+- Every retrieval system on these pages rests on that one idea.
 
-## TL;DR
+## Overview
 
 - An **embedding** maps text to a vector (Brightpost's model uses **1,536 numbers**). Similar meanings land close together, even with different words.
 - **Token embeddings** are rows of a lookup table; **contextual** embeddings change with the surrounding words; **sentence and document** embeddings give one vector per passage.
@@ -14,9 +16,12 @@ An embedding is a list of numbers that stands for a piece of text. Texts with si
 - Embedding models are trained **contrastively**: pull a question and its answer together, push unrelated pairs apart. **Hard negatives** make them sharp.
 - Fewer dimensions mean a smaller, faster index. **Matryoshka** models can be cut short (1,536 → 256) with little loss; other models cannot.
 
-## The idea in plain English
+## Mental model
 
-Picture a huge map where every sentence has an address. Sentences about passwords live in one district, sentences about parcels in another. A question gets an address too, and the sentences that answer it are its neighbours. The embedding model is the address-maker, and vector search asks "who lives nearest?".
+- Picture a huge map where every sentence has an address.
+- Sentences about passwords live in one district, sentences about parcels in another.
+- A question gets an address too, and the sentences that answer it are its neighbours.
+- The embedding model is the address-maker, and vector search asks "who lives nearest?".
 
 ## Core concepts
 
@@ -24,15 +29,21 @@ The running example: Brightpost's help centre, **1,200 articles** cut into **3,6
 
 ### Token embeddings and the embedding matrix
 
-A language model starts with an **embedding matrix**: one row of numbers per token in its vocabulary. Looking up a token returns its row. Word2vec (Mikolov et al., 2013) showed that rows trained to predict neighbouring words put related words near each other. On their own they give one vector per word, whatever the sentence.
+- A language model starts with an **embedding matrix**: one row of numbers per token in its vocabulary.
+- Looking up a token returns its row. Word2vec (Mikolov et al., 2013) showed that rows trained to predict neighbouring words put related words near each other.
+- On their own they give one vector per word, whatever the sentence.
 
 ### Contextual versus static embeddings
 
-A **static** embedding gives "bank" one vector, whether the sentence is about rivers or money. A **contextual** embedding, produced by a Transformer after attention has mixed in the surrounding words, gives each occurrence its own vector. Retrieval models are built on contextual models, which is why they can tell "reset my password" from "someone else reset my password".
+- A **static** embedding gives "bank" one vector, whether the sentence is about rivers or money.
+- A **contextual** embedding, produced by a Transformer after attention has mixed in the surrounding words, gives each occurrence its own vector.
+- Retrieval models are built on contextual models, which is why they can tell "reset my password" from "someone else reset my password".
 
 ### Sentence and document embeddings
 
-Retrieval needs one vector per chunk, not per token. Averaging token vectors works poorly for search. Sentence-BERT (Reimers and Gurevych, 2019) fine-tuned BERT so that one pooled vector per sentence can be compared directly with cosine similarity, and today's embedding models follow the same pattern: one passage in, one vector out.
+- Retrieval needs one vector per chunk, not per token.
+- Averaging token vectors works poorly for search.
+- Sentence-BERT (Reimers and Gurevych, 2019) fine-tuned BERT so that one pooled vector per sentence can be compared directly with cosine similarity, and today's embedding models follow the same pattern: one passage in, one vector out.
 
 Here is what that buys you.
 
@@ -42,7 +53,12 @@ Here is what that buys you.
   caption="Meaning sets the position; a paraphrase with other words lands in the same neighbourhood."
 />
 
-**How to read it.** Step 1 places the help articles; they fall into topic clusters without anyone labelling them. Step 2 adds the question, which lands between the two articles that answer it. Step 3 adds "Can't log in, phone was stolen": it shares almost no words with the question but lands in the same place, which keyword search could not do. The real space has 1,536 dimensions; this is a 2-D sketch with illustrative positions.
+**How to read it:**
+
+- Step 1 places the help articles; they fall into topic clusters without anyone labelling them.
+- Step 2 adds the question, which lands between the two articles that answer it.
+- Step 3 adds "Can't log in, phone was stolen": it shares almost no words with the question but lands in the same place, which keyword search could not do.
+- The real space has 1,536 dimensions; this is a 2-D sketch with illustrative positions.
 
 ### Similarity measures: cosine, dot product and Euclidean distance
 
@@ -57,9 +73,16 @@ Three ways to score "how close":
   caption="Cosine reads direction only; length changes the dot product and the distance."
 />
 
-**How to read it.** Vector c points exactly where a points but is twice as long. Cosine scores it a perfect 1.00; distance says it is far away (5.00), farther than b, which points slightly elsewhere. When every vector is scaled to length 1 the three measures rank results the same way, so use the measure your model was trained with and normalise when in doubt.
+**How to read it:**
 
-**The numbers.** a·b = 3×4 + 4×3 = 24; |a| = |b| = 5; cosine = 24 ÷ 25 = 0.96; |a − b| = √2 = 1.41. For c = 2a: cosine = 50 ÷ 50 = 1.00, distance = 5.00.
+- Vector c points exactly where a points but is twice as long.
+- Cosine scores it a perfect 1.00; distance says it is far away (5.00), farther than b, which points slightly elsewhere.
+- When every vector is scaled to length 1 the three measures rank results the same way, so use the measure your model was trained with and normalise when in doubt.
+
+**The numbers:**
+
+- a·b = 3×4 + 4×3 = 24; |a| = |b| = 5; cosine = 24 ÷ 25 = 0.96; |a − b| = √2 = 1.41.
+- For c = 2a: cosine = 50 ÷ 50 = 1.00, distance = 5.00.
 
 ## Architecture
 
@@ -71,17 +94,24 @@ Embeddings appear twice in a RAG system: once per chunk at ingestion and once pe
   caption="The same embedding model runs offline for every chunk and online for every question."
 />
 
-Embedding the help centre once sends 3,600 chunks × 400 tokens = 1.44 million tokens through the model; each question adds about 15. Changing the model means re-embedding all 3,600 chunks, because vectors from two models live in different spaces (see [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline)).
+- Embedding the help centre once sends 3,600 chunks × 400 tokens = 1.44 million tokens through the model; each question adds about 15.
+- Changing the model means re-embedding all 3,600 chunks, because vectors from two models live in different spaces (see [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline)).
 
-## Deep dive
+## Technical mechanics
 
 ### Contrastive training and hard negatives
 
-Embedding models learn from pairs. Each training example is a question with a passage that answers it (a positive) and passages that do not (negatives). The loss pulls the positive closer and pushes the negatives away. Using the other passages in the same batch as negatives is cheap ("in-batch negatives", as in Dense Passage Retrieval, Karpukhin et al., 2020). **Hard negatives**, passages that look relevant but are not ("Change your password" for someone who lost their phone), teach the finest distinctions. [Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection) draws the training loop.
+- Embedding models learn from pairs. Each training example is a question with a passage that answers it (a positive) and passages that do not (negatives).
+- The loss pulls the positive closer and pushes the negatives away.
+- Using the other passages in the same batch as negatives is cheap ("in-batch negatives", as in Dense Passage Retrieval, Karpukhin et al., 2020).
+- **Hard negatives**, passages that look relevant but are not ("Change your password" for someone who lost their phone), teach the finest distinctions.
+- [Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection) draws the training loop.
 
 ### Dimensions, Matryoshka embeddings and quantization
 
-Each dimension costs 4 bytes per vector in float32. Matryoshka Representation Learning (Kusupati et al., 2022) trains a model so that the first dimensions carry the most information, which makes a prefix of the vector a usable embedding by itself. OpenAI reported that text-embedding-3-large shortened to 256 dimensions still beat its earlier 1,536-dimension ada-002 on the MTEB benchmark.
+- Each dimension costs 4 bytes per vector in float32.
+- Matryoshka Representation Learning (Kusupati et al., 2022) trains a model so that the first dimensions carry the most information, which makes a prefix of the vector a usable embedding by itself.
+- OpenAI reported that text-embedding-3-large shortened to 256 dimensions still beat its earlier 1,536-dimension ada-002 on the MTEB benchmark.
 
 <AnimatedDiagram
   spec="animated/rag/vector-truncation"
@@ -89,19 +119,26 @@ Each dimension costs 4 bytes per vector in float32. Matryoshka Representation Le
   caption="A Matryoshka-trained vector can be cut short and still work; the index shrinks six times."
 />
 
-**How to read it.** Step 1 is the full vector, drawn darker where the information concentrates. Step 2 keeps the first 256 dimensions and scales the result back to length 1, so cosine and dot product stay comparable.
+**How to read it:**
 
-**The numbers.** 256 × 4 = 1,024 bytes per vector instead of 6,144; for 3,600 chunks, 3,686,400 bytes ≈ 3.7 MB instead of 22 MB.
+- Step 1 is the full vector, drawn darker where the information concentrates.
+- Step 2 keeps the first 256 dimensions and scales the result back to length 1, so cosine and dot product stay comparable.
+
+- **The numbers:** 256 × 4 = 1,024 bytes per vector instead of 6,144; for 3,600 chunks, 3,686,400 bytes ≈ 3.7 MB instead of 22 MB.
 
 <Callout tone="red" title="What breaks">
   Cutting a model that was not trained this way throws away information it spread across every dimension and quietly ruins recall. Check the model card for Matryoshka support, and measure recall@k before and after shortening.
 </Callout>
 
-Quantization is the other lever: store each number in fewer bits (int8, or one bit per dimension) and rescore the top candidates at full precision. [Vector Databases](/ai-system-design/genai-system-design/vector-databases) shows product quantization, which compresses Brightpost's vectors 64 times.
+- Quantization is the other lever: store each number in fewer bits (int8, or one bit per dimension) and rescore the top candidates at full precision.
+- [Vector Databases](/ai-system-design/genai-system-design/vector-databases) shows product quantization, which compresses Brightpost's vectors 64 times.
 
 ### Anisotropy and other failure modes
 
-Contextual representations are not spread evenly in every direction: Ethayarajh (2019) found them anisotropic in every layer. Raw similarities then bunch together and look high even for unrelated text. Good embedding models correct for this in training, but it explains why a cosine of 0.8 is not "80% relevant": compare scores within one model, never across models. Other failures: text longer than the model's input limit is silently cut off; domain words (product codes, internal names) are split into meaningless pieces; and two languages share a space only if the model was trained to be multilingual.
+- Contextual representations are not spread evenly in every direction: Ethayarajh (2019) found them anisotropic in every layer.
+- Raw similarities then bunch together and look high even for unrelated text.
+- Good embedding models correct for this in training, but it explains why a cosine of 0.8 is not "80% relevant": compare scores within one model, never across models.
+- Other failures: text longer than the model's input limit is silently cut off; domain words (product codes, internal names) are split into meaningless pieces; and two languages share a space only if the model was trained to be multilingual.
 
 ## Trade-offs
 
@@ -112,13 +149,13 @@ Contextual representations are not spread evenly in every direction: Ethayarajh 
 | Precision | float32 | int8 or binary | Quantize, then rescore the top candidates |
 | General vs domain model | Works everywhere | Better on your vocabulary | Start general; fine-tune if evaluation shows misses |
 
-## Real-world examples
+## Production systems
 
 - Hosted embedding APIs commonly return unit-length vectors so that cosine and dot product agree.
 - OpenAI's text-embedding-3 models accept a `dimensions` setting that shortens the vector, relying on Matryoshka-style training.
 - Vector databases let you choose cosine, dot product or Euclidean distance per index; the choice must match the model.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Embedding chunks and questions with different models or model versions.
 - Comparing similarity scores across models, or reading a cosine score as a probability.
@@ -126,7 +163,7 @@ Contextual representations are not spread evenly in every direction: Ethayarajh 
 - Letting long chunks be cut off silently at the model's input limit.
 - Forgetting to normalise when the index uses dot product.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define an embedding and why nearness means relatedness.
 2. Explain contextual sentence embeddings and why queries and chunks use the same model.
@@ -148,15 +185,24 @@ Contextual representations are not spread evenly in every direction: Ethayarajh 
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between a static and a contextual embedding?" category="Concepts" level="Junior">
-    A static embedding gives each word one vector regardless of the sentence, as word2vec does. A contextual embedding is produced after the model has read the surrounding words, so the same word gets different vectors in different sentences. Retrieval models use contextual models and produce one vector per passage.
+    - A static embedding gives each word one vector regardless of the sentence, as word2vec does.
+    - A contextual embedding is produced after the model has read the surrounding words, so the same word gets different vectors in different sentences.
+    - Retrieval models use contextual models and produce one vector per passage.
   </InterviewQuestion>
   <InterviewQuestion question="Cosine similarity or dot product: which should a vector index use?" category="Trade-offs" level="Mid">
-    The one the embedding model was trained with. Cosine ignores vector length; dot product rewards longer vectors as well as alignment. If the vectors are normalised to length 1, the two give the same ranking, which is why many APIs return unit vectors. Mixing them up silently changes the ranking.
+    - The one the embedding model was trained with.
+    - Cosine ignores vector length; dot product rewards longer vectors as well as alignment.
+    - If the vectors are normalised to length 1, the two give the same ranking, which is why many APIs return unit vectors. Mixing them up silently changes the ranking.
   </InterviewQuestion>
   <InterviewQuestion question="How are embedding models trained, and why do hard negatives matter?" category="Concepts" level="Mid">
-    With a contrastive loss over pairs: a query and a passage that answers it are pulled together, and other passages are pushed away. In-batch negatives are cheap but mostly easy. Hard negatives are passages that look relevant but are not, and they teach the model the fine distinctions that decide the top of a ranking.
+    - With a contrastive loss over pairs: a query and a passage that answers it are pulled together, and other passages are pushed away.
+    - In-batch negatives are cheap but mostly easy.
+    - Hard negatives are passages that look relevant but are not, and they teach the model the fine distinctions that decide the top of a ranking.
   </InterviewQuestion>
   <InterviewQuestion question="Your vector index is too large. How do you shrink it without losing quality?" category="Architecture" level="Senior">
-    First measure recall at k on a labelled set so any loss is visible. If the model supports Matryoshka truncation, keep fewer dimensions and re-normalise: 1,536 to 256 cuts storage six times. Quantize to int8 or binary and rescore the top candidates at full precision, or use product quantization in the index. Re-check recall after each step and keep the cheapest setting that holds it.
+    - First measure recall at k on a labelled set so any loss is visible.
+    - If the model supports Matryoshka truncation, keep fewer dimensions and re-normalise: 1,536 to 256 cuts storage six times.
+    - Quantize to int8 or binary and rescore the top candidates at full precision, or use product quantization in the index.
+    - Re-check recall after each step and keep the cheapest setting that holds it.
   </InterviewQuestion>
 </InterviewQuestions>

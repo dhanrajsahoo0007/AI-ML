@@ -5,9 +5,9 @@ icon: package
 updated: 2026-11-15
 ---
 
-A large model answers well and costs a lot on every request. Interviewers ask about distillation because a good answer covers three things: how a small model learns from a large one, what data and evaluation make the copy trustworthy, and the legal limit on training from a provider's outputs.
+A large model answers well but costs heavily on every request. Distillation trains a small model to imitate a large teacher, cutting serving cost while preserving task quality within provider licensing limits.
 
-## TL;DR
+## Overview
 
 - **Distillation trains a small student to imitate a large teacher.** The student learns from the teacher's answers, not from human labels alone.
 - **Soft labels carry more than hard labels.** A teacher's full probability distribution, softened by a temperature T, tells the student which wrong answers are nearly right (Hinton et al., 2015).
@@ -16,15 +16,18 @@ A large model answers well and costs a lot on every request. Interviewers ask ab
 - **Quality is the thing to measure.** A 4-point gap on 200 tickets is inside the noise (about ±4 points), so compare on the same tickets with a paired test.
 - **Check the terms.** Several providers forbid using their outputs to train competing models. As of November 2026, read the current terms before you build.
 
-## The idea in plain English
+## Mental model
 
-An apprentice learns from a master craftsperson. Watching only the finished chairs (hard labels) teaches little. Watching the master explain, "this one is almost a rocking chair, that one is nothing like it", teaches the shape of the whole space. Distillation is the apprenticeship: the student does not need the master's years of training, only enough good demonstrations of the master's judgement. The master stays in the workshop for hard orders; the apprentice takes the routine ones.
+- **Hard labels vs. master guidance:** An apprentice watching only finished chairs (hard labels) learns little, whereas hearing the master explain "this one is almost a rocking chair, that one is nothing like it" teaches the shape of the entire space.
+- **Demonstrations over years:** Distillation is that apprenticeship—the student does not need the master's years of pretraining, only enough good demonstrations of the master's judgement.
+- **Routing by difficulty:** The master stays in the workshop for hard custom orders while the apprentice handles the routine ones.
 
 ## Core concepts
 
 ### Teacher and student
 
-The **teacher** is a large, strong model, frozen. The **student** is a smaller model that starts from its own weights (or a pretrained small model) and trains to match the teacher on a task. The student can be a different architecture and a different size. Distillation was proposed to compress an ensemble into one deployable model (Hinton et al., 2015); DistilBERT applied it during pretraining and reports a model 40 % smaller and 60 % faster that keeps 97 % of BERT's language understanding (Sanh et al., 2019).
+- **Roles:** The **teacher** is a large, strong frozen model; the **student** is a smaller model (often initialized from a pretrained small model) that trains to match the teacher on a target task, even across different architectures and sizes.
+- **Origins and compression:** Proposed by Hinton et al. (2015) to compress an ensemble into one deployable model, distillation was applied during pretraining by DistilBERT to produce a model 40 % smaller and 60 % faster that retains 97 % of BERT's language understanding (Sanh et al., 2019).
 
 ### Response, logit and feature distillation
 
@@ -38,13 +41,21 @@ The **teacher** is a large, strong model, frozen. The **student** is a smaller m
   caption="A high temperature turns the teacher's answer into a full distribution, so the student learns that Replace is a far better runner-up than Decline, not only that Refund is correct."
 />
 
-**How to read it.** Green is the teacher, orange the student. The rows are four candidate first words of a refund reply. Each column is a softmax over the same logits at a different temperature.
+**How to read it:**
 
-**The numbers.** The softmax with temperature is q = exp(z ÷ T) ÷ Σ exp(z ÷ T). With teacher logits 6, 4, 2, 0 (illustrative), T = 1 gives 0.865, 0.117, 0.016, 0.002 and T = 4 gives 0.455, 0.276, 0.167, 0.102. A student at 0.325, 0.325, 0.197, 0.153 has KL(teacher ‖ student) = 0.039 at T = 4. Hinton et al. note that soft-target gradients shrink by 1/T², so the soft term is multiplied by T² (here 16, giving 0.63) and combined with the ordinary loss on the true label.
+- **Color coding:** Green is the teacher and orange is the student.
+- **Axes:** The rows are four candidate first words of a refund reply, and each column is a softmax over the same logits at a different temperature.
+
+**The numbers:**
+
+- **Temperature softmax:** Computed as `q = exp(z ÷ T) ÷ Σ exp(z ÷ T)`.
+- **Distribution shift:** With illustrative teacher logits `6, 4, 2, 0`, `T = 1` gives `0.865, 0.117, 0.016, 0.002` while `T = 4` gives `0.455, 0.276, 0.167, 0.102`.
+- **KL and gradient scaling:** A student at `0.325, 0.325, 0.197, 0.153` has `KL(teacher ‖ student) = 0.039` at `T = 4`; because soft-target gradients shrink by `1/T²` (Hinton et al.), the soft term is multiplied by `T²` (here 16, giving 0.63) and combined with the ordinary loss on the true label.
 
 ### Distilling from an API model with synthetic data
 
-When the teacher is a hosted model you cannot read the logits from, you distil by text: prompt the teacher with real inputs, keep the good answers, and fine-tune the student on them. This is **synthetic data** in its simplest form; the full pipeline (seed, generate, deduplicate, judge) is on [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation).
+- **Text-only distillation:** When the teacher is a hosted API model whose logits you cannot read, prompt the teacher with real inputs, filter for good answers, and fine-tune the student on them.
+- **Synthetic data pipeline:** This is **synthetic data** in its simplest form; the full pipeline (seed, generate, deduplicate, judge) is covered in [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation).
 
 ## Architecture
 
@@ -75,7 +86,7 @@ The flow has four parts: the teacher answers, a filter decides what is worth lea
   If golden-set tickets or near copies reach the teacher's prompts or the student's training data, the student's score is inflated and the comparison means nothing. Split the 200 off before anything else and check for overlap.
 </Callout>
 
-## Deep dive
+## Technical mechanics
 
 ### Small language models and where they win
 
@@ -89,32 +100,32 @@ A small model wins when the task is narrow, the traffic is high and a few points
 | Phi-4-mini | 3.8B | MIT | 128K context |
 | Qwen3 | 0.6B, 1.7B, 4B, 8B, 14B, 32B dense | Apache 2.0 | Also larger mixture-of-experts models |
 
-Some of these small models are themselves distilled from larger siblings (Llama 3.2 and Gemma 2 above), so distillation is also how some open small models you start from were made. For a routing design that keeps a large model for hard cases, see [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks).
+- **Pre-distilled open bases:** Several small open models (such as Llama 3.2 and Gemma 2 above) are themselves distilled from larger siblings during pretraining.
+- **Hybrid routing:** For a routing design that keeps a large model for hard cases, see [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks).
 
 ### Evaluating a distilled model against its teacher
 
-Score both on the golden set with one rubric and one grader. Report the student as a share of the teacher, and read the slices: refund decisions, tone, and the tickets the teacher got right but the student got wrong. A single average hides a student that is fine on small talk and wrong on every refund over £30.
-
-Sample size matters. With 200 tickets and a pass rate near 90 %, the standard error is √(0.9 × 0.1 ÷ 200) = 0.021, so a 95 % interval is about ±4 points. A 92 % teacher and an 88 % student overlap. Compare the two on the same tickets with a paired test, and grow the set before a close call decides a launch (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)).
+- **Slice-level grading:** Score both models on the golden set with one rubric and one grader, reporting the student as a share of the teacher and inspecting critical slices (refund decisions, tone, and tickets the teacher passed but the student failed) so a single average does not hide failures on refunds over £30.
+- **Sample-size math:** With 200 tickets and a pass rate near 90 %, the standard error is `√(0.9 × 0.1 ÷ 200) = 0.021` (a 95 % interval of about ±4 points), meaning a 92 % teacher and an 88 % student overlap.
+- **Paired testing:** Compare the two models on the exact same tickets with a paired test, and grow the evaluation set before a close call decides a launch (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)).
 
 ### Licence and terms-of-service limits
 
 Many providers limit what you may do with their outputs. As of 15 November 2026:
 
-- **Anthropic.** The Commercial Terms (effective 17 June 2025) bar using the services to build a competing product or service, "including to train competing AI models".
-- **Google.** The Gemini API terms (effective 23 March 2026) say you may not use the services to develop models that compete with them.
-- **OpenAI.** Its terms of use have prohibited using output to develop models that compete with OpenAI; the Alpaca team cited this in 2023 and archived versions through December 2024 carry it. I could not retrieve the current text, so read it yourself. OpenAI's own guide describes distilling a larger OpenAI model into a smaller one inside its platform, and says new users cannot start fine-tuning jobs and eligible existing customers can create them until 6 January 2027.
-- **Open-weight models.** Each has its own licence. Llama, Gemma, Qwen and Phi differ on commercial use and on whether outputs may train another model. Read the licence for the teacher and the student.
-
-This is a summary of public terms, not legal advice. Get the terms checked for your contract, and prefer a teacher whose licence allows the use, such as a permissively licensed open model.
+- **Anthropic:** The Commercial Terms (effective 17 June 2025) bar using the services to build a competing product or service, "including to train competing AI models".
+- **Google:** The Gemini API terms (effective 23 March 2026) state you may not use the services to develop models that compete with them.
+- **OpenAI:** Its terms of use have prohibited using output to develop models that compete with OpenAI (cited by the Alpaca team in 2023 and carried through December 2024 archives; verify the current text directly); OpenAI's own guide supports in-platform distillation from larger to smaller OpenAI models, noting new users cannot start fine-tuning jobs while eligible existing customers can create them until 6 January 2027.
+- **Open-weight models:** Llama, Gemma, Qwen, and Phi differ on commercial use and whether outputs may train another model—always read the licence for both the teacher and the student.
+- **Legal review:** Treat public summaries as a starting point, have legal check your contract, and prefer a teacher whose licence explicitly permits distillation (such as a permissively licensed open model).
 
 ### Worked example: Brightpost's student
 
 Brightpost's teacher costs too much for routine questions. The plan, with every price and rate illustrative:
 
-1. **Daily cost.** Traffic is 440 M input and 50 M output tokens a day. Teacher at \$3 and \$15 per million: 440 × 3 + 50 × 15 = 1,320 + 750 = **\$2,070**. Student at \$0.15 and \$0.60: 66 + 30 = **\$96**. That is 21.6 times less, or \$755,550 against \$35,040 a year.
-2. **One-off.** The teacher labels 5,000 prompts: 11 × 3 + 1.25 × 15 = 33 + 18.75 = \$51.75, plus the training run. The kept 4,300 pairs are about 4,300 × 2,450 = 10.5 M tokens per epoch.
-3. **Quality.** On the golden set an illustrative result is 184 of 200 (92 %) for the teacher and 176 of 200 (88 %) for the student.
+1. **Daily cost:** Traffic is 440 M input and 50 M output tokens a day; the teacher at \$3 and \$15 per million costs `440 × 3 + 50 × 15 = 1,320 + 750 =` **\$2,070/day** (\$755,550/year), while the student at \$0.15 and \$0.60 costs `66 + 30 =` **\$96/day** (\$35,040/year), or 21.6 times less.
+2. **One-off labelling and training:** The teacher labels 5,000 prompts for `11 × 3 + 1.25 × 15 = 33 + 18.75 =` **\$51.75** plus the training run, and the 4,300 kept pairs come to about `4,300 × 2,450 = 10.5 M` tokens per epoch.
+3. **Quality:** On the golden set, an illustrative result is 184 of 200 (92 %) for the teacher and 176 of 200 (88 %) for the student.
 
 <AnimatedDiagram
   spec="animated/finetune/distill-cost-quality"
@@ -122,9 +133,13 @@ Brightpost's teacher costs too much for routine questions. The plan, with every 
   caption="Prices and pass rates are illustrative. The cost gap is arithmetic from the traffic; the quality gap is the number to measure on your own golden set before deciding it is acceptable."
 />
 
-**How to read it.** Step 1 is the two daily costs with their working. Step 2 adds the ratio and the year. Step 3 adds the pass rates and the one-off labelling cost.
+**How to read it:**
 
-Brightpost does not switch everything. It sends a request to the student, checks that the reply passes its format and refund-rule checks, and falls back to the teacher when not. The student saves the most when most requests are routine.
+- **Step 1:** Shows the two daily costs with their token arithmetic.
+- **Step 2:** Adds the 21.6× cost ratio and annual totals.
+- **Step 3:** Adds the golden-set pass rates and the one-off labelling cost.
+
+- **Guarded rollout:** Brightpost sends requests to the student first, checks that the reply passes format and refund-rule guards, and falls back to the teacher when a check fails—saving the most when most requests are routine.
 
 ## Trade-offs
 
@@ -136,7 +151,7 @@ Brightpost does not switch everything. It sends a request to the student, checks
 | Logit distillation | Richer signal; learns the near-misses | Needs teacher logits and a shared vocabulary | Open-weight teacher |
 | Student with teacher fallback | Cheap on routine traffic; safe on hard cases | Needs a check and a router | High volume with a mix of difficulty |
 
-## Real-world examples
+## Production systems
 
 - **DistilBERT (2019).** 40 % smaller, 60 % faster, 97 % of BERT's language understanding (the paper's abstract).
 - **Alpaca (2023).** Stanford fine-tuned LLaMA on about 52,000 instruction-output pairs generated by text-davinci-003 for under \$500, and limited it to academic use, partly because of OpenAI's terms.
@@ -144,7 +159,7 @@ Brightpost does not switch everything. It sends a request to the student, checks
 - **Llama 3.2 1B and 3B (2024).** Trained with logits from larger Llama 3.1 models as targets, then distilled again after pruning (model card).
 - **OpenAI's distillation guide.** Capture a large model's responses, filter them, and fine-tune a smaller model on them; as of November 2026 it also notes fine-tuning access is being wound down.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Treating the teacher as ground truth: its mistakes become the student's.
 - Training on every teacher answer without a filter; wrong refund decisions are copied faithfully.
@@ -153,7 +168,7 @@ Brightpost does not switch everything. It sends a request to the student, checks
 - Building on a teacher whose terms forbid training a competing model.
 - Distilling once and never rechecking: when the teacher or the traffic changes, the student drifts.
 
-## How to answer in an interview
+## Interview framework
 
 1. Say what distillation is: a small student trained to imitate a large teacher, usually to cut cost and latency on one task.
 2. Name the three kinds and say which your teacher allows: text only from an API, logits or hidden states from open weights.
@@ -177,24 +192,48 @@ Brightpost does not switch everything. It sends a request to the student, checks
 
 <InterviewQuestions>
   <InterviewQuestion question="What is knowledge distillation, and why does the student learn more from soft labels than from hard labels?" category="Concepts" level="Junior">
-    Distillation trains a small student model to imitate a large teacher. A hard label says only which answer is correct. The teacher's full probability distribution also says which wrong answers are close, for example that Replace is a better runner-up than Decline. That extra information about the shape of the output space lets the student learn from fewer examples. The distribution is softened with a temperature so the small probabilities are large enough to matter.
+    - Distillation trains a small student model to imitate a large teacher.
+    - A hard label says only which answer is correct.
+    - The teacher's full probability distribution also says which wrong answers are close, for example that Replace is a better runner-up than Decline.
+    - That extra information about the shape of the output space lets the student learn from fewer examples.
+    - The distribution is softened with a temperature so the small probabilities are large enough to matter.
   </InterviewQuestion>
   <InterviewQuestion question="What does the temperature do in distillation, and why is the soft-target loss multiplied by T squared?" category="Concepts" level="Mid">
-    Temperature divides the logits before the softmax. At T = 1 the teacher is nearly certain; at a higher T the distribution flattens and the runner-ups show. The gradients of the soft-target term shrink by about 1 over T squared as T grows, so multiplying that term by T squared keeps its weight steady against the hard-label loss when you change T. The loss is a weighted average of the two terms; Hinton et al. found a lower weight on the hard-label term worked best in their setups.
+    - Temperature divides the logits before the softmax.
+    - At T = 1 the teacher is nearly certain; at a higher T the distribution flattens and the runner-ups show.
+    - The gradients of the soft-target term shrink by about 1 over T squared as T grows, so multiplying that term by T squared keeps its weight steady against the hard-label loss when you change T.
+    - The loss is a weighted average of the two terms; Hinton et al. found a lower weight on the hard-label term worked best in their setups.
   </InterviewQuestion>
   <InterviewQuestion question="You can only call the teacher through an API with no logits. How do you distil?" category="Architecture" level="Mid">
-    Use response, or sequence-level, distillation. Send real inputs to the teacher, collect its answers, filter them, and fine-tune the student on the kept pairs with ordinary supervised training. The filter checks format, business rules and a judge's verdict. You lose the near-miss information that logits give, so the student learns the sampled answers only. Check the provider's terms first, because many forbid using outputs to train competing models.
+    - Use response, or sequence-level, distillation.
+    - Send real inputs to the teacher, collect its answers, filter them, and fine-tune the student on the kept pairs with ordinary supervised training.
+    - The filter checks format, business rules and a judge's verdict.
+    - You lose the near-miss information that logits give, so the student learns the sampled answers only.
+    - Check the provider's terms first, because many forbid using outputs to train competing models.
   </InterviewQuestion>
   <InterviewQuestion question="How would you decide whether the student is good enough to replace the teacher?" category="Trade-offs" level="Senior">
-    Score both on a held-out golden set with the same rubric and grader, and read the slices that matter, such as refund decisions, not only the average. With 200 tickets and a pass rate near 90 percent the interval is about plus or minus 4 points, so use a paired comparison on the same tickets and enlarge the set if the call is close. Then decide with the cost: the student's saving against the quality gap the product will accept. Keep a fallback to the teacher for requests that fail checks.
+    - Score both on a held-out golden set with the same rubric and grader, and read the slices that matter, such as refund decisions, not only the average.
+    - With 200 tickets and a pass rate near 90 percent the interval is about plus or minus 4 points, so use a paired comparison on the same tickets and enlarge the set if the call is close.
+    - Then decide with the cost: the student's saving against the quality gap the product will accept.
+    - Keep a fallback to the teacher for requests that fail checks.
   </InterviewQuestion>
   <InterviewQuestion question="What goes wrong if the golden set leaks into distillation?" category="Failure modes" level="Senior">
-    The student, or the filter tuned on the same tickets, has effectively seen the test, so its score is inflated and the comparison with the teacher is meaningless. Leaks come from golden tickets in the teacher's prompts, near duplicates in the training data, or a judge prompt tuned on them. Split the golden set off before any generation, deduplicate the training data against it, and spot-check kept examples for overlap. The failure shows later as a student that scores well offline and disappoints on live traffic.
+    - The student, or the filter tuned on the same tickets, has effectively seen the test, so its score is inflated and the comparison with the teacher is meaningless.
+    - Leaks come from golden tickets in the teacher's prompts, near duplicates in the training data, or a judge prompt tuned on them.
+    - Split the golden set off before any generation, deduplicate the training data against it, and spot-check kept examples for overlap.
+    - The failure shows later as a student that scores well offline and disappoints on live traffic.
   </InterviewQuestion>
   <InterviewQuestion question="Can you train a small model on a provider's API outputs? What do you check?" category="Trade-offs" level="Senior">
-    Check the provider's terms, because several bar using outputs to build competing models: as of November 2026 Anthropic's Commercial Terms and Google's Gemini API terms say so in their own words, and OpenAI's terms have carried a similar clause. Some providers offer their own distillation path inside the platform, which is allowed by design. Also check the licence of the student's base model. If the terms are unclear or forbid it, use a teacher with a permissive licence, or human-written data. This is a contract question, so involve legal.
+    - Check the provider's terms, because several bar using outputs to build competing models: as of November 2026 Anthropic's Commercial Terms and Google's Gemini API terms say so in their own words, and OpenAI's terms have carried a similar clause.
+    - Some providers offer their own distillation path inside the platform, which is allowed by design.
+    - Also check the licence of the student's base model.
+    - If the terms are unclear or forbid it, use a teacher with a permissive licence, or human-written data.
+    - This is a contract question, so involve legal.
   </InterviewQuestion>
   <InterviewQuestion question="Brightpost's student is cheaper but sometimes wrong on refunds. What is your rollout?" category="Scaling" level="Mid">
-    Route by risk. Send routine questions to the student, run its replies through format and refund-rule checks, and fall back to the teacher when a check fails or the request involves a refund over £30. Track the share of fallbacks, since it sets the real saving. Run the student in shadow mode first and compare its decisions with the teacher's on live tickets. Retrain when the fallback share rises, because the traffic or the teacher has changed.
+    - Route by risk. Send routine questions to the student, run its replies through format and refund-rule checks, and fall back to the teacher when a check fails or the request involves a refund over £30.
+    - Track the share of fallbacks, since it sets the real saving.
+    - Run the student in shadow mode first and compare its decisions with the teacher's on live tickets.
+    - Retrain when the fallback share rises, because the traffic or the teacher has changed.
   </InterviewQuestion>
 </InterviewQuestions>

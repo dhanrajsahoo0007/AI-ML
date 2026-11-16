@@ -1,7 +1,7 @@
 import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 import { AGENT_TONE } from "@/components/diagrams/presets/agents";
 
-// "Agent = model + harness" (harness-engineering, The idea in plain English): what each side owns. The model owns
+// "Agent = model + harness" (harness-engineering, Mental model): what each side owns. The model owns
 // three things, all of them words: it reads the context it is given, proposes the next step (a tool call or an
 // answer), and says when it is done. The harness owns eight parts, each answering one question. The two sides meet
 // at a narrow interface: the harness sends context in, the model sends a proposal out.

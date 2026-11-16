@@ -6,7 +6,7 @@ updated: 2026-11-15
 
 A model can be accurate on average and still treat one group of customers worse than another. Interviewers ask how you would measure that, because "we tested it and it looked fine" is not an answer.
 
-## TL;DR
+## Overview
 
 - **Measure by slice.** Report every metric per group, not only overall. An average hides the group that is hurt.
 - **Counterfactual tests** change one attribute (a name, a dialect) and hold the rest fixed. A different answer means the attribute mattered.
@@ -14,9 +14,12 @@ A model can be accurate on average and still treat one group of customers worse 
 - **Four sources:** the **data**, the **model**, the **prompt** and the **evaluation**. Each has its own check.
 - **No metric settles it.** Fairness definitions conflict, so pick the one that matches the harm, publish its limits, and keep humans auditing the classifier's errors.
 
-## The idea in plain English
+## Mental model
 
-A bathroom scale that reads two kilos heavy for everyone is a small annoyance. A scale that reads two kilos heavy only for people over sixty is a different fault, and the average reading would never show it. Weigh the over-sixties separately. Bias testing is the same: do not trust one overall number, split it by group and compare. Then ask where the tilt came from: the scale's parts (the model), what it was calibrated on (the data), how it is set up (the prompt) or how you check it (the evaluation).
+- A bathroom scale that reads two kilos heavy for everyone is a small annoyance.
+- A scale that reads two kilos heavy only for people over sixty is a different fault, and the average reading would never show it.
+- Weigh the over-sixties separately. Bias testing is the same: do not trust one overall number, split it by group and compare.
+- Then ask where the tilt came from: the scale's parts (the model), what it was calibrated on (the data), how it is set up (the prompt) or how you check it (the evaluation).
 
 ## Core concepts
 
@@ -49,7 +52,7 @@ Bias checks run in three places: before release, on live traffic, and on the cla
 3. **Prompt.** A persona, a sample answer or a tone instruction can tilt replies. Test counterfactual pairs after every prompt edit.
 4. **Evaluation.** The classifier or judge that scores outputs is also a model. Split its error rates by group and audit its mistakes by hand.
 
-## Deep dive
+## Technical mechanics
 
 ### Counterfactual tests
 
@@ -76,7 +79,9 @@ A counterfactual test needs no group labels on your traffic. Take a real ticket,
   </StepCard>
 </StepCards>
 
-Brightpost's golden set has 200 tickets. Two versions of each gives 2 × 200 = **400 answers**. One odd pair proves nothing; a count of differences across 400 answers does. Write the comparison as a rule ("refund decision must match") so a script can check it.
+- Brightpost's golden set has 200 tickets. Two versions of each gives 2 × 200 = **400 answers**.
+- One odd pair proves nothing; a count of differences across 400 answers does.
+- Write the comparison as a rule ("refund decision must match") so a script can check it.
 
 Counterfactual tests catch bias in the answer. They miss bias that only shows when a group's real language differs, such as dialect, so pair them with the group error rates below.
 
@@ -96,9 +101,12 @@ For each group, build the table and compute the rates:
 - **Group B:** precision = 82 ÷ (82 + 90) = 0.48; recall = 82 ÷ 100 = 0.82; false-positive rate = 90 ÷ 900 = **0.10**.
 - **Gap:** 0.10 − 0.04 = **0.06**; the ratio is 0.10 ÷ 0.04 = **2.5**.
 
-Is 0.06 real, or noise? The standard error of a rate is √(p × (1 − p) ÷ n). For group A that is √(0.04 × 0.96 ÷ 900) = 0.0065, and for group B √(0.10 × 0.90 ÷ 900) = 0.0100. The gap's standard error is √(0.0065² + 0.0100²) = 0.012, so a 95% interval is 0.06 ± 1.96 × 0.012, about **0.06 ± 0.02**. The gap is well outside noise. With only 20 fine messages per group the same gap would not be.
+- Is 0.06 real, or noise? The standard error of a rate is √(p × (1 − p) ÷ n).
+- For group A that is √(0.04 × 0.96 ÷ 900) = 0.0065, and for group B √(0.10 × 0.90 ÷ 900) = 0.0100.
+- The gap's standard error is √(0.0065² + 0.0100²) = 0.012, so a 95% interval is 0.06 ± 1.96 × 0.012, about **0.06 ± 0.02**.
+- The gap is well outside noise. With only 20 fine messages per group the same gap would not be.
 
-The pattern has been seen in real systems. Sap et al. (2019) report that tweets in African American English, and tweets by self-identified African Americans, were up to twice as likely to be labelled offensive in widely used hate-speech datasets, and that classifiers trained on them learn the same bias.
+- The pattern has been seen in real systems. Sap et al. (2019) report that tweets in African American English, and tweets by self-identified African Americans, were up to twice as likely to be labelled offensive in widely used hate-speech datasets, and that classifiers trained on them learn the same bias.
 
 ### Choosing a fix
 
@@ -114,7 +122,8 @@ Nothing removes societal bias. Fixes move the trade-off between group error rate
 
 ### Worked example: a flagged customer
 
-A customer from group B writes a polite, frustrated message in a regional dialect about the cracked kettle, order 4471. The toxicity filter flags it, and the assistant hands the ticket to a person instead of starting the £42 refund.
+- A customer from group B writes a polite, frustrated message in a regional dialect about the cracked kettle, order 4471.
+- The toxicity filter flags it, and the assistant hands the ticket to a person instead of starting the £42 refund.
 
 1. **Symptom:** support leads notice that flagged tickets are slower to refund, and some are from polite customers.
 2. **Slice:** the team labels 1,000 messages per group and builds the two tables above. False-positive rates are 0.04 and 0.10.
@@ -130,7 +139,10 @@ The counterfactual test from the figure above is added at the same time, so the 
 
 ### Perspective API, and what ages
 
-Perspective API, a toxicity scoring service from Jigsaw, has been the common general-purpose scorer. Jigsaw's site says the service stays active until 31 December 2026 and stopped accepting new usage requests after February 2026 (checked November 2026). Plan a replacement: another hosted classifier or a model you tune on your own labelled data. Whatever you choose, re-measure the group error rates on it, because a new classifier has new biases.
+- Perspective API, a toxicity scoring service from Jigsaw, has been the common general-purpose scorer.
+- Jigsaw's site says the service stays active until 31 December 2026 and stopped accepting new usage requests after February 2026 (checked November 2026).
+- Plan a replacement: another hosted classifier or a model you tune on your own labelled data.
+- Whatever you choose, re-measure the group error rates on it, because a new classifier has new biases.
 
 ## Trade-offs
 
@@ -144,14 +156,14 @@ Perspective API, a toxicity scoring service from Jigsaw, has been the common gen
 | General toxicity API | Quick to add | Misses coded language, dialect false positives | A first layer, always audited |
 | Domain-tuned classifier | Fits your users | Needs labelled data and upkeep | High traffic, clear policy |
 
-## Real-world examples
+## Production systems
 
 - **BBQ** (Parrish et al., 2022) tests social bias in question answering across nine dimensions, with vague and clear contexts.
 - **RealToxicityPrompts** (Gehman et al., 2020) used 100,000 web prompts and found that pretrained models can produce toxic text from innocuous prompts, and that no method tested was failsafe.
 - **Hate-speech detection and dialect** (Sap et al., 2019): classifiers learned to label African American English as offensive more often, showing that annotator bias reaches the model.
 - **Brightpost** reports its toxicity filter's false-positive rate by group before each release and keeps the largest gap as a gate.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Overall metrics only.** The average hides the group that is hurt.
 - **One benchmark as proof.** BBQ and similar sets cover set scenarios; your traffic differs.
@@ -160,7 +172,7 @@ Perspective API, a toxicity scoring service from Jigsaw, has been the common gen
 - **Fixing only the model.** The prompt and the evaluation also carry bias.
 - **Treating fairness as pass or fail.** Publish the metric, its limits and the trade-off you chose.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define the harm first (a wrongly refused customer, a different answer) and the groups that matter.
 2. Say you report every metric by slice, and compute a gap such as the false-positive rate difference.
@@ -183,27 +195,48 @@ Perspective API, a toxicity scoring service from Jigsaw, has been the common gen
 
 <InterviewQuestions>
   <InterviewQuestion question="How do demographic parity and equalized odds differ in practice?" category="Concepts" level="Mid">
-    Demographic parity asks that the share of positive predictions match across groups whatever the base rates, which can force unequal true-positive rates when prevalence differs. Equalized odds asks that true-positive and false-positive rates are similar across groups, which is closer to equal treatment of mistakes when the label is meaningful. The choice depends on whether equal selection or equal error treatment fits the policy, and on whether base-rate differences reflect real signal or historical inequity in the labels.
+    - Demographic parity asks that the share of positive predictions match across groups whatever the base rates, which can force unequal true-positive rates when prevalence differs.
+    - Equalized odds asks that true-positive and false-positive rates are similar across groups, which is closer to equal treatment of mistakes when the label is meaningful.
+    - The choice depends on whether equal selection or equal error treatment fits the policy, and on whether base-rate differences reflect real signal or historical inequity in the labels.
   </InterviewQuestion>
   <InterviewQuestion question="What are the pitfalls of deploying a toxicity classifier in production?" category="Failure modes" level="Mid">
-    Classifiers inherit annotator bias, do worse on dialects and other languages, and can be fooled by obfuscation. If they are synchronous they add latency and a dependency. Thresholds trade silenced valid speech against missed harm. I would monitor error rates by slice, sample borderline scores for human review, version the classifier with a rollback path, and re-check after language drifts or the vendor changes the model.
+    - Classifiers inherit annotator bias, do worse on dialects and other languages, and can be fooled by obfuscation.
+    - If they are synchronous they add latency and a dependency.
+    - Thresholds trade silenced valid speech against missed harm.
+    - I would monitor error rates by slice, sample borderline scores for human review, version the classifier with a rollback path, and re-check after language drifts or the vendor changes the model.
   </InterviewQuestion>
   <InterviewQuestion question="How would you approach intersectional fairness evaluation?" category="Trade-offs" level="Senior">
-    I would define intersectional cells in advance with a minimum sample size, and use bootstrap or Bayesian intervals to show uncertainty. Where counts are too small, I would use qualitative review and synthetic stress tests instead of trusting point estimates. I would document which intersections are out of scope for numeric claims because of sparse data, and ask domain experts which combinations carry the highest risk, so those get the deepest study.
+    - I would define intersectional cells in advance with a minimum sample size, and use bootstrap or Bayesian intervals to show uncertainty.
+    - Where counts are too small, I would use qualitative review and synthetic stress tests instead of trusting point estimates.
+    - I would document which intersections are out of scope for numeric claims because of sparse data, and ask domain experts which combinations carry the highest risk, so those get the deepest study.
   </InterviewQuestion>
   <InterviewQuestion question="What is a counterfactual fairness test for an LLM assistant?" category="Concepts" level="Junior">
-    Write the same input twice, changing one attribute such as the name the customer signs with, and compare the answers. If the refund decision, the proof requested or the tone differs, the attribute influenced the answer. Run it across a whole set, for example 200 tickets in two versions for 400 answers, and count the differences. Use temperature 0 or several runs so random variation does not look like bias.
+    - Write the same input twice, changing one attribute such as the name the customer signs with, and compare the answers.
+    - If the refund decision, the proof requested or the tone differs, the attribute influenced the answer.
+    - Run it across a whole set, for example 200 tickets in two versions for 400 answers, and count the differences.
+    - Use temperature 0 or several runs so random variation does not look like bias.
   </InterviewQuestion>
   <InterviewQuestion question="Overall recall is 0.80 and 0.82 for two groups, but customers complain. What do you check?" category="Failure modes" level="Mid">
-    Look at the false-positive rate by group, since recall can match while fine messages from one group are flagged far more often. In the example it is 0.04 against 0.10, a ratio of 2.5. Check the gap against its interval, using the standard error of each rate. Then inspect the wrongly flagged messages by hand to see the pattern, such as dialect or a topic word, and trace it to the data or the classifier.
+    - Look at the false-positive rate by group, since recall can match while fine messages from one group are flagged far more often.
+    - In the example it is 0.04 against 0.10, a ratio of 2.5.
+    - Check the gap against its interval, using the standard error of each rate.
+    - Then inspect the wrongly flagged messages by hand to see the pattern, such as dialect or a topic word, and trace it to the data or the classifier.
   </InterviewQuestion>
   <InterviewQuestion question="Where does bias come from in an LLM application, and how do you test each source?" category="Architecture" level="Mid">
-    There are four sources. Data: count examples by group and topic. Model: run question tests such as BBQ. Prompt: test counterfactual pairs after every edit. Evaluation: split the classifier's or judge's error rates by group. A fix in one place does not cover the others, so the test suite needs one check per source and runs on every release.
+    - There are four sources. Data: count examples by group and topic.
+    - Model: run question tests such as BBQ. Prompt: test counterfactual pairs after every edit.
+    - Evaluation: split the classifier's or judge's error rates by group.
+    - A fix in one place does not cover the others, so the test suite needs one check per source and runs on every release.
   </InterviewQuestion>
   <InterviewQuestion question="Is a gap in false-positive rate of 0.06 between two groups significant?" category="Scaling" level="Senior">
-    It depends on the sample. The standard error of a rate is the square root of p times one minus p over n. With 900 fine messages per group, the errors are 0.0065 and 0.0100, so the gap's error is about 0.012 and the 95% interval is roughly 0.06 plus or minus 0.02, which excludes zero. With only 20 fine messages per group the interval would be far wider. I would size the labelled set so the smallest slice gives an interval narrow enough to act on.
+    - It depends on the sample. The standard error of a rate is the square root of p times one minus p over n.
+    - With 900 fine messages per group, the errors are 0.0065 and 0.0100, so the gap's error is about 0.012 and the 95% interval is roughly 0.06 plus or minus 0.02, which excludes zero.
+    - With only 20 fine messages per group the interval would be far wider.
+    - I would size the labelled set so the smallest slice gives an interval narrow enough to act on.
   </InterviewQuestion>
   <InterviewQuestion question="Would you set a different threshold for each group to equalise error rates?" category="Trade-offs" level="Senior">
-    It works mechanically, but it treats groups differently on purpose, and some laws and policies restrict that. I would first try fixing the cause: better data for the affected group, a retrained or domain-tuned classifier, and a human-review band. If per-group thresholds remain, I would get policy and legal sign-off, document the reason, and monitor both groups, because equalising one error rate shifts the others.
+    - It works mechanically, but it treats groups differently on purpose, and some laws and policies restrict that.
+    - I would first try fixing the cause: better data for the affected group, a retrained or domain-tuned classifier, and a human-review band.
+    - If per-group thresholds remain, I would get policy and legal sign-off, document the reason, and monitor both groups, because equalising one error rate shifts the others.
   </InterviewQuestion>
 </InterviewQuestions>

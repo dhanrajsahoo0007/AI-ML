@@ -4,43 +4,134 @@ description: "Treat prompts as versioned artefacts: templates, registries, revie
 icon: book-template
 ---
 
-## Prompt Templates & Versioning
+Production LLM systems treat prompts as versioned, testable software artifacts rather than hard-coded strings scattered across application services.
 
-Production LLM systems rarely hard-code a single string in application code. Instead they centralize prompts in a template layer that separates static instructions from dynamic slots (user input, retrieved documents, tool outputs, locale, and safety policies). Good template systems define a schema for variables, default values, escaping rules for nested content, and compile-time checks so missing keys fail in CI rather than at runtime. That contract becomes especially important when the same logical prompt is rendered for multiple models that differ in tokenizer quirks, stop sequences, and maximum context lengths.
+- A prompt registry decouples prompt iteration from code deploys while keeping every change gated by offline evaluations and tied to trace logs.
 
-Version control for prompts is not identical to Git alone. You typically want immutable versions tagged with metadata: model family, temperature and decoding parameters, evaluation scores on a frozen benchmark, author, and the dataset snapshot used for regression tests. A prompt registry stores these artifacts and maps logical names (for example, support_ticket_summarizer_v3) to concrete template bodies and parameter bundles. Rollback means repointing a feature flag or configuration entry to a prior registry version without redeploying code, while still retaining the ability to correlate logs with the exact prompt hash that produced each response.
+## Overview
 
-Few-shot examples deserve first-class versioning because they are often the highest-leverage part of a template. Managing them as structured records (example text, label, weight, source dataset row id) lets you audit provenance, prune redundant demonstrations that inflate token cost, and detect leakage from evaluation sets into the prompt. Teams sometimes maintain parallel template branches for A/B experiments, but the architecture should enforce that only one branch is active per traffic slice and that analytics join on version identifiers.
+- **Typed templates over raw strings:** Separate static instructions from dynamic variable slots (`user_query`, `retrieved_chunks`, `policy`) with compile-time schema validation so missing variables fail in CI.
+- **Immutable registry versions:** Store every prompt revision as an immutable bundle containing the template text, model ID, decoding parameters (`temperature`, `max_tokens`), tool definitions, and benchmark score.
+- **Environment promotion & instant rollback:** Resolve logical aliases (`refund_assistant:prod`) to pinned version hashes via configuration flags so bad prompts roll back in seconds without redeploying application code.
+- **Trace correlation:** Log the exact `prompt_version_id` and content hash on every production request to attribute latency, token cost, and quality shifts to specific edits.
+- **Systematic optimization:** Replace ad-hoc playground tweaking with evaluation-driven iteration and programmatic optimizers (such as DSPy) backed by held-out datasets.
 
-Trade-offs appear between flexibility and governance. Highly dynamic templates with arbitrary string concatenation are fast to iterate but brittle; rigid templating with typed slots is safer but can slow product teams. The operational sweet spot is usually declarative templates plus automated diff review, golden-output tests on representative inputs, and a clear deprecation policy so old versions do not linger in shadow traffic or cron jobs.
+## Mental model
 
-## Prompt Management & Optimization
+- **Database queries, not comments:** Hard-coding concatenated prompt strings in business logic is like pasting raw, unparameterized SQL across controllers; typed prompt templates act like prepared statements with versioned migrations.
+- **Artifact registry (like Docker tags):** Each edit creates an immutable digest (`sha256:9f2a...`), while environment pointers (`staging`, `prod`) move between digests after passing automated regression gates.
+- **Bundled configuration:** A prompt's behavior depends on the model and decoding settings it was tuned for, so the template, model ID, temperature, and output schema travel together as one versioned unit.
 
-Ad hoc tweaking in a playground does not scale. Mature teams treat prompts like hyperparameters: they define objectives (task success rate, constraint violations, latency), hold out evaluation sets with diverse edge cases, and change one axis at a time while tracking regressions. Systematic prompt engineering adds structure through rubrics, pairwise comparisons, and error clustering so improvements generalize beyond the examples that inspired a wording change. The goal is a repeatable workflow where every edit is tied to metrics and can be reverted without guesswork.
+## Core concepts
 
-Frameworks in the spirit of DSPy recast prompts as programs that compile into model-facing strings or demonstration sets given a training signal. Instead of manually rewriting instructions, you specify modules (signatures), provide a small set of labeled examples, and let an optimizer search over paraphrases, chain-of-thought scaffolding, or few-shot selections. This trades some upfront complexity for better coverage of the optimization landscape, especially when multiple components (retrieval, reasoning, formatting) must co-adapt. The approach still needs guardrails: overfitting to tiny dev sets is common if you do not maintain held-out tasks and periodic human review.
+1. **Template engine & variable schemas:** Defines typed slots, default values, and escaping rules for untrusted user inputs so injected delimiters cannot silently rewrite system instructions.
+2. **Immutable prompt bundle:** Packages the system prompt, user template, few-shot demonstrations, tool schemas, target model identifier, and decoding parameters into a single content-addressed record.
+3. **Alias and environment pointers:** Maps human-readable names (`support_triage@prod`, `support_triage@canary`) to immutable version numbers so traffic routing and rollbacks happen via config updates.
+4. **Versioned few-shot packs:** Stores few-shot examples as structured dataset rows with provenance metadata rather than inline text, preventing evaluation-set leakage and enabling dynamic example selection.
+5. **CI regression gate:** Runs golden-dataset assertions (schema validity, deterministic checks, and LLM-as-judge rubrics) on every prompt pull request before promotion.
+6. **Programmatic prompt compilation (DSPy):** Treats prompts as declarative signatures (`input -> output`) and uses an optimizer to search over instructions and few-shot combinations against a validation metric.
+7. **Prompt compression:** Trims duplicate policy clauses, prunes low-leverage few-shot examples, and moves reference text into retrieval while verifying that task accuracy and safety scores do not regress.
 
-Prompt compression targets redundant phrasing, duplicated policy text, and oversized few-shot blocks. Techniques include summarizing static policy into bullet constraints, moving reference material into retrieval rather than the system message, and using smaller models to rewrite verbose drafts under length caps. Each removal should be validated because aggressive shortening can drop implicit disambiguation that the model relied on, increasing format errors or safety failures even when headline accuracy looks fine on average.
+## Architecture
 
-Evaluation-driven iteration closes the loop. Online signals (thumbs down, task completion, downstream parser success) feed dashboards; offline suites catch regressions before ship. The trade-off is measurement cost: rich human eval does not run on every commit, so you layer fast automated checks (schema validity, keyword constraints, embedding distance to reference answers) with slower periodic deep eval. The architecture should log prompts and outcomes at fine granularity so optimizers and analysts can attribute cost and quality changes to specific prompt versions.
+A production prompt management pipeline separates authoring and evaluation from the low-latency runtime serving path:
+
+- **Step 1 — Author & commit:** Engineers or domain experts edit the prompt bundle (template + model config + few-shot IDs) in Git or a prompt registry UI.
+- **Step 2 — CI validation & offline eval:** CI validates variable schemas, checks token length against prompt-cache breakpoints, and runs the offline benchmark suite.
+- **Step 3 — Publish immutable version:** Passing bundles receive an immutable version number (`v14`, hash `8c4e1b`) in the registry store.
+- **Step 4 — Canary & promote:** The `canary` pointer shifts 5% of live traffic to `v14`; if online guardrails (schema parse rate, latency, user thumbs-down rate) hold steady, `prod` promotes to `v14`.
+- **Step 5 — Local SDK caching at runtime:** Application workers fetch `prod` bundles from an edge cache or local memory with a short TTL (e.g., 30 seconds), rendering slots locally with zero external network hops per request.
+- **Step 6 — Observability join:** Every LLM trace logs `prompt_name`, `prompt_version`, and `prompt_hash` alongside token usage and outcome signals.
+
+## Technical mechanics
+
+### Versioning templates, parameters, and few-shot examples
+
+- **Coupled model + prompt versioning:** A prompt tuned for Claude Sonnet often behaves differently on GPT-5 or a smaller open-weights model; pin the model snapshot and temperature inside the version record.
+- **Cache-friendly slot placement:** Keep static instructions and few-shot examples at the top of the rendered template and inject dynamic user slots at the bottom so provider [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) hits remain above 50%.
+- **Provenance for few-shot sets:** Tag every few-shot example with its source dataset ID and verify in CI that zero examples overlap with the offline evaluation benchmark.
+
+### Programmatic optimization and prompt compression
+
+- **DSPy-style compilation:** Define task signatures, provide 50–200 labeled examples and a scoring metric, and let bootstrap or MIPRO optimizers select demonstrations and instruction phrasings automatically.
+- **Guard against dev-set overfitting:** Always hold out a separate test split that the prompt optimizer never sees, and inspect optimized prompts for brittle formatting hacks.
+- **Token-budget pruning:** Measure each prompt section's marginal contribution to accuracy by ablating few-shot examples one by one; drop examples that add token cost without lifting recall or format compliance.
+
+### Rollouts, canaries, and instant rollback
+
+- **Zero-deploy rollback:** When a newly promoted prompt spikes schema validation errors or latency, repoint the `prod` alias to `v13`; local SDK caches pick up the rollback within one refresh interval.
+- **Shadow and A/B routing:** Route traffic by hashing `user_id` or `conversation_id` so multi-turn conversations stay on the same prompt version throughout a session (see [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)).
+
+## Trade-offs
+
+| Decision | Option A | Option B | Guidance |
+| --- | --- | --- | --- |
+| Git-backed files vs external registry DB | Full code review, PR checks, zero extra runtime infra | Non-engineer editing, instant pointer flips without CI deploy | Hybrid: Git as source of truth synced to a fast config store for alias pointers |
+| Hand-tuned templates vs DSPy compilation | Transparent wording, works with < 20 examples | Higher ceiling on multi-step pipelines, adapts when swapping models | Start hand-tuned with evals; adopt programmatic optimizers once labeled data > 100 rows |
+| Verbose instructions vs compressed prompts | Explicit edge-case handling | Lower TTFT and token cost | Compress only after establishing an offline regression suite |
+| Runtime fetch vs build-time bundle | Instant rollbacks | Zero external dependency at request time | Bundle fallback defaults in the image + poll config store asynchronously |
+
+## Production systems
+
+- **Langfuse & LangSmith Prompt Hub:** Store versioned prompt templates with model configurations, environment labels (`production`, `staging`), local SDK caching, and direct links from trace logs to the exact prompt version.
+- **Braintrust:** Links versioned prompts in code or UI directly to CI evaluation datasets and diff views across commits.
+- **DSPy (Stanford NLP):** Compiles declarative LM programs into optimized instructions and few-shot sets using metric-driven teleprompters/optimizers.
+
+## Failure modes & pitfalls
+
+- **Putting the registry on the synchronous critical path:** Fetching a prompt over the network on every user request adds latency and creates a single point of failure; always cache in memory with a bundled fallback.
+- **Mutating a live version in place:** Editing `v3` directly makes historical trace logs impossible to reproduce; every character change must create `v4`.
+- **Inserting dynamic variables above cache breakpoints:** Placing `current_date` or `user_name` at the top of a template invalidates the entire prefix cache on every call.
+- **Leaking eval cases into few-shot templates:** Copy-pasting failing benchmark cases straight into the few-shot prompt inflates offline scores while masking real generalization gaps.
+- **Unpinned `latest` pointers in production:** Referencing `latest` means a draft save immediately hits customer traffic without passing regression checks.
+
+## Interview framework
+
+1. **Define the artifact:** A prompt version is an immutable bundle of template text, variable schema, few-shot IDs, model snapshot, and decoding parameters.
+2. **Walk the lifecycle:** Edit → CI schema & token check → offline eval gate → immutable publish → canary rollout → trace logging (`prompt_version_id`).
+3. **Explain runtime resilience:** In-memory SDK caching with async refresh and bundled fallback defaults so the registry never blocks inference.
+4. **Connect to cost and caching:** Keep static blocks first and dynamic slots last to preserve prefix-cache hits.
+5. **Cover systematic iteration:** Contrast manual rubric-driven edits with DSPy-style compilation when migrating across model families.
+
+**What interviewers listen for:** Immutability, decoupling prompt rollbacks from code deployments, local caching on the serving path, and evaluation gates before promotion.
+
+**Red flags:** Storing prompts as unversioned database rows edited live in production, or making synchronous remote calls to a prompt server on every token request.
+
+## Further reading
+
+- [DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines (Khattab et al., 2023)](https://arxiv.org/abs/2310.03714)
+- Related pages: [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you structure a prompt registry so teams can iterate safely?" category="Management">
-    I would store immutable prompt versions with metadata such as model id, decoding parameters, benchmark results, and ownership. Production resolves a logical name to a pinned version via configuration or feature flags, with audit logs tying each response to the prompt hash. CI runs golden tests and schema checks on every change, and promotion requires review plus explicit activation rather than implicit latest pointers in code paths that matter for compliance.
+  <InterviewQuestion question="How would you structure a prompt registry so teams can iterate safely?" category="Management" level="Mid">
+    - **Immutable version bundles:** Store each revision as an append-only record containing the template, variable schema, model ID, decoding parameters, and offline benchmark score.
+    - **Environment alias pointers:** Resolve logical names (such as `ticket_summarizer:prod`) to pinned version hashes via configuration flags rather than `latest`.
+    - **CI evaluation gates:** Require schema validation, prompt-cache prefix checks, and regression benchmark runs before any version can be promoted to `prod`.
+    - **End-to-end trace attribution:** Log the `prompt_version_id` and hash on every model call so cost, latency, and quality metrics join directly to the exact prompt revision.
   </InterviewQuestion>
-  <InterviewQuestion question="What architectural boundaries belong between templates and application code?" category="Architecture">
-    Templates should own wording, slot ordering, and few-shot packs, while application code supplies validated values for slots and handles retries, timeouts, and observability. Crossing that boundary cleanly avoids scattering prompt fragments in strings across services and lets you swap models or languages without rewriting business logic. Shared libraries can render templates from a central store so microservices do not fork divergent copies of the same instruction text.
+  <InterviewQuestion question="What architectural boundaries belong between templates and application code?" category="Architecture" level="Mid">
+    - **Templates own presentation and model config:** Wording, section ordering, few-shot demonstrations, and model/temperature parameters live inside the versioned prompt artifact.
+    - **Application code owns data and orchestration:** Services supply typed, validated slot values and manage retries, timeouts, permissions, and side effects.
+    - **Local rendering via cached SDK:** Workers pull versioned bundles asynchronously into memory and render templates locally so prompt lookups add zero network latency.
   </InterviewQuestion>
-  <InterviewQuestion question="Describe a practical rollback strategy after a bad prompt deploy." category="Operations">
-    Keep the previous registry version hot and addressable by id. On elevated error rates or quality regressions detected by monitors, flip the configuration flag or traffic weight back to the last known-good version within minutes, without a full redeploy. Capture exemplar failing requests, diff template versions, and run offline replays against both versions to confirm the fix before attempting a forward roll again. Document the incident with the prompt version ids involved for postmortems.
+  <InterviewQuestion question="Describe a practical rollback strategy after a bad prompt deploy." category="Operations" level="Mid">
+    - **Repoint the environment alias:** Flip the `prod` pointer back to the previous known-good version hash in the config store; SDK caches pick up the change within seconds without a code deploy.
+    - **Capture failing traces:** Query observability logs by the bad `prompt_version_id` to extract the inputs and invalid completions that triggered the alert.
+    - **Add to the regression suite:** Convert the failing production inputs into permanent offline test cases and verify the fix against both old and new versions before rolling forward.
   </InterviewQuestion>
-  <InterviewQuestion question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?" category="Optimization">
-    When you have enough labeled or scored examples to define a training objective, multiple composable modules whose prompts interact, and engineers who can invest in the optimizer setup and validation harness. Hand iteration stays better for tiny data, highly creative copy, or tasks where success is subjective and expensive to score automatically, provided you still track versions and run regression tests.
+  <InterviewQuestion question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?" category="Optimization" level="Senior">
+    - **Use programmatic optimization (DSPy)** when you have 100+ labeled examples, an automated scoring metric, multi-stage pipelines whose prompts interact, or frequent migrations across model families.
+    - **Use hand-written iteration** when labeled data is scarce, success criteria are nuanced brand/tone judgements, or you are bootstrapping an initial prototype.
+    - **Hybrid guardrails:** Always evaluate compiled prompts on a held-out test set and review the generated instructions to prevent overfitting to small dev splits.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you reduce LLM cost through prompt changes without wrecking quality?" category="Cost">
-    Profile token usage per stage and remove duplicate instructions, shrink few-shot sets using clustering or influence-style selection, push long reference text into retrieval, and prefer concise system messages tested on a benchmark. Pair every cut with offline eval and spot checks on long-tail intents, because the cheapest prompt is not cheaper overall if it raises failures, retries, or human escalations.
+  <InterviewQuestion question="How do you reduce LLM cost through prompt changes without wrecking quality?" category="Cost" level="Mid">
+    - **Protect prefix cache hits:** Place static instructions, tools, and few-shot examples first and volatile per-request context last to cut cached input token cost by up to 90%.
+    - **Prune redundant few-shot examples:** Ablate examples against the offline evaluation benchmark and remove demonstrations that do not improve accuracy or format compliance.
+    - **Move reference bulk to retrieval:** Replace long static policy tables in the system prompt with targeted RAG chunks or progressive tool lookups, verifying end-to-end task resolution rate after each cut.
   </InterviewQuestion>
-  <InterviewQuestion question="What does an evaluation-driven iteration cadence look like in production?" category="Evaluation">
-    Every prompt change runs automated regression tests and schema checks in CI. Shadow or canary traffic compares new prompts against the incumbent on live-shaped traffic with guardrail metrics. Promote only if quality and safety metrics meet thresholds, then monitor drift over days because short canaries can miss weekly seasonality. Keep a feedback channel so failures cluster into new benchmark cases.
+  <InterviewQuestion question="What does an evaluation-driven iteration cadence look like in production?" category="Evaluation" level="Senior">
+    - **Pre-merge CI checks:** Every prompt PR runs deterministic schema/syntax tests and offline benchmark rubrics against the incumbent baseline.
+    - **Canary and shadow traffic:** Promote passing versions to a 1–5% traffic slice (keyed by user or session ID) and monitor online guardrails (parse errors, latency, user feedback).
+    - **Continuous dataset flywheel:** Cluster production failures and thumbs-down traces weekly, promote representative cases into the golden evaluation set, and retire stale tests.
   </InterviewQuestion>
 </InterviewQuestions>

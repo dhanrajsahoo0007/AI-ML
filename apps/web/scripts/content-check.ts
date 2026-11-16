@@ -38,6 +38,15 @@ const WIDGET_TAGS =
 const MAX_WIDGETS = 2;
 /** A line of tool output that has been pasted into the end of pages before; it renders as text. */
 const STRAY_TOOL_LINE = /^`,Path:\s*$/;
+/** Retired casual headings replaced by Overview, Mental model, Technical mechanics, etc. in ai-system-design. */
+const BANNED_GENAI_HEADINGS = new Set([
+  "TL;DR",
+  "The idea in plain English",
+  "Deep dive",
+  "Real-world examples",
+  "Common pitfalls",
+  "How to answer in an interview",
+]);
 
 const ROOT = process.cwd();
 const APP_DIR = path.join(ROOT, "src", "app");
@@ -237,10 +246,23 @@ async function main() {
   for (const { section, items } of docsItems) {
     for (const item of items) {
       const text = fs.readFileSync(item.file, "utf8");
+      let inCodeFence = false;
       text.split("\n").forEach((l, i) => {
+        if (l.trimStart().startsWith("```")) inCodeFence = !inCodeFence;
         if (STRAY_TOOL_LINE.test(l)) report(item.file, "stray tool output on its own line; delete it", "error", i + 1);
         if (NO_EM_DASH.has(section.key) && l.includes("\u2014")) {
           report(item.file, "em dash; use a comma, a colon or a full stop", "error", i + 1);
+        }
+        if (!inCodeFence && section.key === "ai-system-design" && l.startsWith("## ")) {
+          const h2 = l.slice(3).trim();
+          if (BANNED_GENAI_HEADINGS.has(h2)) {
+            report(
+              item.file,
+              `retired heading "## ${h2}"; use Overview, Mental model, Technical mechanics, Production systems, Failure modes & pitfalls, or Interview framework`,
+              "error",
+              i + 1
+            );
+          }
         }
       });
       // Interviewer prompts for these sections live in the bank YAML (tagged to the page with `topics`), so they

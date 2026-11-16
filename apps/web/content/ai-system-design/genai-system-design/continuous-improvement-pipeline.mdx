@@ -5,9 +5,11 @@ icon: repeat
 updated: 2026-11-15
 ---
 
-A model that ships once gets worse as the world moves, and one that ships weekly can still get worse if nobody checks. Interviewers ask about the improvement loop because it ties together everything else in the section: traces, evaluation sets, experiments, release gates and rollback.
+A model that ships once gets worse as the world moves, and one that ships weekly can still get worse if nobody checks.
 
-## TL;DR
+- Interviewers ask about the improvement loop because it ties together everything else in the section: traces, evaluation sets, experiments, release gates and rollback.
+
+## Overview
 
 - **Quality is a time series, not a milestone.** The loop is: **trace, mine failures, add test cases, make one change, evaluate offline, canary, promote, trace again.**
 - **Failures become tests.** Every production failure you understand is added to the evaluation set, so it cannot come back unnoticed. Brightpost's set grows from **200 to 214 cases** in one week.
@@ -15,13 +17,17 @@ A model that ships once gets worse as the world moves, and one that ships weekly
 - **Two gates, different jobs.** Offline evaluation compares the candidate with the baseline on the whole set; a **canary** on a small share of real traffic checks what the set cannot. Keep rollback one step away.
 - **Measure the loop itself:** time from a flagged issue to the fix in production (**102 hours** in the worked example), the share of regressions caught before release, and cost per quality point.
 
-## The idea in plain English
+## Mental model
 
-A restaurant kitchen keeps a notebook. Every time a dish comes back, the cook writes down what was wrong and tests the next batch against that note before it goes out. Over months the notebook becomes the kitchen's real recipe. A kitchen without one fixes each complaint once and repeats it a year later. The improvement pipeline is that notebook plus a rule that no change reaches every table without a taste test first.
+- A restaurant kitchen keeps a notebook. Every time a dish comes back, the cook writes down what was wrong and tests the next batch against that note before it goes out.
+- Over months the notebook becomes the kitchen's real recipe.
+- A kitchen without one fixes each complaint once and repeats it a year later.
+- The improvement pipeline is that notebook plus a rule that no change reaches every table without a taste test first.
 
 ## Core concepts
 
-The running example is Brightpost's support assistant: **200,000 requests a day**, a **200-ticket golden set**, and a refund rule (order 4471, a cracked kettle, £42; refunds over £30 need approval). All counts in this page's example are illustrative.
+- The running example is Brightpost's support assistant: **200,000 requests a day**, a **200-ticket golden set**, and a refund rule (order 4471, a cracked kettle, £42; refunds over £30 need approval).
+- All counts in this page's example are illustrative.
 
 1. **Signals.** What production tells you: thumbs-down and edits, hand-offs to a person, retries, errors, latency, cost and business outcomes such as refunds issued. See [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback).
 2. **Traces.** One record per request: question, retrieved passages, tool calls, answer, versions and timings. Without them you can only count failures, not explain them.
@@ -65,11 +71,13 @@ The running example is Brightpost's support assistant: **200,000 requests a day*
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### From a failure to a test case
 
-A trace is evidence; a test case is a repeatable question with a grader. Turning one into the other takes three decisions: what the correct behaviour is (written by a person who owns the policy), how to grade it (a code check if the right behaviour can be tested mechanically, a judge if not), and what to remove (customer names, card digits, anything personal). Here is one of the 14 Brightpost cases, in a format we use for illustration, not a standard:
+- A trace is evidence; a test case is a repeatable question with a grader.
+- Turning one into the other takes three decisions: what the correct behaviour is (written by a person who owns the policy), how to grade it (a code check if the right behaviour can be tested mechanically, a judge if not), and what to remove (customer names, card digits, anything personal).
+- Here is one of the 14 Brightpost cases, in a format we use for illustration, not a standard:
 
 ```json
 {
@@ -94,7 +102,11 @@ The question is what kind of gap the failure shows. [Prompt vs RAG vs Fine-Tunin
   caption="The lever follows the gap, and you only know the gap after you have measured the best prompt."
 />
 
-**How to read it.** Start from the best prompt you can write and the evaluation set. Read what is still wrong. Missing facts point to retrieval, a format or behaviour gap points to fine-tuning, both point to both, and nothing left means ship. Brightpost's failures sort like this (illustrative counts out of 50 thumbs-down traces):
+**How to read it:**
+
+- Start from the best prompt you can write and the evaluation set.
+- Read what is still wrong. Missing facts point to retrieval, a format or behaviour gap points to fine-tuning, both point to both, and nothing left means ship.
+- Brightpost's failures sort like this (illustrative counts out of 50 thumbs-down traces):
 
 | Failure (count) | Gap | Cheapest lever that works |
 | --- | --- | --- |
@@ -105,23 +117,36 @@ The question is what kind of gap the failure shows. [Prompt vs RAG vs Fine-Tunin
 | Tone or length off (5) | Style | Prompt; fine-tune on the 5,000 resolved tickets if it persists |
 | Right article not retrieved (4) | Retrieval | Chunking, reranking |
 
-A rule the model must never break belongs in code, not in a prompt: code runs every time. The loop's order of preference is code check, prompt, retrieval, then fine-tuning, because each step costs more and is slower to undo. See [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning) for when a fine-tune earns its place.
+- A rule the model must never break belongs in code, not in a prompt: code runs every time.
+- The loop's order of preference is code check, prompt, retrieval, then fine-tuning, because each step costs more and is slower to undo.
+- See [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning) for when a fine-tune earns its place.
 
 ### Gates: offline first, then the canary
 
-Offline evaluation is fast and repeatable but only knows the cases you have. The canary sees real traffic but is slow and exposes some customers. Use both, in that order. For the offline gate read the flips, not just the total: a candidate that fixes 5 cases and breaks 3 has a net gain of 2, but the 3 may be the ones that matter. For the canary, compare against the baseline running at the same time (a small A/B test; see [A/B Testing for Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)), with limits agreed in advance on quality, p95 latency, cost and hand-offs, and an automatic rollback. Once it is live, [online production evaluation](/ai-system-design/genai-system-design/online-production-evaluation) keeps watching.
+- Offline evaluation is fast and repeatable but only knows the cases you have.
+- The canary sees real traffic but is slow and exposes some customers.
+- Use both, in that order. For the offline gate read the flips, not just the total: a candidate that fixes 5 cases and breaks 3 has a net gain of 2, but the 3 may be the ones that matter.
+- For the canary, compare against the baseline running at the same time (a small A/B test; see [A/B Testing for Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)), with limits agreed in advance on quality, p95 latency, cost and hand-offs, and an automatic rollback.
+- Once it is live, [online production evaluation](/ai-system-design/genai-system-design/online-production-evaluation) keeps watching.
 
 ### Triggers and automation
 
-Run the weekly loop on a schedule, and add event triggers. Automate when a drift test crosses its threshold on large, representative traffic, when rolling quality on labelled slices falls significantly, or when a knowledge index refresh completes. Keep a person in the loop for rare safety incidents, single-customer spikes, ambiguous metric moves (which may be an instrumentation bug) and any regulated domain. A single threshold on a small sample oscillates; combine drift statistics, a sequential test on held-out slices and a human approval for high-risk changes.
+- Run the weekly loop on a schedule, and add event triggers.
+- Automate when a drift test crosses its threshold on large, representative traffic, when rolling quality on labelled slices falls significantly, or when a knowledge index refresh completes.
+- Keep a person in the loop for rare safety incidents, single-customer spikes, ambiguous metric moves (which may be an instrumentation bug) and any regulated domain.
+- A single threshold on a small sample oscillates; combine drift statistics, a sequential test on held-out slices and a human approval for high-risk changes.
 
 ### Root cause: where the failure actually is
 
-A bad answer can come from retrieval staleness, a tokenizer or template change, a tool that changed its output, a provider's silent model update, or the weights. Link in one place: model version, prompt version, index snapshot id and dependency health for every trace. Then a regression is a diff between two version sets. Keep training jobs on their own orchestration so a long GPU run does not block a hotfix, but record the same metadata for both, so every production model points to the data, code commit and evaluation report that justified it.
+- A bad answer can come from retrieval staleness, a tokenizer or template change, a tool that changed its output, a provider's silent model update, or the weights.
+- Link in one place: model version, prompt version, index snapshot id and dependency health for every trace.
+- Then a regression is a diff between two version sets.
+- Keep training jobs on their own orchestration so a long GPU run does not block a hotfix, but record the same metadata for both, so every production model points to the data, code commit and evaluation report that justified it.
 
 ### Measuring the loop
 
-Three numbers make the pipeline legible: the **time from a flagged issue to the fix in production**, the **share of regressions caught before release**, and the **cost per quality point** gained. They show whether you improve faster or just churn.
+- Three numbers make the pipeline legible: the **time from a flagged issue to the fix in production**, the **share of regressions caught before release**, and the **cost per quality point** gained.
+- They show whether you improve faster or just churn.
 
 ### Worked example: one week at Brightpost
 
@@ -149,7 +174,12 @@ Three numbers make the pipeline legible: the **time from a flagged issue to the 
   </StepCard>
 </StepCards>
 
-**The loop's own numbers.** Flagged Monday 09:00, fully released Friday 15:00: 4 × 24 + 6 = **102 hours**. One real regression (the £28 case) was caught offline, before any customer saw it. The cost: a few hours of a person's time reading 50 traces, and one afternoon of engineering. A team that avoids Friday releases moves the ramp to Monday, and the clock reads 7 days 6 hours.
+**The loop's own numbers:**
+
+- Flagged Monday 09:00, fully released Friday 15:00: 4 × 24 + 6 = **102 hours**.
+- One real regression (the £28 case) was caught offline, before any customer saw it.
+- The cost: a few hours of a person's time reading 50 traces, and one afternoon of engineering.
+- A team that avoids Friday releases moves the ramp to Monday, and the clock reads 7 days 6 hours.
 
 <Callout tone="red" title="What breaks">
   The team keeps adding cases and tuning until the 214-case set passes at 100 %. Production quality does not follow, because the prompt now fits the set and the set stopped growing from fresh traffic. Keep a hidden slice, refresh from new traces every week, and watch the online metric, not only the offline score.
@@ -167,14 +197,14 @@ Three numbers make the pipeline legible: the **time from a flagged issue to the 
 | Heavy process, many gates | Few incidents | Slow, and teams route around it | Where one failure is costly |
 | Light process | Fast | Untracked changes make incidents unrecoverable | Prototypes only |
 
-## Real-world examples
+## Production systems
 
 - **Canarying at Google.** The SRE workbook defines a canary as a partial, time-limited deployment of a change together with its evaluation, used to decide whether a rollout should continue.
 - **Evals as the engine of improvement.** Husain's widely cited write-up describes three levels, unit-test assertions, human and model review of logged traces, and A/B tests, and notes that the same infrastructure feeds debugging and fine-tuning data (2024).
 - **Criteria drift.** Shankar et al. (2024) found that people's own evaluation criteria shift as they grade outputs, which is why the test set must be revisited as failures are read.
 - **Feedback loops in ML systems.** Sculley et al. (2015) warn about hidden feedback loops and undeclared dependencies, the failure modes a version-linked trace is built to expose.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Fixing without a test.** The failure returns after the next prompt edit.
 - **Several changes at once.** A prompt, a model and a retrieval change together tell you nothing about which one helped.
@@ -183,7 +213,7 @@ Three numbers make the pipeline legible: the **time from a flagged issue to the 
 - **Judging only the total.** A net gain can hide the one case that matters most.
 - **No rollback path.** A canary without an automatic stop is only a slow release.
 
-## How to answer in an interview
+## Interview framework
 
 1. Describe the loop in one breath: trace, mine, add cases, change, offline gate, canary, promote.
 2. Say how a failure becomes a test case, and who owns the label.
@@ -205,27 +235,49 @@ Three numbers make the pipeline legible: the **time from a flagged issue to the 
 
 <InterviewQuestions>
   <InterviewQuestion question="What is a continuous improvement pipeline for an LLM application, and why is it a loop?" category="Concepts" level="Junior">
-    It is the repeating path from production signals to a safer, better release: log traces, find and name failures, turn them into test cases, make one change, test it offline, release it to a small share of traffic, then promote it. It is a loop because the promoted version produces the next traces, and because each fixed failure joins the evaluation set. Quality is then a managed time series, not a launch milestone.
+    - It is the repeating path from production signals to a safer, better release: log traces, find and name failures, turn them into test cases, make one change, test it offline, release it to a small share of traffic, then promote it.
+    - It is a loop because the promoted version produces the next traces, and because each fixed failure joins the evaluation set.
+    - Quality is then a managed time series, not a launch milestone.
   </InterviewQuestion>
   <InterviewQuestion question="How does a thumbs-down in production become a regression test?" category="Concepts" level="Junior">
-    Find the trace behind the rating and read it to decide what went wrong and what correct behaviour looks like, written by someone who owns the policy. Remove personal data, add the input and expected behaviour, and pick a grader: a code check where the behaviour can be tested mechanically, a judge otherwise. Label it, have a second person confirm, and add it to the versioned test set. From then on every candidate runs against it.
+    - Find the trace behind the rating and read it to decide what went wrong and what correct behaviour looks like, written by someone who owns the policy.
+    - Remove personal data, add the input and expected behaviour, and pick a grader: a code check where the behaviour can be tested mechanically, a judge otherwise.
+    - Label it, have a second person confirm, and add it to the versioned test set.
+    - From then on every candidate runs against it.
   </InterviewQuestion>
   <InterviewQuestion question="Brightpost's top failure is a refund over the limit sent without approval, though the prompt states the rule. Which lever do you pull?" category="Trade-offs" level="Mid">
-    The gap is behaviour, not knowledge, but the cheapest reliable lever is code: make the refund tool refuse amounts over the limit unless an approval is attached, so the rule runs every time. Then tighten the prompt so the model asks for approval itself. Retrieval does not help because the rule is already known, and fine-tuning is slow and hard to undo, so I would keep it for a failure that survives both. I would measure the change on the 14 new cases and on the old set.
+    - The gap is behaviour, not knowledge, but the cheapest reliable lever is code: make the refund tool refuse amounts over the limit unless an approval is attached, so the rule runs every time.
+    - Then tighten the prompt so the model asks for approval itself.
+    - Retrieval does not help because the rule is already known, and fine-tuning is slow and hard to undo, so I would keep it for a failure that survives both.
+    - I would measure the change on the 14 new cases and on the old set.
   </InterviewQuestion>
   <InterviewQuestion question="What signals would you use to trigger an automated retrain versus opening a manual investigation?" category="Failure modes" level="Mid">
-    Automate when drift tests cross thresholds on large, representative traffic, when rolling quality on labelled slices drops significantly, and when a dependency such as a knowledge index refresh finishes cleanly. Investigate manually for rare safety incidents, single-customer spikes and ambiguous movements that may be instrumentation bugs. Never rely on one threshold over a small sample, because it oscillates, and always keep a human gate in regulated domains even when the numbers look bad.
+    - Automate when drift tests cross thresholds on large, representative traffic, when rolling quality on labelled slices drops significantly, and when a dependency such as a knowledge index refresh finishes cleanly.
+    - Investigate manually for rare safety incidents, single-customer spikes and ambiguous movements that may be instrumentation bugs.
+    - Never rely on one threshold over a small sample, because it oscillates, and always keep a human gate in regulated domains even when the numbers look bad.
   </InterviewQuestion>
   <InterviewQuestion question="How do you integrate A/B tests into a continuous delivery flow for models without contaminating the readout?" category="Architecture" level="Mid">
-    Assign a stable experiment key at the edge and route deterministically, log every exposure with the model and prompt version, and preregister the metrics and duration. Do not let training data drawn from the experiment leak labels across arms when computing automated rewards. Provide a kill switch that reverts assignment at once, and isolate capacity so one arm's autoscaling cannot starve the other. A canary is then a small A/B test with automatic stop conditions.
+    - Assign a stable experiment key at the edge and route deterministically, log every exposure with the model and prompt version, and preregister the metrics and duration.
+    - Do not let training data drawn from the experiment leak labels across arms when computing automated rewards.
+    - Provide a kill switch that reverts assignment at once, and isolate capacity so one arm's autoscaling cannot starve the other.
+    - A canary is then a small A/B test with automatic stop conditions.
   </InterviewQuestion>
   <InterviewQuestion question="How would you run root cause analysis for a sudden rise in toxic outputs?" category="Failure modes" level="Senior">
-    Segment by language, topic, region and version to see whether the spike lines up with a release or a traffic shift. Use the version-linked traces to diff what changed: prompt, model alias, index snapshot, a new document source, a changed filter. Inspect retrieval corpora and tool outputs for poisoned content, and compare token distributions against a baseline. Roll back the most likely change while you investigate, then add the failing cases to the test set, fix the cause, and validate on held-out toxic prompts before redeploying.
+    - Segment by language, topic, region and version to see whether the spike lines up with a release or a traffic shift.
+    - Use the version-linked traces to diff what changed: prompt, model alias, index snapshot, a new document source, a changed filter.
+    - Inspect retrieval corpora and tool outputs for poisoned content, and compare token distributions against a baseline.
+    - Roll back the most likely change while you investigate, then add the failing cases to the test set, fix the cause, and validate on held-out toxic prompts before redeploying.
   </InterviewQuestion>
   <InterviewQuestion question="The offline score is 100 % after a month of loops, but customers complain more. What went wrong?" category="Failure modes" level="Senior">
-    The team probably tuned to the test set: the prompt now fits its cases, and the set stopped matching fresh traffic. Check how recently the cases were refreshed, compare with a hidden slice that was never used for tuning, and read new traces for failure types the set lacks. Look for judge drift as well, since criteria change as people grade. Fix it by sampling new cases every week, keeping a held-out slice, and giving the online metric the final say.
+    - The team probably tuned to the test set: the prompt now fits its cases, and the set stopped matching fresh traffic.
+    - Check how recently the cases were refreshed, compare with a hidden slice that was never used for tuning, and read new traces for failure types the set lacks.
+    - Look for judge drift as well, since criteria change as people grade.
+    - Fix it by sampling new cases every week, keeping a held-out slice, and giving the online metric the final say.
   </InterviewQuestion>
   <InterviewQuestion question="How would you design the pipeline so it is fast but safe, and how would you measure that?" category="Architecture" level="Senior">
-    Separate training orchestration from serving CI so a long GPU job never blocks a hotfix, and unify the metadata so every production model references its data version, code commit and evaluation report. Put gates in order of cost: code checks and the offline suite, then a canary with limits and automatic rollback, with human approval only for high-risk changes. Measure the time from a flagged issue to the fix in production, the share of regressions caught before release, and the cost per quality point. Process overhead is worth it when automation removes the manual toil.
+    - Separate training orchestration from serving CI so a long GPU job never blocks a hotfix, and unify the metadata so every production model references its data version, code commit and evaluation report.
+    - Put gates in order of cost: code checks and the offline suite, then a canary with limits and automatic rollback, with human approval only for high-risk changes.
+    - Measure the time from a flagged issue to the fix in production, the share of regressions caught before release, and the cost per quality point.
+    - Process overhead is worth it when automation removes the manual toil.
   </InterviewQuestion>
 </InterviewQuestions>

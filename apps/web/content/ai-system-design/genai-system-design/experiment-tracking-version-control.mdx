@@ -4,9 +4,12 @@ description: Capture experiment metadata, hyperparameters, and artifacts with ML
 updated: 2026-11-15
 ---
 
-Experiment tracking answers a simple question: what exactly did we run, and how did it compare with everything else? Interviewers ask it because LLM work has more moving parts than classic ML (prompts, base models, datasets, judges) and teams that cannot name which combination produced a score cannot reproduce it or roll back from it. This page covers what a run record holds and how runs are compared; prompts are versioned on [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning) and data on [Data Versioning & Lineage](/ai-system-design/genai-system-design/data-versioning-lineage).
+Experiment tracking answers a simple question: what exactly did we run, and how did it compare with everything else?
 
-## TL;DR
+- Interviewers ask it because LLM work has more moving parts than classic ML (prompts, base models, datasets, judges) and teams that cannot name which combination produced a score cannot reproduce it or roll back from it.
+- This page covers what a run record holds and how runs are compared; prompts are versioned on [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning) and data on [Data Versioning & Lineage](/ai-system-design/genai-system-design/data-versioning-lineage).
+
+## Overview
 
 - **A run is one record:** parameters, **data version**, code **commit**, **prompt version**, base model, metrics and artefacts. Miss one input and the run cannot be reproduced.
 - **Version the inputs, not only the weights.** Brightpost's run r-0187 used dataset tickets-v3 (5,000 tickets), prompt p12 and base model m6; the output is model m7.
@@ -15,9 +18,11 @@ Experiment tracking answers a simple question: what exactly did we run, and how 
 - **Keep the schema small and required.** Task, data version, prompt version and primary metric are mandatory; the rest is optional metadata.
 - **Statistical, not bitwise, reproducibility** is the realistic target on GPUs.
 
-## The idea in plain English
+## Mental model
 
-A chef who tests a new sauce writes on the card: which recipe version, which batch of tomatoes, which oven, and what the tasters said. A week later, when someone says "the old sauce was better", the cards settle it. Without cards, you argue from memory. Experiment tracking is the card for every training or prompt-tuning run, and version control is the shelf that keeps the recipes and tomatoes labelled.
+- A chef who tests a new sauce writes on the card: which recipe version, which batch of tomatoes, which oven, and what the tasters said.
+- A week later, when someone says "the old sauce was better", the cards settle it.
+- Without cards, you argue from memory. Experiment tracking is the card for every training or prompt-tuning run, and version control is the shelf that keeps the recipes and tomatoes labelled.
 
 ## Core concepts
 
@@ -42,7 +47,10 @@ The tracking backend sits between the training job and the registry. Every run w
   caption="One run, one record: five things that went in and two that came out. Values are illustrative."
 />
 
-**How to read it.** Step 1 is the record for run r-0187. Step 2 adds what went in: parameters (LoRA rank 16, 3 epochs), data version tickets-v3, code commit a3f9c1e, prompt p12 and base model m6. Step 3 adds what came out: the score on the golden set (184 of 200, 92 %) and the artefacts (model m7 and the evaluation report).
+**How to read it:**
+
+- Step 1 is the record for run r-0187. Step 2 adds what went in: parameters (LoRA rank 16, 3 epochs), data version tickets-v3, code commit a3f9c1e, prompt p12 and base model m6.
+- Step 3 adds what came out: the score on the golden set (184 of 200, 92 %) and the artefacts (model m7 and the evaluation report).
 
 1. The training job starts a run and logs its inputs before it begins, so a crashed run still has a record.
 2. During training it logs metrics with a step, so curves can be overlaid.
@@ -50,11 +58,13 @@ The tracking backend sits between the training job and the registry. Every run w
 4. It uploads artefacts to the object store and logs their ids and hashes.
 5. A registry entry links back to the run, so a version in production always leads to an inputs list.
 
-## Deep dive
+## Technical mechanics
 
 ### What a record must hold
 
-The test of a record is whether another engineer could rerun it. Brightpost's minimum is five inputs and two outputs: parameters, data version, commit, prompt version, base model, then metrics and artefacts. Everything else is optional metadata. Making more than that mandatory slows exploration, and making less leaves audit gaps; the usual compromise is a required core and free-form tags for the rest.
+- The test of a record is whether another engineer could rerun it.
+- Brightpost's minimum is five inputs and two outputs: parameters, data version, commit, prompt version, base model, then metrics and artefacts.
+- Everything else is optional metadata. Making more than that mandatory slows exploration, and making less leaves audit gaps; the usual compromise is a required core and free-form tags for the rest.
 
 A record is small enough to read:
 
@@ -79,7 +89,12 @@ Lineage is only a lookup if each id was written when the thing was made.
   caption="Dataset tickets-v3, prompt p12 and base model m6 feed run r-0187, which produces model m7, scored on the golden set. Counts are illustrative."
 />
 
-**How to read it.** Steps 1 to 4 build the chain from inputs to score. Step 5 changes only the prompt to p13: a new run, a new model and a score of 164 of 200 (82 %), under the 85 % floor. The data, base model and golden set did not change, so the prompt is the cause. The [RAG data lineage figure](/ai-system-design/genai-system-design/data-versioning-lineage) traces a different thing, one answer back to a source document; this one traces a model back to its inputs.
+**How to read it:**
+
+- Steps 1 to 4 build the chain from inputs to score.
+- Step 5 changes only the prompt to p13: a new run, a new model and a score of 164 of 200 (82 %), under the 85 % floor.
+- The data, base model and golden set did not change, so the prompt is the cause.
+- The [RAG data lineage figure](/ai-system-design/genai-system-design/data-versioning-lineage) traces a different thing, one answer back to a source document; this one traces a model back to its inputs.
 
 ### Comparing runs
 
@@ -91,9 +106,17 @@ Put the runs side by side, change one thing at a time, and compute the deltas ra
   caption="Runs r-0187 and r-0188 side by side: only the prompt differs. Counts and prices are illustrative."
 />
 
-**How to read it.** Step 1 shows that only the prompt version differs. Step 2 adds the metrics with computed deltas: pass rate drops 10 points (92 % to 82 %), refund-limit cases stay at 12 of 12, output grows from 250 to 290 tokens (+16 %), and cost per answer rises from \$0.0069 to \$0.0073 (+6 %) at illustrative list prices. Step 3 checks the noise.
+**How to read it:**
 
-**The numbers.** A 95 % range on a pass rate p over n answers is 1.96 × √(p(1 − p) ÷ n). For 184 of 200 that is 1.96 × √(0.92 × 0.08 ÷ 200) = 3.8 points; for 164 of 200 it is 5.3. The range of the gap is √(3.8² + 5.3²) = 6.5 points, so a 10-point gap clears it and a 2-point gap would not. Cost per answer is 2,200 input tokens × \$2 ÷ 1,000,000 plus output tokens × \$10 ÷ 1,000,000: \$0.0044 + \$0.0025 = \$0.0069, then \$0.0044 + \$0.0029 = \$0.0073.
+- Step 1 shows that only the prompt version differs.
+- Step 2 adds the metrics with computed deltas: pass rate drops 10 points (92 % to 82 %), refund-limit cases stay at 12 of 12, output grows from 250 to 290 tokens (+16 %), and cost per answer rises from \$0.0069 to \$0.0073 (+6 %) at illustrative list prices. Step 3 checks the noise.
+
+**The numbers:**
+
+- A 95 % range on a pass rate p over n answers is 1.96 × √(p(1 − p) ÷ n).
+- For 184 of 200 that is 1.96 × √(0.92 × 0.08 ÷ 200) = 3.8 points; for 164 of 200 it is 5.3.
+- The range of the gap is √(3.8² + 5.3²) = 6.5 points, so a 10-point gap clears it and a 2-point gap would not.
+- Cost per answer is 2,200 input tokens × \$2 ÷ 1,000,000 plus output tokens × \$10 ÷ 1,000,000: \$0.0044 + \$0.0025 = \$0.0069, then \$0.0044 + \$0.0029 = \$0.0073.
 
 <Callout tone="red" title="What breaks">
   Comparing a run scored on one golden set version or grader with a run scored on another. The delta then mixes a model change with a measurement change. Log the golden-set version and the grader version on every run, and rescore old runs when either changes.
@@ -118,14 +141,14 @@ Put the runs side by side, change one thing at a time, and compute the deltas ra
 | Free-form tags only | Fast | Junk tags; no audit | Early research |
 | Keep every checkpoint | Can resume or bisect | Storage cost | Short-lived projects or key milestones |
 
-## Real-world examples
+## Production systems
 
 - **MLflow Tracking.** Parameters, metrics, tags, artefacts and dataset inputs per run, with an optional model registry (documentation checked November 2026).
 - **Weights and Biases.** Runs and Artifacts with alias-addressed versions such as `latest` and a lineage view of inputs and outputs (checked November 2026).
 - **Git and DVC-style data versioning.** Code and small files in git; large data by content hash in object storage, referenced from the run.
 - **Brightpost's run r-0187.** Its record, with five inputs and two outputs, carried through to bundle 42.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Logging the learning rate but not the data version or prompt version.
 - Training on a data snapshot nobody can name, so a result cannot be rerun.
@@ -134,7 +157,7 @@ Put the runs side by side, change one thing at a time, and compute the deltas ra
 - Letting notebooks hold the only copy of the training code.
 - Keeping every checkpoint forever, or deleting the one a production model came from.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define the record: parameters, data version, commit, prompt version, base model, metrics, artefacts.
 2. Say why LLMs add to the list: prompts, judges and golden-set versions can move a score as much as weights.
@@ -155,27 +178,49 @@ Put the runs side by side, change one thing at a time, and compute the deltas ra
 
 <InterviewQuestions>
   <InterviewQuestion question="How do MLflow and Weights and Biases differ in typical adoption patterns?" category="Trade-offs" level="Junior">
-    MLflow is open source, easy to self-host, and sits in the same project as a model registry, so it suits teams with hosting constraints or strict data rules. Weights and Biases is a managed service with a strong comparison interface and low operations burden, which suits research-heavy teams that want speed and accept a per-seat cost. Both offer Python SDKs and APIs for runs, metrics and artefacts. The choice usually follows hosting rules, budget and what the rest of the platform already uses.
+    - MLflow is open source, easy to self-host, and sits in the same project as a model registry, so it suits teams with hosting constraints or strict data rules.
+    - Weights and Biases is a managed service with a strong comparison interface and low operations burden, which suits research-heavy teams that want speed and accept a per-seat cost.
+    - Both offer Python SDKs and APIs for runs, metrics and artefacts.
+    - The choice usually follows hosting rules, budget and what the rest of the platform already uses.
   </InterviewQuestion>
   <InterviewQuestion question="What would you log to maximize reproducibility of a fine-tuning run?" category="Concepts" level="Mid">
-    The git commit, a dependency lockfile or container digest, the base model identifier and revision, the dataset snapshot id with a checksum and the code that built the splits. Add the tokenizer version, the training configuration, precision settings and the seed policy, then the evaluation script, golden-set version and grader version. For distributed runs add the world size, framework version and any custom kernels. Store checkpoints at intervals so a failure can resume.
+    - The git commit, a dependency lockfile or container digest, the base model identifier and revision, the dataset snapshot id with a checksum and the code that built the splits.
+    - Add the tokenizer version, the training configuration, precision settings and the seed policy, then the evaluation script, golden-set version and grader version.
+    - For distributed runs add the world size, framework version and any custom kernels.
+    - Store checkpoints at intervals so a failure can resume.
   </InterviewQuestion>
   <InterviewQuestion question="How should teams structure experiment naming and tagging?" category="Concepts" level="Junior">
-    Use stable project namespaces and run names that state the hypothesis, such as "prompt p13 refund wording", not only a date. Keep tags to separate concerns: environment, dataset slice, model family and milestone such as production candidate. Avoid packing several facts into one composite string that is hard to query. Review the metadata of any run declared a production candidate before its results are shared.
+    - Use stable project namespaces and run names that state the hypothesis, such as "prompt p13 refund wording", not only a date.
+    - Keep tags to separate concerns: environment, dataset slice, model family and milestone such as production candidate.
+    - Avoid packing several facts into one composite string that is hard to query.
+    - Review the metadata of any run declared a production candidate before its results are shared.
   </InterviewQuestion>
   <InterviewQuestion question="Why does an LLM experiment record need more than hyperparameters?" category="Concepts" level="Mid">
-    The score depends on the prompt, the base model revision, the data version, the golden set and the judge, as well as the training settings. A change to any of these can move the metric by more than a learning-rate tweak. So the record must hold the prompt version, the data version and hash, the grader version and the golden-set version. Without them, two runs with the same hyperparameters can differ for reasons nobody can see.
+    - The score depends on the prompt, the base model revision, the data version, the golden set and the judge, as well as the training settings.
+    - A change to any of these can move the metric by more than a learning-rate tweak.
+    - So the record must hold the prompt version, the data version and hash, the grader version and the golden-set version.
+    - Without them, two runs with the same hyperparameters can differ for reasons nobody can see.
   </InterviewQuestion>
   <InterviewQuestion question="Two runs differ by 2 points on a 200-ticket golden set. Is the better one better?" category="Failure modes" level="Senior">
-    Probably not provably. A pass rate near 90 % on 200 answers has a 95 % range of about ±4 points, and the range of the gap between two runs is about ±6.5, so a 2-point gap is inside the noise. Look at paired results on the same tickets, grow the set or rerun with several seeds, and check slices that matter such as refund cases. A 10-point gap, like prompt p12 against p13, does clear the noise. Treat a borderline result as a reason to collect more evidence, not as a decision.
+    - Probably not provably. A pass rate near 90 % on 200 answers has a 95 % range of about ±4 points, and the range of the gap between two runs is about ±6.5, so a 2-point gap is inside the noise.
+    - Look at paired results on the same tickets, grow the set or rerun with several seeds, and check slices that matter such as refund cases.
+    - A 10-point gap, like prompt p12 against p13, does clear the noise.
+    - Treat a borderline result as a reason to collect more evidence, not as a decision.
   </InterviewQuestion>
   <InterviewQuestion question="How would you trace a bad production answer back to the data that shaped it?" category="Architecture" level="Senior">
-    Stamp the bundle id on every trace. The bundle links to the model version, which links to the run that produced it, which holds the data version and hash, the prompt version, the base model and the commit. Because each id was written when the artefact was created, the trace is a lookup. If the run's data came from an upstream source, the data lineage continues from the dataset version to its source records.
+    - Stamp the bundle id on every trace. The bundle links to the model version, which links to the run that produced it, which holds the data version and hash, the prompt version, the base model and the commit.
+    - Because each id was written when the artefact was created, the trace is a lookup.
+    - If the run's data came from an upstream source, the data lineage continues from the dataset version to its source records.
   </InterviewQuestion>
   <InterviewQuestion question="What is the trade-off between a strict mandatory schema and a free-form one?" category="Trade-offs" level="Mid">
-    A strict schema makes runs comparable and audits possible, but it adds friction when people are exploring. Free-form tags are fast and invite junk that cannot be queried. A common compromise is a small required core (task, data version, prompt version, primary metric) for everything, and a stricter checklist enforced only when a run is declared a production candidate and heads to the registry.
+    - A strict schema makes runs comparable and audits possible, but it adds friction when people are exploring.
+    - Free-form tags are fast and invite junk that cannot be queried.
+    - A common compromise is a small required core (task, data version, prompt version, primary metric) for everything, and a stricter checklist enforced only when a run is declared a production candidate and heads to the registry.
   </InterviewQuestion>
   <InterviewQuestion question="How long should you keep checkpoints and artefacts?" category="Scaling" level="Senior">
-    Keep what you might need to resume, bisect or audit. Keep the artefacts behind anything that reached production for as long as the model is in service plus the audit period, and archive their evaluation reports. Delete intermediate checkpoints of failed or superseded runs on a schedule, but keep the run record, which is small. Align retention with regulation and the model's deprecation date, and never delete the single artefact a live version points to.
+    - Keep what you might need to resume, bisect or audit.
+    - Keep the artefacts behind anything that reached production for as long as the model is in service plus the audit period, and archive their evaluation reports.
+    - Delete intermediate checkpoints of failed or superseded runs on a schedule, but keep the run record, which is small.
+    - Align retention with regulation and the model's deprecation date, and never delete the single artefact a live version points to.
   </InterviewQuestion>
 </InterviewQuestions>

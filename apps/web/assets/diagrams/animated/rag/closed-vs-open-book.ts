@@ -1,7 +1,7 @@
 import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 import { RAG_TONE, RESULTS, QUESTIONS } from "@/components/diagrams/presets/rag";
 
-// "The idea in plain English": the same model answers the same question twice. Left, closed book: the model alone
+// "Mental model": the same model answers the same question twice. Left, closed book: the model alone
 // answers from what it learned in training, which knows nothing about Brightpost's help centre. Right, open book: the
 // three relevant chunks from the running example (RESULTS ranks 2, 4 and 7) are handed over, and the answer cites
 // them as [1], [2], [3].

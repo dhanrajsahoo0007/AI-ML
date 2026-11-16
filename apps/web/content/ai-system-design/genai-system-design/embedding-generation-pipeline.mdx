@@ -3,9 +3,11 @@ title: Embedding Generation Pipeline
 description: Design patterns for scalable, maintainable vectorization of data with clear quality and freshness guarantees.
 ---
 
-An embedding pipeline turns text, images or multimodal records into dense vectors used for search, clustering and features. This page is about running it in production: throughput, idempotency, freshness, and changing the model without taking search down.
+An embedding pipeline turns text, images or multimodal records into dense vectors used for search, clustering and features.
 
-## TL;DR
+- This page is about running it in production: throughput, idempotency, freshness, and changing the model without taking search down.
+
+## Overview
 
 - Treat embeddings as **derived, versioned data**: every vector records the model name, the dimensions and the preprocessing recipe that made it.
 - A production pipeline is a **queue, a batcher, a cache keyed by content hash, the model with retries and rate limits, and an upsert by chunk id**. Each part removes duplicate work or makes a retry safe.
@@ -13,9 +15,13 @@ An embedding pipeline turns text, images or multimodal records into dense vector
 - **Normalise** vectors when the index uses cosine or dot product, and re-embed only chunks whose content hash changed: 36 of Brightpost's 3,600 in a typical week.
 - A new model means a **new index**: dual write, backfill, shadow reads, switch an alias, retire the old one.
 
-## The idea in plain English
+## Mental model
 
-Think of a print shop that turns manuscripts into printed books. Orders go into a tray (the queue). The press runs best with full sheets, so the shop waits until it has enough pages for one run (the batcher). Before printing, it checks the archive for an identical page already printed (the cache). When the press jams, the order goes back in the tray rather than being lost or printed twice. And when the shop buys a new press with a different paper size, it reprints the whole catalogue on the new press before it stops selling the old editions.
+- Think of a print shop that turns manuscripts into printed books.
+- Orders go into a tray (the queue). The press runs best with full sheets, so the shop waits until it has enough pages for one run (the batcher).
+- Before printing, it checks the archive for an identical page already printed (the cache).
+- When the press jams, the order goes back in the tray rather than being lost or printed twice.
+- And when the shop buys a new press with a different paper size, it reprints the whole catalogue on the new press before it stops selling the old editions.
 
 ## Core concepts
 
@@ -23,19 +29,28 @@ The running example: Brightpost's help centre, **1,200 articles** cut into **3,6
 
 ### Embeddings are derived, versioned data
 
-A vector is a function of three things: the text, the model and the preprocessing (cleaning, chunking, any prefix such as "passage: "). Change any one and the vector changes. Store the model name and version, the dimensions and the recipe version beside each vector, and key every vector by a stable chunk id. Then you can re-embed the corpus when the model changes, handle documents that arrive late, and avoid paying GPU hours or API tokens twice for the same work.
+- A vector is a function of three things: the text, the model and the preprocessing (cleaning, chunking, any prefix such as "passage: ").
+- Change any one and the vector changes. Store the model name and version, the dimensions and the recipe version beside each vector, and key every vector by a stable chunk id.
+- Then you can re-embed the corpus when the model changes, handle documents that arrive late, and avoid paying GPU hours or API tokens twice for the same work.
 
 ### Throughput and idempotency
 
-Throughput is tokens per second through the model. Idempotency means that running the same job twice gives the same result: a retried batch overwrites its vectors by chunk id instead of adding duplicates. Incremental updates need a stable mapping from each document to its chunks, so a content hash per chunk tells the pipeline which ones changed and which it can skip ([Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates)).
+- Throughput is tokens per second through the model.
+- Idempotency means that running the same job twice gives the same result: a retried batch overwrites its vectors by chunk id instead of adding duplicates.
+- Incremental updates need a stable mapping from each document to its chunks, so a content hash per chunk tells the pipeline which ones changed and which it can skip ([Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates)).
 
 ### Normalisation
 
-When the index scores by cosine similarity, or by dot product as a faster stand-in for it, scale every vector to length 1 at write time, for chunks and questions alike. Some APIs already return unit vectors; normalising again is harmless. Forgetting it on one side silently changes the ranking ([Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)).
+- When the index scores by cosine similarity, or by dot product as a faster stand-in for it, scale every vector to length 1 at write time, for chunks and questions alike.
+- Some APIs already return unit vectors; normalising again is harmless.
+- Forgetting it on one side silently changes the ranking ([Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)).
 
 ### Choosing the model for the pipeline
 
-Model selection balances quality, latency, dimensions, licence terms, and whether you need multilingual or domain adaptation ([Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection)). Open models let you self-host for data residency; hosted APIs simplify operations but tie cost to volume. Dimensions set index size and query speed: more can separate topics better but cost RAM and distance computation. Teams once applied PCA after the fact to shrink vectors; today the usual route is a model trained to be shortened, or quantization in the index.
+- Model selection balances quality, latency, dimensions, licence terms, and whether you need multilingual or domain adaptation ([Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection)).
+- Open models let you self-host for data residency; hosted APIs simplify operations but tie cost to volume.
+- Dimensions set index size and query speed: more can separate topics better but cost RAM and distance computation.
+- Teams once applied PCA after the fact to shrink vectors; today the usual route is a model trained to be shortened, or quantization in the index.
 
 ## Architecture
 
@@ -68,17 +83,27 @@ Here is the pipeline that turns a list of changed chunks into searchable vectors
   </StepCard>
 </StepCards>
 
-**The numbers.** Weekly run: 12 changed articles × 3 chunks = 36 chunks × 400 tokens = 14,400 tokens, one request. Full run: 3,600 ÷ 100 = 36 requests, 1.44 million tokens; at a price of P per million tokens it costs 1.44 × P. A full re-run with the same model and a warm cache: 0 tokens.
+**The numbers:**
 
-## Deep dive
+- Weekly run: 12 changed articles × 3 chunks = 36 chunks × 400 tokens = 14,400 tokens, one request.
+- Full run: 3,600 ÷ 100 = 36 requests, 1.44 million tokens; at a price of P per million tokens it costs 1.44 × P.
+- A full re-run with the same model and a warm cache: 0 tokens.
+
+## Technical mechanics
 
 ### Batching and padding
 
-A GPU processes a batch as one rectangle of tokens, so every sequence is padded to the longest one in the batch. Batch generation maximises GPU use by packing sequences of similar length together (bucketing) and padding only to each bucket's longest, and by spreading the fixed cost of each kernel launch over many sequences. Brightpost's chunks are all about 400 tokens, so padding waste is small; a corpus that mixes 20-token titles with 500-token passages wastes most of each batch without bucketing. Keep enough GPU memory free for the longest sequence you allow.
+- A GPU processes a batch as one rectangle of tokens, so every sequence is padded to the longest one in the batch.
+- Batch generation maximises GPU use by packing sequences of similar length together (bucketing) and padding only to each bucket's longest, and by spreading the fixed cost of each kernel launch over many sequences.
+- Brightpost's chunks are all about 400 tokens, so padding waste is small; a corpus that mixes 20-token titles with 500-token passages wastes most of each batch without bucketing.
+- Keep enough GPU memory free for the longest sequence you allow.
 
 ### Streaming, micro-batch and backfill
 
-Big batches fit offline backfills and periodic re-index jobs. Streaming or micro-batch paths put freshness first for documents users will look for soon, and pair well with queue consumers that scale with the ingestion rate. Hybrid designs batch within short windows (for example, whatever arrived in the last few seconds, up to 100 chunks) to smooth spikes while keeping the 95th-percentile lag bounded. Hosted providers often price the two differently: OpenAI's Batch API, which accepts embedding requests, costs half the synchronous price and completes within 24 hours.
+- Big batches fit offline backfills and periodic re-index jobs.
+- Streaming or micro-batch paths put freshness first for documents users will look for soon, and pair well with queue consumers that scale with the ingestion rate.
+- Hybrid designs batch within short windows (for example, whatever arrived in the last few seconds, up to 100 chunks) to smooth spikes while keeping the 95th-percentile lag bounded.
+- Hosted providers often price the two differently: OpenAI's Batch API, which accepts embedding requests, costs half the synchronous price and completes within 24 hours.
 
 ### Changing models: the re-embed migration
 
@@ -90,9 +115,19 @@ Vectors from two models live in different spaces, so a new model cannot share an
   caption="The old index keeps serving until the new one has every chunk and has matched it on real questions; the switch is one alias flip, and so is the rollback."
 />
 
-**How to read it.** Step 1: questions reach index v1 through an alias, a stable name the application searches. Step 2: new and changed chunks are embedded by both models and written to both indexes, so v2 never falls behind. Step 3: a backfill job re-embeds every older chunk into v2. Step 4: a copy of each question is embedded by the new model and run against v2, and its top 5 is compared with v1's on a golden set of labelled questions; users still see v1. Step 5: the alias points at v2, and v1 stays untouched as the rollback. Step 6: after the rollback window, v1 is deleted.
+**How to read it:**
 
-**The numbers.** The backfill is 3,600 chunks and 1.44 million tokens, 36 requests of 100. During steps 2 to 5 both indexes exist: 2 × 22 MB of raw vectors at 1,536 dimensions (more if the new model has more dimensions), plus double the cost of every write.
+- Step 1: questions reach index v1 through an alias, a stable name the application searches.
+- Step 2: new and changed chunks are embedded by both models and written to both indexes, so v2 never falls behind.
+- Step 3: a backfill job re-embeds every older chunk into v2.
+- Step 4: a copy of each question is embedded by the new model and run against v2, and its top 5 is compared with v1's on a golden set of labelled questions; users still see v1.
+- Step 5: the alias points at v2, and v1 stays untouched as the rollback.
+- Step 6: after the rollback window, v1 is deleted.
+
+**The numbers:**
+
+- The backfill is 3,600 chunks and 1.44 million tokens, 36 requests of 100.
+- During steps 2 to 5 both indexes exist: 2 × 22 MB of raw vectors at 1,536 dimensions (more if the new model has more dimensions), plus double the cost of every write.
 
 <Callout tone="red" title="What breaks">
   Switching the alias before the backfill finishes serves an index that is missing older chunks, and recall drops with no error anywhere. Gate the switch on a count check (v2 holds as many chunks as v1) and on the shadow comparison, never on the backfill job's exit code alone.
@@ -100,7 +135,9 @@ Vectors from two models live in different spaces, so a new model cannot share an
 
 ### Embedding drift and monitoring
 
-Embedding drift appears when upstream text is edited, when the model is upgraded, or when the questions people ask shift. Mitigate it with dual-write periods, versioned vector namespaces, gradual rollouts compared by reranking experiments, and monitoring retrieval quality against golden queries rather than assuming that vectors stay good forever. Track queue lag, cache hit rate, the share of 429s, tokens per day and recall@5 on the golden set on one dashboard.
+- Embedding drift appears when upstream text is edited, when the model is upgraded, or when the questions people ask shift.
+- Mitigate it with dual-write periods, versioned vector namespaces, gradual rollouts compared by reranking experiments, and monitoring retrieval quality against golden queries rather than assuming that vectors stay good forever.
+- Track queue lag, cache hit rate, the share of 429s, tokens per day and recall@5 on the golden set on one dashboard.
 
 ## Trade-offs
 
@@ -111,13 +148,13 @@ Embedding drift appears when upstream text is edited, when the model is upgraded
 | Cache vs no cache | Re-runs cost nothing | Simpler, no storage | Cache by hash of text plus model version |
 | In-place upgrade vs new index | No second index to pay for | Zero downtime, instant rollback | Always a new index for a new model |
 
-## Real-world examples
+## Production systems
 
 - OpenAI's Batch API accepts embedding requests at half the synchronous price, finishes within 24 hours and takes up to 50,000 embedding inputs per batch.
 - Qdrant collection aliases switch atomically, so a re-indexed collection can replace the live one in one step; Elasticsearch and OpenSearch index aliases are used the same way.
 - Vector databases expose upsert by id, which makes retried writes safe.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Re-embedding the whole corpus on every run because nothing records content hashes.
 - A cache keyed by text alone, which returns old-model vectors after a model change.
@@ -125,7 +162,7 @@ Embedding drift appears when upstream text is edited, when the model is upgraded
 - Inserting instead of upserting, so every retry adds duplicate chunks to the top 5.
 - Upgrading the model in place, mixing two vector spaces in one index.
 
-## How to answer in an interview
+## Interview framework
 
 1. Frame embeddings as versioned, derived data keyed by chunk id.
 2. Draw the pipeline: queue, batcher, hash cache, model with retries and rate limits, upsert.
@@ -145,12 +182,20 @@ Embedding drift appears when upstream text is edited, when the model is upgraded
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you architect a pipeline to re-embed ten billion tokens after swapping embedding models?" category="Architecture">
-    Partition the corpus by shard keys, enqueue work idempotently with content hashes, and run GPU workers that write to a new index namespace keyed by model version. Keep the old index serving until the new one passes quality gates on a benchmark query set, then flip a routing flag and retire the old namespace asynchronously. Track cost and throughput per shard to right-size clusters and use spot or preemptible instances only for fault-tolerant stages with checkpointing.
+    - Partition the corpus by shard keys, enqueue work idempotently with content hashes, and run GPU workers that write to a new index namespace keyed by model version.
+    - Keep the old index serving until the new one passes quality gates on a benchmark query set, then flip a routing flag and retire the old namespace asynchronously.
+    - Track cost and throughput per shard to right-size clusters and use spot or preemptible instances only for fault-tolerant stages with checkpointing.
   </InterviewQuestion>
   <InterviewQuestion question="What batching considerations matter most for embedding throughput?" category="Performance">
-    Dynamic padding or bucketing by length reduces wasted compute on short sequences. Micro-batching should respect GPU memory headroom for peak lengths. Avoid per-item synchronous API calls when self-hosting; instead pipeline tokenization, GPU forward, and vector upload with overlapping stages. Monitor queue lag and batch formation time because overly large batches improve MFU but can violate freshness SLAs.
+    - Dynamic padding or bucketing by length reduces wasted compute on short sequences.
+    - Micro-batching should respect GPU memory headroom for peak lengths.
+    - Avoid per-item synchronous API calls when self-hosting; instead pipeline tokenization, GPU forward, and vector upload with overlapping stages.
+    - Monitor queue lag and batch formation time because overly large batches improve MFU but can violate freshness SLAs.
   </InterviewQuestion>
   <InterviewQuestion question="How do you decide between a general-purpose embedding model and a domain-finetuned one?" category="Model Selection">
-    Start with a strong general model and measure retrieval precision on in-domain queries. Finetune or use adapters when you have labeled relevance data or consistent vocabulary mismatch. Finetuning improves in-domain clustering and recall but raises MLOps cost, risks catastrophic forgetting on out-of-domain queries, and forces a reindex. If data is sensitive or small, few-shot rerankers on top of a general retriever may be enough without changing the base embedder.
+    - Start with a strong general model and measure retrieval precision on in-domain queries.
+    - Finetune or use adapters when you have labeled relevance data or consistent vocabulary mismatch.
+    - Finetuning improves in-domain clustering and recall but raises MLOps cost, risks catastrophic forgetting on out-of-domain queries, and forces a reindex.
+    - If data is sensitive or small, few-shot rerankers on top of a general retriever may be enough without changing the base embedder.
   </InterviewQuestion>
 </InterviewQuestions>

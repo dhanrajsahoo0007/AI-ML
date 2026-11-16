@@ -5,9 +5,11 @@ icon: repeat
 updated: 2026-11-15
 ---
 
-A fine-tuned model goes stale: customers change what they ask, policies change, and yesterday's training set stops matching today's traffic. Interviewers ask about automated retraining because a strong answer covers what starts a run, how a candidate is checked, and how to avoid a model that learns the new and forgets the old.
+A fine-tuned model goes stale: customers change what they ask, policies change, and yesterday's training set stops matching today's traffic.
 
-## TL;DR
+- Interviewers ask about automated retraining because a strong answer covers what starts a run, how a candidate is checked, and how to avoid a model that learns the new and forgets the old.
+
+## Overview
 
 - **Three triggers start a run:** a schedule, a drift or quality alarm, and enough new labelled data. Combine them in one rule with a **guard** so a noisy signal cannot start a run storm.
 - **A run is a pipeline, not a script:** collect, curate, train, a gate, a registry entry, then a canary. Nothing goes straight to production.
@@ -16,9 +18,12 @@ A fine-tuned model goes stale: customers change what they ask, policies change, 
 - **Compare against the champion on live traffic.** At 200 graded samples the 95 % interval is about ±4.3 points, so a 10 % canary can fail to rule out a drop.
 - **Every run leaves a record:** the trigger, the data snapshot, the code commit, the scores and the decision.
 
-## The idea in plain English
+## Mental model
 
-A newspaper keeps a style guide. Each month editors learn what changed: a new product, a new refund rule. They do not throw the guide away and start again, and they do not scribble on it unchecked. They draft a revision, test it on last month's articles and on a pile of classic ones, print it for one desk first, and keep the old edition to hand. Automated retraining is that routine, run by a pipeline: a draft revision (the candidate), two test piles (the gate), one desk first (the canary) and the old edition (the champion, ready for rollback).
+- A newspaper keeps a style guide. Each month editors learn what changed: a new product, a new refund rule.
+- They do not throw the guide away and start again, and they do not scribble on it unchecked.
+- They draft a revision, test it on last month's articles and on a pile of classic ones, print it for one desk first, and keep the old edition to hand.
+- Automated retraining is that routine, run by a pipeline: a draft revision (the candidate), two test piles (the gate), one desk first (the canary) and the old edition (the champion, ready for rollback).
 
 ## Core concepts
 
@@ -35,27 +40,41 @@ A newspaper keeps a style guide. Each month editors learn what changed: a new pr
   caption="Three triggers start a training run through one rule with a guard; the result is a candidate that enters the release pipeline."
 />
 
-**How to read it.** Each trigger fires on its own number: the calendar, a graded sample of 166 of 200 (83 %, under the 85 % floor) and a counter of 1,000 tickets. One rule lets any of them start a run, with a guard of at most one run in 7 days and none while one is in flight. This figure is explained in full on [CI/CD for LLM Applications](/ai-system-design/genai-system-design/cicd-ct-pipelines); this page follows the run it starts.
+**How to read it:**
+
+- Each trigger fires on its own number: the calendar, a graded sample of 166 of 200 (83 %, under the 85 % floor) and a counter of 1,000 tickets.
+- One rule lets any of them start a run, with a guard of at most one run in 7 days and none while one is in flight.
+- This figure is explained in full on [CI/CD for LLM Applications](/ai-system-design/genai-system-design/cicd-ct-pipelines); this page follows the run it starts.
 
 ### 2. Idempotent orchestration
 
-A run must be repeatable. Snapshot the training data, pin the code commit and the base model revision, request a fixed GPU quota, log metrics and artefacts to experiment tracking, and write the result to the registry as a candidate rather than to production. If a run dies half-way, rerunning it with the same inputs must give the same plan.
+- A run must be repeatable. Snapshot the training data, pin the code commit and the base model revision, request a fixed GPU quota, log metrics and artefacts to experiment tracking, and write the result to the registry as a candidate rather than to production.
+- If a run dies half-way, rerunning it with the same inputs must give the same plan.
 
 ### 3. Data freshness
 
-New data helps only if it is current and labelled. Labels can lag: a ticket counts as resolved days after it opens, and refunds may be reversed later. Use only tickets past their settling window, and check that the features the model sees at training match what serving provides.
+- New data helps only if it is current and labelled.
+- Labels can lag: a ticket counts as resolved days after it opens, and refunds may be reversed later.
+- Use only tickets past their settling window, and check that the features the model sees at training match what serving provides.
 
 ### 4. Adapters for cheap runs
 
-Retraining the whole model every month is costly. LoRA freezes the base weights and trains small low-rank adapters; QLoRA also stores the frozen base in 4-bit form to cut memory (see [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft)). Adapters also forget less: Biderman et al. (2024) found LoRA underperforms full fine-tuning on code and maths in their settings, but preserves the base model's abilities outside the target domain better. Verify that an adapter was trained on the exact base revision and tokenizer that inference loads.
+- Retraining the whole model every month is costly.
+- LoRA freezes the base weights and trains small low-rank adapters; QLoRA also stores the frozen base in 4-bit form to cut memory (see [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft)).
+- Adapters also forget less: Biderman et al. (2024) found LoRA underperforms full fine-tuning on code and maths in their settings, but preserves the base model's abilities outside the target domain better.
+- Verify that an adapter was trained on the exact base revision and tokenizer that inference loads.
 
 ### 5. Forgetting and replay
 
-Training on new data alone can overwrite old behaviour, known as catastrophic forgetting (Kirkpatrick et al., 2017, studied it and a method to slow learning on important weights). The common practical defences are replaying a share of old training examples, lowering the learning rate, training fewer epochs and using adapters. The defence is only trusted if the gate tests for it.
+- Training on new data alone can overwrite old behaviour, known as catastrophic forgetting (Kirkpatrick et al., 2017, studied it and a method to slow learning on important weights).
+- The common practical defences are replaying a share of old training examples, lowering the learning rate, training fewer epochs and using adapters.
+- The defence is only trusted if the gate tests for it.
 
 ### 6. Gates, champions and challengers
 
-The **champion** is the live model. The **challenger** is the new candidate. Both are scored on the same golden set and then on live traffic, first in a shadow or a small canary and then at larger shares (see [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) and [A/B Testing](/ai-system-design/genai-system-design/ab-testing-prompts-models)). The model registry stores the candidate with its lineage and stage (see [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance)).
+- The **champion** is the live model. The **challenger** is the new candidate.
+- Both are scored on the same golden set and then on live traffic, first in a shadow or a small canary and then at larger shares (see [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) and [A/B Testing](/ai-system-design/genai-system-design/ab-testing-prompts-models)).
+- The model registry stores the candidate with its lineage and stage (see [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance)).
 
 ## Architecture
 
@@ -88,7 +107,7 @@ A retraining run is a chain of six steps, with one gate that can stop it.
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### The forgetting check
 
@@ -99,7 +118,12 @@ The old suite is a frozen set of cases from earlier incidents and earlier capabi
   caption="Candidate A scores higher on the new set and still fails, because it forgot. Candidate B gives up two points on the new set and keeps the old behaviour. Counts are illustrative."
 />
 
-**The numbers.** The champion passes 114 of 120 on the old suite (95 %). A candidate may fall at most 2 points, so the floor is (0.95 − 0.02) × 120 = 111.6, rounded up to **112**. Candidate A, trained on new data only, passes 188 of 200 (94 %) on the new golden set but 99 of 120 (82.5 %) on the old suite, and is blocked. Candidate B, with 700 replayed tickets, passes 184 of 200 (92 %) and 113 of 120 (94.2 %), and goes to the registry.
+**The numbers:**
+
+- The champion passes 114 of 120 on the old suite (95 %).
+- A candidate may fall at most 2 points, so the floor is (0.95 − 0.02) × 120 = 111.6, rounded up to **112**.
+- Candidate A, trained on new data only, passes 188 of 200 (94 %) on the new golden set but 99 of 120 (82.5 %) on the old suite, and is blocked.
+- Candidate B, with 700 replayed tickets, passes 184 of 200 (92 %) and 113 of 120 (94.2 %), and goes to the registry.
 
 <Callout tone="red" title="What breaks">
   A gate with only a new-data score ships Candidate A: the number goes up while the model forgets how to handle returns, tone or older products. The old suite is the only thing that sees it.
@@ -114,11 +138,19 @@ A golden set is a fixed sample; live traffic is the real test. Send a small shar
   caption="Both models answer real traffic and the same judge grades them. At 200 samples the challenger's interval still holds the floor. Pass counts are illustrative."
 />
 
-**The numbers.** At the average 2.3 requests/s there are 2.3 × 3,600 = 8,280 requests an hour, so 10 % is 828 to the challenger. It passes 178 of 200 = 89 %. The 95 % interval is 1.96 × √(0.89 × 0.11 ÷ 200) = ±4.3 points, or 84.7 % to 93.3 %. That holds the 85 % floor, so the check cannot rule out a drop. The answer is a larger share (50 %), not an early promotion.
+**The numbers:**
+
+- At the average 2.3 requests/s there are 2.3 × 3,600 = 8,280 requests an hour, so 10 % is 828 to the challenger.
+- It passes 178 of 200 = 89 %. The 95 % interval is 1.96 × √(0.89 × 0.11 ÷ 200) = ±4.3 points, or 84.7 % to 93.3 %.
+- That holds the 85 % floor, so the check cannot rule out a drop.
+- The answer is a larger share (50 %), not an early promotion.
 
 ### Cost and the run storm
 
-Each run costs GPU time, an evaluation pass (200 tickets × 2,450 tokens, plus the judge) and review attention. Too many triggers fragment the model lineage and burn budget; too few let slow decay build until an incident forces a rushed retrain. The guard (one run in 7 days, none in flight) and a minimum sample size before an alarm fires are the controls. Log every trigger decision with the statistics behind it.
+- Each run costs GPU time, an evaluation pass (200 tickets × 2,450 tokens, plus the judge) and review attention.
+- Too many triggers fragment the model lineage and burn budget; too few let slow decay build until an incident forces a rushed retrain.
+- The guard (one run in 7 days, none in flight) and a minimum sample size before an alarm fires are the controls.
+- Log every trigger decision with the statistics behind it.
 
 ### Worked example: Brightpost's monthly refresh
 
@@ -154,14 +186,14 @@ This is an illustrative run record, not a standard format.
 | Adapter (LoRA/QLoRA) run | Cheap; fast; forgets less | May underfit big shifts | Style, format, narrow policy |
 | Full fine-tune run | Highest capacity | Costly; more forgetting risk | Large shifts in behaviour |
 
-## Real-world examples
+## Production systems
 
 - **Brightpost's monthly refresh.** The worked example above: counter trigger, replay, two-part gate, canary.
 - **LoRA in practice.** Biderman et al. (2024): LoRA learned less than full fine-tuning on code and maths but forgot less outside the target domain.
 - **Elastic weight consolidation.** Kirkpatrick et al. (2017) slowed learning on weights important to earlier tasks, to show forgetting could be reduced.
 - **Continuous training in MLOps.** Google's MLOps guidance describes triggers, data and model validation, and a registry in automated pipelines (see Further reading).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - A gate that tests only new data, so forgetting ships.
 - No minimum sample or window, so one noisy day fires a run.
@@ -170,7 +202,7 @@ This is an illustrative run record, not a standard format.
 - Loading an adapter on a different base revision or tokenizer than it was trained on.
 - Retraining with no data snapshot, so a bad model cannot be reproduced.
 
-## How to answer in an interview
+## Interview framework
 
 1. Name the triggers (schedule, quality, drift, data) and the guard that combines them.
 2. Walk the pipeline: collect, curate, train, gate, register, canary, with the run stopping at the gate.
@@ -191,27 +223,49 @@ This is an illustrative run record, not a standard format.
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you combine drift detection with performance triggers?" category="Architecture" level="Mid">
-    Treat them as complementary signals in one rule. Drift without a metric drop might only open a ticket or schedule a low-priority run, while a sustained quality drop starts an urgent run with tighter approval. Require a minimum sample size and a time window before acting, and add a guard such as one run in 7 days. Log every trigger decision with the statistics that caused it, and allow a human override when domain knowledge explains benign drift.
+    - Treat them as complementary signals in one rule.
+    - Drift without a metric drop might only open a ticket or schedule a low-priority run, while a sustained quality drop starts an urgent run with tighter approval.
+    - Require a minimum sample size and a time window before acting, and add a guard such as one run in 7 days.
+    - Log every trigger decision with the statistics that caused it, and allow a human override when domain knowledge explains benign drift.
   </InterviewQuestion>
   <InterviewQuestion question="When would you choose LoRA over full fine-tuning for a retraining run?" category="Trade-offs" level="Mid">
-    LoRA fits when the base model already has broad competence and you need style, format or a narrow policy update on limited data and GPU budget. It also tends to forget less outside the target domain. Full fine-tuning fits when the domain differs strongly from pretraining or when adapter capacity limits quality after evaluation. Serving loads the base once and swaps adapters per task or tenant, so the adapter must match the exact base revision and tokenizer.
+    - LoRA fits when the base model already has broad competence and you need style, format or a narrow policy update on limited data and GPU budget.
+    - It also tends to forget less outside the target domain.
+    - Full fine-tuning fits when the domain differs strongly from pretraining or when adapter capacity limits quality after evaluation.
+    - Serving loads the base once and swaps adapters per task or tenant, so the adapter must match the exact base revision and tokenizer.
   </InterviewQuestion>
   <InterviewQuestion question="What validations matter before swapping a production model?" category="Concepts" level="Mid">
-    Beyond the aggregate score, check slices for high-risk groups such as refunds over the approval limit, a frozen old suite for forgetting, a safety suite, tail latency under load and cost per request. For generative models add rubric grading and a human read of the worst cases. Then run a canary against the champion and require no sustained drop before widening, with rollback ready.
+    - Beyond the aggregate score, check slices for high-risk groups such as refunds over the approval limit, a frozen old suite for forgetting, a safety suite, tail latency under load and cost per request.
+    - For generative models add rubric grading and a human read of the worst cases.
+    - Then run a canary against the champion and require no sustained drop before widening, with rollback ready.
   </InterviewQuestion>
   <InterviewQuestion question="What is catastrophic forgetting, and how does your pipeline guard against it?" category="Failure modes" level="Senior">
-    Training on new data overwrites earlier behaviour, so the model improves on new tickets and fails on old ones. Defences are replaying old examples, a lower learning rate, fewer epochs and adapters. The pipeline's guard is a frozen old suite in the gate, with a floor relative to the champion. In our example, new data only gave 99 of 120 against a floor of 112 and was blocked, while the replay run scored 113 and passed.
+    - Training on new data overwrites earlier behaviour, so the model improves on new tickets and fails on old ones.
+    - Defences are replaying old examples, a lower learning rate, fewer epochs and adapters.
+    - The pipeline's guard is a frozen old suite in the gate, with a floor relative to the champion.
+    - In our example, new data only gave 99 of 120 against a floor of 112 and was blocked, while the replay run scored 113 and passed.
   </InterviewQuestion>
   <InterviewQuestion question="Your challenger scores 89 % on 200 graded canary answers and the floor is 85 %. Do you promote?" category="Trade-offs" level="Senior">
-    Not yet. The 95 % interval is 1.96 × √(0.89 × 0.11 ÷ 200) = ±4.3 points, so 84.7 % to 93.3 %, which still contains the floor. The check cannot rule out a real drop. Widen the share, for example to 50 %, and grade more samples until the interval's lower end clears the floor or the data show a regression. Also compare with the champion on the same tickets.
+    - Not yet. The 95 % interval is 1.96 × √(0.89 × 0.11 ÷ 200) = ±4.3 points, so 84.7 % to 93.3 %, which still contains the floor.
+    - The check cannot rule out a real drop. Widen the share, for example to 50 %, and grade more samples until the interval's lower end clears the floor or the data show a regression.
+    - Also compare with the champion on the same tickets.
   </InterviewQuestion>
   <InterviewQuestion question="Retraining fires three times in one week. What do you do?" category="Scaling" level="Senior">
-    Look at the triggers and the guard. A guard of one run per 7 days and none in flight stops a storm. Check whether one noisy signal fires repeatedly: raise the minimum sample size or window, or require two signals together. Review the cost per run against the benefit, and whether the model lineage is becoming hard to follow. Log each decision with its statistics, and review the thresholds after each incident.
+    - Look at the triggers and the guard. A guard of one run per 7 days and none in flight stops a storm.
+    - Check whether one noisy signal fires repeatedly: raise the minimum sample size or window, or require two signals together.
+    - Review the cost per run against the benefit, and whether the model lineage is becoming hard to follow.
+    - Log each decision with its statistics, and review the thresholds after each incident.
   </InterviewQuestion>
   <InterviewQuestion question="Why can fresh labelled data still make a retrained model worse?" category="Failure modes" level="Mid">
-    Labels may not have settled: a ticket marked resolved can be reopened or a refund reversed. Features at training time may differ from what serving provides. The new data may be skewed to one intent, or contain personal data and duplicates. And replay may be missing, so old behaviour is lost. Use only settled tickets, curate and balance the data, replay old examples, and judge the result on the gate and the canary.
+    - Labels may not have settled: a ticket marked resolved can be reopened or a refund reversed.
+    - Features at training time may differ from what serving provides.
+    - The new data may be skewed to one intent, or contain personal data and duplicates.
+    - And replay may be missing, so old behaviour is lost.
+    - Use only settled tickets, curate and balance the data, replay old examples, and judge the result on the gate and the canary.
   </InterviewQuestion>
   <InterviewQuestion question="What should a registry record for each retraining run?" category="Architecture" level="Mid">
-    The candidate's weights or adapter, the base model revision and tokenizer, the data snapshot id, the code commit, the trigger that started the run, the gate scores and the stage (candidate, canary, live, retired). With that lineage you can reproduce a model, explain why it was promoted and roll back to the previous bundle in one step. See the registry page for stage rules and approvals.
+    - The candidate's weights or adapter, the base model revision and tokenizer, the data snapshot id, the code commit, the trigger that started the run, the gate scores and the stage (candidate, canary, live, retired).
+    - With that lineage you can reproduce a model, explain why it was promoted and roll back to the previous bundle in one step.
+    - See the registry page for stage rules and approvals.
   </InterviewQuestion>
 </InterviewQuestions>

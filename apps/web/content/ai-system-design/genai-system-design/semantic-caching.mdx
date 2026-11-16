@@ -3,9 +3,12 @@ title: Semantic Caching
 description: Reuse LLM responses for similar requests via embedding similarity, careful invalidation, and monitoring to cut cost and latency without stale or wrong answers.
 ---
 
-Many questions a support assistant gets are the same question in different words. A semantic cache notices that and returns the answer it already paid for, in milliseconds instead of seconds. The hard part is not the lookup; it is knowing when two questions that look alike need different answers, and when a stored answer has gone stale.
+Many questions a support assistant gets are the same question in different words.
 
-## TL;DR
+- A semantic cache notices that and returns the answer it already paid for, in milliseconds instead of seconds.
+- The hard part is not the lookup; it is knowing when two questions that look alike need different answers, and when a stored answer has gone stale.
+
+## Overview
 
 - An **exact-match cache** misses as soon as a user rephrases. A **semantic cache** keys each request by an embedding of its normalised text and serves a stored answer when a past question is close enough.
 - The **similarity threshold** is a policy choice, not a tuning detail. Higher means fewer wrong answers and fewer hits; lower means more hits and more answers served to questions they do not fit.
@@ -13,19 +16,27 @@ Many questions a support assistant gets are the same question in different words
 - **Invalidation** needs three tools: a TTL, busting by the version of the source documents and tools, and a purge by tenant.
 - Measure **hit rate, net savings and the error rate of cached answers against fresh ones**, and start in shadow mode.
 
-## The idea in plain English
+## Mental model
 
-A help-desk worker who has answered "how do I reset my password?" fifty times keeps a sheet of model answers. When a customer asks "how can I reset it?", they read from the sheet. A good worker also knows when not to: "how do I change my password?" sounds the same but has different steps, and a sheet written before last week's policy change is wrong. A semantic cache is that sheet, with an embedding model deciding what counts as "the same question".
+- A help-desk worker who has answered "how do I reset my password?" fifty times keeps a sheet of model answers.
+- When a customer asks "how can I reset it?", they read from the sheet.
+- A good worker also knows when not to: "how do I change my password?" sounds the same but has different steps, and a sheet written before last week's policy change is wrong.
+- A semantic cache is that sheet, with an embedding model deciding what counts as "the same question".
 
 ## Core concepts
 
-The running example is Brightpost's support assistant from the RAG pages: a help centre of **1,200 articles** in **3,600 chunks**, answering with retrieval and an LLM. Every answer it generates costs about **2,215 input tokens** and 1.5 seconds.
+- The running example is Brightpost's support assistant from the RAG pages: a help centre of **1,200 articles** in **3,600 chunks**, answering with retrieval and an LLM.
+- Every answer it generates costs about **2,215 input tokens** and 1.5 seconds.
 
 ### Exact keys and semantic keys
 
-An exact-match cache hashes the request text and looks the hash up. It is cheap and never wrong, and it misses whenever the wording changes by one character. Semantic caching keys requests by an embedding of normalised text (and optionally structured context such as locale or model parameters), then searches a store of past (query embedding, response, metadata) pairs for neighbours above a similarity threshold. On a hit, you can return the cached completion immediately or use it as a draft for a cheaper verification pass.
+- An exact-match cache hashes the request text and looks the hash up.
+- It is cheap and never wrong, and it misses whenever the wording changes by one character.
+- Semantic caching keys requests by an embedding of normalised text (and optionally structured context such as locale or model parameters), then searches a store of past (query embedding, response, metadata) pairs for neighbours above a similarity threshold.
+- On a hit, you can return the cached completion immediately or use it as a draft for a cheaper verification pass.
 
-The architecture parallels the nearest-neighbour retrieval used in recommendation, but it optimises for equivalence of task outcomes rather than personalisation: two questions are neighbours only if the same answer is right for both. It is also different from [prompt caching](/ai-system-design/genai-system-design/prompt-caching), where the provider reuses the computed state of an **exact** prompt prefix and the model still generates a fresh answer. A semantic cache skips the model entirely.
+- The architecture parallels the nearest-neighbour retrieval used in recommendation, but it optimises for equivalence of task outcomes rather than personalisation: two questions are neighbours only if the same answer is right for both.
+- It is also different from [prompt caching](/ai-system-design/genai-system-design/prompt-caching), where the provider reuses the computed state of an **exact** prompt prefix and the model still generates a fresh answer. A semantic cache skips the model entirely.
 
 ### What goes into the key
 
@@ -37,7 +48,8 @@ The embedding decides "same question"; everything else that changes the answer b
 
 ### The similarity threshold
 
-Similarity thresholds encode a policy choice: higher thresholds reduce false reuse where wording differences actually change the answer, while lower thresholds increase hit rate but risk serving incorrect or noncompliant text for subtly different constraints. The figure puts real-looking pairs from Brightpost's traffic on one axis.
+- Similarity thresholds encode a policy choice: higher thresholds reduce false reuse where wording differences actually change the answer, while lower thresholds increase hit rate but risk serving incorrect or noncompliant text for subtly different constraints.
+- The figure puts real-looking pairs from Brightpost's traffic on one axis.
 
 <AnimatedDiagram
   spec="animated/rag/semcache-threshold"
@@ -45,9 +57,18 @@ Similarity thresholds encode a policy choice: higher thresholds reduce false reu
   caption="The two groups overlap, so every threshold trades hits for false hits; “change” against “reset” sits above pairs that really mean the same thing."
 />
 
-**How to read it.** Each row is a new question and the nearest cached question, placed by the similarity of their embeddings. The top group means the same thing, so serving the cached answer is right; the bottom group only looks alike. Step 2 draws a threshold at 0.92: three of the five good pairs hit, and so does "change my password", which gets the reset steps. Step 3 raises it to 0.96: the false hit is gone, and so is one good hit. No line separates the groups, because similarity measures shared words and topic, and a single verb can flip the answer.
+**How to read it:**
 
-**The numbers.** At 0.92: 3 of 5 hits and 1 false hit of 4. At 0.96: 2 of 5 hits and 0 false hits. All similarities are illustrative; measure your own pairs with your own embedding model, and re-measure when you change it, because the geometry shifts.
+- Each row is a new question and the nearest cached question, placed by the similarity of their embeddings.
+- The top group means the same thing, so serving the cached answer is right; the bottom group only looks alike.
+- Step 2 draws a threshold at 0.92: three of the five good pairs hit, and so does "change my password", which gets the reset steps.
+- Step 3 raises it to 0.96: the false hit is gone, and so is one good hit.
+- No line separates the groups, because similarity measures shared words and topic, and a single verb can flip the answer.
+
+**The numbers:**
+
+- At 0.92: 3 of 5 hits and 1 false hit of 4. At 0.96: 2 of 5 hits and 0 false hits.
+- All similarities are illustrative; measure your own pairs with your own embedding model, and re-measure when you change it, because the geometry shifts.
 
 <Callout tone="red" title="What breaks">
   "Change my password" (signed in, knows the old one) scores 0.94 against a cached "reset my password" (locked out) and gets the wrong procedure. Raising the threshold alone costs good hits. Add an exact check on the words that flip the answer, or a cheap verifier on hits in the overlap band.
@@ -80,20 +101,25 @@ The cache sits in front of the whole RAG pipeline, so a hit skips retrieval and 
     Below 0.92 the request continues into RAG: the top 5 chunks, the prompt and the LLM, about 1.5 seconds in all (illustrative). The user gets a fresh, cited answer. Nothing has been learned for the next person who asks the same thing.
   </StepCard>
   <StepCard n={6} title="Store the answer with a TTL, the tenant and article versions">
-    The answer is written to the cache with its question vector, the key fields, a TTL (24 hours here) and the ids and versions of the articles it cites. Those versions are what lets an article edit find every answer built from it later. The cache now hits on the next paraphrase, and on anything else that scores above 0.92.
+    - The answer is written to the cache with its question vector, the key fields, a TTL (24 hours here) and the ids and versions of the articles it cites.
+    - Those versions are what lets an article edit find every answer built from it later.
+    - The cache now hits on the next paraphrase, and on anything else that scores above 0.92.
   </StepCard>
   <StepCard n={7} title="False hit: a different question above the threshold">
-    "Change my password" scores 0.94 against the cached reset question and gets the reset steps. This is the failure that decides how far to push the threshold, and why the Deep dive adds verification and invalidation.
+    "Change my password" scores 0.94 against the cached reset question and gets the reset steps. This is the failure that decides how far to push the threshold, and why Technical mechanics adds verification and invalidation.
   </StepCard>
 </StepCards>
 
-**The numbers.** Hit: 20 ms to embed + 5 ms to search = 25 ms. Miss: 25 + 15 (vector search) + 2 (prompt) + 1,500 (answer) = 1,542 ms. At an illustrative 10,000 questions a day and a 30% hit rate, 3,000 answers skip an LLM call of 2,215 input tokens; at an illustrative 3 US dollars per million input tokens that is about 0.0066 dollars each, roughly 20 US dollars a day, before subtracting the embedding and cache costs.
+**The numbers:**
 
-## Deep dive
+- Hit: 20 ms to embed + 5 ms to search = 25 ms. Miss: 25 + 15 (vector search) + 2 (prompt) + 1,500 (answer) = 1,542 ms. At an illustrative 10,000 questions a day and a 30% hit rate, 3,000 answers skip an LLM call of 2,215 input tokens; at an illustrative 3 US dollars per million input tokens that is about 0.0066 dollars each, roughly 20 US dollars a day, before subtracting the embedding and cache costs.
+
+## Technical mechanics
 
 ### Invalidation
 
-Invalidation is harder than for byte-identical caches, because one article edit can make answers to dozens of differently worded questions wrong. You need rules for TTL on time-sensitive topics, explicit busting when underlying documents or tools change version, and per-tenant purge APIs for privacy requests.
+- Invalidation is harder than for byte-identical caches, because one article edit can make answers to dozens of differently worded questions wrong.
+- You need rules for TTL on time-sensitive topics, explicit busting when underlying documents or tools change version, and per-tenant purge APIs for privacy requests.
 
 <AnimatedDiagram
   spec="animated/rag/semcache-invalidation"
@@ -101,9 +127,15 @@ Invalidation is harder than for byte-identical caches, because one article edit 
   caption="Store what an answer was built from, and an article edit can find every cached answer it makes wrong."
 />
 
-**How to read it.** Each entry carries its tenant, the article versions it was built from and a TTL. Step 2: the sale answer was stored for one hour, because sale dates change, and it expires. Step 3: an editor saves version 8 of "Reset a forgotten password"; both entries built from version 7 go, although their questions are worded differently. Step 4: Tenant B asks for a purge and all its entries go. The parcel answer survives all three.
+**How to read it:**
 
-The edit event is the same one that re-embeds the article's chunks in [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates): the update pipeline should publish "article X is now v8" once, and both the vector index and the cache act on it. For regulated answers, prefer shorter TTLs or disable semantic reuse entirely.
+- Each entry carries its tenant, the article versions it was built from and a TTL.
+- Step 2: the sale answer was stored for one hour, because sale dates change, and it expires.
+- Step 3: an editor saves version 8 of "Reset a forgotten password"; both entries built from version 7 go, although their questions are worded differently.
+- Step 4: Tenant B asks for a purge and all its entries go. The parcel answer survives all three.
+
+- The edit event is the same one that re-embeds the article's chunks in [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates): the update pipeline should publish "article X is now v8" once, and both the vector index and the cache act on it.
+- For regulated answers, prefer shorter TTLs or disable semantic reuse entirely.
 
 ### Verifying a hit
 
@@ -115,7 +147,10 @@ False positives are more damaging than a cache miss, so conservative thresholds 
 
 ### Monitoring
 
-Monitoring should track hit rate, estimated savings in US dollars, and downstream error rates attributed to cache hits versus misses: thumbs-down, follow-up questions such as "that's not what I asked", and escalations to a human. Log the similarity of every hit so you can plot errors against it. Start in shadow mode: look up, log the would-be hit, and serve the fresh answer anyway; comparing the two gives the false-hit rate before any customer sees one. See [LLMOps Observability](/ai-system-design/genai-system-design/llmops-observability).
+- Monitoring should track hit rate, estimated savings in US dollars, and downstream error rates attributed to cache hits versus misses: thumbs-down, follow-up questions such as "that's not what I asked", and escalations to a human.
+- Log the similarity of every hit so you can plot errors against it.
+- Start in shadow mode: look up, log the would-be hit, and serve the fresh answer anyway; comparing the two gives the false-hit rate before any customer sees one.
+- See [LLMOps Observability](/ai-system-design/genai-system-design/llmops-observability).
 
 ## Trade-offs
 
@@ -129,14 +164,14 @@ Trade-offs include storage growth, embedding compute on every request, and the c
 | Expiry | Long TTL: more reuse | Short TTL or version busting: fresher |
 | Scope | Shared across users: more hits | Per user: no leaks, rarely hits |
 
-## Real-world examples
+## Production systems
 
 - **GPTCache** (open source, from Zilliz) splits a semantic cache into an embedding generator, a cache store, a vector store, a similarity evaluator and eviction policies (LRU, FIFO, LFU and random). GPTCache and similar libraries illustrate embedding backends, vector stores, and eviction policies you can adapt to your stack.
 - **Azure API Management** has a semantic cache lookup policy for LLM APIs with a `score-threshold` from 0.0 to 1.0 where lower is stricter, a `vary-by` expression to partition the cache per user or subscription, and a store policy whose TTL is set in seconds. Microsoft's docs warn that similarity-based reuse can surface incorrect, outdated or unsafe responses.
 - **RedisVL `SemanticCache`** uses a cosine distance threshold (0 identical, 2 opposite), optional TTLs, filterable tag fields such as a user or tenant id, and calls to drop individual entries or clear the cache.
 - Research moves beyond one global threshold: vCache (Schroeder et al., 2025) learns a separate threshold for each cached entry so the error rate stays under a bound the user sets.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - One threshold for every topic: a password procedure needs a stricter one than "what are your opening hours".
 - Leaving tenant or permission scope out of the key and serving one user's answer to another.
@@ -145,7 +180,7 @@ Trade-offs include storage growth, embedding compute on every request, and the c
 - Counting gross savings and forgetting the embedding call, the cache store and any verifier.
 - Changing the embedding model without re-embedding the cached questions or re-tuning the threshold.
 
-## How to answer in an interview
+## Interview framework
 
 1. Contrast exact-match, prompt and semantic caching in one sentence each.
 2. Draw the request path: normalise, embed, nearest cached question, hit or miss, store with metadata.
@@ -169,12 +204,20 @@ Trade-offs include storage growth, embedding compute on every request, and the c
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you tune semantic cache similarity thresholds in production?" category="Performance">
-    Start conservative with high similarity and measure hit rate, user corrections, and task failure rates on cached responses versus misses. Use shadow mode that logs would-be hits without serving them to estimate savings safely. Adjust by segment because creative writing tolerates looser matching than legal or medical style tasks. Revisit thresholds when you change embedding models because geometry shifts.
+    - Start conservative with high similarity and measure hit rate, user corrections, and task failure rates on cached responses versus misses.
+    - Use shadow mode that logs would-be hits without serving them to estimate savings safely.
+    - Adjust by segment because creative writing tolerates looser matching than legal or medical style tasks.
+    - Revisit thresholds when you change embedding models because geometry shifts.
   </InterviewQuestion>
   <InterviewQuestion question="How do you estimate cost savings from semantic caching?" category="Cost">
-    Compare token usage and model tier costs for served traffic with a counterfactual without cache using logged prompt lengths. Include embedding costs and vector store queries in the net savings. Report savings net of any verifier model calls you add. Watch for traffic shaping effects where faster responses increase total usage, partially offsetting per-request savings.
+    - Compare token usage and model tier costs for served traffic with a counterfactual without cache using logged prompt lengths.
+    - Include embedding costs and vector store queries in the net savings.
+    - Report savings net of any verifier model calls you add.
+    - Watch for traffic shaping effects where faster responses increase total usage, partially offsetting per-request savings.
   </InterviewQuestion>
   <InterviewQuestion question="What invalidation strategies prevent stale cached answers?" category="Architecture">
-    Combine TTLs with version stamps for knowledge bases, tools, and prompts in the cache key, and provide admin APIs to purge by tenant or tag. For retrieval-heavy answers, invalidate when source document versions change. For high-risk domains, shorten TTL or require periodic revalidation against a checksum of retrieved evidence ids stored with the cache entry.
+    - Combine TTLs with version stamps for knowledge bases, tools, and prompts in the cache key, and provide admin APIs to purge by tenant or tag.
+    - For retrieval-heavy answers, invalidate when source document versions change.
+    - For high-risk domains, shorten TTL or require periodic revalidation against a checksum of retrieved evidence ids stored with the cache entry.
   </InterviewQuestion>
 </InterviewQuestions>

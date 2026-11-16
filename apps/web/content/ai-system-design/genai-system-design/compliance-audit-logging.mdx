@@ -4,9 +4,11 @@ description: Align ML systems with GDPR, the EU AI Act, and SOC 2 style controls
 updated: 2026-11-15
 ---
 
-When an AI system pays a refund, a regulator, an auditor or an angry customer will ask who decided, on what basis and with which version of the system. Interviewers ask about audit logging to see whether you can build the record that answers those questions without turning the log into a new privacy problem.
+When an AI system pays a refund, a regulator, an auditor or an angry customer will ask who decided, on what basis and with which version of the system.
 
-## TL;DR
+- Interviewers ask about audit logging to see whether you can build the record that answers those questions without turning the log into a new privacy problem.
+
+## Overview
 
 - An **audit record** answers six questions: **who** asked, **what** was done, **when**, **which model and prompt version** ran, what the **decision** and its rule were, and what **evidence** it used (by reference). Replaying a decision needs all six.
 - Store records **append-only**, with each record carrying the **hash of the one before** (a hash chain). An edit or a deletion then shows up. Nobody, engineers included, can write or delete by hand.
@@ -14,9 +16,12 @@ When an AI system pays a refund, a regulator, an auditor or an angry customer wi
 - **Retention is a decision with two clocks:** raw detail (prompts, traces) expires fast; the small record lives longer. Brightpost's 30 days and 13 months are illustrative choices.
 - **Rules differ in who they bind.** As of November 2026, the EU AI Act logging duty (Art. 12) binds **high-risk** systems, with Annex III duties applying from **2 December 2027**. GDPR binds Brightpost today because tickets hold personal data. SOC 2 and ISO/IEC 42001 are voluntary.
 
-## The idea in plain English
+## Mental model
 
-A bank keeps a ledger in ink. Each page is numbered, each entry is signed, and a wrong entry is never scratched out; it is corrected by a new entry that refers to the old one. The ledger says who moved the money and when, not the customer's life story. An auditor can read it and a clerk cannot rewrite it. An audit log for an AI system is that ledger: the assistant adds entries, but nobody changes the entries already in the book.
+- A bank keeps a ledger in ink. Each page is numbered, each entry is signed, and a wrong entry is never scratched out; it is corrected by a new entry that refers to the old one.
+- The ledger says who moved the money and when, not the customer's life story.
+- An auditor can read it and a clerk cannot rewrite it.
+- An audit log for an AI system is that ledger: the assistant adds entries, but nobody changes the entries already in the book.
 
 ## Core concepts
 
@@ -60,11 +65,11 @@ This is the same record as JSON. It follows `audit-record`; the ids, model name 
 }
 ```
 
-## Deep dive
+## Technical mechanics
 
 ### The pipeline
 
-Services emit an event for every decision. A redaction step removes personal data and computes the hash, a store appends the record, a retention job removes raw detail by age, and a read API gives a named role read-only access.
+- Services emit an event for every decision. A redaction step removes personal data and computes the hash, a store appends the record, a retention job removes raw detail by age, and a read API gives a named role read-only access.
 
 <AnimatedDiagram
   spec="animated/safety/audit-pipeline"
@@ -90,7 +95,12 @@ Services emit an event for every decision. A redaction step removes personal dat
   </StepCard>
 </StepCards>
 
-**The numbers (illustrative).** Assume 1 KB per record. Brightpost handles 200,000 requests a day, so one record per request is 200,000 × 1 KB = 200 MB a day. Over 13 months (about 395 days) that is 200 MB × 395 = 79,000 MB, about **79 GB**. That is small enough to keep in a cheap, locked, searchable store. Raw prompts at about 10 KB each would be ten times larger, which is why they expire first.
+**The numbers (illustrative):**
+
+- Assume 1 KB per record. Brightpost handles 200,000 requests a day, so one record per request is 200,000 × 1 KB = 200 MB a day.
+- Over 13 months (about 395 days) that is 200 MB × 395 = 79,000 MB, about **79 GB**.
+- That is small enough to keep in a cheap, locked, searchable store.
+- Raw prompts at about 10 KB each would be ten times larger, which is why they expire first.
 
 ### Which rule asks for which control
 
@@ -101,16 +111,30 @@ Rules differ in who they bind and what they ask. This figure is dated: checked o
   caption="Only GDPR binds Brightpost’s assistant today. The AI Act’s logging duty targets high-risk systems; SOC 2 and ISO 42001 are voluntary. Checked 16 November 2026."
 />
 
-- **EU AI Act** (Regulation (EU) 2024/1689). Art. 12(1) says high-risk AI systems must technically allow automatic recording of events over their lifetime. Art. 12(2) ties the logs to three purposes: spotting risk situations, post-market monitoring and monitoring operation. Art. 19(1) (providers) and Art. 26(6) (deployers) say to keep logs under their control for at least six months, unless other law says otherwise. The Digital Omnibus on AI, Regulation (EU) 2026/1744, in force since 27 July 2026, moved the Annex III high-risk duties to 2 December 2027 (Annex I products: 2 August 2028). A customer-support assistant is not an Annex III use, so Art. 12 does not bind Brightpost on its own. It is still a sound design target.
-- **GDPR.** Art. 30(1) requires a record of processing activities: purposes, categories of data and recipients, planned erasure time limits and a description of security measures. Art. 22 limits decisions based solely on automated processing with legal or similarly significant effects, and where it allows them, the person has at least the right to human intervention, to give their view and to contest the decision. Art. 5(1)(c), (e) and (f) set minimisation, storage limitation and security for the log itself. Art. 30(5) exempts organisations under 250 people only in narrow cases.
+- **EU AI Act** (Regulation (EU) 2024/1689). Art. 12(1) says high-risk AI systems must technically allow automatic recording of events over their lifetime.
+  - Art. 12(2) ties the logs to three purposes: spotting risk situations, post-market monitoring and monitoring operation.
+  - Art. 19(1) (providers) and Art. 26(6) (deployers) say to keep logs under their control for at least six months, unless other law says otherwise.
+  - The Digital Omnibus on AI, Regulation (EU) 2026/1744, in force since 27 July 2026, moved the Annex III high-risk duties to 2 December 2027 (Annex I products: 2 August 2028).
+  - A customer-support assistant is not an Annex III use, so Art. 12 does not bind Brightpost on its own. It is still a sound design target.
+- **GDPR.** Art. 30(1) requires a record of processing activities: purposes, categories of data and recipients, planned erasure time limits and a description of security measures.
+  - Art. 22 limits decisions based solely on automated processing with legal or similarly significant effects, and where it allows them, the person has at least the right to human intervention, to give their view and to contest the decision.
+  - Art. 5(1)(c), (e) and (f) set minimisation, storage limitation and security for the log itself.
+  - Art. 30(5) exempts organisations under 250 people only in narrow cases.
 - **SOC 2** (AICPA 2017 Trust Services Criteria, with revised points of focus from 2022). It does not name AI. The criteria that logging serves: CC6.1 (logical access), CC7.2 (monitoring system components for anomalies) and CC8.1 (authorised, recorded changes). A report is something a buyer asks for.
 - **ISO/IEC 42001:2023.** A certifiable management system for AI. Annex A has a control on recording event logs while an AI system is in use (A.6.2.8, per published control lists; the standard's text is paid). Certification is voluntary.
 
-**What the log cannot do.** No rule prescribes one interpretability technique. For a generative system, do not claim the log explains why the model wrote a sentence. It shows the inputs, versions, rules and tool calls, which is what an auditor can verify.
+**What the log cannot do:**
+
+- No rule prescribes one interpretability technique.
+- For a generative system, do not claim the log explains why the model wrote a sentence.
+- It shows the inputs, versions, rules and tool calls, which is what an auditor can verify.
 
 ### Logs hold personal data too
 
-A user id, an order id and an amount are personal data once they link to a person. The log is therefore under GDPR itself. Use a pseudonymous id with the mapping in a separate, access-controlled table. Keep content out. Limit who reads. When a customer asks for erasure, the common approach is to delete the mapping, so the record can no longer be tied to them, and to keep the record only where a lawful basis allows it. Ask counsel which records fall under that basis; this is a legal decision, not an engineering one.
+- A user id, an order id and an amount are personal data once they link to a person.
+- The log is therefore under GDPR itself. Use a pseudonymous id with the mapping in a separate, access-controlled table.
+- Keep content out. Limit who reads. When a customer asks for erasure, the common approach is to delete the mapping, so the record can no longer be tied to them, and to keep the record only where a lawful basis allows it.
+- Ask counsel which records fall under that basis; this is a legal decision, not an engineering one.
 
 ### Worked example: the refund, replayed
 
@@ -135,14 +159,14 @@ A user id, an order id and an amount are personal data once they link to a perso
 | Short retention | Less data to leak | Evidence may be gone when asked | Raw detail |
 | Voluntary certification (SOC 2, ISO 42001) | Buyers trust it; forces discipline | Cost and effort; says nothing about model quality | When customers require it |
 
-## Real-world examples
+## Production systems
 
 - **AWS CloudTrail** log file integrity validation hashes each log file with SHA-256, and delivers hourly digest files signed with RSA, each holding the signature of the previous digest. That is a hash chain in production.
 - **Amazon S3 Object Lock** gives write-once-read-many storage; in compliance mode no user, including the account root user, can overwrite or delete a locked version until the retention date.
 - **The EU AI Act** (Regulation (EU) 2024/1689) makes automatic event logging a design requirement for high-risk systems, kept at least six months.
 - **Brightpost** logs each tool decision as a 1 KB record with ids and hashes, keeps the record 13 months and raw prompts 30 days (illustrative).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Logging content into the audit store.** The log becomes a new sensitive datastore that cannot be cleaned.
 - **Missing versions.** A record without the model and prompt version cannot answer "what was running?".
@@ -151,7 +175,7 @@ A user id, an order id and an amount are personal data once they link to a perso
 - **Assuming a rule applies.** Check whether the system is high-risk, whether personal data is involved, and who asks for a report.
 - **Treating the log as an explanation.** It records inputs and rules, not the model's reasoning.
 
-## How to answer in an interview
+## Interview framework
 
 1. Say what the audit log is for: reconstructing a decision for someone outside the team.
 2. List the six fields and show one record, with versions and references instead of content.
@@ -175,27 +199,50 @@ A user id, an order id and an amount are personal data once they link to a perso
 
 <InterviewQuestions>
   <InterviewQuestion question="What goes into an audit record for an LLM decision?" category="Concepts" level="Junior">
-    Six things: who asked (user and role), what was done (the tool call and its arguments), when (timestamp and a request id), which model and prompt version ran, the decision with the rule behind it, and the evidence by reference, such as passage ids and an input hash. It holds references and hashes, not the customer's words, so it can be kept longer and read more widely than a debug log.
+    - Six things: who asked (user and role), what was done (the tool call and its arguments), when (timestamp and a request id), which model and prompt version ran, the decision with the rule behind it, and the evidence by reference, such as passage ids and an input hash.
+    - It holds references and hashes, not the customer's words, so it can be kept longer and read more widely than a debug log.
   </InterviewQuestion>
   <InterviewQuestion question="What GDPR considerations apply to LLM chat logs used for improvement?" category="Concepts" level="Mid">
-    You need a lawful basis such as consent or legitimate interests, clear notice and often a way to opt out of training use. Logs may reveal special category data, which needs extra safeguards. Transfers outside the EU need a mechanism such as standard contractual clauses. Keep retention to what the purpose needs (Art. 5(1)(e)), and for erasure delete or anonymise transcripts and keep them out of future training sets, even though a trained model cannot be fully unlearned.
+    - You need a lawful basis such as consent or legitimate interests, clear notice and often a way to opt out of training use.
+    - Logs may reveal special category data, which needs extra safeguards.
+    - Transfers outside the EU need a mechanism such as standard contractual clauses.
+    - Keep retention to what the purpose needs (Art. 5(1)(e)), and for erasure delete or anonymise transcripts and keep them out of future training sets, even though a trained model cannot be fully unlearned.
   </InterviewQuestion>
   <InterviewQuestion question="What belongs in an immutable audit log for model promotion?" category="Architecture" level="Mid">
-    The actor and role, a timestamp, the source and destination stages, model version ids and checksums, the linked evaluation report ids, the approval ticket and a hash of the safety configuration. Make the stream append-only, with a hash chain or an external notary where the threat model asks for it. A read API with least privilege supports queries by model id and time range, and does not expose customer content unless separately authorised.
+    - The actor and role, a timestamp, the source and destination stages, model version ids and checksums, the linked evaluation report ids, the approval ticket and a hash of the safety configuration.
+    - Make the stream append-only, with a hash chain or an external notary where the threat model asks for it.
+    - A read API with least privilege supports queries by model id and time range, and does not expose customer content unless separately authorised.
   </InterviewQuestion>
   <InterviewQuestion question="Does the EU AI Act require Brightpost's support assistant to keep audit logs?" category="Concepts" level="Mid">
-    Not under Art. 12 by itself. Art. 12 applies to high-risk systems, and a customer-support assistant is not one of the Annex III uses. As of November 2026 the Annex III duties apply from 2 December 2027 after the Digital Omnibus amendment. GDPR does apply today because tickets hold personal data, and a buyer may ask for SOC 2 evidence. Brightpost can still copy the Art. 12 design, since it is sound practice. Legal review should confirm the classification.
+    - Not under Art. 12 by itself. Art. 12 applies to high-risk systems, and a customer-support assistant is not one of the Annex III uses.
+    - As of November 2026 the Annex III duties apply from 2 December 2027 after the Digital Omnibus amendment.
+    - GDPR does apply today because tickets hold personal data, and a buyer may ask for SOC 2 evidence.
+    - Brightpost can still copy the Art. 12 design, since it is sound practice.
+    - Legal review should confirm the classification.
   </InterviewQuestion>
   <InterviewQuestion question="Logging helps audits but creates a sensitive datastore. How do you balance that?" category="Trade-offs" level="Mid">
-    Log less in the record and more by reference. Keep ids, versions, rules and hashes in the audit store, and keep raw prompts in a separate store with a short life and tight access. Redact personal data before anything is written. Use pseudonymous user ids with the mapping in a separate table, and limit who can read through a role that is itself audited.
+    - Log less in the record and more by reference.
+    - Keep ids, versions, rules and hashes in the audit store, and keep raw prompts in a separate store with a short life and tight access.
+    - Redact personal data before anything is written.
+    - Use pseudonymous user ids with the mapping in a separate table, and limit who can read through a role that is itself audited.
   </InterviewQuestion>
   <InterviewQuestion question="How would you design governance for EU AI Act high-risk classification?" category="Architecture" level="Senior">
-    Keep a risk register that links each use case to the Annex categories, with an accountable owner for the conformity documentation. Implement the technical measures: logging, human oversight interfaces and incident reporting. Change control records model and data changes that affect risk, and post-market monitoring feeds back into the register on a set cadence. Legal review covers the classification and any accuracy claims. Date the register, because the application dates moved in 2026.
+    - Keep a risk register that links each use case to the Annex categories, with an accountable owner for the conformity documentation.
+    - Implement the technical measures: logging, human oversight interfaces and incident reporting.
+    - Change control records model and data changes that affect risk, and post-market monitoring feeds back into the register on a set cadence.
+    - Legal review covers the classification and any accuracy claims.
+    - Date the register, because the application dates moved in 2026.
   </InterviewQuestion>
   <InterviewQuestion question="A customer asks for erasure, but your audit store is write-once. What do you do?" category="Failure modes" level="Senior">
-    Prevent the clash by design: keep personal data out of the locked store, use pseudonymous ids and hold the mapping elsewhere. On a request, delete the mapping so the record can no longer be tied to the person, and keep the record only where a lawful basis allows it, which legal counsel confirms. Raw prompts live in a separate store that expires by age, so they are gone. If personal data did reach the locked store, the options are poor, so test redaction before the store.
+    - Prevent the clash by design: keep personal data out of the locked store, use pseudonymous ids and hold the mapping elsewhere.
+    - On a request, delete the mapping so the record can no longer be tied to the person, and keep the record only where a lawful basis allows it, which legal counsel confirms.
+    - Raw prompts live in a separate store that expires by age, so they are gone.
+    - If personal data did reach the locked store, the options are poor, so test redaction before the store.
   </InterviewQuestion>
   <InterviewQuestion question="How do you prove nobody edited the audit log, at 200,000 requests a day?" category="Scaling" level="Senior">
-    Chain the records: each stores the SHA-256 hash of the previous one, so a deleted or changed record breaks the chain. Anchor the latest hash periodically outside the system, in signed digest files like CloudTrail's, and write to storage with Object Lock so nobody can delete. Volume is small: at an illustrative 1 KB per record, 200,000 a day is about 200 MB, and 13 months is about 79 GB. Queue the events so the chain is built off the request path.
+    - Chain the records: each stores the SHA-256 hash of the previous one, so a deleted or changed record breaks the chain.
+    - Anchor the latest hash periodically outside the system, in signed digest files like CloudTrail's, and write to storage with Object Lock so nobody can delete.
+    - Volume is small: at an illustrative 1 KB per record, 200,000 a day is about 200 MB, and 13 months is about 79 GB.
+    - Queue the events so the chain is built off the request path.
   </InterviewQuestion>
 </InterviewQuestions>

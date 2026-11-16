@@ -4,9 +4,13 @@ description: Per-request LLM cost, attribution to products and teams, budgets, a
 updated: 2026-11-15
 ---
 
-A provider invoice says "\$47,000 for the month" and nothing else. Interviewers ask about cost tracking to see whether you can answer the next three questions: who spent it, on what feature, and whether it bought anything. This page covers the LLM-specific part: how to price one request, tag it, divide by outcomes and stop a runaway. The levers that cut the bill are on [Cost and Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization).
+A provider invoice says "\$47,000 for the month" and nothing else.
 
-## TL;DR
+- Interviewers ask about cost tracking to see whether you can answer the next three questions: who spent it, on what feature, and whether it bought anything.
+- This page covers the LLM-specific part: how to price one request, tag it, divide by outcomes and stop a runaway.
+- The levers that cut the bill are on [Cost and Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization).
+
+## Overview
 
 - **Price every request when it happens.** Cost = tokens × the price for each token class (uncached input, cached input, output, reasoning), using a **versioned price table**. Brightpost's request is \$0.0069 at illustrative prices.
 - **Tag at the edge, sum up the tree.** The gateway stamps `team`, `feature`, `env` and a request ID on every call. Spend then adds up request → feature → team → total, with no gaps. An untagged call is cost nobody owns.
@@ -15,9 +19,13 @@ A provider invoice says "\$47,000 for the month" and nothing else. Interviewers 
 - **Reconcile with the invoice.** Your own metering is a fast estimate; the provider's usage report is the bill. Compare them daily and investigate the gap.
 - **Showback** shows teams their spend; **chargeback** bills it to them. Start with showback.
 
-## The idea in plain English
+## Mental model
 
-A shared office has one electricity meter. The bill arrives monthly, and everyone argues. Fit a sub-meter on each team's floor and each team sees its own use daily. Fit a smart plug on every device and you find the heater left on over the weekend. Tags are the sub-meters, the request ID is the smart plug, and a budget is a fuse that trips before the heater melts the wiring. "Cost per outcome" is the last step: not how many kilowatt-hours the floor used, but what each finished product cost to make.
+- A shared office has one electricity meter. The bill arrives monthly, and everyone argues.
+- Fit a sub-meter on each team's floor and each team sees its own use daily.
+- Fit a smart plug on every device and you find the heater left on over the weekend.
+- Tags are the sub-meters, the request ID is the smart plug, and a budget is a fuse that trips before the heater melts the wiring.
+- "Cost per outcome" is the last step: not how many kilowatt-hours the floor used, but what each finished product cost to make.
 
 ## Core concepts
 
@@ -41,7 +49,13 @@ Every number in the tree is a sum of the level below it, and every level is a ta
   caption="Brightpost's day of model spend by tag. Each box is the sum of those below it. Illustrative prices: 2 dollars in and 10 dollars out per million tokens."
 />
 
-**How to read it.** Start at the orange box: one request, 2,200 tokens in and 250 out, \$0.0044 + \$0.0025 = **\$0.0069**. Eighty thousand returns-and-refunds requests a day make \$552; the 120,000 order questions make \$828; together they are the support assistant's \$1,380. Add the catalogue writer's \$112 (16 M tokens in and 8 M out) and the labs team's \$87 and the day is **\$1,579**. If a request arrives without a `feature` tag, its cost is in the team total but in no feature box, and the boxes no longer add up. That mismatch is how you find untagged traffic.
+**How to read it:**
+
+- Start at the orange box: one request, 2,200 tokens in and 250 out, \$0.0044 + \$0.0025 = **\$0.0069**.
+- Eighty thousand returns-and-refunds requests a day make \$552; the 120,000 order questions make \$828; together they are the support assistant's \$1,380.
+- Add the catalogue writer's \$112 (16 M tokens in and 8 M out) and the labs team's \$87 and the day is **\$1,579**.
+- If a request arrives without a `feature` tag, its cost is in the team total but in no feature box, and the boxes no longer add up.
+- That mismatch is how you find untagged traffic.
 
 The data path has five steps:
 
@@ -51,11 +65,12 @@ The data path has five steps:
 4. **A warehouse sums the records** by tag, day and model; dashboards and budget checks read from it.
 5. **A nightly job reconciles** the totals against the provider's usage report.
 
-## Deep dive
+## Technical mechanics
 
 ### The metering record
 
-One record per call, written by the gateway ([LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) holds the keys, budgets and the one-line-per-call log). This is an illustrative shape, not a vendor format:
+- One record per call, written by the gateway ([LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) holds the keys, budgets and the one-line-per-call log).
+- This is an illustrative shape, not a vendor format:
 
 ```json
 {
@@ -68,9 +83,13 @@ One record per call, written by the gateway ([LLM Gateway](/ai-system-design/gen
 }
 ```
 
-Three details matter. **Store the token classes**, so you can re-price when a price changes or a provider changes how it discounts. **Count a retry as cost**: a failed call that still consumed tokens, and a retried call, each cost money, so record `retries` and bill every attempt. **Join on `trace_id`** so a costly request opens straight into its trace. See [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging) and [Latency & Token Usage Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring) for the token fields.
+- Three details matter. **Store the token classes**, so you can re-price when a price changes or a provider changes how it discounts.
+- **Count a retry as cost**: a failed call that still consumed tokens, and a retried call, each cost money, so record `retries` and bill every attempt.
+- **Join on `trace_id`** so a costly request opens straight into its trace.
+- See [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging) and [Latency & Token Usage Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring) for the token fields.
 
-On pricing: as of November 2026, Anthropic's prompt-caching docs give a 5-minute cache write as 1.25 times the base input price and a cache read as 0.1 times for most models, lower for some newer ones (0.05 times for Sonnet 5.5). Check the current table before you hard-code a multiplier; keep it in the price table, not in code.
+- On pricing: as of November 2026, Anthropic's prompt-caching docs give a 5-minute cache write as 1.25 times the base input price and a cache read as 0.1 times for most models, lower for some newer ones (0.05 times for Sonnet 5.5).
+- Check the current table before you hard-code a multiplier; keep it in the price table, not in code.
 
 ### Cost per outcome
 
@@ -94,7 +113,11 @@ A cost per request tells you what a call costs. It does not tell you whether the
   </StepCard>
 </StepCards>
 
-**The point.** Model spend is about 1 % of the all-in cost per ticket in this example, so a small change in resolution rate dominates a large change in price. This is why you measure cost per outcome together with the quality score from the golden set ([Quality Metrics](/ai-system-design/genai-system-design/quality-metrics)), and why the cheapest model is chosen by the routing and cascade levers on [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) only after quality is held. Every input here (70 %, 55 %, \$4, 1.6) is illustrative; the method is the content.
+**The point:**
+
+- Model spend is about 1 % of the all-in cost per ticket in this example, so a small change in resolution rate dominates a large change in price.
+- This is why you measure cost per outcome together with the quality score from the golden set ([Quality Metrics](/ai-system-design/genai-system-design/quality-metrics)), and why the cheapest model is chosen by the routing and cascade levers on [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) only after quality is held.
+- Every input here (70 %, 55 %, \$4, 1.6) is illustrative; the method is the content.
 
 ### Budgets and alerts
 
@@ -118,7 +141,10 @@ A budget with percentage thresholds is a rear-view mirror. Layer three defences.
   </StepCard>
 </StepCards>
 
-The three layers are: a **threshold alert** at 50 % and 80 % for the human, a **forecast alert** on the run-rate for early warning, and a **hard cap** at the gateway for the machine. Also alert on the **daily spend per tag** against its trailing average, since a loop shows up in a feature's day total long before a monthly threshold. The gateway side of budgets, with per-key daily token budgets and 429s, is on [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway). Capacity and spend forecasts are on [Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation).
+- The three layers are: a **threshold alert** at 50 % and 80 % for the human, a **forecast alert** on the run-rate for early warning, and a **hard cap** at the gateway for the machine.
+- Also alert on the **daily spend per tag** against its trailing average, since a loop shows up in a feature's day total long before a monthly threshold.
+- The gateway side of budgets, with per-key daily token budgets and 429s, is on [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway).
+- Capacity and spend forecasts are on [Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation).
 
 ### Worked example: finding the loop
 
@@ -132,7 +158,11 @@ On day 21 the dashboard shows the support team's daily spend at \$4,380 against 
 
 ### Showback or chargeback
 
-Showback is a report; chargeback is a transfer. Showback gets adoption and honest tagging, since nobody is penalised for being visible. Chargeback changes behaviour fast but adds disputes about shared costs and can push teams to call providers directly to avoid internal bills. Many platforms begin with showback and move high-spend teams to chargeback. The cloud-wide version of this practice is on [FinOps and cost tools](/cloud/operations/finops-and-cost-tools).
+- Showback is a report; chargeback is a transfer.
+- Showback gets adoption and honest tagging, since nobody is penalised for being visible.
+- Chargeback changes behaviour fast but adds disputes about shared costs and can push teams to call providers directly to avoid internal bills.
+- Many platforms begin with showback and move high-spend teams to chargeback.
+- The cloud-wide version of this practice is on [FinOps and cost tools](/cloud/operations/finops-and-cost-tools).
 
 ## Trade-offs
 
@@ -146,13 +176,13 @@ Showback is a report; chargeback is a transfer. Showback gets adoption and hones
 | Cost per request | Easy to compute | Ignores whether it helped | A first dashboard |
 | Cost per outcome | Matches business value | Needs a trusted outcome signal | Decisions on models and prompts |
 
-## Real-world examples
+## Production systems
 
 - **LiteLLM proxy** tracks spend per virtual key, user and team, and supports request tags for spend by tag in its enterprise tier; budgets are set per key and team.
 - **Anthropic's Usage and Cost API** reports usage and cost grouped by model, API key and workspace, which is the data for reconciling your own metering. Anthropic describes it as a legacy API with a newer analytics API for new work (as of November 2026).
 - **Cloud cost allocation by tags** is the same pattern at infrastructure level: a required tag set, untagged spend reported as its own line, and showback before chargeback.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Optional tags.** Untagged traffic becomes the largest "team". Validate at the gateway.
 - **One total cost per request.** You cannot re-price or explain it. Store token classes and the price-table version.
@@ -161,7 +191,7 @@ Showback is a report; chargeback is a transfer. Showback gets adoption and hones
 - **Optimising per-request price.** The cheap model can cost more per ticket. Always divide by outcomes.
 - **Never reconciling.** Your metering drifts from the invoice, and nobody notices until finance does.
 
-## How to answer in an interview
+## Interview framework
 
 1. **Price at call time**: tokens by class times a versioned price table, stored with the tags and trace ID.
 2. **Describe the tag tree**: request, feature, team, total, with validation at the gateway.
@@ -182,24 +212,40 @@ Showback is a report; chargeback is a transfer. Showback gets adoption and hones
 
 <InterviewQuestions>
   <InterviewQuestion question="How do you attribute shared LLM spend when many services call the same gateway?" category="Architecture" level="Mid">
-    Make tags non-optional: service, feature and environment, validated at the gateway, with the request ID for joining to traces. Sum records by tag in a warehouse, and report any untagged spend as its own line so it gets fixed. For legacy callers, fall back to the API key or workload identity. Allocate shared costs such as committed GPU capacity by an agreed rule, for example token share, or a flat platform fee plus usage.
+    - Make tags non-optional: service, feature and environment, validated at the gateway, with the request ID for joining to traces.
+    - Sum records by tag in a warehouse, and report any untagged spend as its own line so it gets fixed.
+    - For legacy callers, fall back to the API key or workload identity.
+    - Allocate shared costs such as committed GPU capacity by an agreed rule, for example token share, or a flat platform fee plus usage.
   </InterviewQuestion>
   <InterviewQuestion question="Where in the architecture should cost metering live, and why?" category="Architecture" level="Mid">
-    In the gateway, because it sees the final token counts, every retry, the routing decision and the price version in one place. Client-side estimates drift when retries and streaming are counted differently from the provider's logs. The gateway writes an immutable record per call, and a nightly job reconciles the totals against the provider's usage report.
+    - In the gateway, because it sees the final token counts, every retry, the routing decision and the price version in one place.
+    - Client-side estimates drift when retries and streaming are counted differently from the provider's logs.
+    - The gateway writes an immutable record per call, and a nightly job reconciles the totals against the provider's usage report.
   </InterviewQuestion>
   <InterviewQuestion question="Why isn't cost per request a good enough measure?" category="Concepts" level="Junior">
-    It says what a call costs, not whether it helped. In the Brightpost example a model 10 times cheaper per request resolves fewer tickets, and the extra tickets handed to people cost far more than the tokens saved: \$1.80 per ticket against \$1.21. Divide spend by an outcome such as a resolved ticket, and read it together with a quality score.
+    - It says what a call costs, not whether it helped.
+    - In the Brightpost example a model 10 times cheaper per request resolves fewer tickets, and the extra tickets handed to people cost far more than the tokens saved: \$1.80 per ticket against \$1.21.
+    - Divide spend by an outcome such as a resolved ticket, and read it together with a quality score.
   </InterviewQuestion>
   <InterviewQuestion question="Design budget alerts for a support assistant so a runaway loop is caught early." category="Failure modes" level="Senior">
-    Use three layers. Threshold alerts at 50 % and 80 % of the monthly budget tell a human where the month stands. A run-rate forecast alert fires when the projected month-end spend exceeds the budget, which in the example fires a day before the 80 % line. A hard cap at the gateway enforces the limit, degrading to a smaller model or a cached answer for customer-facing routes. Add a daily check per tag against its trailing average, since a loop shows in one feature's total first.
+    - Use three layers. Threshold alerts at 50 % and 80 % of the monthly budget tell a human where the month stands.
+    - A run-rate forecast alert fires when the projected month-end spend exceeds the budget, which in the example fires a day before the 80 % line.
+    - A hard cap at the gateway enforces the limit, degrading to a smaller model or a cached answer for customer-facing routes.
+    - Add a daily check per tag against its trailing average, since a loop shows in one feature's total first.
   </InterviewQuestion>
   <InterviewQuestion question="Your metered cost is 3 % below the provider's invoice. What do you check?" category="Failure modes" level="Mid">
-    Compare by day, model and key to see where the gap sits. Likely causes are retries or failed calls you did not meter, streaming requests cancelled by the client that still produced tokens, cache-write premiums priced as plain input, an out-of-date price table, and untagged keys that bypass the gateway. Fix the largest cause first and keep the daily reconciliation, with an alert on a gap above a set tolerance.
+    - Compare by day, model and key to see where the gap sits.
+    - Likely causes are retries or failed calls you did not meter, streaming requests cancelled by the client that still produced tokens, cache-write premiums priced as plain input, an out-of-date price table, and untagged keys that bypass the gateway.
+    - Fix the largest cause first and keep the daily reconciliation, with an alert on a gap above a set tolerance.
   </InterviewQuestion>
   <InterviewQuestion question="Showback or chargeback for an internal AI platform?" category="Trade-offs" level="Mid">
-    Showback reports each team's spend without moving money, which keeps adoption high and improves tagging. Chargeback creates a stronger incentive and funds shared capacity fairly, but brings disputes over shared costs and a risk that teams bypass the platform. A common path is showback first, then chargeback for the biggest spenders once tags and allocation rules are trusted.
+    - Showback reports each team's spend without moving money, which keeps adoption high and improves tagging.
+    - Chargeback creates a stronger incentive and funds shared capacity fairly, but brings disputes over shared costs and a risk that teams bypass the platform.
+    - A common path is showback first, then chargeback for the biggest spenders once tags and allocation rules are trusted.
   </InterviewQuestion>
   <InterviewQuestion question="A cheaper model cuts the per-request cost by 90 % but quality drops a little. How do you decide whether to switch?" category="Trade-offs" level="Senior">
-    Convert the quality drop into cost. Measure the resolution rate on the golden set and in an A/B test, compute the cost per resolved ticket and the all-in cost including people, and compare. With 70 % against 55 % resolution and \$4 per human-handled ticket, the cheap model costs 49 % more per ticket despite a tenth of the model spend. If the all-in number favours it, switch only for the routes where quality holds, and route the hard cases to the larger model.
+    - Convert the quality drop into cost. Measure the resolution rate on the golden set and in an A/B test, compute the cost per resolved ticket and the all-in cost including people, and compare.
+    - With 70 % against 55 % resolution and \$4 per human-handled ticket, the cheap model costs 49 % more per ticket despite a tenth of the model spend.
+    - If the all-in number favours it, switch only for the routes where quality holds, and route the hard cases to the larger model.
   </InterviewQuestion>
 </InterviewQuestions>

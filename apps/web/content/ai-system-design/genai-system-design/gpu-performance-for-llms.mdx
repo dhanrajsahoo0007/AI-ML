@@ -4,9 +4,11 @@ description: The roofline model, memory bandwidth vs compute, arithmetic intensi
 updated: 2026-11-15
 ---
 
-Inference and performance interviews (NVIDIA, Together AI, Groq, and most frontier labs) expect quick hardware math: will this model fit, how many tokens per second can one GPU produce, and why does batching help? This page gives you the mental model and the numbers, using one GPU (the NVIDIA H100 SXM) throughout.
+Inference and performance interviews (NVIDIA, Together AI, Groq, and most frontier labs) expect quick hardware math: will this model fit, how many tokens per second can one GPU produce, and why does batching help?
 
-## TL;DR
+- This page gives you the mental model and the numbers, using one GPU (the NVIDIA H100 SXM) throughout.
+
+## Overview
 
 - Every kernel is limited by **compute** (FLOPs per second) or **memory bandwidth** (bytes per second). The **roofline model** says which, and its answer decides which optimisation can help.
 - **Arithmetic intensity** is FLOPs per byte moved. An H100 SXM has **989 TFLOPS** of dense BF16 and **3.35 TB/s** of memory bandwidth, so its **ridge point** is 989 ÷ 3.35 = **295 FLOPs per byte** (NVIDIA datasheet, November 2026). Below it you wait for memory; above it you wait for arithmetic.
@@ -15,9 +17,13 @@ Inference and performance interviews (NVIDIA, Together AI, Groq, and most fronti
 - **Quantisation, KV-cache shrinking and fusion** help the memory-bound side. **FP8, better kernels and more GPUs** help the compute-bound side. A fix for the wrong side changes nothing.
 - Multi-GPU serving trades memory capacity for **communication**, so interconnect bandwidth shapes the parallelism plan.
 
-## The idea in plain English
+## Mental model
 
-A GPU is a kitchen with a huge number of fast cooks (compute) and a narrow pantry door (memory bandwidth). If each dish needs lots of ingredients but little cooking, the cooks wait at the door: you are memory-bound. Generating one token for one user is like cooking a single dish that needs the whole pantry carried through the door. Batching means cooking for many guests from the same trip. A big prompt is the opposite case: one trip, and then hours of chopping. The cooks are busy and the door is quiet.
+- A GPU is a kitchen with a huge number of fast cooks (compute) and a narrow pantry door (memory bandwidth).
+- If each dish needs lots of ingredients but little cooking, the cooks wait at the door: you are memory-bound.
+- Generating one token for one user is like cooking a single dish that needs the whole pantry carried through the door.
+- Batching means cooking for many guests from the same trip.
+- A big prompt is the opposite case: one trip, and then hours of chopping. The cooks are busy and the door is quiet.
 
 ## Core concepts
 
@@ -61,11 +67,12 @@ How to reason about any serving question:
 4. Estimate throughput from the binding limit.
 5. Pick levers that attack that limit, then measure.
 
-## Deep dive
+## Technical mechanics
 
 ### The roofline
 
-The roofline model (Williams, Waterman and Patterson, 2009) says a kernel's achievable speed is the lower of two limits: peak compute, and bandwidth times arithmetic intensity. Plotted on log axes, the first is a flat line and the second a rising line.
+- The roofline model (Williams, Waterman and Patterson, 2009) says a kernel's achievable speed is the lower of two limits: peak compute, and bandwidth times arithmetic intensity.
+- Plotted on log axes, the first is a flat line and the second a rising line.
 
 <AnimatedDiagram
   spec="animated/serving/gpu-roofline"
@@ -73,15 +80,27 @@ The roofline model (Williams, Waterman and Patterson, 2009) says a kernel's achi
   caption="Computed from NVIDIA's published peak compute and bandwidth for the H100 SXM (November 2026): a kernel can go no faster than the lower of the two lines, and they meet at 295 FLOPs per byte."
 />
 
-**How to read it.** Both axes are logarithmic: each gridline is ten times the last. The violet line is the memory roof, the teal line the compute roof, and the ringed point is the ridge where they meet.
+**How to read it:**
 
-**The numbers.** Ridge = 989 × 10¹² FLOPs/s ÷ 3.35 × 10¹² bytes/s = 295 FLOPs per byte. Left of it, speed = 3.35 TB/s × intensity, so intensity 1 gives 3.35 TFLOPS and intensity 100 gives 335 TFLOPS. Right of it, speed is 989 TFLOPS. Real kernels sit below the roof. The FlashAttention-2 paper reports attention kernels at 25–40% of peak FLOPS before it and 50–73% after, on A100. The gap under the roof is the inefficiency to hunt.
+- Both axes are logarithmic: each gridline is ten times the last.
+- The violet line is the memory roof, the teal line the compute roof, and the ringed point is the ridge where they meet.
 
-The roof depends on the chip and the date. The H100's figures above are as of November 2026; newer GPUs raise both lines, and the ridge point moves with their ratio. Use the method, and look up the datasheet for the chip you are asked about.
+**The numbers:**
+
+- Ridge = 989 × 10¹² FLOPs/s ÷ 3.35 × 10¹² bytes/s = 295 FLOPs per byte.
+- Left of it, speed = 3.35 TB/s × intensity, so intensity 1 gives 3.35 TFLOPS and intensity 100 gives 335 TFLOPS.
+- Right of it, speed is 989 TFLOPS. Real kernels sit below the roof.
+- The FlashAttention-2 paper reports attention kernels at 25–40% of peak FLOPS before it and 50–73% after, on A100.
+- The gap under the roof is the inefficiency to hunt.
+
+- The roof depends on the chip and the date. The H100's figures above are as of November 2026; newer GPUs raise both lines, and the ridge point moves with their ratio.
+- Use the method, and look up the datasheet for the chip you are asked about.
 
 ### Prefill, decode and the roofline
 
-An LLM request runs two phases with opposite shapes. **Prefill** reads the prompt in one pass: many tokens share each weight read. **Decode** then makes one token per step: few tokens share it.
+- An LLM request runs two phases with opposite shapes.
+- **Prefill** reads the prompt in one pass: many tokens share each weight read.
+- **Decode** then makes one token per step: few tokens share it.
 
 <AnimatedDiagram
   spec="animated/serving/gpu-prefill-vs-decode"
@@ -101,11 +120,16 @@ An LLM request runs two phases with opposite shapes. **Prefill** reads the promp
   </StepCard>
 </StepCards>
 
-This is why the two phases are tuned differently. Decode wants fewer bytes (quantisation, batching, a small KV cache, [speculative decoding](/ai-system-design/genai-system-design/speculative-decoding)). Prefill wants more FLOPs (FP8, more GPUs, skipping repeated prompt prefixes with [prompt caching](/ai-system-design/genai-system-design/prompt-caching)). In practice batching stops well before the ridge: KV-cache memory is finite, and every sequence waits for the whole batch's step. Engines such as the one on the [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) page choose the batch each iteration to balance the two.
+- This is why the two phases are tuned differently.
+- Decode wants fewer bytes (quantisation, batching, a small KV cache, [speculative decoding](/ai-system-design/genai-system-design/speculative-decoding)).
+- Prefill wants more FLOPs (FP8, more GPUs, skipping repeated prompt prefixes with [prompt caching](/ai-system-design/genai-system-design/prompt-caching)).
+- In practice batching stops well before the ridge: KV-cache memory is finite, and every sequence waits for the whole batch's step.
+- Engines such as the one on the [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) page choose the batch each iteration to balance the two.
 
 ### Where the memory goes
 
-The weights are a fixed read per step. The KV cache is the part that grows with every token and every concurrent sequence: 327,680 bytes (about 0.33 MB) per token for a Llama-style 70B with GQA (80 layers, 8 KV heads of size 128, 16-bit). The figure from the model-choice page shows what that does to the GPU count.
+- The weights are a fixed read per step. The KV cache is the part that grows with every token and every concurrent sequence: 327,680 bytes (about 0.33 MB) per token for a Llama-style 70B with GQA (80 layers, 8 KV heads of size 128, 16-bit).
+- The figure from the model-choice page shows what that does to the GPU count.
 
 <AnimatedDiagram
   spec="animated/llm/choose-gpu-memory"
@@ -122,7 +146,8 @@ Brightpost's budget is 400 ms to the first token and 1,500 ms for 250 tokens, so
 4. **Split the model.** In 4.4 ms an H100 reads 4.4 ms × 3,350 GB/s = 14.7 GB. The weights must spread over at least 70 ÷ 14.7 = 4.8, so 5 GPUs by bandwidth alone. Tensor parallelism needs a count that divides the 8 KV heads, which means 8: 8.75 GB each, a 2.6 ms read, inside an NVLink node.
 5. **Prefill.** 2 × 70 × 10⁹ × 2,200 = 308 TFLOP. One GPU at its full 989 TFLOPS needs 0.31 s; at a realistic half of peak, 0.62 s, over the 400 ms budget. Spread over 8 GPUs, 78 ms at half of peak. Eight-way tensor parallelism fixes both phases.
 
-Costs not counted: the per-layer all-reduce, attention FLOPs in prefill, and the KV reads. Measure all three before committing. Brightpost's plan: one eight-H100 node per replica with 8-bit weights, FP8 tensor cores for prefill (twice the BF16 rate), and a profile of the real step time before it commits.
+- Costs not counted: the per-layer all-reduce, attention FLOPs in prefill, and the KV reads.
+- Measure all three before committing. Brightpost's plan: one eight-H100 node per replica with 8-bit weights, FP8 tensor cores for prefill (twice the BF16 rate), and a profile of the real step time before it commits.
 
 ## Trade-offs
 
@@ -136,14 +161,14 @@ Costs not counted: the per-layer all-reduce, attention FLOPs in prefill, and the
 | More GPUs (tensor parallel) | Memory capacity, lower latency | Communication, cost | Model too large or too slow on one GPU |
 | Speculative decoding | Latency at low batch | Extra draft compute | Latency-sensitive, low-batch traffic |
 
-## Real-world examples
+## Production systems
 
 - **FlashAttention (Dao et al., 2022).** Tiling that cuts HBM reads and writes made attention faster without reducing FLOPs; the paper reports a 3× speed-up on GPT-2 at sequence length 1K.
 - **vLLM (Kwon et al., 2023).** PagedAttention and continuous batching raise throughput by keeping the GPU's batch full, which moves decode right on the roofline.
 - **GPTQ (2022) and AWQ (2023).** Made 4-bit weight-only inference practical, which attacks the memory-bound side directly.
 - **Groq's LPU.** Its published GroqChip brief lists 230 MB of on-chip SRAM per chip and up to 80 TB/s of on-die bandwidth, far above HBM's 3.35 TB/s, so the memory roof is much higher but each chip holds little and models spread over many chips.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Quoting FLOPs to estimate decode speed. Decode is usually bandwidth-bound.
 - Forgetting the KV cache in memory and bandwidth estimates.
@@ -152,7 +177,7 @@ Costs not counted: the per-layer all-reduce, attention FLOPs in prefill, and the
 - Ignoring interconnect: tensor parallelism across slow network links destroys latency.
 - Benchmarking with unrealistic prompt lengths, output lengths or batch sizes.
 
-## How to answer in an interview
+## Interview framework
 
 1. State the bottleneck model: roofline, intensity, ridge point, and the GPU's numbers.
 2. Do the memory math: weights, KV cache, overhead.
@@ -175,27 +200,47 @@ Costs not counted: the per-layer all-reduce, attention FLOPs in prefill, and the
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the roofline model?" category="Concepts" level="Junior">
-    It plots achievable performance against arithmetic intensity, the FLOPs done per byte moved from memory. Below the ridge point, performance is capped by memory bandwidth and rises with intensity; above it, performance is capped by peak compute. It tells you whether to optimise memory traffic or computation. For an H100 SXM the ridge is about 295 FLOPs per byte.
+    - It plots achievable performance against arithmetic intensity, the FLOPs done per byte moved from memory.
+    - Below the ridge point, performance is capped by memory bandwidth and rises with intensity; above it, performance is capped by peak compute.
+    - It tells you whether to optimise memory traffic or computation.
+    - For an H100 SXM the ridge is about 295 FLOPs per byte.
   </InterviewQuestion>
   <InterviewQuestion question="Why is LLM decoding at batch size 1 memory-bound?" category="Concepts" level="Mid">
-    Generating one token multiplies each weight matrix by a single vector, about 2 FLOPs per parameter, while reading each 2-byte parameter from memory. That is roughly 1 FLOP per byte, far below the 295 an H100 needs to be compute-bound. The GPU reaches about 0.3% of its peak arithmetic rate and spends most of its time waiting on memory.
+    - Generating one token multiplies each weight matrix by a single vector, about 2 FLOPs per parameter, while reading each 2-byte parameter from memory.
+    - That is roughly 1 FLOP per byte, far below the 295 an H100 needs to be compute-bound.
+    - The GPU reaches about 0.3% of its peak arithmetic rate and spends most of its time waiting on memory.
   </InterviewQuestion>
   <InterviewQuestion question="Why does batching increase throughput so much for decoding?" category="Concepts" level="Mid">
-    One read of the weights serves every sequence in the batch, so FLOPs per byte rise roughly in proportion to batch size. Until the batch is large enough to reach the compute roof, adding sequences costs almost no extra time per step, so total tokens per second grows nearly linearly. KV cache memory, which grows with every sequence, is what limits batch size first.
+    - One read of the weights serves every sequence in the batch, so FLOPs per byte rise roughly in proportion to batch size.
+    - Until the batch is large enough to reach the compute roof, adding sequences costs almost no extra time per step, so total tokens per second grows nearly linearly.
+    - KV cache memory, which grows with every sequence, is what limits batch size first.
   </InterviewQuestion>
   <InterviewQuestion question="Estimate single-stream tokens per second for a 70B model in 8-bit on one H100." category="Scaling" level="Senior">
-    The weights are about 70 GB and must be read once per token. HBM bandwidth is 3.35 TB/s, so the upper bound is 3.35e12 ÷ 70e9, about 48 tokens per second. Reading the KV cache, kernel inefficiency and launch overheads lower it in practice. I would state it as an upper bound and then measure.
+    - The weights are about 70 GB and must be read once per token.
+    - HBM bandwidth is 3.35 TB/s, so the upper bound is 3.35e12 ÷ 70e9, about 48 tokens per second.
+    - Reading the KV cache, kernel inefficiency and launch overheads lower it in practice.
+    - I would state it as an upper bound and then measure.
   </InterviewQuestion>
   <InterviewQuestion question="What is kernel fusion and why does it help?" category="Concepts" level="Mid">
-    It combines several operations, such as a matmul's bias, an activation and a residual add, into one GPU kernel so intermediate results stay in registers or on-chip memory instead of being written to and read back from HBM. For memory-bound operations this removes much of the cost, and it also cuts kernel launch overhead. FlashAttention applies the same idea to attention with tiling.
+    - It combines several operations, such as a matmul's bias, an activation and a residual add, into one GPU kernel so intermediate results stay in registers or on-chip memory instead of being written to and read back from HBM.
+    - For memory-bound operations this removes much of the cost, and it also cuts kernel launch overhead.
+    - FlashAttention applies the same idea to attention with tiling.
   </InterviewQuestion>
   <InterviewQuestion question="Why should tensor parallelism stay within a node?" category="Trade-offs" level="Senior">
-    Tensor parallelism splits each layer's matrices across GPUs and needs an all-reduce of activations after every layer, many times per token. Inside a node, NVLink gives hundreds of gigabytes per second per GPU (900 GB/s on H100 SXM); across nodes, network bandwidth is far lower and latency higher, so communication would dominate. Across nodes, pipeline or data parallelism is used instead.
+    - Tensor parallelism splits each layer's matrices across GPUs and needs an all-reduce of activations after every layer, many times per token.
+    - Inside a node, NVLink gives hundreds of gigabytes per second per GPU (900 GB/s on H100 SXM); across nodes, network bandwidth is far lower and latency higher, so communication would dominate.
+    - Across nodes, pipeline or data parallelism is used instead.
   </InterviewQuestion>
   <InterviewQuestion question="Time to first token is 900 ms on a long prompt, but tokens stream quickly afterwards. Which lever do you reach for, and why not batching?" category="Trade-offs" level="Senior">
-    A slow first token with a fast stream points at prefill, which is compute-bound: the prompt already shares each weight read across thousands of tokens. Batching moves work right on the roofline, but prefill is already right of the ridge, so it adds nothing. The levers are more FLOPs per request: FP8 tensor cores, tensor parallelism across more GPUs, better kernels, or skipping the repeated part of the prompt with prefix caching. I would check the profile first to confirm that the tensor cores are busy.
+    - A slow first token with a fast stream points at prefill, which is compute-bound: the prompt already shares each weight read across thousands of tokens.
+    - Batching moves work right on the roofline, but prefill is already right of the ridge, so it adds nothing.
+    - The levers are more FLOPs per request: FP8 tensor cores, tensor parallelism across more GPUs, better kernels, or skipping the repeated part of the prompt with prefix caching.
+    - I would check the profile first to confirm that the tensor cores are busy.
   </InterviewQuestion>
   <InterviewQuestion question="Your decode throughput stopped rising at batch 64 although the roofline says you are still memory-bound. What do you check?" category="Failure modes" level="Senior">
-    At batch 64 the intensity is about 64 FLOPs per byte, still well under 295, so the weight read is not the cause. The usual suspects are the KV cache: its reads grow with batch times context and can rival the weights, and its memory may force the engine to stop admitting requests. Next, check for kernel launch overhead or scheduler stalls at the CPU, and communication time if tensor parallelism is on. A profile that splits time into weight reads, cache reads, communication and idle gaps shows which one it is.
+    - At batch 64 the intensity is about 64 FLOPs per byte, still well under 295, so the weight read is not the cause.
+    - The usual suspects are the KV cache: its reads grow with batch times context and can rival the weights, and its memory may force the engine to stop admitting requests.
+    - Next, check for kernel launch overhead or scheduler stalls at the CPU, and communication time if tensor parallelism is on.
+    - A profile that splits time into weight reads, cache reads, communication and idle gaps shows which one it is.
   </InterviewQuestion>
 </InterviewQuestions>

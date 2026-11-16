@@ -4,9 +4,11 @@ description: What changes when a container serves an LLM on Kubernetes - GPU sch
 updated: 2026-11-15
 ---
 
-Interviewers ask about containers for LLMs because the usual answer, "package it in Docker and let Kubernetes run it", hides the hard parts: a GPU that must be scheduled, tens of gigabytes of weights, and a start-up that takes a minute or more. A good answer says where the weights live, how Kubernetes knows the replica is ready, and what happens to traffic while it is not.
+Interviewers ask about containers for LLMs because the usual answer, "package it in Docker and let Kubernetes run it", hides the hard parts: a GPU that must be scheduled, tens of gigabytes of weights, and a start-up that takes a minute or more.
 
-## TL;DR
+- A good answer says where the weights live, how Kubernetes knows the replica is ready, and what happens to traffic while it is not.
+
+## Overview
 
 - **A container is a small program plus a huge file.** An engine image is about **8 GB**; the weights of an 8 B model are **16 GB** (8 billion parameters × 2 bytes). Where those 16 GB live sets start-up time.
 - **Three places for the weights:** bake them into the image (**24 GB** image, **128 s** to load in our illustrative numbers), download them at start (**64 s**), or mount a volume that already holds them (**56 s**). All rates are illustrative.
@@ -15,9 +17,13 @@ Interviewers ask about containers for LLMs because the usual answer, "package it
 - **Three LLM-specific traps:** a CUDA build newer than the host driver, a `/dev/shm` too small for tensor-parallel workers, and a rolling update that needs a spare GPU you do not have.
 - **The general container and cluster material is elsewhere.** See [Containers and registries](/cloud/compute/containers-and-registries) and [Kubernetes concepts](/cloud/compute/kubernetes-concepts); this page covers only what an LLM changes.
 
-## The idea in plain English
+## Mental model
 
-A normal web service is a food truck: it drives to any parking space, opens the hatch in seconds and starts selling. An LLM replica is a restaurant that needs a specific oven (the GPU), a delivery of 16 GB of ingredients (the weights) and a warm-up before the first plate. Kubernetes is the manager who assigns kitchens. If the manager seats guests the moment the door opens, they wait at empty tables; if the fire inspector (the liveness check) comes at second 20 and finds no meal ready, he closes the restaurant. Most of the work is telling the manager when the kitchen is truly open.
+- A normal web service is a food truck: it drives to any parking space, opens the hatch in seconds and starts selling.
+- An LLM replica is a restaurant that needs a specific oven (the GPU), a delivery of 16 GB of ingredients (the weights) and a warm-up before the first plate.
+- Kubernetes is the manager who assigns kitchens.
+- If the manager seats guests the moment the door opens, they wait at empty tables; if the fire inspector (the liveness check) comes at second 20 and finds no meal ready, he closes the restaurant.
+- Most of the work is telling the manager when the kitchen is truly open.
 
 ## Core concepts
 
@@ -64,7 +70,7 @@ The cluster itself, its control plane and its request path are on [Kubernetes co
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### Where the weights live
 
@@ -74,21 +80,33 @@ The cluster itself, its control plane and its request path are on [Kubernetes co
   caption="The same 16 GB model, three ways to put it next to the engine. Seconds are for one new replica on a node with nothing cached, before warm-up. Rates are illustrative."
 />
 
-**How to read it.** Each bar is the time before the engine can start loading kernels. Violet is pulling the engine image, blue is downloading weights, teal is copying them into GPU memory. The lime pill is the total.
+**How to read it:**
 
-**The numbers.** The weights are 8 × 10⁹ parameters × 2 bytes = 16 GB. At illustrative rates (registry 0.2 GB/s, object storage 1 GB/s, disk to GPU 2 GB/s, a network volume 1 GB/s):
+- Each bar is the time before the engine can start loading kernels.
+- Violet is pulling the engine image, blue is downloading weights, teal is copying them into GPU memory. The lime pill is the total.
+
+**The numbers:**
+
+- The weights are 8 × 10⁹ parameters × 2 bytes = 16 GB.
+- At illustrative rates (registry 0.2 GB/s, object storage 1 GB/s, disk to GPU 2 GB/s, a network volume 1 GB/s):
 
 - **Bake in.** Image 8 + 16 = 24 GB; pull 24 ÷ 0.2 = 120 s; load 16 ÷ 2 = 8 s; total **128 s**.
 - **Download at start.** Pull 8 ÷ 0.2 = 40 s; download 16 ÷ 1 = 16 s; load 8 s; total **64 s**.
 - **Mount a volume.** Pull 40 s; read from the volume 16 ÷ 1 = 16 s; total **56 s**. The volume's read speed is shared, so ten replicas starting together may each see a tenth of it.
 
-Baking in is the simplest and the slowest to scale, because every new node pulls 24 GB. Google's Cloud Run guidance (November 2026) puts the line at models under about 10 GB for the image route and recommends Cloud Storage downloads for larger ones. Because the image changes with every model version, a model change also means a registry push and a new Deployment, which fits the release flow on [Rollback and Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment). The fast case is a node that already holds the image and the weights on local disk: the 23 s cold start on [Load Balancing and Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling).
+- Baking in is the simplest and the slowest to scale, because every new node pulls 24 GB.
+- Google's Cloud Run guidance (November 2026) puts the line at models under about 10 GB for the image route and recommends Cloud Storage downloads for larger ones.
+- Because the image changes with every model version, a model change also means a registry push and a new Deployment, which fits the release flow on [Rollback and Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment).
+- The fast case is a node that already holds the image and the weights on local disk: the 23 s cold start on [Load Balancing and Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling).
 
-Kubernetes also has **image volumes**, which mount an OCI artifact from a registry into a container. The docs list them as stable since v1.36 (November 2026), and they need runtime support. They let weights travel as a versioned artifact without being part of the engine image.
+- Kubernetes also has **image volumes**, which mount an OCI artifact from a registry into a container.
+- The docs list them as stable since v1.36 (November 2026), and they need runtime support.
+- They let weights travel as a versioned artifact without being part of the engine image.
 
 ### The GPU pod: requests, probes and shared memory
 
-The container excerpt below follows the Kubernetes docs for extended resources and probes, and the vLLM Kubernetes guide for the health path (all checked November 2026). The image tag and thresholds are illustrative.
+- The container excerpt below follows the Kubernetes docs for extended resources and probes, and the vLLM Kubernetes guide for the health path (all checked November 2026).
+- The image tag and thresholds are illustrative.
 
 ```yaml
 containers:
@@ -119,7 +137,8 @@ volumes:
     persistentVolumeClaim: { claimName: brightpost-8b-weights }
 ```
 
-A memory-backed `emptyDir` counts against the pod's memory limit, so raise that limit by the same amount. A GPU node usually also carries a taint; add a matching `tolerations` entry, whose key and effect depend on your cluster and operator settings.
+- A memory-backed `emptyDir` counts against the pod's memory limit, so raise that limit by the same amount.
+- A GPU node usually also carries a taint; add a matching `tolerations` entry, whose key and effect depend on your cluster and operator settings.
 
 ### Ready is not started
 
@@ -129,9 +148,18 @@ A memory-backed `emptyDir` counts against the pod's memory limit, so raise that 
   caption="One replica whose image is already on the node. The engine can answer at 59 s, but traffic starts at 65 s, after the startup and readiness probes pass. Seconds are illustrative."
 />
 
-**How to read it.** The top lane is the engine's own work. The lime bars are the probes: startup first, then readiness and liveness together. The orange bar is real traffic. Step 4 shows the failure the startup probe prevents.
+**How to read it:**
 
-**The numbers.** Download 16 s + load 8 s + warm-up 35 s = 59 s. A startup probe with `periodSeconds: 10` first succeeds at the next tick, 60 s. Its budget is `periodSeconds × failureThreshold` = 10 × 30 = 300 s, five times the need. Then readiness probes every 5 s put the pod in service by about 65 s. The Kubernetes docs add that readiness probes run for the container's whole life, and that a pod that is not ready receives no traffic through a Service.
+- The top lane is the engine's own work. The lime bars are the probes: startup first, then readiness and liveness together.
+- The orange bar is real traffic. Step 4 shows the failure the startup probe prevents.
+
+**The numbers:**
+
+- Download 16 s + load 8 s + warm-up 35 s = 59 s.
+- A startup probe with `periodSeconds: 10` first succeeds at the next tick, 60 s.
+- Its budget is `periodSeconds × failureThreshold` = 10 × 30 = 300 s, five times the need.
+- Then readiness probes every 5 s put the pod in service by about 65 s.
+- The Kubernetes docs add that readiness probes run for the container's whole life, and that a pod that is not ready receives no traffic through a Service.
 
 <Callout tone="red" title="What breaks">
   A liveness probe with `initialDelaySeconds: 10`, `periodSeconds: 10` and `failureThreshold: 3` fails at 10, 20 and 30 s while the engine is still loading, and the kubelet restarts the container at 30 s. The restart begins the same load again, so the replica never becomes ready. Add a startup probe, or set the liveness delay above the worst-case start.
@@ -139,11 +167,18 @@ A memory-backed `emptyDir` counts against the pod's memory limit, so raise that 
 
 ### CUDA, drivers and the image
 
-The driver is part of the node; CUDA libraries are part of the image. NVIDIA's compatibility guide says applications built with a CUDA toolkit in one major family run on a sufficiently recent driver of that family, and that a `cuda-compat` forward-compatibility package lets a newer toolkit run on an older driver where the platform and GPU support it. In practice: pin the image's CUDA version, record the minimum driver, and upgrade node pools before images. An operator that manages the driver (see the GPU Operator above) keeps that step in the cluster's hands. See [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) for the hardware side.
+- The driver is part of the node; CUDA libraries are part of the image.
+- NVIDIA's compatibility guide says applications built with a CUDA toolkit in one major family run on a sufficiently recent driver of that family, and that a `cuda-compat` forward-compatibility package lets a newer toolkit run on an older driver where the platform and GPU support it.
+- In practice: pin the image's CUDA version, record the minimum driver, and upgrade node pools before images.
+- An operator that manages the driver (see the GPU Operator above) keeps that step in the cluster's hands.
+- See [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) for the hardware side.
 
 ### Init containers, sidecars and scale to zero
 
-An **init container** runs to completion before the main container starts, so it can download and verify the weights onto a shared volume while the engine image stays small and has no bucket credentials. A **sidecar** (a second container in the same pod) fits log shipping or token minting; keep the GPU process in its own container so a sidecar crash does not restart the model. **Scale to zero** (Knative, Cloud Run) saves GPU hours but makes the first request pay the full cold start, here 99 s, so it suits batch and low-urgency traffic, not a 400 ms first-token target. Sharing one GPU is covered on [GPU/TPU Resource Management](/ai-system-design/genai-system-design/gpu-tpu-resource-management).
+- An **init container** runs to completion before the main container starts, so it can download and verify the weights onto a shared volume while the engine image stays small and has no bucket credentials.
+- A **sidecar** (a second container in the same pod) fits log shipping or token minting; keep the GPU process in its own container so a sidecar crash does not restart the model.
+- **Scale to zero** (Knative, Cloud Run) saves GPU hours but makes the first request pay the full cold start, here 99 s, so it suits batch and low-urgency traffic, not a 400 ms first-token target.
+- Sharing one GPU is covered on [GPU/TPU Resource Management](/ai-system-design/genai-system-design/gpu-tpu-resource-management).
 
 ### Worked example: Brightpost ships a new model version
 
@@ -167,14 +202,14 @@ All durations in this example are illustrative; time a real cold start in your c
 | Whole-GPU pod | Predictable; simple | Idle capacity is billed | Latency-sensitive production |
 | Scale to zero | No idle GPU cost | Cold start on first request | Batch and low-urgency traffic |
 
-## Real-world examples
+## Production systems
 
 - **vLLM Kubernetes guide (November 2026).** Its example manifest sets one `nvidia.com/gpu` limit, a memory-backed `/dev/shm` with a 2 GiB limit, `/health` readiness and liveness probes, and a 50 GiB persistent volume for the model cache.
 - **NVIDIA GPU Operator.** Deploys the driver, container toolkit, device plugin, GPU Feature Discovery and DCGM-based monitoring as cluster components, so node upgrades do not leave pods without a matching runtime.
 - **Google Cloud Run GPUs.** Documentation (November 2026) recommends downloading models from Cloud Storage at start and bakes the model into the image only for models under about 10 GB.
 - **Kubernetes image volumes.** Stable since v1.36 per the docs; they mount an OCI artifact into a pod, a way to ship weights outside the engine image.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - A liveness probe with a short budget that kills a replica mid-load and restarts it forever.
 - Putting 16 GB of weights in the image and pulling it onto every new node.
@@ -183,7 +218,7 @@ All durations in this example are illustrative; time a real cold start in your c
 - Counting on `maxSurge` for a rollout when the GPU pool has no spare card.
 - Sending traffic on "container started" instead of "engine can answer".
 
-## How to answer in an interview
+## Interview framework
 
 1. **Name what is different.** A GPU, many gigabytes of weights, a slow start, a driver that lives on the node.
 2. **Place the weights.** Compare baking in, downloading and mounting with numbers for a 16 GB model.
@@ -207,27 +242,51 @@ All durations in this example are illustrative; time a real cold start in your c
 
 <InterviewQuestions>
   <InterviewQuestion question="When would you put model download logic in an init container instead of the main application container?" category="Architecture" level="Mid">
-    Use an init container when the engine must not start until the weights are present and verified, when the pull needs bucket credentials the serving process should never hold, or when you want a small engine image with no download tooling. The init container fills a shared volume, then exits, and the main container starts with the files already there. A restart of the main container does not re-download, because the volume survives it. The cost is that the init step adds to every cold start.
+    - Use an init container when the engine must not start until the weights are present and verified, when the pull needs bucket credentials the serving process should never hold, or when you want a small engine image with no download tooling.
+    - The init container fills a shared volume, then exits, and the main container starts with the files already there.
+    - A restart of the main container does not re-download, because the volume survives it.
+    - The cost is that the init step adds to every cold start.
   </InterviewQuestion>
   <InterviewQuestion question="How do Kubernetes resource requests interact with GPU scheduling in practice?" category="Architecture" level="Mid">
-    A GPU is an extended resource such as `nvidia.com/gpu`, advertised by the device plugin. You set it under `limits`; if you also set a request it must equal the limit, and the amount is a whole integer, so you cannot ask for half a card or overcommit. The scheduler then needs a node with that many free GPUs, and node labels or taints narrow which card type and pool it uses. A node can report GPUs and still fail at run time if the image's CUDA version needs a newer driver than the node has.
+    - A GPU is an extended resource such as `nvidia.com/gpu`, advertised by the device plugin.
+    - You set it under `limits`; if you also set a request it must equal the limit, and the amount is a whole integer, so you cannot ask for half a card or overcommit.
+    - The scheduler then needs a node with that many free GPUs, and node labels or taints narrow which card type and pool it uses.
+    - A node can report GPUs and still fail at run time if the image's CUDA version needs a newer driver than the node has.
   </InterviewQuestion>
   <InterviewQuestion question="What operational risks appear when mixing scale-to-zero with low-latency inference targets?" category="Failure modes" level="Senior">
-    The first request after idle pays the whole cold start: image pull, weight download or mount, load into GPU memory and warm-up. With our illustrative numbers that is 99 s against a 400 ms first-token target. Concurrency limits can queue a burst while new instances start. Keep a minimum number of warm replicas for interactive traffic, send only batch or low-urgency traffic to scale-to-zero pools, and fall back to the steady pool when serverless capacity is slow.
+    - The first request after idle pays the whole cold start: image pull, weight download or mount, load into GPU memory and warm-up.
+    - With our illustrative numbers that is 99 s against a 400 ms first-token target.
+    - Concurrency limits can queue a burst while new instances start.
+    - Keep a minimum number of warm replicas for interactive traffic, send only batch or low-urgency traffic to scale-to-zero pools, and fall back to the steady pool when serverless capacity is slow.
   </InterviewQuestion>
   <InterviewQuestion question="What is the difference between a startup, a readiness and a liveness probe, and why does an LLM server need all three?" category="Concepts" level="Mid">
-    The startup probe runs first and gives a slow start a long budget; liveness and readiness stay off until it passes. Readiness decides whether the Service sends traffic and runs for the container's whole life. Liveness restarts a process that is stuck. An LLM replica takes about a minute to load and warm up, so without a startup probe a normal liveness probe kills it mid-load and restarts the same load. Without readiness, traffic arrives before the engine can answer.
+    - The startup probe runs first and gives a slow start a long budget; liveness and readiness stay off until it passes.
+    - Readiness decides whether the Service sends traffic and runs for the container's whole life.
+    - Liveness restarts a process that is stuck. An LLM replica takes about a minute to load and warm up, so without a startup probe a normal liveness probe kills it mid-load and restarts the same load.
+    - Without readiness, traffic arrives before the engine can answer.
   </InterviewQuestion>
   <InterviewQuestion question="Why does a tensor-parallel engine need a larger /dev/shm, and how do you provide it in Kubernetes?" category="Failure modes" level="Mid">
-    The engine's worker processes exchange data through shared memory, and Docker's default of 64 MB is too small, so start-up can crash. In Kubernetes you mount an `emptyDir` with `medium: Memory` and a `sizeLimit` at `/dev/shm`; vLLM's guide uses 2 GiB. That memory counts against the pod's memory limit, so raise the limit to match. On plain Docker the equivalent is `--shm-size` or `--ipc=host`.
+    - The engine's worker processes exchange data through shared memory, and Docker's default of 64 MB is too small, so start-up can crash.
+    - In Kubernetes you mount an `emptyDir` with `medium: Memory` and a `sizeLimit` at `/dev/shm`; vLLM's guide uses 2 GiB.
+    - That memory counts against the pod's memory limit, so raise the limit to match.
+    - On plain Docker the equivalent is `--shm-size` or `--ipc=host`.
   </InterviewQuestion>
   <InterviewQuestion question="Compare baking weights into the image, downloading at start and mounting a volume for a 16 GB model." category="Trade-offs" level="Senior">
-    Baking in gives one artifact but a 24 GB image: at an illustrative 0.2 GB/s registry pull that is 120 s per cold node, and every model change needs a new image. Downloading keeps the image at 8 GB (40 s) and adds 16 s of download, but every replica fetches the weights and needs storage credentials. A volume or image volume avoids the download and gives the fastest scale-out, but replicas share its read bandwidth. Choose by how often replicas start: rarely, bake in a small model; often, mount.
+    - Baking in gives one artifact but a 24 GB image: at an illustrative 0.2 GB/s registry pull that is 120 s per cold node, and every model change needs a new image.
+    - Downloading keeps the image at 8 GB (40 s) and adds 16 s of download, but every replica fetches the weights and needs storage credentials.
+    - A volume or image volume avoids the download and gives the fastest scale-out, but replicas share its read bandwidth.
+    - Choose by how often replicas start: rarely, bake in a small model; often, mount.
   </InterviewQuestion>
   <InterviewQuestion question="A rollout of a new model version stalls with one pod Pending. What happened and how do you fix it?" category="Failure modes" level="Senior">
-    With `maxSurge: 1` the Deployment starts a new pod before removing an old one, and that pod needs its own GPU. If every GPU in the pool is taken, the pod stays Pending and the rollout stops. Either keep one spare GPU for rollouts, or switch to `maxSurge: 0` and `maxUnavailable: 1`, which removes an old pod first and runs at reduced capacity for each step. Check that readiness gates the traffic, and keep the old version ready for rollback.
+    - With `maxSurge: 1` the Deployment starts a new pod before removing an old one, and that pod needs its own GPU.
+    - If every GPU in the pool is taken, the pod stays Pending and the rollout stops.
+    - Either keep one spare GPU for rollouts, or switch to `maxSurge: 0` and `maxUnavailable: 1`, which removes an old pod first and runs at reduced capacity for each step.
+    - Check that readiness gates the traffic, and keep the old version ready for rollback.
   </InterviewQuestion>
   <InterviewQuestion question="Pods crash right after an image upgrade on some nodes but not others. What do you check first?" category="Failure modes" level="Senior">
-    Compare the driver versions on the failing and healthy nodes against the CUDA version the new image was built with. The driver is part of the node and the CUDA libraries are part of the image, and a build needing a newer driver fails where the driver is old. Fix by upgrading the node pool first, or by using NVIDIA's forward-compatibility package where supported. Prevent it by pinning the CUDA version, recording the minimum driver, and letting an operator manage drivers so pools stay uniform.
+    - Compare the driver versions on the failing and healthy nodes against the CUDA version the new image was built with.
+    - The driver is part of the node and the CUDA libraries are part of the image, and a build needing a newer driver fails where the driver is old.
+    - Fix by upgrading the node pool first, or by using NVIDIA's forward-compatibility package where supported.
+    - Prevent it by pinning the CUDA version, recording the minimum driver, and letting an operator manage drivers so pools stay uniform.
   </InterviewQuestion>
 </InterviewQuestions>

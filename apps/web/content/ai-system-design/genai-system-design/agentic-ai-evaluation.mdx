@@ -3,9 +3,11 @@ title: Agentic AI Evaluation
 description: How to evaluate AI agents, covering task success, trajectory and tool-call quality, LLM-as-judge, simulated users, benchmarks, safety, cost and monitoring.
 ---
 
-Agents are harder to evaluate than single LLM calls: they take many steps, use tools, change state, and can reach the right answer the wrong way. Interviewers ask "how do you know your agent works?" to see whether you can build a real evaluation system rather than eyeballing demos.
+Agents are harder to evaluate than single LLM calls: they take many steps, use tools, change state, and can reach the right answer the wrong way.
 
-## TL;DR
+- Interviewers ask "how do you know your agent works?" to see whether you can build a real evaluation system rather than eyeballing demos.
+
+## Overview
 
 - Evaluate on **three levels**: the **final outcome** (did the task succeed?), the **trajectory** (were the steps and tool calls sensible?), and **single components** (retrieval, tool selection, argument accuracy).
 - Prefer **verifiable outcomes**: unit tests, database state checks, exact answers. Use **LLM-as-judge** with rubrics where outcomes are open-ended, and calibrate it against humans.
@@ -13,11 +15,16 @@ Agents are harder to evaluate than single LLM calls: they take many steps, use t
 - Measure **cost, latency, steps and safety** alongside success.
 - Close the loop: **production traces and failures become new test cases**, and every change runs through a regression gate.
 
-## The idea in plain English
+## Mental model
 
-Evaluating an agent is like assessing a new employee on real assignments. You check whether the job got done (outcome), look over how they did it (trajectory: did they use the right systems, waste time, take risky shortcuts?), test specific skills separately (components), and watch how they behave when things go wrong or when a customer is difficult (robustness and safety). And you do it more than once, because good days and bad days happen.
+- Evaluating an agent is like assessing a new employee on real assignments.
+- You check whether the job got done (outcome), look over how they did it (trajectory: did they use the right systems, waste time, take risky shortcuts?), test specific skills separately (components), and watch how they behave when things go wrong or when a customer is difficult (robustness and safety).
+- And you do it more than once, because good days and bad days happen.
 
-The running example on this page is the Brightpost support agent from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures). A customer writes "My kettle arrived cracked. It's order 4471. Can I get my money back?" The agent looks up the order, finds the refund rule, refunds £42 after a support agent approves it (refunds over £30 wait for a person), emails the customer and replies. Evaluating it means answering one question many times over: did that refund happen, once, for the right amount, by an acceptable path?
+- The running example on this page is the Brightpost support agent from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures).
+- A customer writes "My kettle arrived cracked.
+- It's order 4471. Can I get my money back?" The agent looks up the order, finds the refund rule, refunds £42 after a support agent approves it (refunds over £30 wait for a person), emails the customer and replies.
+- Evaluating it means answering one question many times over: did that refund happen, once, for the right amount, by an acceptable path?
 
 ## Core concepts
 
@@ -40,9 +47,17 @@ Calibrating means grading the same runs twice, once by a person and once by the 
   caption="86 % agreement sounds good, but the judge passed 5 of the 21 runs a person failed. Check failures caught, not only agreement."
 />
 
-**How to read it.** Columns are the person's label, rows are the judge's verdict. The two lime cells are agreement. The grey cell is false alarms: the judge failed a run the person passed, which costs a second look. The red cell is the dangerous one: runs the person failed and the judge passed. Those failures would reach production with a green tick.
+**How to read it:**
 
-**The numbers** (illustrative counts, 50 graded Brightpost runs). Agreement = (16 + 27) / 50 = **86 %**. Failures caught = 16 / (16 + 5) = **76 %**: one real failure in four slips through. Cohen's kappa corrects agreement for chance. The judge says fail on 18 runs and the person on 21, so chance agreement = (18 × 21 + 32 × 29) / 50² = 0.52, and κ = (0.86 − 0.52) / (1 − 0.52) = **0.71**.
+- Columns are the person's label, rows are the judge's verdict.
+- The two lime cells are agreement. The grey cell is false alarms: the judge failed a run the person passed, which costs a second look.
+- The red cell is the dangerous one: runs the person failed and the judge passed.
+- Those failures would reach production with a green tick.
+
+**The numbers (illustrative counts, 50 graded Brightpost runs):**
+
+- Agreement = (16 + 27) / 50 = **86 %**. Failures caught = 16 / (16 + 5) = **76 %**: one real failure in four slips through.
+- Cohen's kappa corrects agreement for chance. The judge says fail on 18 runs and the person on 21, so chance agreement = (18 × 21 + 32 × 29) / 50² = 0.52, and κ = (0.86 − 0.52) / (1 − 0.52) = **0.71**.
 
 <Callout tone="red" title="What breaks">
   A judge that passes almost everything still scores high agreement, because most runs are fine. Read the missed
@@ -97,9 +112,16 @@ Take one agent that passes a task on 70 % of runs and plot both numbers for k = 
   caption="Same agent, same 70 % per run. Give it four tries and it almost always passes once (0.992); ask it to pass four times in a row and it manages that only 24 % of the time."
 />
 
-**How to read it.** Both charts start at 0.700 for one run. On the left, more tries can only help, so pass@k climbs towards 1. On the right, every extra run is one more chance to fail, so pass^k falls towards 0. pass@k suits a coding agent whose patch a person picks from several tries. pass^k suits a support agent, where every customer gets exactly one run.
+**How to read it:**
 
-**The numbers.** With independent runs at p = 0.7: pass@4 = 1 − 0.3⁴ = 1 − 0.0081 = **0.992**, and pass^4 = 0.7⁴ = **0.240**. At k = 8, pass^8 = 0.7⁸ = 0.058. tau-bench defines pass^k as the chance that all k runs of a task succeed, averaged over tasks; from n runs with c successes it estimates C(c, k) / C(n, k) per task. It reported gpt-4o below 25 % pass^8 in its retail domain.
+- Both charts start at 0.700 for one run. On the left, more tries can only help, so pass@k climbs towards 1.
+- On the right, every extra run is one more chance to fail, so pass^k falls towards 0. pass@k suits a coding agent whose patch a person picks from several tries. pass^k suits a support agent, where every customer gets exactly one run.
+
+**The numbers:**
+
+- With independent runs at p = 0.7: pass@4 = 1 − 0.3⁴ = 1 − 0.0081 = **0.992**, and pass^4 = 0.7⁴ = **0.240**.
+- At k = 8, pass^8 = 0.7⁸ = 0.058. tau-bench defines pass^k as the chance that all k runs of a task succeed, averaged over tasks; from n runs with c successes it estimates C(c, k) / C(n, k) per task.
+- It reported gpt-4o below 25 % pass^8 in its retail domain.
 
 8. **Efficiency metrics.** Steps per task, tokens, cost per successful task, latency, and time to first useful action.
 
@@ -162,7 +184,7 @@ One task in the dataset, as the runner reads it (an illustrative format; framewo
 }
 ```
 
-## Deep dive
+## Technical mechanics
 
 ### Three layers of evaluation
 
@@ -175,7 +197,12 @@ Grade one Brightpost run at three levels, from a single tool call up to the end 
   caption="One run, three graders. The outcome grader says whether the refund worked; the trajectory and component graders say why, when it did not."
 />
 
-**How to read it.** Step 1 is the run's trace: four tool calls and their results, then the answer. Step 2 adds a component grader on one call, `create_refund`: right order, right amount. Step 3 adds a trajectory grader that reads every row: the right tools, in a sensible order, approval before the refund, no repeated calls. Step 4 grades the outcome: the sandbox holds one refund of £42 and one email, which matches the goal.
+**How to read it:**
+
+- Step 1 is the run's trace: four tool calls and their results, then the answer.
+- Step 2 adds a component grader on one call, `create_refund`: right order, right amount.
+- Step 3 adds a trajectory grader that reads every row: the right tools, in a sensible order, approval before the refund, no repeated calls.
+- Step 4 grades the outcome: the sandbox holds one refund of £42 and one email, which matches the goal.
 
 Outcome metrics tell you **whether** the agent works; trajectory and component metrics tell you **why not**.
 
@@ -194,7 +221,8 @@ It passes if `order_id` is the order in the task and `amount` is no more than th
 
 ### Worked example: grading the Brightpost refund run
 
-This follows the [three-layer figure](#three-layers-of-evaluation) for the task above, run k = 4 times. Runs 1, 2 and 4 follow the happy path. In run 3, `create_refund` times out, the agent calls it again, and both calls go through, because the tool has no idempotency key.
+- This follows the [three-layer figure](#three-layers-of-evaluation) for the task above, run k = 4 times.
+- Runs 1, 2 and 4 follow the happy path. In run 3, `create_refund` times out, the agent calls it again, and both calls go through, because the tool has no idempotency key.
 
 | Grader      | Checks                                                 | Run 1 | Run 3                              |
 | ----------- | ------------------------------------------------------ | ----- | ---------------------------------- |
@@ -209,7 +237,8 @@ Three things to take from it:
 - **The judge passed it too.** The reply read well. Text quality says nothing about what changed in the database, which is why outcome checks come first.
 - **One task, four runs, two answers.** Success rate is 3 / 4 = 0.75. pass^4 for this task is 0, because C(3, 4) = 0: not all four runs passed. With the tau-bench estimator, pass^2 = C(3, 2) / C(4, 2) = 3 / 6 = 0.5. A single run would have shown a pass three times out of four.
 
-The fix is in the tool, not the prompt: give `create_refund` an idempotency key so a retry cannot refund twice ([Agent Reliability and Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery)). Then add run 3's trace to the dataset as a test with a forced timeout.
+- The fix is in the tool, not the prompt: give `create_refund` an idempotency key so a retry cannot refund twice ([Agent Reliability and Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery)).
+- Then add run 3's trace to the dataset as a test with a forced timeout.
 
 ### Building the dataset
 
@@ -240,13 +269,13 @@ Benchmarks are useful for comparing models, but your own task-specific suite dec
 | Simulated users        | Repeatable multi-turn tests            | Simulator may be unrealistic                                    | Conversational agents                                  |
 | Public benchmarks      | Comparable across models               | May not match your tasks; contamination risk                    | Model selection, not launch decisions                  |
 
-## Real-world examples
+## Production systems
 
 - SWE-bench grades coding agents by running each repository's own tests after the agent's patch. SWE-bench Verified (OpenAI, August 2024) keeps 500 tasks that annotators checked for clear issue text and fair tests.
 - tau-bench evaluates tool-using customer-service agents against a simulated user and checks the final database state, and introduced pass^k to measure consistency across repeated trials. It reported gpt-4o below 25 % on pass^8 in the retail domain.
 - The MT-Bench and Chatbot Arena work studied LLM-as-judge: GPT-4 as a judge agreed with human preferences over 80 % of the time, about as often as humans agree with each other, alongside position, verbosity and self-enhancement biases.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Judging from a handful of demos instead of a fixed, versioned dataset.
 - Reporting a single run; agents vary run to run.
@@ -255,7 +284,7 @@ Benchmarks are useful for comparing models, but your own task-specific suite dec
 - Tuning on the test set until it no longer predicts production.
 - Not testing failure modes: tool errors, ambiguous requests, prompt injection.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define success for the product and how it can be verified.
 2. Describe the dataset: real tasks, edge cases, a held-out split, grading methods.
@@ -282,61 +311,50 @@ Benchmarks are useful for comparing models, but your own task-specific suite dec
     category="Concepts"
     level="Junior"
   >
-    An agent takes many steps, calls tools and changes the state of an environment, so there are many ways to succeed or
-    fail, and the same task can produce different paths on different runs. You need a controllable environment, graders
-    for the final state and the path, multiple runs per task, and metrics for cost and safety, not just a single answer
-    comparison.
+    - An agent takes many steps, calls tools and changes the state of an environment, so there are many ways to succeed or fail, and the same task can produce different paths on different runs.
+    - You need a controllable environment, graders for the final state and the path, multiple runs per task, and metrics for cost and safety, not just a single answer comparison.
   </InterviewQuestion>
   <InterviewQuestion
     question="What is the difference between outcome and trajectory evaluation?"
     category="Concepts"
     level="Junior"
   >
-    Outcome evaluation checks whether the task's goal was achieved, for example whether the right order was refunded or
-    the tests pass. Trajectory evaluation checks how the agent got there: tool choices, arguments, unnecessary steps and
-    policy violations. Outcomes measure success; trajectories explain failures and catch cases where the right result
-    came from a risky path.
+    - Outcome evaluation checks whether the task's goal was achieved, for example whether the right order was refunded or the tests pass.
+    - Trajectory evaluation checks how the agent got there: tool choices, arguments, unnecessary steps and policy violations.
+    - Outcomes measure success; trajectories explain failures and catch cases where the right result came from a risky path.
   </InterviewQuestion>
   <InterviewQuestion question="How do you make LLM-as-judge trustworthy?" category="Evaluation" level="Mid">
-    Use a clear rubric with concrete criteria and examples, ask for reasoning before the score, prefer pairwise
-    comparisons or binary checks over vague scales, and randomize answer order to reduce position bias. Most
-    importantly, calibrate it against human labels on a sample and track agreement over time, and avoid letting a model
-    judge its own outputs when possible.
+    - Use a clear rubric with concrete criteria and examples, ask for reasoning before the score, prefer pairwise comparisons or binary checks over vague scales, and randomize answer order to reduce position bias.
+    - Most importantly, calibrate it against human labels on a sample and track agreement over time, and avoid letting a model judge its own outputs when possible.
   </InterviewQuestion>
   <InterviewQuestion question="What is pass^k and why does it matter for agents?" category="Evaluation" level="Mid">
-    pass^k is the probability that an agent succeeds on all of k independent attempts at the same task, while pass@k
-    measures whether at least one succeeds. Users experience every run, so an agent that succeeds 70% of the time per
-    run is much less dependable than its single-run score suggests. pass^k exposes that inconsistency.
+    - pass^k is the probability that an agent succeeds on all of k independent attempts at the same task, while pass@k measures whether at least one succeeds.
+    - Users experience every run, so an agent that succeeds 70% of the time per run is much less dependable than its single-run score suggests. pass^k exposes that inconsistency.
   </InterviewQuestion>
   <InterviewQuestion
     question="How would you build an evaluation dataset for a customer-support agent?"
     category="Architecture"
     level="Senior"
   >
-    I would sample real support conversations and resolved tickets, turn them into tasks with a user goal, a persona,
-    the starting account state and the expected end state, and add edge cases: missing information, policy exceptions,
-    angry users, tool failures and injection attempts. Each task gets a grader, mainly a state check plus a rubric for
-    communication quality. I would run it with a simulated user against sandboxed APIs, keep a held-out split, and grow
-    the set from production failures.
+    - I would sample real support conversations and resolved tickets, turn them into tasks with a user goal, a persona, the starting account state and the expected end state, and add edge cases: missing information, policy exceptions, angry users, tool failures and injection attempts.
+    - Each task gets a grader, mainly a state check plus a rubric for communication quality.
+    - I would run it with a simulated user against sandboxed APIs, keep a held-out split, and grow the set from production failures.
   </InterviewQuestion>
   <InterviewQuestion
     question="Which metrics would you put on a dashboard for an agent in production?"
     category="Evaluation"
     level="Senior"
   >
-    Task completion rate and escalation-to-human rate, user feedback and abandonment, tool error and retry rates, steps
-    and tokens per task, cost per successful task, latency percentiles, guardrail and policy-violation triggers, and the
-    results of sampled human reviews. Each should be broken down by task type and version so regressions can be traced
-    to a change.
+    - Task completion rate and escalation-to-human rate, user feedback and abandonment, tool error and retry rates, steps and tokens per task, cost per successful task, latency percentiles, guardrail and policy-violation triggers, and the results of sampled human reviews.
+    - Each should be broken down by task type and version so regressions can be traced to a change.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your agent scores well on public benchmarks but users complain. What do you do?"
     category="Failure modes"
     level="Senior"
   >
-    Benchmarks measure generic skills, not my users' tasks, and may be contaminated. I would collect the complaints and
-    production traces, categorize the failures, and build them into a task-specific evaluation suite with realistic
-    grading. Then I would fix the most common failure categories, often in context, tools or policies rather than the
-    model, and use the new suite as the release gate going forward.
+    - Benchmarks measure generic skills, not my users' tasks, and may be contaminated.
+    - I would collect the complaints and production traces, categorize the failures, and build them into a task-specific evaluation suite with realistic grading.
+    - Then I would fix the most common failure categories, often in context, tools or policies rather than the model, and use the new suite as the release gate going forward.
   </InterviewQuestion>
 </InterviewQuestions>

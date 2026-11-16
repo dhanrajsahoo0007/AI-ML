@@ -3,22 +3,121 @@ title: Structured Output Generation
 description: Force LLM responses into machine-parseable shapes using schema-aware decoding, tool interfaces, and validation loops so downstream systems stay dependable.
 ---
 
-Downstream automation breaks when models emit prose instead of predictable records. Modern APIs expose JSON mode, constrained decoding, or function and tool calling interfaces that bias generation toward syntactically valid structures. Architecturally, you decide whether structure is enforced primarily by the model provider, by a grammar-constrained local decoder, or by post-hoc parsing and repair. Provider-native JSON modes reduce client complexity but tie you to vendor behavior and error messages; local constrained generation can add latency and integration work but offers portability.
+Downstream automation breaks when a model returns free-form prose instead of predictable records.
 
-Application layers often model expected outputs with typed schemas (for example, Pydantic or JSON Schema) and validate parsed objects before business logic runs. Validation catches subtle issues: correct JSON with wrong field types, missing required keys, or enum values outside the allowed set. A common pattern is generate, parse, validate, and on failure issue a short repair prompt or switch to a smaller verifier model that only fixes syntax against the schema. Recursive summarization of validation errors into the retry prompt improves convergence compared to generic try again messages.
+- Production systems combine grammar-constrained decoding, typed schemas, and bounded repair loops so application code only consumes validated payloads.
 
-Grammar-based generation and logit masking (where supported) reduce the probability of malformed tokens at the source by restricting each decoding step to tokens that keep the partial string in a valid grammar for JSON or a domain-specific language. This is powerful for strict protocols but can interact poorly with tokenizer boundaries and may not be available on every endpoint. Function calling treats the schema as a tool definition the model fills, which can yield higher reliability for tool-shaped tasks than free-form JSON instructions alone.
+## Overview
 
-Trade-offs include latency from retries, cost from multi-pass generation, and brittleness when the schema is overly rigid for genuinely fuzzy user intents. Good design matches schema granularity to the task, separates free-text user explanations from machine fields, and logs structured parse failures to refine prompts or schemas over time.
+- **Three enforcement layers:** Enforce structure at the **decoder** (logit masking / constrained grammar), the **API interface** (tool calling / strict JSON schema mode), and the **application boundary** (Pydantic / Zod validation).
+- **Syntax vs semantics:** Constrained decoding guarantees valid JSON syntax and schema keys, but cannot guarantee business rules (valid order IDs, positive refund amounts, cross-field constraints).
+- **Bounded repair loop:** Follow **generate → parse → validate → repair**, feeding compact validation errors back to the model for at most 1–2 retries before falling back.
+- **Schema design:** Separate free-text reasoning fields from strict machine fields (`enum`, numeric bounds, ISO timestamps) and keep nesting shallow to minimize token overhead and latency.
+
+## Mental model
+
+- **Paper form vs blank sheet:** Asking a model for prose is handing someone a blank sheet of paper; asking for structured output is handing them a web form with dropdowns, required fields, and validation rules.
+- **Constrained decoding as input masks:** Grammar-based logit masking disables every token that would break the JSON schema at the current character position, making syntax errors impossible during generation.
+- **Application validator as the clerk:** Even when every box on the form is filled with the right data type, the receiving service still verifies that the order number exists and the total matches the line items.
+
+## Core concepts
+
+1. **Prompt-only JSON instructions:** Asking the model in the prompt to "respond only in JSON" requires no special API support, but fails on edge cases (markdown fences, trailing commas, unescaped quotes, conversational preambles).
+2. **JSON mode:** Provider flag (`response_format: { type: "json_object" }`) that guarantees valid JSON syntax, but does not enforce which keys or types appear in the object.
+3. **Strict schema / constrained decoding:** Compiles a JSON Schema into a context-free grammar or finite-state automaton and masks invalid token logits at every decoding step so the output always conforms to the schema.
+4. **Function and tool calling:** Exposes the target schema as a callable tool definition; models post-trained on tool use reliably populate arguments and allow mixing prose with structured calls.
+5. **Runtime validation (Pydantic / Zod):** Parses the raw JSON string into a strongly typed object and checks semantic invariants (value ranges, regex patterns, cross-field rules) before business logic executes.
+6. **Error-guided repair:** When validation fails, the harness sends the validation error list (missing keys, type mismatches) back to the model or a smaller repair model to fix only the broken fields.
+
+## Architecture
+
+A production structured-output pipeline pairs decoder-level schema enforcement with application-level semantic validation and a bounded retry loop:
+
+- **Step 1 — Schema compilation:** Convert the application's Pydantic or Zod model into a strict JSON Schema (all fields required or explicitly nullable, `additionalProperties: false`).
+- **Step 2 — Constrained generation:** Send the prompt and compiled schema to the model endpoint (or local engine such as vLLM / SGLang with XGrammar or Outlines).
+- **Step 3 — Parse and semantic check:** Parse the JSON payload and run domain validators (database foreign-key checks, numeric bounds, cross-field invariants).
+- **Step 4 — Compact repair or fallback:** On semantic failure, append the specific validation error messages and retry once; if the retry fails or the response was truncated (`finish_reason: "length"`), route to a deterministic fallback or human review queue.
+
+## Technical mechanics
+
+### Grammar-constrained decoding and logit masking
+
+- **Token mask construction:** A grammar engine (Outlines, XGrammar, Guidance, LM Format Enforcer) tracks the parser state after each emitted token and computes the set of vocabulary tokens that keep the partial string valid.
+- **Zero-probability masking:** Before sampling, the engine sets the logit of every disallowed token to $-\infty$, so the model samples only from schema-valid continuations.
+- **First-token precompilation:** Compiling a complex JSON Schema into a token-level state machine takes tens of milliseconds to a few seconds on first use; production engines cache the compiled grammar by schema hash.
+- **Tokenizer boundary traps:** A single sub-word token can span a quote and a colon (`":`), so the grammar engine must map character-level regexes across multi-byte sub-word boundaries.
+
+### Validation and bounded repair loops
+
+- **Distinguish truncation from bad values:** Check `stop_reason` / `finish_reason` before retrying; if the output hit `max_tokens`, retrying with the same token cap will fail again.
+- **Structured error feedback:** Format Pydantic/Zod errors as path + expected type + actual value (for example, `items[0].amount: expected number <= 30, got 42.5`) rather than re-sending the entire prompt from scratch.
+- **Cap retry depth:** Limit repair attempts to 1 or 2 turns; persistent failures indicate an ambiguous schema or an impossible constraint that retries only amplify in cost and latency.
+
+### Designing schemas that models fill accurately
+
+- **Field ordering matters:** Because autoregressive models condition on earlier tokens, place reasoning or summary fields **before** final classification or decision fields if you are not using a reasoning model.
+- **Prefer flat structures and enums:** Deeply nested objects and unions (`anyOf` / `oneOf`) increase grammar compilation time and error rates; use flat keys and explicit string enums.
+- **Make optionality explicit:** Strict schema modes require every property to be listed in `required`, using union types (`["string", "null"]`) for fields that may be absent.
+
+## Trade-offs
+
+| Approach | Syntactic Guarantee | Semantic Guarantee | Latency & Cost | Portability |
+| --- | --- | --- | --- | --- |
+| Prompt-only JSON | None (prone to prose wrappers) | None | Lowest single-pass cost; high retry rate | Works on every model |
+| Basic JSON mode | Valid JSON object only | None (keys may drift) | Low overhead | Widely supported |
+| Strict JSON Schema / Constrained decoding | 100% schema-compliant syntax & types | Type-level only | Grammar compile overhead (cached); zero syntax retries | Provider-specific subsets or self-hosted engine |
+| Tool / Function calling | High (strict when enabled) | Type-level only | Extra prompt tokens for tool definitions | Standard across major APIs |
+| Post-hoc validation + repair loop | Enforced after parse | Full domain & cross-field checks | Adds 1–2 round-trips on failure | Framework-agnostic (Instructor, Marvin, LangChain) |
+
+## Production systems
+
+- **OpenAI Structured Outputs:** Enforces strict JSON Schema compliance via constrained decoding (`strict: true`), requiring `additionalProperties: false` and explicit required lists.
+- **Anthropic Tool Use & Strict Schemas:** Uses tool definitions and grammar constraints to return typed JSON inputs inside `tool_use` content blocks.
+- **vLLM & SGLang (XGrammar / Outlines):** Self-hosted inference engines that compile JSON schemas, regexes, and EBNF grammars into fast token masks with sub-millisecond per-step overhead.
+- **Instructor & Pydantic:** Popular application wrapper that pairs provider schema modes with Pydantic validators and automatic error-fed retries.
+
+## Failure modes & pitfalls
+
+- **Silent truncation on `max_tokens`:** A response cut off mid-object fails JSON parsing; always check `finish_reason` / `stop_reason` before blaming the parser.
+- **Assuming valid JSON means valid data:** Schema enforcement does not stop a model from inventing a plausible-looking UUID or putting a negative price in a `number` field.
+- **Putting classification before reasoning:** In non-reasoning models, forcing the boolean verdict as the first JSON key locks in a hasty guess before the model writes the explanation.
+- **Unbounded repair loops:** Retrying 5 times on a broken schema multiplies tail latency and token spend without fixing the underlying prompt ambiguity.
+- **Unsupported JSON Schema keywords:** Many provider grammar engines reject recursive schemas, complex lookahead regexes, or unconstrained dictionaries.
+
+## Interview framework
+
+1. **Separate syntax from semantics:** State clearly that constrained decoding solves syntax and types, while application validators (Pydantic/Zod) solve domain rules.
+2. **Walk the request path:** Compile schema → constrained generation / tool call → parse → domain validation → bounded error-fed repair → safe fallback.
+3. **Explain constrained decoding mechanics:** Describe how a finite-state machine masks invalid token logits to $-\infty$ at each decoding step and why grammar compilation is cached.
+4. **Call out schema design levers:** Flat structure, explicit enums, `null` unions instead of omitted keys, and ordering explanation fields before decision fields.
+5. **Define operational metrics:** Track first-pass validation rate, retry rate, truncation rate (`max_tokens`), and fallback escalation rate.
+
+**What interviewers listen for:** Distinction between syntactic grammar masking and semantic domain validation, awareness of `max_tokens` truncation, and bounded retry budgets.
+
+**Red flags:** Relying on regex stripping of markdown code fences in production, or claiming JSON mode prevents hallucinated field values.
+
+## Further reading
+
+- [Introducing Structured Outputs in the API (OpenAI, 2024)](https://openai.com/index/introducing-structured-outputs-in-the-api/)
+- [Efficient Guided Generation for Large Language Models — Outlines (Willard & Louf, 2023)](https://arxiv.org/abs/2307.09702)
+- [XGrammar: Flexible and Efficient Structured Generation Engine for LLMs (Dong et al., 2024)](https://arxiv.org/abs/2411.15100)
+- Related pages: [Decoding & Sampling](/ai-system-design/genai-system-design/decoding-and-sampling) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) · [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Outline a robust retry flow when structured output fails validation." category="Implementation">
-    Parse the raw completion, run schema validation, and if it fails return a compact error summary listing missing fields and type mismatches. Retry with the same model or a cheaper repair-focused prompt that sees only the invalid JSON and the schema excerpt, capped at a small number of attempts. If still failing, fall back to a deterministic template partial fill plus human review flag, and log the failure pattern for prompt or schema updates.
+  <InterviewQuestion question="Outline a robust retry flow when structured output fails validation." category="Implementation" level="Mid">
+    - **Check truncation first:** Inspect `finish_reason` / `stop_reason` before parsing; if the response hit `max_tokens`, increase the token budget or shorten the output schema rather than issuing a repair prompt.
+    - **Run typed validation:** Parse the JSON completion into a Pydantic or Zod schema and collect structured field-level errors (field path, expected constraint, received value).
+    - **Issue a compact repair prompt:** Send the invalid JSON alongside the exact validation error summary for at most 1–2 retries so the model fixes only the failing fields.
+    - **Fail safe and log:** If retries still fail, route to a deterministic fallback or human review queue and log the schema hash and raw failure for offline regression testing.
   </InterviewQuestion>
-  <InterviewQuestion question="Why might JSON mode still produce logically invalid outputs?" category="Reliability">
-    JSON mode generally enforces syntax, not semantics. The model can emit valid JSON with wrong keys, wrong types, hallucinated enum values, or values that violate cross-field constraints. Without a validation layer and business rules, consumers can misinterpret data silently. Always pair syntactic guarantees with schema validation and domain checks.
+  <InterviewQuestion question="Why might JSON mode still produce logically invalid outputs?" category="Reliability" level="Junior">
+    - **Syntax vs schema:** Basic JSON mode only guarantees that the string parses as valid JSON; it does not enforce required keys, field names, or value types.
+    - **Type vs domain semantics:** Even strict schema-constrained decoding cannot verify cross-field invariants (e.g., `start_date < end_date`) or external ground truth (e.g., whether an order ID exists in Postgres).
+    - **Defense in depth:** Always pair decoder-level schema constraints with application-layer validators and business-rule checks before executing side effects.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you choose between function calling and a plain JSON schema prompt?" category="Design">
-    Prefer function calling when the provider implements it well for your target models and your output maps naturally to a tool invocation shape. Use explicit JSON schema prompts when you need broader portability, custom wrapping, or when the task is record extraction rather than tool routing. Base the decision on measured parse success, latency, and how tightly you need to couple arguments to named capabilities.
+  <InterviewQuestion question="How do you choose between function calling and a plain JSON schema prompt?" category="Design" level="Mid">
+    - **Use function/tool calling** when the model must decide *which* action to take among several tools, or mix a natural-language user reply with a structured action payload.
+    - **Use strict JSON Schema response format** when every request performs a single deterministic data-extraction, classification, or transformation task with no tool routing.
+    - **Benchmark both on your target model:** Compare first-pass validation rate, prompt token overhead from tool definitions, and portability across your primary and fallback providers.
   </InterviewQuestion>
 </InterviewQuestions>

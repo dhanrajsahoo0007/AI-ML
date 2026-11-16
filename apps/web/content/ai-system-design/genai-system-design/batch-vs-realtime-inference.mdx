@@ -4,9 +4,11 @@ description: Choosing and combining offline batch scoring with synchronous onlin
 updated: 2026-11-15
 ---
 
-Most LLM work is not a chat window. Nightly summaries, evaluation runs, embedding backfills and offline scoring all call the same model, and nobody is waiting on any single answer. Interviewers ask about batch against real time to see whether you price latency: a second of waiting is expensive, and a job that can wait hours can be run for half the price.
+Most LLM work is not a chat window. Nightly summaries, evaluation runs, embedding backfills and offline scoring all call the same model, and nobody is waiting on any single answer.
 
-## TL;DR
+- Interviewers ask about batch against real time to see whether you price latency: a second of waiting is expensive, and a job that can wait hours can be run for half the price.
+
+## Overview
 
 - **Real-time inference** serves a person who is waiting. It is judged on **tail latency** against a deadline in seconds (Brightpost: first token in **400 ms**, the whole answer in **1.5 s**), and capacity is sized for the **peak**.
 - **Batch inference** serves a deadline in hours. It is judged on **throughput and cost per row**: partition the input, run it in parallel, save each result as you go, retry what failed.
@@ -14,9 +16,11 @@ Most LLM work is not a chat window. Nightly summaries, evaluation runs, embeddin
 - **On your own GPUs**, batch work fills the hours the real-time fleet sits idle, with large batches for throughput, at **low priority** so a customer never waits behind it.
 - The discount only matters at volume: **590 dollars a night** on Brightpost's 200,000 nightly summaries, **69 cents** on the 200-ticket golden set. Pick by deadline first, then by cost.
 
-## The idea in plain English
+## Mental model
 
-A bakery has a counter and an oven. At the counter a customer waits, so the baker serves one person at a time, fast, even if the oven is half empty. Overnight nobody is waiting, so the baker fills every tray and bakes tomorrow's bread in a few big loads. Same oven, same recipes, two schedules. The mistake is baking bread one loaf at a time during the day, or making a customer wait for the overnight batch.
+- A bakery has a counter and an oven. At the counter a customer waits, so the baker serves one person at a time, fast, even if the oven is half empty.
+- Overnight nobody is waiting, so the baker fills every tray and bakes tomorrow's bread in a few big loads.
+- Same oven, same recipes, two schedules. The mistake is baking bread one loaf at a time during the day, or making a customer wait for the overnight batch.
 
 ## Core concepts
 
@@ -36,9 +40,19 @@ The difference is easiest to see on one axis of time and one of cost.
   caption="The two deadlines are 57,600 times apart, and the one that can wait pays half; prices illustrative, the discount from the providers' docs (November 2026)."
 />
 
-**How to read it.** The time axis is logarithmic, so each grid label is ten times or more the one before. Brightpost's customer gets the whole answer in 1.5 seconds; a provider batch usually returns within the hour and may take up to 24. The two lime lines are both deadlines; only the first has a person behind it. The bottom bars price one request of the same size each way.
+**How to read it:**
 
-**The numbers.** One answer is 2,200 input and 250 output tokens. At an illustrative 2 dollars per million input tokens and 10 per million output: 2,200 × 2 ÷ 1,000,000 = 0.0044 dollars, plus 250 × 10 ÷ 1,000,000 = 0.0025, so 0.0069 dollars in real time. Through a batch API at 50 % off: 0.00345 dollars. The deadlines: 24 h = 86,400 s, and 86,400 ÷ 1.5 = 57,600.
+- The time axis is logarithmic, so each grid label is ten times or more the one before.
+- Brightpost's customer gets the whole answer in 1.5 seconds; a provider batch usually returns within the hour and may take up to 24.
+- The two lime lines are both deadlines; only the first has a person behind it.
+- The bottom bars price one request of the same size each way.
+
+**The numbers:**
+
+- One answer is 2,200 input and 250 output tokens.
+- At an illustrative 2 dollars per million input tokens and 10 per million output: 2,200 × 2 ÷ 1,000,000 = 0.0044 dollars, plus 250 × 10 ÷ 1,000,000 = 0.0025, so 0.0069 dollars in real time.
+- Through a batch API at 50 % off: 0.00345 dollars.
+- The deadlines: 24 h = 86,400 s, and 86,400 ÷ 1.5 = 57,600.
 
 ## Architecture
 
@@ -83,22 +97,29 @@ One request in an OpenAI batch input file is a line of JSON Lines (one JSON obje
                        {"role": "user", "content": "<the logged prompt and answer>"}]}}
 ```
 
-## Deep dive
+## Technical mechanics
 
 ### What a provider batch API gives you, and what it takes
 
-As of November 2026, the three large providers publish nearly the same terms. Anthropic's Message Batches API charges 50 % of standard prices, takes up to 100,000 requests or 256 MB per batch, finishes most batches within an hour, expires requests not done within 24 hours, and keeps results for 29 days. OpenAI's Batch API gives a 50 % discount with a 24-hour completion window, takes up to 50,000 requests and 200 MB per file, and draws on a separate rate-limit pool, so a big batch does not use up the chat path's limits. Google's Gemini Batch API costs 50 % of the standard price with a 24-hour target turnaround.
+- As of November 2026, the three large providers publish nearly the same terms.
+- Anthropic's Message Batches API charges 50 % of standard prices, takes up to 100,000 requests or 256 MB per batch, finishes most batches within an hour, expires requests not done within 24 hours, and keeps results for 29 days.
+- OpenAI's Batch API gives a 50 % discount with a 24-hour completion window, takes up to 50,000 requests and 200 MB per file, and draws on a separate rate-limit pool, so a big batch does not use up the chat path's limits.
+- Google's Gemini Batch API costs 50 % of the standard price with a 24-hour target turnaround.
 
-What you give up is control of timing. There is no partial deadline: a batch might finish in ten minutes tonight and in twenty hours on a busy night. Design for the 24-hour worst case, poll or subscribe for completion, and treat expiry as a normal outcome. Anthropic notes that prompt-caching discounts stack with the batch discount, but cache hits inside a batch are best-effort; it suggests the 1-hour cache duration for batches that share a long prefix (see [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)).
+- What you give up is control of timing. There is no partial deadline: a batch might finish in ten minutes tonight and in twenty hours on a busy night.
+- Design for the 24-hour worst case, poll or subscribe for completion, and treat expiry as a normal outcome.
+- Anthropic notes that prompt-caching discounts stack with the batch discount, but cache hits inside a batch are best-effort; it suggests the 1-hour cache duration for batches that share a long prefix (see [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)).
 
 ### Running batch on your own GPUs
 
-Self-hosting changes the question from "what discount?" to "what is idle?". A fleet sized for Brightpost's peak of 12 requests a second carries 2.3 on average, so it runs at about 2.3 ÷ 12 ≈ 19 % of capacity across a day, and less at night. Batch work can fill that gap at almost no extra cost, if two rules hold.
+- Self-hosting changes the question from "what discount?" to "what is idle?".
+- A fleet sized for Brightpost's peak of 12 requests a second carries 2.3 on average, so it runs at about 2.3 ÷ 12 ≈ 19 % of capacity across a day, and less at night.
+- Batch work can fill that gap at almost no extra cost, if two rules hold.
 
 - **Batch never delays a customer.** Give chat requests priority in the gateway or engine, cap how much of the fleet the batch may use, or run batch on separate replicas that scale down when chat traffic rises (see [GPU/TPU Resource Management](/ai-system-design/genai-system-design/gpu-tpu-resource-management)).
 - **Tune the engine for throughput.** Offline, nobody feels the time to first token, so allow larger batches and longer queues. vLLM's offline mode takes a whole list of prompts in one call for this reason; Ray Data runs it across many GPUs.
 
-The job itself has the shape every batch system has, the one Brightpost already uses for its month-end image re-render: small jobs in a queue, each saving its result as it goes, so losing a machine costs one small job.
+- The job itself has the shape every batch system has, the one Brightpost already uses for its month-end image re-render: small jobs in a queue, each saving its result as it goes, so losing a machine costs one small job.
 
 <AnimatedDiagram
   spec="animated/cloud/batch-job-queue"
@@ -107,11 +128,17 @@ The job itself has the shape every batch system has, the one Brightpost already 
   caption="The same pattern for LLM jobs: small jobs in a queue, each result saved as it goes, so a lost machine costs one job, not the night."
 />
 
-**How to read it.** The figure comes from the [Batch, HPC and GPUs page](/cloud/compute/batch-hpc-gpus), where the jobs resize photos. Swap the photos for conversations and the spot machines for GPU workers and nothing else changes: 200 jobs of 1,000 conversations each, results written by id, and a job whose machine is reclaimed goes back in the queue.
+**How to read it:**
+
+- The figure comes from the [Batch, HPC and GPUs page](/cloud/compute/batch-hpc-gpus), where the jobs resize photos.
+- Swap the photos for conversations and the spot machines for GPU workers and nothing else changes: 200 jobs of 1,000 conversations each, results written by id, and a job whose machine is reclaimed goes back in the queue.
 
 ### When real time is the only option
 
-Batch is wrong when a decision must reflect events that arrive continuously and a stale result causes harm: live bidding, moderating an upload before it is shown, an operational alert. The middle ground is an **asynchronous queue**: the request returns a job id at once and the result arrives in seconds to minutes, through a webhook or a poll. It suits work that a person started but does not watch, such as a long report. It costs the same as real time per token, but it smooths the peaks your fleet or your rate limits must absorb.
+- Batch is wrong when a decision must reflect events that arrive continuously and a stale result causes harm: live bidding, moderating an upload before it is shown, an operational alert.
+- The middle ground is an **asynchronous queue**: the request returns a job id at once and the result arrives in seconds to minutes, through a webhook or a poll.
+- It suits work that a person started but does not watch, such as a long report.
+- It costs the same as real time per token, but it smooths the peaks your fleet or your rate limits must absorb.
 
 ### Worked example: Brightpost's nightly summaries
 
@@ -154,7 +181,7 @@ For the whole-system view of these numbers, from requests a day to GPUs, see [Ca
 | Own GPUs, offline job | Large batches, highest tokens per GPU; data stays in house | You run the queue, retries and the fleet | Steady, very large volumes on an open model |
 | Own GPUs, idle real-time fleet | Nearly free capacity at night | Must never delay chat; capacity varies with traffic | Self-hosted serving with a big peak-to-average gap |
 
-## Real-world examples
+## Production systems
 
 - **Anthropic Message Batches API:** 50 % of standard prices; up to 100,000 requests or 256 MB per batch; most batches within 1 hour; requests expire after 24 hours and are not billed; results kept 29 days; prompt-cache discounts stack, with best-effort cache hits (as of November 2026).
 - **OpenAI Batch API:** 50 % discount; a fixed 24-hour completion window; up to 50,000 requests and 200 MB per input file; supports the Responses, Chat Completions and Embeddings endpoints among others; does not consume the standard per-model rate limits; output files expire after 30 days by default.
@@ -162,7 +189,7 @@ For the whole-system view of these numbers, from requests a day to GPUs, see [Ca
 - **Amazon Bedrock batch inference:** prompts as files in an S3 bucket, results written back to S3; not available for provisioned models.
 - **vLLM offline inference:** the `LLM` class generates for a whole list of prompts in one call, and Ray Data LLM spreads the same work across a cluster.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Running a large nightly job through the real-time path: it competes with customers for rate limits and GPUs, and pays full price.
 - Treating "most batches finish within an hour" as a promise; the promise is 24 hours.
@@ -171,7 +198,7 @@ For the whole-system view of these numbers, from requests a day to GPUs, see [Ca
 - Using a batch API for evaluation that gates a release: the saving is cents and the wait can be a day.
 - Letting batch work share GPUs with chat without priority or a cap, so the nightly job raises tail latency for night-time customers.
 
-## How to answer in an interview
+## Interview framework
 
 1. Ask who waits on the result and by when. Put each workload on one side: seconds (real time), minutes (asynchronous queue) or hours (batch).
 2. Size the real-time path for its peak and its latency SLO; mention the gateway, autoscaling and tail latency.
@@ -194,24 +221,38 @@ For the whole-system view of these numbers, from requests a day to GPUs, see [Ca
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between batching requests on a GPU and using a provider's batch API?" category="Concepts" level="Junior">
-    Batching on a GPU means the inference engine runs many requests through the model together, so each pass over the weights serves more tokens; real-time serving does this too, with the batch size capped to protect latency. A provider batch API is a pricing and scheduling product: you upload a file of requests, the provider runs them when it has capacity, and you collect results within 24 hours at about half the price. The first is about how a GPU is used; the second is about when your work runs and what it costs.
+    - Batching on a GPU means the inference engine runs many requests through the model together, so each pass over the weights serves more tokens; real-time serving does this too, with the batch size capped to protect latency.
+    - A provider batch API is a pricing and scheduling product: you upload a file of requests, the provider runs them when it has capacity, and you collect results within 24 hours at about half the price.
+    - The first is about how a GPU is used; the second is about when your work runs and what it costs.
   </InterviewQuestion>
   <InterviewQuestion question="What are the main downsides of running everything as real-time inference?" category="Trade-offs" level="Junior">
-    Cost scales with peak concurrency, GPUs sit underused off-peak, and complex autoscaling increases the incident surface. Large bulk recomputes become slow and expensive compared with a batch job, and with a hosted API they also eat the rate limits your customers need. You also lose easy checkpointed replay unless you build the same durability guarantees a batch system gives you for free.
+    - Cost scales with peak concurrency, GPUs sit underused off-peak, and complex autoscaling increases the incident surface.
+    - Large bulk recomputes become slow and expensive compared with a batch job, and with a hosted API they also eat the rate limits your customers need.
+    - You also lose easy checkpointed replay unless you build the same durability guarantees a batch system gives you for free.
   </InterviewQuestion>
   <InterviewQuestion question="When is batch inference inappropriate even if average latency requirements seem loose?" category="Architecture" level="Mid">
-    When decisions must reflect events that arrive continuously and stale scores cause bad outcomes, such as live bidding, moderating uploads before they are shown, or operational alerts. It is also wrong when a feedback loop needs immediate updates to avoid training on outdated labels, unless you design delayed supervision with safe defaults in between. And it is wrong when the result gates something time-bound, such as an evaluation run that blocks a release, because a 24-hour window can cost a day to save a few cents.
+    - When decisions must reflect events that arrive continuously and stale scores cause bad outcomes, such as live bidding, moderating uploads before they are shown, or operational alerts.
+    - It is also wrong when a feedback loop needs immediate updates to avoid training on outdated labels, unless you design delayed supervision with safe defaults in between.
+    - And it is wrong when the result gates something time-bound, such as an evaluation run that blocks a release, because a 24-hour window can cost a day to save a few cents.
   </InterviewQuestion>
   <InterviewQuestion question="How do you keep a nightly batch job from hurting real-time latency on shared GPUs?" category="Scaling" level="Mid">
-    Give real-time traffic priority in the gateway or the engine's scheduler and cap the share of the fleet the batch may use. Alternatively run the batch on separate replicas that scale down as chat traffic rises, or schedule it in the trough and stop submitting when queue depth or time to first token for chat crosses a threshold. Watch chat p95 and p99 during the batch window; if they move, the cap is too high.
+    - Give real-time traffic priority in the gateway or the engine's scheduler and cap the share of the fleet the batch may use.
+    - Alternatively run the batch on separate replicas that scale down as chat traffic rises, or schedule it in the trough and stop submitting when queue depth or time to first token for chat crosses a threshold.
+    - Watch chat p95 and p99 during the batch window; if they move, the cap is too high.
   </InterviewQuestion>
   <InterviewQuestion question="How would you design a hybrid pipeline for document classification with a daily retrain?" category="Architecture" level="Senior">
-    Stream new documents into a queue that feeds a near-real-time first-tier classifier for user-facing triage, while nightly jobs retrain or fine-tune on the accumulated labels and validate on held-out data. Promote new weights through a canary deployment with shadow scoring, then switch the online service. Keep versioned features so batch training rows match what online inference saw at the time, and backfill scores for old documents as a batch job after each promotion.
+    - Stream new documents into a queue that feeds a near-real-time first-tier classifier for user-facing triage, while nightly jobs retrain or fine-tune on the accumulated labels and validate on held-out data.
+    - Promote new weights through a canary deployment with shadow scoring, then switch the online service.
+    - Keep versioned features so batch training rows match what online inference saw at the time, and backfill scores for old documents as a batch job after each promotion.
   </InterviewQuestion>
   <InterviewQuestion question="Your nightly summarisation job uses a provider batch API, and some mornings the summaries are missing. What happened and how do you fix it?" category="Failure modes" level="Senior">
-    Provider batches promise completion within 24 hours, not within your deadline, and requests not processed in time expire; a busy night can also leave some requests errored. Match results by custom id, collect every expired or errored id, and resubmit them, either in the next batch or through the real-time API at full price when the deadline is close. Submit as early as the data allows, alert on any batch still running after a few hours, and make the downstream report show which summaries are missing rather than silently skipping them.
+    - Provider batches promise completion within 24 hours, not within your deadline, and requests not processed in time expire; a busy night can also leave some requests errored.
+    - Match results by custom id, collect every expired or errored id, and resubmit them, either in the next batch or through the real-time API at full price when the deadline is close.
+    - Submit as early as the data allows, alert on any batch still running after a few hours, and make the downstream report show which summaries are missing rather than silently skipping them.
   </InterviewQuestion>
   <InterviewQuestion question="When is it better to run batch work on your own GPUs than on a provider's batch API?" category="Trade-offs" level="Senior">
-    When you already self-host an open model and your real-time fleet has a large peak-to-average gap, the idle hours are nearly free capacity, cheaper than any discount. Self-hosting also wins for very large steady volumes, for data that may not leave your environment, and when you need to control completion time. A provider batch API wins when you use a closed model, have no fleet to fill, or the job is occasional: you get half price without running queues, retries and GPUs yourself.
+    - When you already self-host an open model and your real-time fleet has a large peak-to-average gap, the idle hours are nearly free capacity, cheaper than any discount.
+    - Self-hosting also wins for very large steady volumes, for data that may not leave your environment, and when you need to control completion time.
+    - A provider batch API wins when you use a closed model, have no fleet to fill, or the job is occasional: you get half price without running queues, retries and GPUs yourself.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -4,9 +4,12 @@ description: "Retrieval driven by an agent that plans, searches in several steps
 icon: bot
 ---
 
-A basic RAG pipeline searches once, with the user's words, and answers from whatever came back. Agentic RAG hands the search to the model: it decides what to look for, reads the results, notices what is missing, searches again, and decides when it has enough. It answers harder questions, and it costs more model calls, time and tokens for every one of them.
+A basic RAG pipeline searches once, with the user's words, and answers from whatever came back.
 
-## TL;DR
+- Agentic RAG hands the search to the model: it decides what to look for, reads the results, notices what is missing, searches again, and decides when it has enough.
+- It answers harder questions, and it costs more model calls, time and tokens for every one of them.
+
+## Overview
 
 - **Agentic RAG** puts an LLM in a loop with retrieval as a **tool**: plan, search, read, decide, then search again or answer.
 - It helps when one search cannot find everything: **multi-hop** questions, vague questions, and answers spread over several sources or systems.
@@ -14,13 +17,16 @@ A basic RAG pipeline searches once, with the user's words, and answers from what
 - **Self-RAG** and **Corrective RAG** are narrower: the model or a grader checks retrieval and the answer, inside a mostly fixed pipeline.
 - The cost is real: on Brightpost's question an agent with three search rounds makes **4 model calls instead of 1**, takes about **2.8 s instead of 1.5 s**, and reads **5.8 times the input tokens** (illustrative). Stopping rules and budgets are part of the design, not an add-on.
 
-## The idea in plain English
+## Mental model
 
-A basic RAG system is a clerk who runs one search with your exact words and hands you the top five results. An agentic system is a researcher: they read your question, decide what to look up first, read what they find, notice "this assumes you still have your backup codes", look that up too, and stop when the answer is complete. The researcher gives better answers to hard questions and takes longer on every question, including the easy ones.
+- A basic RAG system is a clerk who runs one search with your exact words and hands you the top five results.
+- An agentic system is a researcher: they read your question, decide what to look up first, read what they find, notice "this assumes you still have your backup codes", look that up too, and stop when the answer is complete.
+- The researcher gives better answers to hard questions and takes longer on every question, including the easy ones.
 
 ## Core concepts
 
-The running example is Brightpost's help centre (1,200 articles, 3,600 chunks) and the question "How do I reset my password if I lost my phone?". Its answer needs three chunks; vector search ranks them 2, 4 and 7, so the ID-check article sits outside a top 5 (see [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)).
+- The running example is Brightpost's help centre (1,200 articles, 3,600 chunks) and the question "How do I reset my password if I lost my phone?".
+- Its answer needs three chunks; vector search ranks them 2, 4 and 7, so the ID-check article sits outside a top 5 (see [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)).
 
 ### From one-shot retrieval to a retrieval loop
 
@@ -59,7 +65,9 @@ In basic RAG, the application decides everything: one query, top 5, one prompt. 
 
 ### Retrieval as a tool
 
-The agent does not call the vector index directly. It calls a **tool**: a function with a name, a description and typed arguments, such as `search_help_centre(query, product, top_k)`. The model writes the arguments; the application runs the search, applies permission filters and returns results as text. Three design rules follow:
+- The agent does not call the vector index directly.
+- It calls a **tool**: a function with a name, a description and typed arguments, such as `search_help_centre(query, product, top_k)`.
+- The model writes the arguments; the application runs the search, applies permission filters and returns results as text. Three design rules follow:
 
 - **Describe tools by when to use them.** "Search help articles for how-to questions" lets the model choose between a help-centre search, a ticket search and an order-lookup API.
 - **Return results the model can judge:** titles, short snippets and ids it can cite, not 5 × 400 tokens of raw text every time.
@@ -69,13 +77,21 @@ The agent does not call the vector index directly. It calls a **tool**: a functi
 
 ### Multi-hop and iterative search
 
-Some questions need the answer to one search before the next search can be written. "Which team owns the service that failed in last week's incident?" needs two hops: search the incidents and find that INC-311 hit checkout-api; then search for the owner of checkout-api and find the Payments team. No single query can name checkout-api before the first search has found it.
+- Some questions need the answer to one search before the next search can be written.
+- "Which team owns the service that failed in last week's incident?" needs two hops: search the incidents and find that INC-311 hit checkout-api; then search for the owner of checkout-api and find the Payments team.
+- No single query can name checkout-api before the first search has found it.
 
-IRCoT (Trivedi et al., 2022) interleaves retrieval with chain-of-thought reasoning: after each reasoning sentence it retrieves again using that sentence. With GPT-3 on four multi-hop datasets (HotpotQA, 2WikiMultihopQA, MuSiQue and IIRC) it improved retrieval by up to 21 points and question answering by up to 15 points over retrieving once. When the hops follow known relations, a [knowledge graph](/ai-system-design/genai-system-design/knowledge-graph-systems) walk does the same job without a model call per hop.
+- IRCoT (Trivedi et al., 2022) interleaves retrieval with chain-of-thought reasoning: after each reasoning sentence it retrieves again using that sentence.
+- With GPT-3 on four multi-hop datasets (HotpotQA, 2WikiMultihopQA, MuSiQue and IIRC) it improved retrieval by up to 21 points and question answering by up to 15 points over retrieving once.
+- When the hops follow known relations, a [knowledge graph](/ai-system-design/genai-system-design/knowledge-graph-systems) walk does the same job without a model call per hop.
 
 ### Self-RAG and corrective RAG
 
-These add checks rather than open-ended planning. **Self-RAG** (Asai et al., 2023) trains the model to emit reflection tokens that decide whether to retrieve at all, whether a passage is relevant and whether its own output is supported. **Corrective RAG** (Yan et al., 2024) adds a small retrieval evaluator; when it rates the results as wrong, the system rewrites the query and searches the web instead. Both keep the pipeline mostly fixed and let a judgement change one branch. The [corrective loop on Advanced RAG](/ai-system-design/genai-system-design/advanced-rag) steps through one run on Brightpost's question.
+- These add checks rather than open-ended planning.
+- **Self-RAG** (Asai et al., 2023) trains the model to emit reflection tokens that decide whether to retrieve at all, whether a passage is relevant and whether its own output is supported.
+- **Corrective RAG** (Yan et al., 2024) adds a small retrieval evaluator; when it rates the results as wrong, the system rewrites the query and searches the web instead.
+- Both keep the pipeline mostly fixed and let a judgement change one branch.
+- The [corrective loop on Advanced RAG](/ai-system-design/genai-system-design/advanced-rag) steps through one run on Brightpost's question.
 
 A useful scale: fixed pipeline → pipeline with graders (Self-RAG, CRAG) → agent with tools (ReAct) → several agents (deep research). Each step right handles more open questions and costs more per question.
 
@@ -90,7 +106,7 @@ An agentic RAG service has four parts:
 
 Simple questions should not enter the loop at all. A router (or the agent's first call) sends "how do I change my email?" straight to a single retrieval pass.
 
-## Deep dive
+## Technical mechanics
 
 ### Stopping rules and budget control
 
@@ -104,7 +120,10 @@ Log the stop reason (answered, budget, no progress) for every run. A rising shar
 
 ### Deep research pipelines
 
-Deep research is agentic RAG at a larger budget: a lead agent plans, starts subagents that each search one thread in parallel, and writes a long report with citations. Anthropic reports that agents use about 4 times the tokens of a chat interaction, multi-agent systems about 15 times, and that token usage alone explained 80% of the variance in performance on their BrowseComp evaluation. More tokens bought better research, at a cost only valuable tasks can carry. [Deep Research Agents](/ai-system-design/genai-system-design/deep-research-agents) covers the design.
+- Deep research is agentic RAG at a larger budget: a lead agent plans, starts subagents that each search one thread in parallel, and writes a long report with citations.
+- Anthropic reports that agents use about 4 times the tokens of a chat interaction, multi-agent systems about 15 times, and that token usage alone explained 80% of the variance in performance on their BrowseComp evaluation.
+- More tokens bought better research, at a cost only valuable tasks can carry.
+- [Deep Research Agents](/ai-system-design/genai-system-design/deep-research-agents) covers the design.
 
 ### When agentic RAG is not worth it
 
@@ -115,11 +134,21 @@ Every round adds a model call and makes the next call read more. Here is the pri
   caption="Searches are cheap; the extra model calls and the context each one re-reads are what make the agent slower and costlier."
 />
 
-**How to read it.** Row 1 counts the work: one search and one model call for basic RAG; three rounds of model call and search, then the answer call, for the agent. Row 2 is time: the searches are slivers, and the three 400 ms decision calls make up most of the extra 1.3 seconds. Row 3 is input tokens, the main driver of cost: every agent call re-reads the conversation so far, so the four calls read 215, 2,215, 4,215 and 6,215 tokens.
+**How to read it:**
 
-**The numbers.** All illustrative, from the stage latencies on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals). Basic: 20 + 15 ms to search, 2 ms to build the prompt, 1,500 ms to answer = 1,537 ms ≈ 1.5 s, and 2,215 input tokens. Agent: 3 × (400 + 35) + 2 + 1,500 = 2,807 ms ≈ 2.8 s, and 215 + 2,215 + 4,215 + 6,215 = 12,860 input tokens, 5.8 times as many.
+- Row 1 counts the work: one search and one model call for basic RAG; three rounds of model call and search, then the answer call, for the agent.
+- Row 2 is time: the searches are slivers, and the three 400 ms decision calls make up most of the extra 1.3 seconds.
+- Row 3 is input tokens, the main driver of cost: every agent call re-reads the conversation so far, so the four calls read 215, 2,215, 4,215 and 6,215 tokens.
 
-For Brightpost, most questions are answered by one or two articles. Running every one through the agent would multiply the model bill by about six for questions basic RAG already answers. The agent earns its cost on the minority that need it: multi-hop questions, questions that span help articles and order data, and questions where the first search fails.
+**The numbers:**
+
+- All illustrative, from the stage latencies on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals).
+- Basic: 20 + 15 ms to search, 2 ms to build the prompt, 1,500 ms to answer = 1,537 ms ≈ 1.5 s, and 2,215 input tokens.
+- Agent: 3 × (400 + 35) + 2 + 1,500 = 2,807 ms ≈ 2.8 s, and 215 + 2,215 + 4,215 + 6,215 = 12,860 input tokens, 5.8 times as many.
+
+- For Brightpost, most questions are answered by one or two articles.
+- Running every one through the agent would multiply the model bill by about six for questions basic RAG already answers.
+- The agent earns its cost on the minority that need it: multi-hop questions, questions that span help articles and order data, and questions where the first search fails.
 
 <Callout tone="red" title="What breaks">
   An agent with no budget loops on questions the corpus cannot answer: it rewrites the query, searches, finds nothing
@@ -137,13 +166,13 @@ For Brightpost, most questions are answered by one or two articles. Running ever
 | Tight vs loose budget                  | Fast, cheap, may stop early     | Better answers on hard questions      | Set the budget per question type and measure answer quality at each cap                        |
 | Single agent vs multi-agent            | Simpler, fewer tokens           | Parallel research threads             | Multi-agent only for research-style tasks worth about 15 times the tokens                      |
 
-## Real-world examples
+## Production systems
 
 - ReAct (Yao et al., 2022) let a model query a Wikipedia API between reasoning steps on HotpotQA and FEVER, and beat imitation and reinforcement learning baselines by 34 and 10 points of absolute success rate on ALFWorld and WebShop.
 - Deep research features in ChatGPT, Gemini and Claude run multi-step search agents that read many sources and write cited reports.
 - Anthropic's multi-agent research system (2025) outperformed a single agent by 90.2% on its internal research evaluation, using several times the tokens.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Sending every question through the agent, including ones a single search answers.
 - No budget, so unanswerable questions loop until a timeout.
@@ -151,7 +180,7 @@ For Brightpost, most questions are answered by one or two articles. Running ever
 - Letting the model choose filters that should be enforced, such as tenant or permission.
 - Evaluating only the final answer, so a run that found the answer by luck after eight searches scores the same as one that needed two.
 
-## How to answer in an interview
+## Interview framework
 
 1. Start from the questions: what share needs more than one search, more than one source, or a follow-up?
 2. Propose a router: a fixed pipeline for most questions, an agent loop for the rest.
@@ -174,39 +203,32 @@ For Brightpost, most questions are answered by one or two articles. Running ever
 
 <InterviewQuestions>
   <InterviewQuestion question="What makes a RAG system agentic, and how is it different from a fixed RAG pipeline?" category="Concepts" level="Junior">
-    In a fixed pipeline the application decides everything: it searches once with the user's question, takes the top
-    results and asks the model to answer. In agentic RAG, retrieval is a tool the model can call. The model decides what
-    to search for, reads the results, decides whether something is missing, searches again with a better query, and
-    decides when it has enough to answer. That handles questions one search cannot answer, at the cost of more model
-    calls and less predictable latency.
+    - In a fixed pipeline the application decides everything: it searches once with the user's question, takes the top results and asks the model to answer.
+    - In agentic RAG, retrieval is a tool the model can call.
+    - The model decides what to search for, reads the results, decides whether something is missing, searches again with a better query, and decides when it has enough to answer.
+    - That handles questions one search cannot answer, at the cost of more model calls and less predictable latency.
   </InterviewQuestion>
   <InterviewQuestion question="How would you decide when an agent should stop searching?" category="Architecture" level="Mid">
-    I would combine three controls. The prompt gives explicit criteria, such as answering when every part of the
-    question has a cited source and searching again only for a named gap. The controller enforces hard limits on
-    searches, tokens and time, and at the limit the agent must answer from what it has or say what it could not find.
-    And the system stops early when a new search returns nothing the agent has not already seen. I would log the stop
-    reason for every run so I can see when budgets are hit too often.
+    - I would combine three controls. The prompt gives explicit criteria, such as answering when every part of the question has a cited source and searching again only for a named gap.
+    - The controller enforces hard limits on searches, tokens and time, and at the limit the agent must answer from what it has or say what it could not find.
+    - And the system stops early when a new search returns nothing the agent has not already seen.
+    - I would log the stop reason for every run so I can see when budgets are hit too often.
   </InterviewQuestion>
   <InterviewQuestion question="Compare a ReAct-style agent with Self-RAG and Corrective RAG." category="Concepts" level="Senior">
-    A ReAct-style agent interleaves reasoning with actions: it can call any tool, as many times as it decides, so it
-    handles open, multi-step questions. Self-RAG trains the model to emit reflection tokens that decide whether to
-    retrieve and whether passages and outputs are relevant and supported. Corrective RAG adds a separate evaluator that
-    grades retrieved documents and triggers a rewritten query or a web search when they are poor. Self-RAG and
-    Corrective RAG keep the pipeline mostly fixed and fix retrieval quality; a ReAct agent changes the shape of the
-    pipeline per question, which is more flexible and more expensive.
+    - A ReAct-style agent interleaves reasoning with actions: it can call any tool, as many times as it decides, so it handles open, multi-step questions.
+    - Self-RAG trains the model to emit reflection tokens that decide whether to retrieve and whether passages and outputs are relevant and supported.
+    - Corrective RAG adds a separate evaluator that grades retrieved documents and triggers a rewritten query or a web search when they are poor.
+    - Self-RAG and Corrective RAG keep the pipeline mostly fixed and fix retrieval quality; a ReAct agent changes the shape of the pipeline per question, which is more flexible and more expensive.
   </InterviewQuestion>
   <InterviewQuestion question="When is agentic RAG not worth it?" category="Trade-offs" level="Mid">
-    When most questions are answered by one or two documents found by one search, such as a help centre. Each agent
-    round adds a model call, and each call re-reads the growing context, so three search rounds can mean four model
-    calls, roughly double the latency and several times the input tokens of a single pass. I would route: a fixed
-    pipeline for the common questions and the agent only for multi-hop questions, questions that span several sources,
-    or cases where the first search fails a relevance check.
+    - When most questions are answered by one or two documents found by one search, such as a help centre.
+    - Each agent round adds a model call, and each call re-reads the growing context, so three search rounds can mean four model calls, roughly double the latency and several times the input tokens of a single pass.
+    - I would route: a fixed pipeline for the common questions and the agent only for multi-hop questions, questions that span several sources, or cases where the first search fails a relevance check.
   </InterviewQuestion>
   <InterviewQuestion question="How do you evaluate an agentic RAG system?" category="Evaluation" level="Senior">
-    I would evaluate the final answer and the path to it. For the answer: correctness, faithfulness to the retrieved
-    sources and citation accuracy on a labelled question set that includes multi-hop and unanswerable questions. For the
-    path: how many searches and tokens each run used, whether the queries were sensible, whether it stopped for the
-    right reason, and how often it hit the budget. I would compare against a fixed pipeline on the same questions, so I
-    know which question types justify the extra cost.
+    - I would evaluate the final answer and the path to it.
+    - For the answer: correctness, faithfulness to the retrieved sources and citation accuracy on a labelled question set that includes multi-hop and unanswerable questions.
+    - For the path: how many searches and tokens each run used, whether the queries were sensible, whether it stopped for the right reason, and how often it hit the budget.
+    - I would compare against a fixed pipeline on the same questions, so I know which question types justify the extra cost.
   </InterviewQuestion>
 </InterviewQuestions>

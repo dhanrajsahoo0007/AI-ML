@@ -5,9 +5,11 @@ icon: folder-tree
 updated: 2026-11-15
 ---
 
-Every evaluation score is only as trustworthy as the cases behind it. Interviewers ask how you would build a golden set because the answer shows whether you have ever had to defend a number: where the cases came from, who labelled them, what they cover and how sure you are.
+Every evaluation score is only as trustworthy as the cases behind it.
 
-## TL;DR
+- Interviewers ask how you would build a golden set because the answer shows whether you have ever had to defend a number: where the cases came from, who labelled them, what they cover and how sure you are.
+
+## Overview
 
 - A **golden set** is a fixed, labelled set of cases that you run on every change. Brightpost's has **200 tickets**: **120** sampled from production logs, **50** written by experts and **30** synthetic.
 - **Real traffic first.** Logs give the real wording and the real mix. Experts add the rare and risky cases logs hardly contain; synthetic cases fill the cells that stay thin, and a person checks each one.
@@ -15,13 +17,19 @@ Every evaluation score is only as trustworthy as the cases behind it. Interviewe
 - **Size is about uncertainty.** At 200 cases a measured 80 % carries about **±5.5 points** (95 % interval). Four times the cases halves that.
 - A set is **versioned, owned and refreshed**. Two annotators label, a lead settles disagreements, and a holdout that nobody tunes on guards against overfitting.
 
-## The idea in plain English
+## Mental model
 
-A driving examiner does not test you on the one loop of roads you practised on. The route has a roundabout, a hill start, a narrow street and, if the weather allows, rain, and the examiner marks each skill on a written sheet. Pick the route from real roads, add the awkward corners that real roads rarely offer, and use the same sheet for every candidate. If learners memorise the route, a pass tells you nothing, so the examiner changes it. A golden set is that route and that sheet for your model.
+- A driving examiner does not test you on the one loop of roads you practised on.
+- The route has a roundabout, a hill start, a narrow street and, if the weather allows, rain, and the examiner marks each skill on a written sheet.
+- Pick the route from real roads, add the awkward corners that real roads rarely offer, and use the same sheet for every candidate.
+- If learners memorise the route, a pass tells you nothing, so the examiner changes it.
+- A golden set is that route and that sheet for your model.
 
 ## Core concepts
 
-The running example is Brightpost's support assistant. Its **golden set is 200 tickets**, each with a reference answer and a rubric. Every number below is illustrative: the counts were chosen to teach, and the totals are checked so they add to 200.
+- The running example is Brightpost's support assistant.
+- Its **golden set is 200 tickets**, each with a reference answer and a rubric.
+- Every number below is illustrative: the counts were chosen to teach, and the totals are checked so they add to 200.
 
 ### Sourcing cases: logs, experts and synthetic data
 
@@ -35,13 +43,17 @@ Three sources, each fixing a weakness of the others.
 
 <StepCards>
   <StepCard n={1} title="Production logs: 120 tickets">
-    Sample from 30 days of real conversations, a set share per intent so rare intents appear. Remove names, emails and card numbers before anyone reads them (see [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)). Logs show how customers really write: typos, two questions in one message, missing order numbers.
+    - Sample from 30 days of real conversations, a set share per intent so rare intents appear.
+    - Remove names, emails and card numbers before anyone reads them (see [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)).
+    - Logs show how customers really write: typos, two questions in one message, missing order numbers.
   </StepCard>
   <StepCard n={2} title="Expert-written: 50 tickets">
     Support leads write the cases that are rare but costly: a refund over the £30 approval limit, an order that was already refunded, a customer who is angry and wrong. Real traffic hardly contains these, and they are where a mistake costs money.
   </StepCard>
   <StepCard n={3} title="Synthetic: 30 tickets">
-    A model writes variations from the policy text and from real tickets, aimed at the thin cells of the grid below. Synthetic cases are cleaner and more uniform than real ones, so use them to fill gaps, never as the bulk, and have a person read each. See [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation).
+    - A model writes variations from the policy text and from real tickets, aimed at the thin cells of the grid below.
+    - Synthetic cases are cleaner and more uniform than real ones, so use them to fill gaps, never as the bulk, and have a person read each.
+    - See [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation).
   </StepCard>
   <StepCard n={4} title="Together: 200 tickets">
     120 + 50 + 30 = 200. Record each case's source in its metadata, so you can later ask whether the model does worse on synthetic cases than on real ones.
@@ -65,11 +77,15 @@ A case is more than a question. It holds the input, what a good answer must cont
 }
 ```
 
-This is an illustrative record, not a standard format. Prefer a **rubric of yes/no lines** to a single "is it good" label: each line can be checked by a code rule, a judge model or a person, and two people disagree less about a concrete line than about a feeling. Write the lines before you label, and revise them when annotators disagree (see [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) and [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
+- This is an illustrative record, not a standard format.
+- Prefer a **rubric of yes/no lines** to a single "is it good" label: each line can be checked by a code rule, a judge model or a person, and two people disagree less about a concrete line than about a feeling.
+- Write the lines before you label, and revise them when annotators disagree (see [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) and [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
 
 ### Coverage: slices, edge cases and adversarial cases
 
-The traffic mix is not the mix you need to test. Most tickets are easy, so a random sample is mostly easy and its pass rate flatters the system. Lay the set out as a grid and fill it on purpose.
+- The traffic mix is not the mix you need to test.
+- Most tickets are easy, so a random sample is mostly easy and its pass rate flatters the system.
+- Lay the set out as a grid and fill it on purpose.
 
 <AnimatedDiagram
   spec="animated/eval/dataset-coverage-grid"
@@ -77,9 +93,17 @@ The traffic mix is not the mix you need to test. Most tickets are easy, so a ran
   caption="A total of 200 hides the shape of the set: the hard refund cell holds four cases, so its pass rate moves 25 points per answer. Counts are illustrative."
 />
 
-**How to read it.** Rows are intents, columns are difficulty, and each cell is a count. Step 2 adds the totals: rows 46 + 40 + 36 + 44 + 34 = 200 and columns 90 + 70 + 40 = 200. The red cell is the thinnest, and step 3 names the problem. Refunds and returns, hard, has 4 cases; one wrong answer moves that cell's pass rate by 1 ÷ 4 = 25 points. Refunds are where money leaves the shop, so this is the cell to grow first, with expert-written cases.
+**How to read it:**
 
-Three kinds of case deserve a deliberate quota: **slices** (an intent, a language, a customer tier), **edge cases** (an empty order number, a refund exactly at £30) and **adversarial cases** (a ticket that tries to talk the assistant into a refund; see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)). Tag each case so the grid can be rebuilt at any time. Read a cell's rate as a flag, not as an estimate: four cases cannot estimate anything.
+- Rows are intents, columns are difficulty, and each cell is a count.
+- Step 2 adds the totals: rows 46 + 40 + 36 + 44 + 34 = 200 and columns 90 + 70 + 40 = 200.
+- The red cell is the thinnest, and step 3 names the problem.
+- Refunds and returns, hard, has 4 cases; one wrong answer moves that cell's pass rate by 1 ÷ 4 = 25 points.
+- Refunds are where money leaves the shop, so this is the cell to grow first, with expert-written cases.
+
+- Three kinds of case deserve a deliberate quota: **slices** (an intent, a language, a customer tier), **edge cases** (an empty order number, a refund exactly at £30) and **adversarial cases** (a ticket that tries to talk the assistant into a refund; see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)).
+- Tag each case so the grid can be rebuilt at any time.
+- Read a cell's rate as a flag, not as an estimate: four cases cannot estimate anything.
 
 ## Architecture
 
@@ -109,11 +133,13 @@ A golden set is a small pipeline with an owner. It runs in five stages and loops
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### How many examples you need
 
-The question is not "how many is enough" but "how wide an interval can I live with". A pass rate measured on n cases is an estimate. With the normal approximation, the 95 % interval around a pass rate p has half-width 1.96 × √(p (1 − p) ÷ n).
+- The question is not "how many is enough" but "how wide an interval can I live with".
+- A pass rate measured on n cases is an estimate.
+- With the normal approximation, the 95 % interval around a pass rate p has half-width 1.96 × √(p (1 − p) ÷ n).
 
 <AnimatedDiagram
   spec="animated/eval/dataset-size-interval"
@@ -121,29 +147,55 @@ The question is not "how many is enough" but "how wide an interval can I live wi
   caption="At 200 tickets a pass rate of 80 percent carries about plus or minus 5.5 points; halving that costs four times the cases. Computed with the normal approximation."
 />
 
-**How to read it.** The curve falls fast and then flattens: width shrinks with the square root of n, so each extra case buys less. Step 2 marks Brightpost's 200 tickets. Step 3 shows that 800 cases give half the width.
+**How to read it:**
 
-**The numbers.** For p = 0.8 and n = 200: 1.96 × √(0.16 ÷ 200) = 1.96 × 0.0283 = 0.0554, about **±5.5 points**. A measured 80 % means the true rate is probably between 74.5 % and 85.5 %. At n = 800 the width is ±2.8. One intent with 34 cases has ±13.4.
+- The curve falls fast and then flattens: width shrinks with the square root of n, so each extra case buys less.
+- Step 2 marks Brightpost's 200 tickets. Step 3 shows that 800 cases give half the width.
 
-Three consequences. First, a change that moves the score by 3 points on 200 cases is inside the noise. Run both versions on the same cases and compare case by case, which narrows the interval, as [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) describes. Second, the normal approximation is rough when n is small or the rate is near 0 % or 100 %. At 190 of 200 passing it gives ±3.0, and the **Wilson interval** gives about 91.0 % to 97.3 %, which is not symmetric. Use Wilson when in doubt (Brown, Cai and DasGupta, 2001). Third, a smaller set is fine to start: 50 well-chosen cases that you read catch more than 5,000 you never open.
+**The numbers:**
+
+- For p = 0.8 and n = 200: 1.96 × √(0.16 ÷ 200) = 1.96 × 0.0283 = 0.0554, about **±5.5 points**.
+- A measured 80 % means the true rate is probably between 74.5 % and 85.5 %.
+- At n = 800 the width is ±2.8. One intent with 34 cases has ±13.4.
+
+- Three consequences. First, a change that moves the score by 3 points on 200 cases is inside the noise.
+- Run both versions on the same cases and compare case by case, which narrows the interval, as [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) describes.
+- Second, the normal approximation is rough when n is small or the rate is near 0 % or 100 %.
+- At 190 of 200 passing it gives ±3.0, and the **Wilson interval** gives about 91.0 % to 97.3 %, which is not symmetric.
+- Use Wilson when in doubt (Brown, Cai and DasGupta, 2001).
+- Third, a smaller set is fine to start: 50 well-chosen cases that you read catch more than 5,000 you never open.
 
 ### Keeping the set fresh and avoiding overfitting
 
-Two things age a golden set. The **world changes**: a policy is rewritten, a product is retired, customers start asking about a new feature, and old cases then test a business that no longer exists. And **you overfit**: every time the team reads a failing case and edits the prompt to fix it, the prompt learns the set. The pass rate climbs and the real quality does not.
+- Two things age a golden set. The **world changes**: a policy is rewritten, a product is retired, customers start asking about a new feature, and old cases then test a business that no longer exists.
+- And **you overfit**: every time the team reads a failing case and edits the prompt to fix it, the prompt learns the set.
+- The pass rate climbs and the real quality does not.
 
-Guard against both. Refresh on a schedule, adding cases from new failures and thumbs-down (see [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)). Keep a **holdout**, a slice of the set or a separate fresh sample that nobody reads while tuning, and report both numbers. If the tuning score rises and the holdout score does not, you have overfit. Never put golden cases in prompts, few-shot examples or fine-tuning data, and keep the set out of any code the model can read.
+- Guard against both. Refresh on a schedule, adding cases from new failures and thumbs-down (see [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)).
+- Keep a **holdout**, a slice of the set or a separate fresh sample that nobody reads while tuning, and report both numbers.
+- If the tuning score rises and the holdout score does not, you have overfit.
+- Never put golden cases in prompts, few-shot examples or fine-tuning data, and keep the set out of any code the model can read.
 
 ### Versioning and ownership
 
-Treat the set like code. Give every release an id (golden-v1), a content hash and a changelog that says which cases were added or retired and why. Never edit a case in place; add a new one and retire the old, so earlier scores stay reproducible. Store the rubric version with the scores. Name one **owner** who approves changes, and write down how disagreements are settled. Without an owner, the set drifts, and a score from March cannot be compared with a score from June.
+- Treat the set like code. Give every release an id (golden-v1), a content hash and a changelog that says which cases were added or retired and why.
+- Never edit a case in place; add a new one and retire the old, so earlier scores stay reproducible.
+- Store the rubric version with the scores. Name one **owner** who approves changes, and write down how disagreements are settled.
+- Without an owner, the set drifts, and a score from March cannot be compared with a score from June.
 
 ### Worked example: Brightpost builds golden-v1 and refreshes it
 
-The team follows the lifecycle figure. **Sample:** 120 tickets from 30 days of logs, a set share per intent, personal data removed. **Label:** two support leads label all 200 cases, 400 labelled copies. **Adjudicate:** they disagree on 22 cases (11 %), a third lead settles them from the written policy, and three repeat disputes become rubric rules. Agreement is 178 ÷ 200 = 89 %.
+- The team follows the lifecycle figure. **Sample:** 120 tickets from 30 days of logs, a set share per intent, personal data removed.
+- **Label:** two support leads label all 200 cases, 400 labelled copies.
+- **Adjudicate:** they disagree on 22 cases (11 %), a third lead settles them from the written policy, and three repeat disputes become rubric rules. Agreement is 178 ÷ 200 = 89 %.
 
 The grid then shows the weak spot: refunds and returns, hard, has 4 cases. The set is frozen as golden-v1 anyway, and the gap goes on the owner's list.
 
-A month later, 12 cases are retired because the delivery policy changed, and 12 are added from thumbs-down tickets. Six of the 12 are expert-written hard refund cases, which take that cell from 4 to 10. The set is golden-v2, still 200. Even at 10 cases a rate in that cell has a rough interval of about ±25 points, so the cell stays a flag and the team reads every case in it by hand. They compare golden-v2 scores only with golden-v2 scores, and keep a separate 30-case holdout, drawn from fresh traffic, that nobody opens during tuning. When a prompt change lifts the tuning score 4 points and the holdout score 0, the team treats the lift as overfitting.
+- A month later, 12 cases are retired because the delivery policy changed, and 12 are added from thumbs-down tickets.
+- Six of the 12 are expert-written hard refund cases, which take that cell from 4 to 10.
+- The set is golden-v2, still 200. Even at 10 cases a rate in that cell has a rough interval of about ±25 points, so the cell stays a flag and the team reads every case in it by hand.
+- They compare golden-v2 scores only with golden-v2 scores, and keep a separate 30-case holdout, drawn from fresh traffic, that nobody opens during tuning.
+- When a prompt change lifts the tuning score 4 points and the holdout score 0, the team treats the lift as overfitting.
 
 <Callout tone="red" title="What breaks">
   The team tunes the prompt against the 200 tickets for two weeks. The score goes from 78 % to 91 %, the release ships, and customers see no change: thumbs-down stay flat. The prompt had learned the set. A holdout or a fresh monthly sample would have shown the gap, and the interval (±5.5 on 200) would have warned that a 3-point move was noise.
@@ -160,13 +212,13 @@ A month later, 12 cases are retired because the delivery policy changed, and 12 
 | A large set (1,000 and up) | Narrow intervals, per-slice estimates | Labelling cost; harder to keep fresh | A mature product with many slices |
 | A frozen set | Scores are comparable over time | Goes stale; invites overfitting | Regression gates, with a refresh schedule |
 
-## Real-world examples
+## Production systems
 
 - **SWE-bench Verified** is a 500-task subset of SWE-bench that human annotators screened for clear problem statements and fair tests. SWE-bench itself has 2,294 task instances from 12 Python repositories (Jimenez et al., 2023). The lesson is that human review of the set raises its value.
 - **MT-bench** is a small set of 80 multi-turn questions used with an LLM judge, which agreed with human preferences over 80 % of the time (Zheng et al., 2023). Small, hand-written and well chosen can be enough for comparison.
 - **Brightpost's golden set** (this page) combines logs, experts and synthetic cases, with a grid, double labelling and a monthly refresh.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Only sampling traffic.** The sample is mostly easy cases, so the pass rate flatters the system and rare costly cases are missing.
 - **One annotator, no rubric.** The labels carry one person's taste, and nobody knows the agreement.
@@ -175,7 +227,7 @@ A month later, 12 cases are retired because the delivery policy changed, and 12 
 - **Letting the set leak.** Golden cases pasted into a prompt, few-shot examples or training data make the score meaningless.
 - **Never refreshing.** The policy changes, the set does not, and the team ends up optimising for last year's shop.
 
-## How to answer in an interview
+## Interview framework
 
 1. State the goal: a labelled set that you can run on every change and trust, with a known uncertainty.
 2. Name the sources and what each is for: logs for the real mix, experts for the rare and risky, synthetic for the gaps.
@@ -197,24 +249,46 @@ A month later, 12 cases are retired because the delivery policy changed, and 12 
 
 <InterviewQuestions>
   <InterviewQuestion question="What is a golden set, and what makes a good one?" category="Concepts" level="Junior">
-    A golden set is a fixed set of labelled cases that you run on every change to the system, so scores from different versions compare fairly. A good one is drawn from real traffic, covers the rare and costly cases as well as the common ones, has clear labels or a rubric, and is versioned. Brightpost's has 200 tickets with reference answers and a rubric. It is small enough to read and large enough to give a usable interval.
+    - A golden set is a fixed set of labelled cases that you run on every change to the system, so scores from different versions compare fairly.
+    - A good one is drawn from real traffic, covers the rare and costly cases as well as the common ones, has clear labels or a rubric, and is versioned.
+    - Brightpost's has 200 tickets with reference answers and a rubric.
+    - It is small enough to read and large enough to give a usable interval.
   </InterviewQuestion>
   <InterviewQuestion question="Where do eval cases come from, and what is each source good for?" category="Concepts" level="Junior">
-    Production logs give the real wording and the real mix of requests. Expert-written cases cover rare, risky or adversarial situations that logs hardly contain, such as a refund over the approval limit. Synthetic cases, written by a model, fill thin cells cheaply, but they are more uniform than real tickets, so a person checks each and they never form the bulk. Record the source of each case so you can compare results by source.
+    - Production logs give the real wording and the real mix of requests.
+    - Expert-written cases cover rare, risky or adversarial situations that logs hardly contain, such as a refund over the approval limit.
+    - Synthetic cases, written by a model, fill thin cells cheaply, but they are more uniform than real tickets, so a person checks each and they never form the bulk.
+    - Record the source of each case so you can compare results by source.
   </InterviewQuestion>
   <InterviewQuestion question="How would you decide how many cases you need?" category="Scaling" level="Mid">
-    Start from the interval you need. For a pass rate p measured on n cases, the 95 % half-width is about 1.96 × √(p (1 − p) ÷ n). At p = 0.8 and n = 200 that is about 5.5 points, and four times the cases halves it. So if you must detect a 2-point change you need thousands of cases, or you compare two versions case by case to cut the noise. Per-slice estimates need the same arithmetic per slice, which is why coverage matters as much as the total.
+    - Start from the interval you need. For a pass rate p measured on n cases, the 95 % half-width is about 1.96 × √(p (1 − p) ÷ n).
+    - At p = 0.8 and n = 200 that is about 5.5 points, and four times the cases halves it.
+    - So if you must detect a 2-point change you need thousands of cases, or you compare two versions case by case to cut the noise.
+    - Per-slice estimates need the same arithmetic per slice, which is why coverage matters as much as the total.
   </InterviewQuestion>
   <InterviewQuestion question="Your golden set has 200 cases but you do not trust it. What do you check?" category="Failure modes" level="Mid">
-    Lay it out as a grid of intent by difficulty and look at the smallest cells: a total of 200 can hide a cell with 4 cases. Check where the cases came from, because a pure traffic sample is mostly easy. Check label quality: two annotators, their agreement, and how disagreements were settled. Then check for leaks and age: whether golden cases appear in prompts or training data, and when the set was last refreshed against current policy.
+    - Lay it out as a grid of intent by difficulty and look at the smallest cells: a total of 200 can hide a cell with 4 cases.
+    - Check where the cases came from, because a pure traffic sample is mostly easy.
+    - Check label quality: two annotators, their agreement, and how disagreements were settled.
+    - Then check for leaks and age: whether golden cases appear in prompts or training data, and when the set was last refreshed against current policy.
   </InterviewQuestion>
   <InterviewQuestion question="How do you label cases so the labels are reliable?" category="Architecture" level="Mid">
-    Write a rubric of concrete yes/no lines before labelling, so each line can be checked by a rule, a judge model or a person. Have two annotators label each case independently, measure how often they agree, and have a lead settle disagreements from the written policy. Every dispute that repeats becomes a rubric rule or an example in the guidelines. Brightpost's annotators disagreed on 22 of 200 cases, 89 % agreement, and three repeat disputes became rules.
+    - Write a rubric of concrete yes/no lines before labelling, so each line can be checked by a rule, a judge model or a person.
+    - Have two annotators label each case independently, measure how often they agree, and have a lead settle disagreements from the written policy.
+    - Every dispute that repeats becomes a rubric rule or an example in the guidelines.
+    - Brightpost's annotators disagreed on 22 of 200 cases, 89 % agreement, and three repeat disputes became rules.
   </InterviewQuestion>
   <InterviewQuestion question="The prompt score rose from 78 % to 91 % on your golden set but users see no change. What happened and how do you prevent it?" category="Failure modes" level="Senior">
-    The most likely cause is overfitting: the team read failing cases and edited the prompt until it passed them, so the prompt learned the set. Check a holdout the team never opened, or a fresh sample from recent traffic; if the holdout score is flat, that confirms it. Prevent it with a holdout slice reported next to the tuning score, a monthly refresh from new failures, and a rule that golden cases never enter prompts, examples or training data. Also report the interval, since a 3-point move on 200 cases is inside the noise.
+    - The most likely cause is overfitting: the team read failing cases and edited the prompt until it passed them, so the prompt learned the set.
+    - Check a holdout the team never opened, or a fresh sample from recent traffic; if the holdout score is flat, that confirms it.
+    - Prevent it with a holdout slice reported next to the tuning score, a monthly refresh from new failures, and a rule that golden cases never enter prompts, examples or training data.
+    - Also report the interval, since a 3-point move on 200 cases is inside the noise.
   </InterviewQuestion>
   <InterviewQuestion question="How do you keep a golden set useful for a year while the product and policies change?" category="Trade-offs" level="Senior">
-    Treat it as a versioned artefact with an owner. Freeze each release with an id, a content hash and a changelog, and never edit cases in place, so old scores stay reproducible. Refresh on a schedule: retire cases whose policy changed, add cases from new failures and thumbs-down, and keep the total steady. Compare scores only within a version, and run old and new versions on the same system once to measure how much the refresh moved the number. The trade-off is stability against freshness: a frozen set is comparable but stale, a rolling set is current but hard to trend.
+    - Treat it as a versioned artefact with an owner.
+    - Freeze each release with an id, a content hash and a changelog, and never edit cases in place, so old scores stay reproducible.
+    - Refresh on a schedule: retire cases whose policy changed, add cases from new failures and thumbs-down, and keep the total steady.
+    - Compare scores only within a version, and run old and new versions on the same system once to measure how much the refresh moved the number.
+    - The trade-off is stability against freshness: a frozen set is comparable but stale, a rolling set is current but hard to trend.
   </InterviewQuestion>
 </InterviewQuestions>

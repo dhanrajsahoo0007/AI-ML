@@ -4,9 +4,12 @@ description: Unify CI for code, data, and models with continuous training trigge
 updated: 2026-11-15
 ---
 
-In an LLM product a one-line prompt edit can change every answer, yet it has no compiler and no type check. Interviewers ask about CI/CD/CT to see whether you treat prompts, tool schemas, indexes and model versions as release artefacts with tests, and whether you know when a model should retrain. The general pipeline is in [CI/CD & Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies); this page covers the LLM-specific gates and the training trigger.
+In an LLM product a one-line prompt edit can change every answer, yet it has no compiler and no type check.
 
-## TL;DR
+- Interviewers ask about CI/CD/CT to see whether you treat prompts, tool schemas, indexes and model versions as release artefacts with tests, and whether you know when a model should retrain.
+- The general pipeline is in [CI/CD & Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies); this page covers the LLM-specific gates and the training trigger.
+
+## Overview
 
 - **Three things ship in lockstep:** application code, pipelines, and the artefacts they use (datasets, prompts, tool schemas, index, model weights). Version them together as one **release bundle**.
 - **Order the gates by cost.** Unit tests need no model. The evaluation suite runs the **200-ticket golden set** and costs 440,000 input tokens, about **0.1 %** of a day's input. The canary costs real traffic.
@@ -15,9 +18,13 @@ In an LLM product a one-line prompt edit can change every answer, yet it has no 
 - **A model passes the same gates as code.** One promotion path keeps a single record of what may reach production.
 - **Tier checks by cost.** Fast checks on every push, the suite on every prompt or model change, the canary at release.
 
-## The idea in plain English
+## Mental model
 
-A bakery tests every new recipe in the same order. First a quick check of the ingredients list (no oven needed). Then a taste test by a panel with a fixed score sheet: the same 200 customers' orders each time, so scores compare. Then a small batch for the shop floor, then the full run. The ovens that bake new recipes on their own (continuous training) work from a calendar, a complaint box and a pile of new order slips, and whatever they bake goes through the same tasting before it reaches a customer.
+- A bakery tests every new recipe in the same order.
+- First a quick check of the ingredients list (no oven needed).
+- Then a taste test by a panel with a fixed score sheet: the same 200 customers' orders each time, so scores compare.
+- Then a small batch for the shop floor, then the full run.
+- The ovens that bake new recipes on their own (continuous training) work from a calendar, a complaint box and a pile of new order slips, and whatever they bake goes through the same tasting before it reaches a customer.
 
 ## Core concepts
 
@@ -42,7 +49,10 @@ Brightpost's pipeline for an LLM change has five stages. Cheap checks come first
   caption="Unit tests, evaluation suite, build, canary, promote. Step 6 shows a prompt change that fails the suite and never reaches the build."
 />
 
-**How to read it.** Steps 1 to 5 reveal the stages. Each box has a line saying what it checks and a three-line note saying what it costs or covers. Step 6 shows a pull request that changes the prompt to p13: it scores 164 of 200 (82 %) against a floor of 170, so the pipeline stops and nothing is built.
+**How to read it:**
+
+- Steps 1 to 5 reveal the stages. Each box has a line saying what it checks and a three-line note saying what it costs or covers.
+- Step 6 shows a pull request that changes the prompt to p13: it scores 164 of 200 (82 %) against a floor of 170, so the pipeline stops and nothing is built.
 
 1. A pull request touches a prompt, a tool schema, a config or code. Unit tests run: templates render, schemas parse, parsers pass. No model is called.
 2. The evaluation suite runs the 200-ticket golden set and scores it. It must reach 170 of 200 (85 %).
@@ -52,15 +62,24 @@ Brightpost's pipeline for an LLM change has five stages. Cheap checks come first
 
 The cloud track draws the same pipeline for application code, with a scan, a signature and one digest promoted from staging to production. The LLM version adds the evaluation suite and the bundle.
 
-## Deep dive
+## Technical mechanics
 
 ### The evaluation suite as a gate
 
-The suite is the expensive stage that earns its cost. One run sends 200 × 2,200 = 440,000 input tokens and 200 × 250 = 50,000 output tokens to the candidate, and the judge adds its own. A day of live traffic is 440,000,000 input tokens, so one run is 440,000 ÷ 440,000,000 = 0.1 % of a day's input. Ten prompt changes a week cost 4.4 M input tokens, which is 0.14 % of a week's 3.08 billion. That is cheap against shipping a regression.
+- The suite is the expensive stage that earns its cost.
+- One run sends 200 × 2,200 = 440,000 input tokens and 200 × 250 = 50,000 output tokens to the candidate, and the judge adds its own.
+- A day of live traffic is 440,000,000 input tokens, so one run is 440,000 ÷ 440,000,000 = 0.1 % of a day's input.
+- Ten prompt changes a week cost 4.4 M input tokens, which is 0.14 % of a week's 3.08 billion. That is cheap against shipping a regression.
 
-Three rules keep the gate honest. Use the same golden set and the same grader version on every run so scores compare. Set the floor from the live bundle's score (here 90 % less 5 points, 85 %). And remember the limit of 200 tickets: a pass rate near 90 % on 200 answers has a 95 % range of about ±4 points, so a 2-point change is noise. Treat a borderline score as a reason to look, not as proof. See [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) for the live counterpart.
+- Three rules keep the gate honest. Use the same golden set and the same grader version on every run so scores compare.
+- Set the floor from the live bundle's score (here 90 % less 5 points, 85 %).
+- And remember the limit of 200 tickets: a pass rate near 90 % on 200 answers has a 95 % range of about ±4 points, so a 2-point change is noise.
+- Treat a borderline score as a reason to look, not as proof.
+- See [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) for the live counterpart.
 
-A trimmed workflow for this gate follows GitHub Actions' syntax (checked November 2026). The `schedule` trigger runs only on the default branch, as often as every 5 minutes, and scheduled runs can be delayed under load. Commands and paths are Brightpost's and illustrative:
+- A trimmed workflow for this gate follows GitHub Actions' syntax (checked November 2026).
+- The `schedule` trigger runs only on the default branch, as often as every 5 minutes, and scheduled runs can be delayed under load.
+- Commands and paths are Brightpost's and illustrative:
 
 ```yaml
 on:
@@ -89,11 +108,21 @@ Continuous training answers "when do we retrain or refresh?" without waiting for
   caption="Three triggers start a training run through one rule with a guard; the result is a candidate bundle that enters the release pipeline."
 />
 
-**How to read it.** Steps 1 to 3 add the triggers: a schedule, a drift alarm and a count of new labelled data. Step 4 joins them in a rule with a guard. Step 5 runs the training, scores it on the same golden set as CI, and registers a candidate bundle that is not live. Step 6 sends it into the release pipeline.
+**How to read it:**
 
-**The numbers.** The schedule fires 12 times a year whether or not anything changed. The drift alarm grades a weekly sample of 200 live answers; 166 pass, which is 83 % and under the 85 % floor, so it fires. The data trigger fires at 1,000 newly resolved tickets, which is 1,000 ÷ 5,000 = 20 % of the fine-tuning set (the threshold is illustrative). The guard allows one run in 7 days and none while one is running, so a noisy alarm cannot start a run storm. Link the alarm to [Drift Detection](/ai-system-design/genai-system-design/drift-detection).
+- Steps 1 to 3 add the triggers: a schedule, a drift alarm and a count of new labelled data.
+- Step 4 joins them in a rule with a guard. Step 5 runs the training, scores it on the same golden set as CI, and registers a candidate bundle that is not live. Step 6 sends it into the release pipeline.
 
-For an LLM application "training" is a family of refreshes: re-embed the index when documents change, refresh the golden set when questions drift, update a prompt, or fine-tune a small model on new tickets. The trigger and the gate are the same for each.
+**The numbers:**
+
+- The schedule fires 12 times a year whether or not anything changed.
+- The drift alarm grades a weekly sample of 200 live answers; 166 pass, which is 83 % and under the 85 % floor, so it fires.
+- The data trigger fires at 1,000 newly resolved tickets, which is 1,000 ÷ 5,000 = 20 % of the fine-tuning set (the threshold is illustrative).
+- The guard allows one run in 7 days and none while one is running, so a noisy alarm cannot start a run storm.
+- Link the alarm to [Drift Detection](/ai-system-design/genai-system-design/drift-detection).
+
+- For an LLM application "training" is a family of refreshes: re-embed the index when documents change, refresh the golden set when questions drift, update a prompt, or fine-tune a small model on new tickets.
+- The trigger and the gate are the same for each.
 
 <Callout tone="red" title="What breaks">
   A retraining job that deploys its own output. A drifted model retrained on drifted data can score worse and still ship, because nothing compared it with the live bundle. Training must end at the registry; only the release pipeline promotes.
@@ -101,7 +130,7 @@ For an LLM application "training" is a family of refreshes: re-embed the index w
 
 ### One bundle, one record
 
-CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a new index); the build step packs it with the prompt, guardrails and tools into bundle 43; the release pipeline scores and canaries it exactly as it would a prompt change.
+- CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a new index); the build step packs it with the prompt, guardrails and tools into bundle 43; the release pipeline scores and canaries it exactly as it would a prompt change.
 
 <AnimatedDiagram
   spec="animated/serving/release-bundle"
@@ -109,7 +138,10 @@ CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a n
   caption="The same bundle that the pipeline builds is the unit that rolls back: five pinned versions, restored together."
 />
 
-**How to read it.** The rows are the five parts of a bundle. The pipeline's build step writes one such manifest; the rollback page shows why the parts move together. The version labels are invented for the figure.
+**How to read it:**
+
+- The rows are the five parts of a bundle. The pipeline's build step writes one such manifest; the rollback page shows why the parts move together.
+- The version labels are invented for the figure.
 
 ### Worked example: Brightpost's week
 
@@ -131,14 +163,14 @@ CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a n
 | Data-volume CT | Uses new labels as they arrive | Volume is not quality | Steady labelling |
 | Manual promotion for major releases | A human judges the risk | Slower; reviewer fatigue | Model swaps and policy changes |
 
-## Real-world examples
+## Production systems
 
 - **GitHub Actions.** Scheduled workflows (default branch only, minimum 5 minutes between runs), concurrency groups that limit how many runs share a name, and environments with required reviewers (documentation checked November 2026).
 - **Google Cloud MLOps guidance.** Describes automated pipelines triggered on demand, on a schedule, on new data, on performance degradation and on data-distribution change.
 - **Argo Rollouts and SageMaker deployment guardrails.** The canary and rollback half of the pipeline, covered on the [rollback page](/ai-system-design/genai-system-design/rollback-blue-green-deployment).
 - **Orchestrators for CT.** Airflow, Prefect and Argo Workflows run training with fixed inputs on a schedule or an event.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Running the evaluation suite with a different golden set or grader each time, so scores cannot be compared.
 - Letting a training job deploy its own output without the release pipeline.
@@ -147,7 +179,7 @@ CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a n
 - Gating on average score alone, so a drop on refund tickets hides inside a flat mean.
 - Rebuilding at promotion time instead of promoting the tested bundle.
 
-## How to answer in an interview
+## Interview framework
 
 1. Say what changes for LLMs: the artefacts are prompts, tools, an index and a model, and quality needs an evaluation, not only tests.
 2. Lay out the stages in cost order: unit and fixture tests, the golden-set suite, build, canary, promote.
@@ -169,27 +201,52 @@ CT and CI/CD share the bundle. Training produces a new model ID (and perhaps a n
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you layer CI checks for an LLM feature that uses RAG and tool calling?" category="Architecture" level="Mid">
-    Run fast checks on every pull request: template schema validation, static checks for unsafe string assembly, unit tests for parsers and tool routers, and mocked retrieval with fixed fixtures to assert prompt assembly. On prompt, model or index changes, run the golden-set evaluation against a floor. Nightly or merge-to-main jobs hit real vector indexes with read-only credentials, run regression prompts against pinned model versions and capture latency histograms. Promotion needs a green bundle with evaluation summaries, token-based cost estimates and signed artefacts tied to the commit.
+    - Run fast checks on every pull request: template schema validation, static checks for unsafe string assembly, unit tests for parsers and tool routers, and mocked retrieval with fixed fixtures to assert prompt assembly.
+    - On prompt, model or index changes, run the golden-set evaluation against a floor.
+    - Nightly or merge-to-main jobs hit real vector indexes with read-only credentials, run regression prompts against pinned model versions and capture latency histograms.
+    - Promotion needs a green bundle with evaluation summaries, token-based cost estimates and signed artefacts tied to the commit.
   </InterviewQuestion>
   <InterviewQuestion question="Where should continuous training live relative to application CI/CD?" category="Architecture" level="Senior">
-    CT should be a separate orchestrated workflow with its own schedule and triggers, but it should reuse the same build artefacts and validation gates as application CD, so training and serving stay aligned. Drift monitors and data counters publish an event that starts a training job with immutable dataset references. The output is a candidate registered with its scores. It reaches inference only through the same promotion pipeline as code, which keeps one source of truth for what may run in production.
+    - CT should be a separate orchestrated workflow with its own schedule and triggers, but it should reuse the same build artefacts and validation gates as application CD, so training and serving stay aligned.
+    - Drift monitors and data counters publish an event that starts a training job with immutable dataset references.
+    - The output is a candidate registered with its scores.
+    - It reaches inference only through the same promotion pipeline as code, which keeps one source of truth for what may run in production.
   </InterviewQuestion>
   <InterviewQuestion question="What reliability practices matter most for ML pipelines in CI?" category="Failure modes" level="Mid">
-    Pin data snapshots and seeds where feasible, cache intermediate artefacts by content hash and make failures actionable with run IDs and input hashes in the logs. Use idempotent steps and retry only transient infrastructure faults, never nondeterministic divergence. Enforce timeouts and resource limits so a stuck GPU job does not block the merge queue, and quarantine flaky tests visibly rather than rerunning them silently. Add a concurrency group so two releases do not run at once.
+    - Pin data snapshots and seeds where feasible, cache intermediate artefacts by content hash and make failures actionable with run IDs and input hashes in the logs.
+    - Use idempotent steps and retry only transient infrastructure faults, never nondeterministic divergence.
+    - Enforce timeouts and resource limits so a stuck GPU job does not block the merge queue, and quarantine flaky tests visibly rather than rerunning them silently.
+    - Add a concurrency group so two releases do not run at once.
   </InterviewQuestion>
   <InterviewQuestion question="Why is a golden-set evaluation suite a CI gate for prompts, and what are its limits?" category="Concepts" level="Junior">
-    A prompt edit can change answers for every user and no compiler will notice. A fixed golden set scored against a floor catches regressions before merge, and because the set and grader are fixed, scores compare run to run. The limits are size and coverage. With 200 tickets, a pass rate near 90 % has a range of about ±4 points, so small changes look like noise, and the set only covers the cases someone wrote down. Keep the live canary and online sampling as backstops.
+    - A prompt edit can change answers for every user and no compiler will notice.
+    - A fixed golden set scored against a floor catches regressions before merge, and because the set and grader are fixed, scores compare run to run.
+    - The limits are size and coverage. With 200 tickets, a pass rate near 90 % has a range of about ±4 points, so small changes look like noise, and the set only covers the cases someone wrote down.
+    - Keep the live canary and online sampling as backstops.
   </InterviewQuestion>
   <InterviewQuestion question="What triggers should start continuous training, and how do you stop a run storm?" category="Scaling" level="Mid">
-    Common triggers are a schedule, a drift alarm on sampled quality or input distribution, and a count of new labelled data. Each has a weakness: a schedule retrains when nothing changed, an alarm can be noisy, and data volume says nothing about quality. Combine them with one rule and a guard: at most one run in a set number of days and none while one is in flight. Log which trigger fired so you can later judge which ones earn their cost.
+    - Common triggers are a schedule, a drift alarm on sampled quality or input distribution, and a count of new labelled data.
+    - Each has a weakness: a schedule retrains when nothing changed, an alarm can be noisy, and data volume says nothing about quality.
+    - Combine them with one rule and a guard: at most one run in a set number of days and none while one is in flight.
+    - Log which trigger fired so you can later judge which ones earn their cost.
   </InterviewQuestion>
   <InterviewQuestion question="Your retraining job produces a model that scores higher offline but worse in production. How could that happen, and how do you prevent it?" category="Failure modes" level="Senior">
-    The golden set may be stale or may overlap the training data, so the offline score flatters the model, or the live questions may have drifted away from it. Prevent it by refreshing the golden set when drift fires, keeping it out of training data, and running the same canary and quality gates on a retrained model as on any change. Compare against the live bundle on sampled production traffic, not only offline. Keep the old bundle warm so rollback is one switch.
+    - The golden set may be stale or may overlap the training data, so the offline score flatters the model, or the live questions may have drifted away from it.
+    - Prevent it by refreshing the golden set when drift fires, keeping it out of training data, and running the same canary and quality gates on a retrained model as on any change.
+    - Compare against the live bundle on sampled production traffic, not only offline.
+    - Keep the old bundle warm so rollback is one switch.
   </InterviewQuestion>
   <InterviewQuestion question="How do you decide what runs on every commit and what runs only at release?" category="Trade-offs" level="Senior">
-    Order the checks by cost and by what they can catch. Unit and fixture tests are free and run on every push. The evaluation suite costs tokens, for Brightpost 440,000 input tokens a run or 0.1 % of a day, so run it on changes that can move answers: prompts, tools, index, guardrails and model. Canary and shadow runs cost live traffic and capacity, so run them at release. Review the split when a gate misses a regression or when its cost grows.
+    - Order the checks by cost and by what they can catch.
+    - Unit and fixture tests are free and run on every push.
+    - The evaluation suite costs tokens, for Brightpost 440,000 input tokens a run or 0.1 % of a day, so run it on changes that can move answers: prompts, tools, index, guardrails and model.
+    - Canary and shadow runs cost live traffic and capacity, so run them at release.
+    - Review the split when a gate misses a regression or when its cost grows.
   </InterviewQuestion>
   <InterviewQuestion question="What makes a production answer traceable to a pipeline run?" category="Concepts" level="Mid">
-    Every release is an immutable bundle with an ID, built by one pipeline run from a commit, a dataset snapshot and a config. The serving layer stamps the bundle ID on each trace and log line. From a bad answer you read the bundle, then the run, then the inputs, and can reproduce or roll back exactly that combination. Without the stamp you can only guess which prompt and model produced the answer.
+    - Every release is an immutable bundle with an ID, built by one pipeline run from a commit, a dataset snapshot and a config.
+    - The serving layer stamps the bundle ID on each trace and log line.
+    - From a bad answer you read the bundle, then the run, then the inputs, and can reproduce or roll back exactly that combination.
+    - Without the stamp you can only guess which prompt and model produced the answer.
   </InterviewQuestion>
 </InterviewQuestions>

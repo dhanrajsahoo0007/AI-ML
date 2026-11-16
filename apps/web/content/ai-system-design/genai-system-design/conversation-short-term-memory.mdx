@@ -3,9 +3,14 @@ title: Conversation / Short-Term Memory
 description: Fit multi-turn dialogue into finite context windows through budgeting, pruning, and prompt design so assistants stay coherent within token and latency budgets.
 ---
 
-A model remembers nothing between requests. Every time a chat assistant replies, the application rebuilds the conversation and sends it again. Short-term memory is the policy that decides what goes into that request: the whole history, the last few messages, a summary, or pinned facts. Interviewers ask about it because the obvious answer, "keep the last N messages", silently forgets the one thing the user said at the start. This page covers the policies, their cost and what each one forgets. Memory that lasts across sessions is on [Agent Memory](/ai-system-design/genai-system-design/agent-memory); how a long-running agent's window is compacted is on [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+A model remembers nothing between requests. Every time a chat assistant replies, the application rebuilds the conversation and sends it again.
 
-## TL;DR
+- Short-term memory is the policy that decides what goes into that request: the whole history, the last few messages, a summary, or pinned facts.
+- Interviewers ask about it because the obvious answer, "keep the last N messages", silently forgets the one thing the user said at the start.
+- This page covers the policies, their cost and what each one forgets.
+- Memory that lasts across sessions is on [Agent Memory](/ai-system-design/genai-system-design/agent-memory); how a long-running agent's window is compacted is on [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+
+## Overview
 
 - Short-term memory is whatever you place in the model's context for the current request: instructions, tool definitions, retrieved text, hidden scratchpad content such as reasoning, and the earlier messages of this conversation.
 - The limit is the **context window, measured in tokens**, not characters. Price, latency and quality all grow worse as the history grows, well before the window is full.
@@ -15,15 +20,23 @@ A model remembers nothing between requests. Every time a chat assistant replies,
 - Trim in whole exchanges. Never separate a tool call from its result: both Claude and OpenAI reject the request.
 - Server-side conversation state (OpenAI's `previous_response_id`, Claude's message threads) saves you resending the history, not paying for it: the model still reads every token.
 
-## The idea in plain English
+## Mental model
 
-Think of a support agent on the phone who cannot take notes. Each time the customer speaks, a colleague hands the agent a printout of the call so far. A long call means a long printout, so the colleague starts cutting pages from the front. Twenty minutes in, the agent no longer knows the order number the customer gave in the first sentence.
+- Think of a support agent on the phone who cannot take notes.
+- Each time the customer speaks, a colleague hands the agent a printout of the call so far.
+- A long call means a long printout, so the colleague starts cutting pages from the front.
+- Twenty minutes in, the agent no longer knows the order number the customer gave in the first sentence.
 
-There are three ways to fix that. Print the whole call every time (complete, but slow and costly). Write a short note of the early part and print only the last few minutes in full (cheaper, but the note can be wrong). Or write the order number on a sticky note that stays on top of every printout (cheap and safe, if you know in advance which facts matter).
+- There are three ways to fix that. Print the whole call every time (complete, but slow and costly).
+- Write a short note of the early part and print only the last few minutes in full (cheaper, but the note can be wrong).
+- Or write the order number on a sticky note that stays on top of every printout (cheap and safe, if you know in advance which facts matter).
 
 ## Core concepts
 
-Every figure on this page follows a 14-message chat with Brightpost's support assistant. Customer 1847 opens with the kettle from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures): "My kettle arrived cracked. It's order 4471. Can I get my money back?" A **message** is one entry in the history, from the customer or the assistant. **Turn t** is the request in which the model writes message t, so at turn 14 it reads messages 1 to 13. Token counts are illustrative.
+- Every figure on this page follows a 14-message chat with Brightpost's support assistant.
+- Customer 1847 opens with the kettle from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures): "My kettle arrived cracked.
+- It's order 4471. Can I get my money back?" A **message** is one entry in the history, from the customer or the assistant.
+- **Turn t** is the request in which the model writes message t, so at turn 14 it reads messages 1 to 13. Token counts are illustrative.
 
 ### The context window as short-term memory
 
@@ -33,7 +46,9 @@ Each request carries a few parts that repeat every time and one part that grows:
 - **Per turn:** retrieved help passages and tool results.
 - **Growing:** the history. In this chat it reaches 1,690 tokens by message 13, and 1,200 of those are the help passages that `search_help` returned in message 4.
 
-Start the design with an explicit **token budget per part**, so no single source silently crowds out the others. Long contexts also lower quality: models use facts buried in the middle of a long prompt less well than facts near its start or end. The evidence is on [Context Engineering](/ai-system-design/genai-system-design/context-engineering#context-rot-and-distraction).
+- Start the design with an explicit **token budget per part**, so no single source silently crowds out the others.
+- Long contexts also lower quality: models use facts buried in the middle of a long prompt less well than facts near its start or end.
+- The evidence is on [Context Engineering](/ai-system-design/genai-system-design/context-engineering#context-rot-and-distraction).
 
 ### Sliding windows
 
@@ -65,7 +80,7 @@ A sliding window keeps the last N messages and drops the rest. Here Brightpost's
   </StepCard>
 </StepCards>
 
-**The numbers** (illustrative). At turn 14 the window holds messages 6 to 13: 40 + 20 + 20 + 10 + 20 + 20 + 30 + 20 = **180 tokens**, against 1,690 for the full history, 89 % less.
+- **The numbers (illustrative):** At turn 14 the window holds messages 6 to 13: 40 + 20 + 20 + 10 + 20 + 20 + 30 + 20 = **180 tokens**, against 1,690 for the full history, 89 % less.
 
 <Callout tone="red" title="What breaks">
   A confident wrong answer, not only a forgotten fact. The best case is that the model asks for the order number again.
@@ -112,9 +127,10 @@ Here is the turn-14 request under the summary policy, in the shape of the Claude
 }
 ```
 
-The Messages API is stateless: you send the history you choose on every request, and earlier assistant messages do not have to be ones the model wrote. That is what makes a summary in place of messages 1 to 9 possible.
+- The Messages API is stateless: you send the history you choose on every request, and earlier assistant messages do not have to be ones the model wrote.
+- That is what makes a summary in place of messages 1 to 9 possible.
 
-## Deep dive
+## Technical mechanics
 
 ### Worked example: what the model sees at turn 14
 
@@ -132,7 +148,8 @@ This follows the [sliding-window figure](#sliding-windows) to its last row and c
 | 12   | Assistant | Good news: the support agent approved your refund at 10:20.                                |     30 |
 | 13   | Customer  | Great. Send me the confirmation, please.                                                   |     20 |
 
-Message 4 is 1,300 tokens because it carries the three help passages `search_help` returned (3 × 400 = 1,200). At turn 14 the model must call `send_email` with the right order and amount. Here is what each policy gives it:
+- Message 4 is 1,300 tokens because it carries the three help passages `search_help` returned (3 × 400 = 1,200).
+- At turn 14 the model must call `send_email` with the right order and amount. Here is what each policy gives it:
 
 | Policy                | History sent           | Tokens | Request | Order, amount, channel in view?  | Likely reply                              |
 | --------------------- | ---------------------- | -----: | ------: | -------------------------------- | ----------------------------------------- |
@@ -141,7 +158,11 @@ Message 4 is 1,300 tokens because it carries the three help passages `search_hel
 | Summary + last 4      | Summary of 1–9 + 10–13 |    210 |   2,906 | All three, from the summary      | Emails "Your £42 refund for order 4471 …" |
 | Pinned facts + last 8 | 3 facts (≈ 30) + 6–13  |    210 |   2,906 | All three, from the pinned block | Emails "Your £42 refund for order 4471 …" |
 
-**The numbers.** Every request carries 2,000 + 696 = 2,696 tokens of instructions and tool definitions. Full: 2,696 + 1,690 = **4,386**. Last 8: 2,696 + 180 = **2,876**. Summary: 2,696 + 120 + 90 = **2,906**, plus one summary call that reads messages 1 to 9 (1,600 tokens) and writes 120.
+**The numbers:**
+
+- Every request carries 2,000 + 696 = 2,696 tokens of instructions and tool definitions.
+- Full: 2,696 + 1,690 = **4,386**. Last 8: 2,696 + 180 = **2,876**.
+- Summary: 2,696 + 120 + 90 = **2,906**, plus one summary call that reads messages 1 to 9 (1,600 tokens) and writes 120.
 
 Three things to take from it:
 
@@ -160,9 +181,15 @@ The same moment as three bars: what each policy sends, and which facts survive.
   caption="Both short policies cut the history by close to 90 %, but only the summary keeps the order number, the amount and the customer's channel. Token counts are illustrative."
 />
 
-**How to read it.** Step 1 is the full history: the blue block, message 4's help passages, dominates. Step 2 is the window of 8: 180 tokens, and the facts column turns red. Step 3 replaces messages 1 to 9 with a 120-token summary (ringed) and keeps 10 to 13 word for word; its text is printed under the bars.
+**How to read it:**
 
-What the summary costs: one more model call per refresh, a few hundred milliseconds if it runs in the background, and the risk that it drops a negation or invents a number. A summary that says "£44 refund" is worse than no summary, because it looks authoritative. Keep identifiers and amounts in pinned fields, and let the prose summary carry the rest.
+- Step 1 is the full history: the blue block, message 4's help passages, dominates.
+- Step 2 is the window of 8: 180 tokens, and the facts column turns red.
+- Step 3 replaces messages 1 to 9 with a 120-token summary (ringed) and keeps 10 to 13 word for word; its text is printed under the bars.
+
+- What the summary costs: one more model call per refresh, a few hundred milliseconds if it runs in the background, and the risk that it drops a negation or invents a number.
+- A summary that says "£44 refund" is worse than no summary, because it looks authoritative.
+- Keep identifiers and amounts in pinned fields, and let the prose summary carry the rest.
 
 ### Trimming without breaking the conversation
 
@@ -178,7 +205,9 @@ A safe trimmer works on whole exchanges (a user message and everything up to the
 
 Both large APIs can now hold the conversation for you (as of November 2026):
 
-- **OpenAI Responses API.** Pass `previous_response_id` to continue from a stored response, or a `conversation` id from the Conversations API for a durable thread (the two cannot be combined). Responses are stored for 30 days by default; conversations have no such limit. The `truncation` parameter defaults to `disabled`, which returns a 400 error when the input exceeds the window; `auto` drops items from the beginning of the conversation, which is a sliding window you do not control.
+- **OpenAI Responses API.** Pass `previous_response_id` to continue from a stored response, or a `conversation` id from the Conversations API for a durable thread (the two cannot be combined).
+  - Responses are stored for 30 days by default; conversations have no such limit.
+  - The `truncation` parameter defaults to `disabled`, which returns a 400 error when the input exceeds the window; `auto` drops items from the beginning of the conversation, which is a sliding window you do not control.
 - **Claude message threads (beta).** Create a thread on the first request, then send only new messages. A thread is append-only, expires five minutes after its last request, and your application keeps its own copy for replay.
 
 Here is turn 14 on OpenAI's API, sending only the newest message:
@@ -192,13 +221,22 @@ Here is turn 14 on OpenAI's API, sending only the newest message:
 }
 ```
 
-OpenAI's guide is explicit: "all previous input tokens for responses in the chain are billed as input tokens". Anthropic says threads do not change pricing. Server-side state saves upload time and code, not tokens, and it does not decide what to forget. Both vendors also offer compaction; see [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state#compaction-and-sliding-window-summarization).
+- OpenAI's guide is explicit: "all previous input tokens for responses in the chain are billed as input tokens".
+- Anthropic says threads do not change pricing.
+- Server-side state saves upload time and code, not tokens, and it does not decide what to forget.
+- Both vendors also offer compaction; see [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state#compaction-and-sliding-window-summarization).
 
 ### Cost over a long chat
 
-The bill follows the sum over all turns, not the last request. If each exchange adds 100 tokens and you send the full history, request k carries about 100 × k tokens. Over 50 exchanges that is 100 × (1 + 2 + … + 50) = **127,500** history tokens, growing with the square of the chat length. A window of 4 exchanges caps each request at 400: 100 + 200 + 300 + 47 × 400 = **19,400**. (Illustrative.)
+- The bill follows the sum over all turns, not the last request.
+- If each exchange adds 100 tokens and you send the full history, request k carries about 100 × k tokens.
+- Over 50 exchanges that is 100 × (1 + 2 + … + 50) = **127,500** history tokens, growing with the square of the chat length.
+- A window of 4 exchanges caps each request at 400: 100 + 200 + 300 + 47 × 400 = **19,400**. (Illustrative.)
 
-Prompt caching changes the comparison. Claude caches the prefix in the order tools, system, messages, and a change at any level invalidates everything after it. An append-only history keeps its prefix, so each request re-reads old messages from cache at 0.1 × the input price and writes only the new exchange at 1.25 ×: 0.1 × 122,500 + 1.25 × 5,000 ≈ **18,500** price-equivalent tokens (illustrative), about the same as the window, with nothing forgotten. A sliding window changes the first message on every request, so the whole history misses the cache each time. Two caveats: cache reads are 0.05 × on some current models, and the default cache lives five minutes, so a customer who pauses longer pays full price for the next turn.
+- Prompt caching changes the comparison. Claude caches the prefix in the order tools, system, messages, and a change at any level invalidates everything after it.
+- An append-only history keeps its prefix, so each request re-reads old messages from cache at 0.1 × the input price and writes only the new exchange at 1.25 ×: 0.1 × 122,500 + 1.25 × 5,000 ≈ **18,500** price-equivalent tokens (illustrative), about the same as the window, with nothing forgotten.
+- A sliding window changes the first message on every request, so the whole history misses the cache each time.
+- Two caveats: cache reads are 0.05 × on some current models, and the default cache lives five minutes, so a customer who pauses longer pays full price for the next turn.
 
 ## Trade-offs
 
@@ -210,15 +248,17 @@ Prompt caching changes the comparison. Claude caches the prefix in the order too
 | Trim by messages vs by tokens   | Simple to explain                           | Matches the real limit and price            | Trigger on tokens; cut on exchange boundaries                 |
 | Own the history vs server state | Full control of what is sent and forgotten  | Less to upload; vendor keeps the thread     | Keep your own transcript either way; server state for latency |
 
-Aggressive pruning saves cost and latency but raises forgetfulness and contradiction. Carrying the full history avoids both until you hit the window or drown the model in noise. Measure a policy against task completion and user frustration (repeated questions, "I already told you"), not token savings alone.
+- Aggressive pruning saves cost and latency but raises forgetfulness and contradiction.
+- Carrying the full history avoids both until you hit the window or drown the model in noise.
+- Measure a policy against task completion and user frustration (repeated questions, "I already told you"), not token savings alone.
 
-## Real-world examples
+## Production systems
 
 - **OpenAI's Responses API** chains requests with `previous_response_id` or a Conversations API id, bills the whole chain as input, and offers `truncation: "auto"` to drop the oldest items when the window is full.
 - **Claude's Messages API** is stateless: the application sends the history on every request. Message threads (beta, header `message-threads-2026-08-12`) keep it server-side for up to an hour; compaction summarises it.
 - **LangGraph** keeps short-term memory as thread state under a `thread_id`, saved by a checkpointer, and leaves what the model sees to the node that calls it: trim with `trim_messages`, delete with `RemoveMessage`, or summarise into a `summary` key.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - A fixed message count that drops the user's first, most important message.
 - Cutting between a tool call and its result, which fails the request.
@@ -228,7 +268,7 @@ Aggressive pruning saves cost and latency but raises forgetfulness and contradic
 - Treating server-side state as free memory: it is billed, and it never forgets on purpose.
 - Tuning for tokens saved instead of tasks completed.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define short-term memory as the context you rebuild on every request, and name its parts.
 2. Give a token budget per part, with headroom for the reply.
@@ -258,63 +298,57 @@ Aggressive pruning saves cost and latency but raises forgetfulness and contradic
     category="Architecture"
     level="Mid"
   >
-    Allocate fixed caps per section with overflow handling: reserve headroom for the model completion, cap retrieved
-    chunks by relevance and diversity, bound tool schemas, and give history a dynamic slice after fixed costs. When
-    retrieval or history exceeds its cap, degrade gracefully by trimming lowest-scored chunks or oldest turns while
-    preserving pinned facts and open tool threads. Emit metrics when trims occur so you can tune budgets from data.
+    - Allocate fixed caps per section with overflow handling: reserve headroom for the model completion, cap retrieved chunks by relevance and diversity, bound tool schemas, and give history a dynamic slice after fixed costs.
+    - When retrieval or history exceeds its cap, degrade gracefully by trimming lowest-scored chunks or oldest turns while preserving pinned facts and open tool threads.
+    - Emit metrics when trims occur so you can tune budgets from data.
   </InterviewQuestion>
   <InterviewQuestion
     question="What performance implications does long conversation context have?"
     category="Performance"
     level="Mid"
   >
-    Longer prompts increase prefill compute and time-to-first-token linearly or superlinearly depending on
-    implementation, and raise per-request dollar cost. They can also slow end-to-end latency if you serialize large
-    payloads to the provider. Caching of prefixes helps when system and document prefixes repeat, and an append-only
-    history keeps its prefix cacheable. Pruning reduces all of these but shifts work to summarization passes if you use
-    them.
+    - Longer prompts increase prefill compute and time-to-first-token linearly or superlinearly depending on implementation, and raise per-request dollar cost.
+    - They can also slow end-to-end latency if you serialize large payloads to the provider.
+    - Caching of prefixes helps when system and document prefixes repeat, and an append-only history keeps its prefix cacheable.
+    - Pruning reduces all of these but shifts work to summarization passes if you use them.
   </InterviewQuestion>
   <InterviewQuestion
     question="Compare sliding-window history with summarization-based retention."
     category="Trade-offs"
     level="Mid"
   >
-    Sliding windows are cheap, deterministic, and easy to debug but forget early constraints. Summarization preserves
-    gist at the cost of an extra model call, possible hallucination of facts in the summary, and engineering complexity
-    to refresh summaries safely. Hybrid approaches often keep the first segment verbatim, summarize the middle, and keep
-    recent turns raw for fidelity on active subtasks.
+    - Sliding windows are cheap, deterministic, and easy to debug but forget early constraints.
+    - Summarization preserves gist at the cost of an extra model call, possible hallucination of facts in the summary, and engineering complexity to refresh summaries safely.
+    - Hybrid approaches often keep the first segment verbatim, summarize the middle, and keep recent turns raw for fidelity on active subtasks.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your support bot asks customers for their order number again after a dozen messages. What is wrong, and how do you fix it?"
     category="Failure modes"
     level="Junior"
   >
-    The history policy is almost certainly a fixed window of the last N messages, and the order number was in the first
-    one. Confirm it by logging what was sent on the failing turn. Fix it in layers: trigger trimming on tokens rather
-    than message count, so short chats keep everything; pin identifiers, amounts and stated preferences in a structured
-    block sent on every turn; and summarise older messages instead of dropping them. Then replay long transcripts and
-    track how often the bot repeats a question.
+    - The history policy is almost certainly a fixed window of the last N messages, and the order number was in the first one.
+    - Confirm it by logging what was sent on the failing turn.
+    - Fix it in layers: trigger trimming on tokens rather than message count, so short chats keep everything; pin identifiers, amounts and stated preferences in a structured block sent on every turn; and summarise older messages instead of dropping them.
+    - Then replay long transcripts and track how often the bot repeats a question.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do you trim a conversation that contains tool calls without breaking the request?"
     category="Implementation"
     level="Senior"
   >
-    Trim whole exchanges, from one user message to the next, so a tool call and its result are kept or dropped together.
-    Claude rejects a tool_use without its tool_result immediately after, and OpenAI rejects a tool message without the
-    assistant message that asked for it. Start the kept history on a user message, keep open clarifying questions with
-    their answers, and count tokens with the model's tokenizer. For bulky results, clear the result's content and keep
-    the call, which saves most of the tokens without breaking the structure.
+    - Trim whole exchanges, from one user message to the next, so a tool call and its result are kept or dropped together.
+    - Claude rejects a tool_use without its tool_result immediately after, and OpenAI rejects a tool message without the assistant message that asked for it.
+    - Start the kept history on a user message, keep open clarifying questions with their answers, and count tokens with the model's tokenizer.
+    - For bulky results, clear the result's content and keep the call, which saves most of the tokens without breaking the structure.
   </InterviewQuestion>
   <InterviewQuestion
     question="Does server-side conversation state such as previous_response_id save tokens?"
     category="Cost"
     level="Senior"
   >
-    No. It saves resending the history and some latency, but OpenAI bills every earlier input token in the chain as
-    input on each request, and Anthropic's message threads do not change pricing. The model still reads the whole
-    history, so the budget, the trimming policy and the forgetting all remain your job. Keep your own transcript as the
-    source of truth too: stored responses expire after 30 days by default, and Claude threads after five minutes idle.
-    To cut cost, use prompt caching with an append-only history, or compaction.
+    - No. It saves resending the history and some latency, but OpenAI bills every earlier input token in the chain as input on each request, and Anthropic's message threads do not change pricing.
+    - The model still reads the whole history, so the budget, the trimming policy and the forgetting all remain your job.
+    - Keep your own transcript as the source of truth too: stored responses expire after 30 days by default, and Claude threads after five minutes idle.
+    - To cut cost, use prompt caching with an append-only history, or compaction.
   </InterviewQuestion>
 </InterviewQuestions>

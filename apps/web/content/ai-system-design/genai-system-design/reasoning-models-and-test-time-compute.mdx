@@ -5,9 +5,11 @@ icon: brain
 updated: 2026-11-15
 ---
 
-A reasoning model writes a long, often hidden, chain of thought before it answers, and gets measurably better at math, code and planning by doing so. Interviewers ask about it because it changes the cost and latency math of every LLM feature, and because "use the reasoning model" is not a design: you have to say how much compute to spend, on which requests, and how to check the result.
+A reasoning model writes a long, often hidden, chain of thought before it answers, and gets measurably better at math, code and planning by doing so.
 
-## TL;DR
+- Interviewers ask about it because it changes the cost and latency math of every LLM feature, and because "use the reasoning model" is not a design: you have to say how much compute to spend, on which requests, and how to check the result.
+
+## Overview
 
 - **Test-time compute** is computation spent per question at inference instead of on a bigger model. There are three main ways to spend it: **one longer chain of thought**, **many samples plus a majority vote**, and **many samples plus a verifier or search**.
 - **Chain-of-thought prompting** started it: eight worked examples lifted PaLM 540B on the GSM8K math benchmark from **17.9% to 56.9%** (Wei et al., 2022). **Self-consistency** (majority vote over 40 sampled chains) pushed it to **74.4%**.
@@ -16,9 +18,14 @@ A reasoning model writes a long, often hidden, chain of thought before it answer
 - **Thinking tokens are billed as output tokens** and the user waits for all of them, even when the API shows only a summary. Use reasoning for **multi-step problems**, not lookups or latency-bound UX.
 - The visible chain of thought is **not a faithful log** of why the model answered: biased prompts cut accuracy by **up to 36%** while the explanations failed to mention the bias (Turpin et al., 2023).
 
-## The idea in plain English
+## Mental model
 
-Think of a math exam. A student who writes the answer straight away is fast but makes slips on long problems. Give the same student scratch paper and ten minutes and they write steps, notice "wait, that total is too big", and fix it: that is a chain of thought. Another option is to ask five students and go with the most common answer, which helps unless they all fall for the same trap. A third is to hand every attempt to a teacher who checks each line and keeps the best one. All three cost more time than answering at once, and none of them helps on "what is the capital of France?". Reasoning models are students who were trained, by grading thousands of their own attempts, to use the scratch paper well.
+- Think of a math exam. A student who writes the answer straight away is fast but makes slips on long problems.
+- Give the same student scratch paper and ten minutes and they write steps, notice "wait, that total is too big", and fix it: that is a chain of thought.
+- Another option is to ask five students and go with the most common answer, which helps unless they all fall for the same trap.
+- A third is to hand every attempt to a teacher who checks each line and keeps the best one.
+- All three cost more time than answering at once, and none of them helps on "what is the capital of France?".
+- Reasoning models are students who were trained, by grading thousands of their own attempts, to use the scratch paper well.
 
 ## Core concepts
 
@@ -30,19 +37,40 @@ Think of a math exam. A student who writes the answer straight away is fast but 
    C \approx 2N \cdot k \cdot (T_{\text{think}} + T_{\text{answer}})
    $$
 
-   for $k$ samples of $T_{\text{think}}$ thinking tokens and $T_{\text{answer}}$ answer tokens. A model can trade $N$ (a bigger model) for $k$ or $T_{\text{think}}$ (more work per question). Each extra token is also one more forward pass of serial work, so thinking adds latency, not only cost.
+- for $k$ samples of $T_{\text{think}}$ thinking tokens and $T_{\text{answer}}$ answer tokens.
+- A model can trade $N$ (a bigger model) for $k$ or $T_{\text{think}}$ (more work per question).
+- Each extra token is also one more forward pass of serial work, so thinking adds latency, not only cost.
 
-2. **Chain-of-thought (CoT) prompting.** Wei et al. (2022) put a few worked examples with written reasoning steps in the prompt. With eight such examples, PaLM 540B went from 17.9% to 56.9% on GSM8K. The gain appeared only in models of about 100B parameters or more; smaller models wrote fluent but illogical chains and did worse than with plain prompts. Kojima et al. (2022) showed that one sentence is often enough: appending "Let's think step by step" took InstructGPT (`text-davinci-002`) from 17.7% to 78.7% on MultiArith and from 10.4% to 40.7% on GSM8K, with no examples. A common intuition for why it works: each token gets a fixed amount of computation, so writing intermediate results gives the model more forward passes and a scratchpad it can attend back to.
+2. **Chain-of-thought (CoT) prompting.** Wei et al. (2022) put a few worked examples with written reasoning steps in the prompt.
+   - With eight such examples, PaLM 540B went from 17.9% to 56.9% on GSM8K.
+   - The gain appeared only in models of about 100B parameters or more; smaller models wrote fluent but illogical chains and did worse than with plain prompts.
+   - Kojima et al. (2022) showed that one sentence is often enough: appending "Let's think step by step" took InstructGPT (`text-davinci-002`) from 17.7% to 78.7% on MultiArith and from 10.4% to 40.7% on GSM8K, with no examples.
+   - A common intuition for why it works: each token gets a fixed amount of computation, so writing intermediate results gives the model more forward passes and a scratchpad it can attend back to.
 
-3. **Extended thinking.** A reasoning model writes its chain of thought in a separate segment before the answer. DeepSeek-R1-Zero's training template asks for the reasoning inside `<think>` and `</think>` tags, then the answer. Many hosted APIs hide or summarize this segment and show only the answer; open-weight models such as R1 return it in full. The model is not prompted into this; it is **trained** to do it, and behaviors such as re-checking a step or trying another approach emerge during training (see [RLVR & Reasoning Post-Training](/ai-system-design/genai-system-design/rlvr-and-reasoning-post-training)).
+3. **Extended thinking.** A reasoning model writes its chain of thought in a separate segment before the answer.
+   - DeepSeek-R1-Zero's training template asks for the reasoning inside `<think>` and `</think>` tags, then the answer.
+   - Many hosted APIs hide or summarize this segment and show only the answer; open-weight models such as R1 return it in full.
+   - The model is not prompted into this; it is **trained** to do it, and behaviors such as re-checking a step or trying another approach emerge during training (see [RLVR & Reasoning Post-Training](/ai-system-design/genai-system-design/rlvr-and-reasoning-post-training)).
 
-4. **Faithfulness of the visible chain.** A chain of thought can read well and still not be the reason for the answer. Turpin et al. (2023) reordered the options in few-shot examples so the correct answer was always "(A)", or suggested an answer in the prompt. GPT-3.5 and Claude 1.0 followed the bias, wrote explanations justifying the biased answer, and systematically failed to mention the bias; accuracy fell by as much as 36% across 13 BIG-Bench Hard tasks. Treat the chain as a useful hint, not an audit log.
+4. **Faithfulness of the visible chain.** A chain of thought can read well and still not be the reason for the answer.
+   - Turpin et al. (2023) reordered the options in few-shot examples so the correct answer was always "(A)", or suggested an answer in the prompt.
+   - GPT-3.5 and Claude 1.0 followed the bias, wrote explanations justifying the biased answer, and systematically failed to mention the bias; accuracy fell by as much as 36% across 13 BIG-Bench Hard tasks.
+   - Treat the chain as a useful hint, not an audit log.
 
 ### Thinking budgets and effort levels
 
-5. **Budgets and budget forcing.** A thinking budget caps how many tokens the model may spend thinking. Models count their own tokens badly: in the s1 paper (Muennighoff et al., 2025), a model trained with "think for up to N tokens" instructions mostly ignored them. **Budget forcing** controls length at decoding time instead. To cap thinking, insert the end-of-thinking delimiter (optionally followed by "Final Answer:"). To extend it, suppress the delimiter and append "Wait", which often makes the model re-check and fix its answer. With budget forcing, s1-32B went from 50% to 57% on AIME 2024, but the gains flattened, and forcing it to continue too often led to repetitive loops.
+5. **Budgets and budget forcing.** A thinking budget caps how many tokens the model may spend thinking.
+   - Models count their own tokens badly: in the s1 paper (Muennighoff et al., 2025), a model trained with "think for up to N tokens" instructions mostly ignored them.
+   - **Budget forcing** controls length at decoding time instead.
+   - To cap thinking, insert the end-of-thinking delimiter (optionally followed by "Final Answer:").
+   - To extend it, suppress the delimiter and append "Wait", which often makes the model re-check and fix its answer.
+   - With budget forcing, s1-32B went from 50% to 57% on AIME 2024, but the gains flattened, and forcing it to continue too often led to repetitive loops.
 
-6. **Effort levels in APIs.** Hosted APIs expose a coarse dial instead of an exact count. As of late 2026, OpenAI's Responses API takes a `reasoning.effort` setting (levels such as `low`, `medium` and `high`; the available set and the default depend on the model). Anthropic's older Claude models took a fixed `budget_tokens` (at least 1,024 and below `max_tokens`); its newer models reject it and instead decide per request whether and how much to think, guided by an `effort` level from `low` to `max`. Google's Gemini API uses a thinking level too. In every case effort is a **soft target**: the output token limit is the only hard cap, and it includes the thinking.
+6. **Effort levels in APIs.** Hosted APIs expose a coarse dial instead of an exact count.
+   - As of late 2026, OpenAI's Responses API takes a `reasoning.effort` setting (levels such as `low`, `medium` and `high`; the available set and the default depend on the model).
+   - Anthropic's older Claude models took a fixed `budget_tokens` (at least 1,024 and below `max_tokens`); its newer models reject it and instead decide per request whether and how much to think, guided by an `effort` level from `low` to `max`.
+   - Google's Gemini API uses a thinking level too.
+   - In every case effort is a **soft target**: the output token limit is the only hard cap, and it includes the thinking.
 
 ### Self-consistency, verification and search at inference time
 
@@ -52,11 +80,21 @@ Think of a math exam. A student who writes the answer straight away is fast but 
    \hat{y} = \arg\max_{y} \sum_{i=1}^{k} \mathbb{1}[y_i = y]
    $$
 
-   With 40 samples, PaLM 540B on GSM8K went from 56.5% (one greedy chain) to 74.4%. The authors note that performance saturates quickly and suggest 5 or 10 paths as a starting point. It needs answers you can compare exactly (a number, a choice, a passing test), and it fails when the model's most common answer is a popular mistake.
+- With 40 samples, PaLM 540B on GSM8K went from 56.5% (one greedy chain) to 74.4%.
+- The authors note that performance saturates quickly and suggest 5 or 10 paths as a starting point.
+- It needs answers you can compare exactly (a number, a choice, a passing test), and it fails when the model's most common answer is a popular mistake.
 
-8. **Best-of-N with verifiers: outcome vs process reward models.** Instead of voting, score each sample and keep the best. An **outcome reward model (ORM)** scores only the final answer. A **process reward model (PRM)** scores every step; Lightman et al. (2023) define a solution's score as the probability that every step is correct, $\prod_t p(\text{step}_t \text{ correct})$. They trained a PRM on PRM800K, 800,000 human labels on individual steps. Selecting from 1,860 samples per problem on 500 MATH test problems, the PRM solved 78.2%, the ORM 72.4% and majority voting 69.6%. Where an exact check exists (unit tests, a math answer checker, a compiler), use it as the verifier: it cannot be fooled the way a learned scorer can.
+8. **Best-of-N with verifiers: outcome vs process reward models.** Instead of voting, score each sample and keep the best.
+   - An **outcome reward model (ORM)** scores only the final answer.
+   - A **process reward model (PRM)** scores every step; Lightman et al. (2023) define a solution's score as the probability that every step is correct, $\prod_t p(\text{step}_t \text{ correct})$.
+   - They trained a PRM on PRM800K, 800,000 human labels on individual steps.
+   - Selecting from 1,860 samples per problem on 500 MATH test problems, the PRM solved 78.2%, the ORM 72.4% and majority voting 69.6%.
+   - Where an exact check exists (unit tests, a math answer checker, a compiler), use it as the verifier: it cannot be fooled the way a learned scorer can.
 
-9. **Search.** Search treats partial reasoning as a tree. Tree of Thoughts (Yao et al., 2023) has the model propose several next steps ("thoughts"), rate them, and keep the best few at each level, backtracking when a branch looks hopeless. On the Game of 24, GPT-4 solved 4% of puzzles with a chain of thought, 9% with 100-sample self-consistency and 74% with Tree of Thoughts keeping the 5 best states per step. Search pays for many more model calls per question; PRM-guided beam search (Snell et al., 2024) is the same idea with a learned step scorer.
+9. **Search.** Search treats partial reasoning as a tree.
+   - Tree of Thoughts (Yao et al., 2023) has the model propose several next steps ("thoughts"), rate them, and keep the best few at each level, backtracking when a branch looks hopeless.
+   - On the Game of 24, GPT-4 solved 4% of puzzles with a chain of thought, 9% with 100-sample self-consistency and 74% with Tree of Thoughts keeping the 5 best states per step.
+   - Search pays for many more model calls per question; PRM-guided beam search (Snell et al., 2024) is the same idea with a learned step scorer.
 
 ## Architecture
 
@@ -75,15 +113,23 @@ A serving system that uses test-time compute usually has these parts:
 4. **Aggregator.** A majority vote, a verifier (PRM, ORM, unit tests, a checker) or a search controller that expands the most promising partial solutions.
 5. **Budget controller.** Enforce effort, a thinking budget, a maximum $k$ and a timeout, and log thinking tokens per request so cost stays visible.
 
-## Deep dive
+## Technical mechanics
 
 ### How reasoning models are trained
 
 The training recipe is the subject of [RLVR & Reasoning Post-Training](/ai-system-design/genai-system-design/rlvr-and-reasoning-post-training); here is what matters for inference.
 
-- **OpenAI o1 (September 2024).** OpenAI described o1 as trained with large-scale reinforcement learning to use a chain of thought, and reported that performance improves both with more RL (train-time compute) and with more time spent thinking (test-time compute). On AIME 2024, GPT-4o solved 12% of problems; o1 solved 74% with one sample, 83% with a majority vote over 64 samples and 93% when a learned scoring function re-ranked 1,000 samples. OpenAI chose not to show the raw chain of thought, giving user experience, competitive advantage and the option of monitoring the chain as reasons, and shows a model-written summary instead.
-- **DeepSeek-R1 (January 2025).** DeepSeek-R1-Zero applied RL (the GRPO algorithm) directly to a base model, with rule-based rewards for a correct final answer and for the thinking format. AIME 2024 pass@1 rose from 15.6% to 71.0%, and to 86.7% with a majority vote over 64 samples. The average response length grew steadily during training, from hundreds to thousands of reasoning tokens, without any length reward. R1-Zero's text was hard to read and mixed languages, so DeepSeek-R1 added a small cold-start fine-tuning stage before RL; it scored 79.8% on AIME 2024 and 97.3% on MATH-500, against 79.2% and 96.4% for OpenAI o1-1217 in the same table.
-- **Distillation.** DeepSeek fine-tuned smaller Qwen and Llama models on 800K samples generated with R1, with no RL. DeepSeek-R1-Distill-Qwen-32B scored 72.6% on AIME 2024, while running large-scale RL directly on the same 32B base reached only 47.0%. The s1 paper went further: fine-tuning Qwen2.5-32B-Instruct on 1,000 curated reasoning traces took 26 minutes on 16 H100 GPUs. See [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models).
+- **OpenAI o1 (September 2024).** OpenAI described o1 as trained with large-scale reinforcement learning to use a chain of thought, and reported that performance improves both with more RL (train-time compute) and with more time spent thinking (test-time compute).
+  - On AIME 2024, GPT-4o solved 12% of problems; o1 solved 74% with one sample, 83% with a majority vote over 64 samples and 93% when a learned scoring function re-ranked 1,000 samples.
+  - OpenAI chose not to show the raw chain of thought, giving user experience, competitive advantage and the option of monitoring the chain as reasons, and shows a model-written summary instead.
+- **DeepSeek-R1 (January 2025).** DeepSeek-R1-Zero applied RL (the GRPO algorithm) directly to a base model, with rule-based rewards for a correct final answer and for the thinking format.
+  - AIME 2024 pass@1 rose from 15.6% to 71.0%, and to 86.7% with a majority vote over 64 samples.
+  - The average response length grew steadily during training, from hundreds to thousands of reasoning tokens, without any length reward.
+  - R1-Zero's text was hard to read and mixed languages, so DeepSeek-R1 added a small cold-start fine-tuning stage before RL; it scored 79.8% on AIME 2024 and 97.3% on MATH-500, against 79.2% and 96.4% for OpenAI o1-1217 in the same table.
+- **Distillation.** DeepSeek fine-tuned smaller Qwen and Llama models on 800K samples generated with R1, with no RL.
+  - DeepSeek-R1-Distill-Qwen-32B scored 72.6% on AIME 2024, while running large-scale RL directly on the same 32B base reached only 47.0%.
+  - The s1 paper went further: fine-tuning Qwen2.5-32B-Instruct on 1,000 curated reasoning traces took 26 minutes on 16 H100 GPUs.
+  - See [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models).
 
 Both levers, longer thinking and more samples, show the same shape when measured:
 
@@ -92,7 +138,10 @@ Both levers, longer thinking and more samples, show the same shape when measured
   caption="Both kinds of extra compute raise accuracy on AIME 2024, and the first increase buys the most. Points from Muennighoff et al. (2025), Table 12, and OpenAI's o1 launch post (2024); lines join reported points only."
 />
 
-Snell et al. (2024) asked how to spend a fixed test-time budget best, using PaLM 2 models fine-tuned to revise answers and to score steps on MATH. The best method depended on difficulty: on easier questions, letting the model revise its own answer in sequence beat parallel samples; on harder ones, parallel sampling or search against a PRM did better. Picking the method per question by estimated difficulty matched best-of-N with **about 4× less compute**. In a FLOPs-matched comparison, a small model with this extra inference compute often outperformed a **14× larger** model on easy and medium questions, but on the hardest questions extra pretraining was worth more than extra thinking.
+- Snell et al. (2024) asked how to spend a fixed test-time budget best, using PaLM 2 models fine-tuned to revise answers and to score steps on MATH.
+- The best method depended on difficulty: on easier questions, letting the model revise its own answer in sequence beat parallel samples; on harder ones, parallel sampling or search against a PRM did better.
+- Picking the method per question by estimated difficulty matched best-of-N with **about 4× less compute**.
+- In a FLOPs-matched comparison, a small model with this extra inference compute often outperformed a **14× larger** model on easy and medium questions, but on the hardest questions extra pretraining was worth more than extra thinking.
 
 ### Cost, latency and when not to use reasoning
 
@@ -107,7 +156,10 @@ Every thinking token is an output token: you pay for it and you wait for it.
 - **Latency.** The answer cannot start until thinking ends, so time to first visible token grows with the thinking length. Stream a thinking summary or progress notes if users watch the screen (see [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)).
 - **Truncation.** The output limit covers thinking plus answer. If thinking uses it up, the response ends before any answer, and you still pay. OpenAI suggests reserving at least 25,000 tokens for reasoning and output when you start.
 
-**Where reasoning helps:** competition math, code that must pass tests, multi-step planning, agent steps that choose among tools, and any task where an answer can be checked. **Where it does not:** lookups, classification and extraction, short rewrites, autocomplete and voice turns with a latency budget of a second or two. **Overthinking** is real: in the s1 paper's ablations, a prompt asking for a long amount of thinking raised average thinking from 6,109 to 9,651 tokens on AIME 2024 yet lowered accuracy from 50.0% to 36.7%. More thinking is not always better thinking; measure it on your own tasks.
+- **Where reasoning helps:** competition math, code that must pass tests, multi-step planning, agent steps that choose among tools, and any task where an answer can be checked.
+- **Where it does not:** lookups, classification and extraction, short rewrites, autocomplete and voice turns with a latency budget of a second or two.
+- **Overthinking** is real: in the s1 paper's ablations, a prompt asking for a long amount of thinking raised average thinking from 6,109 to 9,651 tokens on AIME 2024 yet lowered accuracy from 50.0% to 36.7%.
+- More thinking is not always better thinking; measure it on your own tasks.
 
 ### Prompting reasoning models differently
 
@@ -130,7 +182,7 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 | Best-of-N + verifier | Beats voting when the verifier is good | Verifier to build or train; can be gamed | Code with tests, math with checkers |
 | Tree search (ToT, PRM-guided beam) | Explores and backtracks | Many calls, complex control, high latency | Puzzles and planning where steps can be scored |
 
-## Real-world examples
+## Production systems
 
 - **OpenAI o1 (2024).** AIME 2024: GPT-4o 12%; o1 74% with one sample, 83% with a vote over 64 samples and 93% when a learned scorer re-ranked 1,000 samples, with the raw chain of thought hidden from users.
 - **DeepSeek-R1 (2025).** Open weights. R1-Zero went from 15.6% to 71.0% on AIME 2024 during RL (86.7% with a 64-sample vote); R1 reached 79.8% on AIME 2024 and 97.3% on MATH-500, released with six distilled dense models from 1.5B to 70B parameters.
@@ -138,7 +190,7 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 - **s1 (2025).** 1,000 training examples and budget forcing gave s1-32B results that exceeded o1-preview by up to 27% on competition math (MATH and AIME 2024), according to its authors.
 - **Process supervision (2023).** OpenAI's PRM800K release: 800,000 step-level labels, and a PRM that solved 78.2% of a representative MATH test subset by picking from 1,860 samples.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Sending every request to a reasoning model at high effort. Most traffic gains nothing and pays in tokens and seconds.
 - Setting the output token limit for the answer alone. Thinking uses it up, and the user gets an empty, billed response.
@@ -147,7 +199,7 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 - Trusting a learned verifier without checking it: models can learn to please the scorer instead of being right.
 - Adding few-shot reasoning examples and "think step by step" to a reasoning model, which can make it worse.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define test-time compute and give the three ways to spend it: longer chains, sampling with a vote, sampling with a verifier or search.
 2. Ground it with numbers: CoT on GSM8K, self-consistency's gain, R1-Zero's AIME curve, and o1's 74 → 83 → 93% with more samples.
@@ -170,27 +222,52 @@ Reasoning models need less scaffolding, not more. The details are on [Prompting 
 
 <InterviewQuestions>
   <InterviewQuestion question="What is test-time compute, and what are the main ways to spend it?" category="Concepts" level="Junior">
-    Test-time compute is the computation spent on each question at inference, as opposed to training a bigger model. The first way is a longer chain of thought: one sample that writes out and checks its reasoning. The second is sampling several answers at a temperature above zero and returning the most common one, called self-consistency. The third is scoring samples with a verifier, such as a reward model or unit tests, or searching over partial solutions. All three raise cost and latency, so they pay off only on problems that need several steps.
+    - Test-time compute is the computation spent on each question at inference, as opposed to training a bigger model.
+    - The first way is a longer chain of thought: one sample that writes out and checks its reasoning.
+    - The second is sampling several answers at a temperature above zero and returning the most common one, called self-consistency.
+    - The third is scoring samples with a verifier, such as a reward model or unit tests, or searching over partial solutions.
+    - All three raise cost and latency, so they pay off only on problems that need several steps.
   </InterviewQuestion>
   <InterviewQuestion question="Why does chain-of-thought prompting improve accuracy on math problems?" category="Concepts" level="Junior">
-    Each generated token gets a fixed amount of computation, so writing intermediate steps gives the model more forward passes and a scratchpad of results it can attend back to. It also breaks a multi-step problem into small steps that each look like text the model has seen. Wei et al. showed eight worked examples took PaLM 540B from 17.9% to 56.9% on GSM8K, and Kojima et al. got large gains from "Let's think step by step" alone. The effect appeared only in large models; small models wrote fluent but wrong chains.
+    - Each generated token gets a fixed amount of computation, so writing intermediate steps gives the model more forward passes and a scratchpad of results it can attend back to.
+    - It also breaks a multi-step problem into small steps that each look like text the model has seen.
+    - Wei et al. showed eight worked examples took PaLM 540B from 17.9% to 56.9% on GSM8K, and Kojima et al. got large gains from "Let's think step by step" alone.
+    - The effect appeared only in large models; small models wrote fluent but wrong chains.
   </InterviewQuestion>
   <InterviewQuestion question="Compare self-consistency with best-of-N using a verifier. What is the difference between an outcome and a process reward model?" category="Concepts" level="Mid">
-    Self-consistency samples several reasoning chains and returns the most common final answer, so it needs no extra model but needs answers you can compare exactly, and it fails when a mistake is the model's most common answer. Best-of-N scores each sample with a verifier and keeps the highest. An outcome reward model scores only the final answer, while a process reward model scores every step, and a solution's score is the product of its step scores. In Lightman et al., picking from 1,860 samples on MATH, the PRM solved 78.2%, the ORM 72.4% and majority voting 69.6%. When an exact checker such as unit tests exists, it is the best verifier of all.
+    - Self-consistency samples several reasoning chains and returns the most common final answer, so it needs no extra model but needs answers you can compare exactly, and it fails when a mistake is the model's most common answer.
+    - Best-of-N scores each sample with a verifier and keeps the highest.
+    - An outcome reward model scores only the final answer, while a process reward model scores every step, and a solution's score is the product of its step scores.
+    - In Lightman et al., picking from 1,860 samples on MATH, the PRM solved 78.2%, the ORM 72.4% and majority voting 69.6%.
+    - When an exact checker such as unit tests exists, it is the best verifier of all.
   </InterviewQuestion>
   <InterviewQuestion question="Users of your reasoning-model feature sometimes get an empty answer, and those requests are the most expensive. What is happening?" category="Failure modes" level="Mid">
-    The output token limit covers thinking and answer together, so on hard requests the model spends the whole limit thinking and stops before writing any answer. You are billed for the thinking tokens anyway, which is why these requests cost the most. Check the stop reason or incomplete status and the reasoning-token count in the usage object. Fix it by raising the output limit, lowering the effort on that route, or routing easy requests away from reasoning; OpenAI suggests reserving at least 25,000 tokens when you start.
+    - The output token limit covers thinking and answer together, so on hard requests the model spends the whole limit thinking and stops before writing any answer.
+    - You are billed for the thinking tokens anyway, which is why these requests cost the most.
+    - Check the stop reason or incomplete status and the reasoning-token count in the usage object.
+    - Fix it by raising the output limit, lowering the effort on that route, or routing easy requests away from reasoning; OpenAI suggests reserving at least 25,000 tokens when you start.
   </InterviewQuestion>
   <InterviewQuestion question="A support chatbot answers mostly simple account questions, with a few complex billing disputes. Would you use a reasoning model?" category="Trade-offs" level="Mid">
-    Not for everything. Simple account questions gain nothing from thinking but would pay for it in output tokens and in seconds of waiting before the first word, which hurts a chat experience. I would route: a fast model or low effort for the common questions, and a reasoning model at higher effort for disputes that need multi-step calculation or policy checks. I would stream a progress note or thinking summary on the slow path, log thinking tokens per route, and compare accuracy and cost per resolved ticket before and after.
+    - Not for everything. Simple account questions gain nothing from thinking but would pay for it in output tokens and in seconds of waiting before the first word, which hurts a chat experience.
+    - I would route: a fast model or low effort for the common questions, and a reasoning model at higher effort for disputes that need multi-step calculation or policy checks.
+    - I would stream a progress note or thinking summary on the slow path, log thinking tokens per route, and compare accuracy and cost per resolved ticket before and after.
   </InterviewQuestion>
   <InterviewQuestion question="Design a system that answers hard math and coding questions with a fixed compute budget per question." category="Architecture" level="Senior">
-    Start with a difficulty estimate, from a classifier or a cheap first attempt, because Snell et al. showed the best use of compute depends on difficulty: easier questions do well with sequential revision, harder ones with parallel samples or search against a process reward model. Generate samples in parallel with a shared, cached prompt, extract and normalize final answers, and aggregate with an exact verifier where possible (unit tests for code, an answer checker for math), falling back to a PRM or majority vote. A budget controller caps effort, samples and wall-clock time and stops early when samples agree. Log tokens and accuracy per difficulty bucket so you can move budget to where it pays.
+    - Start with a difficulty estimate, from a classifier or a cheap first attempt, because Snell et al. showed the best use of compute depends on difficulty: easier questions do well with sequential revision, harder ones with parallel samples or search against a process reward model.
+    - Generate samples in parallel with a shared, cached prompt, extract and normalize final answers, and aggregate with an exact verifier where possible (unit tests for code, an answer checker for math), falling back to a PRM or majority vote.
+    - A budget controller caps effort, samples and wall-clock time and stops early when samples agree.
+    - Log tokens and accuracy per difficulty bucket so you can move budget to where it pays.
   </InterviewQuestion>
   <InterviewQuestion question="When is a small model with more test-time compute better than a larger model, and when is it not?" category="Scaling" level="Senior">
-    In Snell et al.'s FLOPs-matched comparison, a small model using compute-optimal test-time strategies often outperformed a 14 times larger model on easy and intermediate questions, where the small model already sometimes got the right answer and extra samples or revisions could find it. On the hardest questions, where the small model almost never succeeds, extra thinking helped little and the larger pretrained model won. Inference volume matters too: test-time compute is paid on every request, so at very high traffic a bigger model can be cheaper overall. Distillation sits in between, as DeepSeek's 32B distilled model reached 72.6% on AIME 2024 by learning from R1's reasoning traces.
+    - In Snell et al.'s FLOPs-matched comparison, a small model using compute-optimal test-time strategies often outperformed a 14 times larger model on easy and intermediate questions, where the small model already sometimes got the right answer and extra samples or revisions could find it.
+    - On the hardest questions, where the small model almost never succeeds, extra thinking helped little and the larger pretrained model won.
+    - Inference volume matters too: test-time compute is paid on every request, so at very high traffic a bigger model can be cheaper overall.
+    - Distillation sits in between, as DeepSeek's 32B distilled model reached 72.6% on AIME 2024 by learning from R1's reasoning traces.
   </InterviewQuestion>
   <InterviewQuestion question="Can you use a reasoning model's chain of thought to explain or audit its decisions?" category="Failure modes" level="Senior">
-    Only with care. Turpin et al. showed that models can follow a hidden bias, such as the correct option always being (A), and write a plausible chain of thought that never mentions it, with accuracy falling by up to 36%. Hosted reasoning models also often return only a summary of the thinking, which is not guaranteed to match the raw reasoning. The chain is useful for debugging and spotting obvious errors, but decisions that need an audit trail should rely on verifiable evidence: retrieved sources, tool calls, test results and logged inputs. Monitoring the chain can still catch some problems, as long as you do not treat its absence of red flags as proof.
+    - Only with care. Turpin et al. showed that models can follow a hidden bias, such as the correct option always being (A), and write a plausible chain of thought that never mentions it, with accuracy falling by up to 36%.
+    - Hosted reasoning models also often return only a summary of the thinking, which is not guaranteed to match the raw reasoning.
+    - The chain is useful for debugging and spotting obvious errors, but decisions that need an audit trail should rely on verifiable evidence: retrieved sources, tool calls, test results and logged inputs.
+    - Monitoring the chain can still catch some problems, as long as you do not treat its absence of red flags as proof.
   </InterviewQuestion>
 </InterviewQuestions>

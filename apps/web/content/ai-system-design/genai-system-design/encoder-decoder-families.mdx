@@ -5,7 +5,7 @@ description: BERT vs GPT vs T5, their pre-training objectives, and how to pick t
 
 "Would you use BERT or GPT for this?" is one of the most common applied questions. A good answer goes beyond names to attention patterns, training objectives and cost, then maps them to the task.
 
-## TL;DR
+## Overview
 
 - **Encoder-only** (BERT family): bidirectional attention, trained to fill in masked tokens. Best at understanding: classification, tagging, embeddings, re-ranking.
 - **Decoder-only** (GPT family): causal attention, trained to predict the next token. Best at open-ended generation, and with scale, almost everything.
@@ -13,9 +13,11 @@ description: BERT vs GPT vs T5, their pre-training objectives, and how to pick t
 - The objective shapes the skill: **masked** objectives learn rich representations; **causal** objectives learn to generate.
 - In production, small encoders still win on cost and latency for focused tasks like search ranking and classification.
 
-## The idea in plain English
+## Mental model
 
-An **encoder** is a careful reader: it reads the whole page at once, looking both backward and forward, and writes a summary card for every word. A **decoder** is a writer: it can only look at what it has already written and must guess the next word. An **encoder-decoder** is a translator: one person reads the source text fully, then another writes the translation while glancing back at the reader's notes.
+- An **encoder** is a careful reader: it reads the whole page at once, looking both backward and forward, and writes a summary card for every word.
+- A **decoder** is a writer: it can only look at what it has already written and must guess the next word.
+- An **encoder-decoder** is a translator: one person reads the source text fully, then another writes the translation while glancing back at the reader's notes.
 
 ## Core concepts
 
@@ -54,11 +56,13 @@ Choosing a family for a task:
 2. Is the output free text conditioned on a clearly separate input? An encoder-decoder is a natural fit, especially at small and medium sizes.
 3. Is the task open-ended, conversational or multi-task? A decoder-only LLM, often via prompting or fine-tuning.
 
-## Deep dive
+## Technical mechanics
 
 ### How BERT packs a sentence pair
 
-BERT reads one sequence that can hold two sentences. A `[CLS]` token comes first and a `[SEP]` token closes each sentence. Every token's input is the sum of three learned embeddings.
+- BERT reads one sequence that can hold two sentences.
+- A `[CLS]` token comes first and a `[SEP]` token closes each sentence.
+- Every token's input is the sum of three learned embeddings.
 
 <AnimatedDiagram
   spec="animated/transformer/bert-input-embeddings"
@@ -91,7 +95,7 @@ Encoders did not disappear: they dominate embedding models, re-rankers and high-
 | Decoder-only | General purpose, in-context learning, scales well | Costly per token, no bidirectional context for the input | Chat, code, agents, general generation |
 | Encoder-decoder | Efficient for conditioned generation, input read bidirectionally | Two stacks, less common at very large scale | Translation, summarization, structured text-to-text |
 
-## Real-world examples
+## Production systems
 
 - BERT (2018) set new results on GLUE and SQuAD and was widely used in search ranking.
 - RoBERTa showed BERT was undertrained: removing NSP and training longer with more data improved results.
@@ -99,13 +103,13 @@ Encoders did not disappear: they dominate embedding models, re-rankers and high-
 - GPT-3 showed that a large decoder-only model can do many tasks from a few examples in the prompt.
 - Modern RAG systems commonly pair a small encoder (embeddings and re-ranking) with a large decoder (generation).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Saying BERT "generates" answers. Extractive QA with BERT predicts start and end positions inside the given text.
 - Assuming the biggest decoder is always best. For a fixed label set at high volume, a fine-tuned encoder is often cheaper and as accurate.
 - Forgetting that embedding quality depends on training for similarity, not just on using an encoder.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define the three families by attention pattern.
 2. Name each family's pre-training objective.
@@ -127,21 +131,34 @@ Encoders did not disappear: they dominate embedding models, re-rankers and high-
 
 <InterviewQuestions>
   <InterviewQuestion question="What is masked language modeling, and why does BERT not always replace chosen tokens with the mask token?" category="Concepts" level="Junior">
-    Masked language modeling hides some input tokens and trains the model to predict them using context on both sides. BERT selects about 15% of tokens; of those, 80% become the mask token, 10% become random tokens and 10% stay as they are. Because the mask token never appears during fine-tuning, this mix stops the model from relying on it and forces useful representations for every token.
+    - Masked language modeling hides some input tokens and trains the model to predict them using context on both sides.
+    - BERT selects about 15% of tokens; of those, 80% become the mask token, 10% become random tokens and 10% stay as they are.
+    - Because the mask token never appears during fine-tuning, this mix stops the model from relying on it and forces useful representations for every token.
   </InterviewQuestion>
   <InterviewQuestion question="Why can't you simply use BERT for open-ended text generation?" category="Architecture" level="Junior">
-    BERT's attention is bidirectional and it was trained to fill in blanks, not to predict the next token from the left. It has no natural left-to-right generation procedure, and outputs would be incoherent if forced. Generation needs a causal objective, which decoder-only and encoder-decoder models have.
+    - BERT's attention is bidirectional and it was trained to fill in blanks, not to predict the next token from the left.
+    - It has no natural left-to-right generation procedure, and outputs would be incoherent if forced.
+    - Generation needs a causal objective, which decoder-only and encoder-decoder models have.
   </InterviewQuestion>
   <InterviewQuestion question="When would you choose an encoder-decoder model over a decoder-only model?" category="Trade-offs" level="Mid">
-    When the task maps a clearly separate input to an output, such as translation or summarization, and you need a small or medium model. The encoder reads the input bidirectionally once, and the decoder only generates the output, which is efficient. For general-purpose, conversational or very large-scale use, decoder-only models are simpler and benefit more from scaling.
+    - When the task maps a clearly separate input to an output, such as translation or summarization, and you need a small or medium model.
+    - The encoder reads the input bidirectionally once, and the decoder only generates the output, which is efficient.
+    - For general-purpose, conversational or very large-scale use, decoder-only models are simpler and benefit more from scaling.
   </InterviewQuestion>
   <InterviewQuestion question="Why did decoder-only architectures become dominant for LLMs?" category="Concepts" level="Mid">
-    They use one simple stack and one objective, next-token prediction, that turns every token of raw text into training signal and scales smoothly. At scale they show in-context learning, and with instruction tuning they can frame almost any task as generation. That generality made them the default for foundation models.
+    - They use one simple stack and one objective, next-token prediction, that turns every token of raw text into training signal and scales smoothly.
+    - At scale they show in-context learning, and with instruction tuning they can frame almost any task as generation.
+    - That generality made them the default for foundation models.
   </InterviewQuestion>
   <InterviewQuestion question="Design a semantic search system. Which model families would you use where?" category="Architecture" level="Senior">
-    I would embed documents and queries with an encoder trained for similarity, store the vectors in an approximate nearest-neighbor index, and retrieve a candidate set fast. A cross-encoder, also an encoder, would re-rank the top candidates by reading query and document together. If the product needs a written answer, a decoder LLM would generate it from the top passages. Encoders handle the high-volume steps cheaply; the decoder is used only where generation is needed.
+    - I would embed documents and queries with an encoder trained for similarity, store the vectors in an approximate nearest-neighbor index, and retrieve a candidate set fast.
+    - A cross-encoder, also an encoder, would re-rank the top candidates by reading query and document together.
+    - If the product needs a written answer, a decoder LLM would generate it from the top passages.
+    - Encoders handle the high-volume steps cheaply; the decoder is used only where generation is needed.
   </InterviewQuestion>
   <InterviewQuestion question="What did RoBERTa change compared with BERT, and what does that teach about pre-training?" category="Concepts" level="Senior">
-    RoBERTa removed next sentence prediction, trained longer with larger batches on much more data, and used dynamic masking that changes masked positions every epoch. These changes alone gave large gains, showing BERT was undertrained. The lesson is that data, training time and objective details often matter as much as architecture changes.
+    - RoBERTa removed next sentence prediction, trained longer with larger batches on much more data, and used dynamic masking that changes masked positions every epoch.
+    - These changes alone gave large gains, showing BERT was undertrained.
+    - The lesson is that data, training time and objective details often matter as much as architecture changes.
   </InterviewQuestion>
 </InterviewQuestions>

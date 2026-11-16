@@ -5,58 +5,68 @@ icon: zap
 updated: 2026-11-15
 ---
 
-An LLM answer takes seconds to write but can start showing in a few hundred milliseconds, so almost every chat product streams. Interviewers ask about streaming because it touches every layer at once: what the engine measures, what each proxy does to a long response, how a guardrail checks text it has not seen yet, and who stops the GPU when the user walks away.
+An LLM answer takes seconds to finish but can start showing in a few hundred milliseconds, so almost every interactive product streams.
 
-## TL;DR
+- Interviewers ask how streaming works across proxies, how guardrails inspect partial text, and how client disconnects free GPU slots.
 
-- **Streaming does not make the answer finish sooner; it ends the blank screen sooner.** Brightpost's answer completes at **1,500 ms** either way, but streamed, the first words show at **400 ms**.
-- **Time to first token (TTFT)** is queueing plus prefill of the prompt; **time per output token (TPOT)** is the average gap after that, **(end-to-end − TTFT) ÷ (output tokens − 1)**: 4.4 ms for Brightpost. **Inter-token latency (ITL)** is each individual gap, and its tail shows stalls.
-- Tokens travel as **server-sent events** (SSE): one long HTTP response of `text/event-stream`, one event per chunk. **Every hop must pass events on as they arrive**; one buffering proxy turns 400 ms back into 1,500 ms without an error.
-- **Cancellation must reach the engine.** A closed tab that is not passed on hop by hop leaves the GPU writing tokens for nobody.
-- **Guardrails on a stream** check text in a **hold-back window** before release: a 30-token window costs Brightpost 30 × 4.4 = **132 ms** of TTFT.
-- Track **p50 and p95 TTFT** at the engine, the gateway and the client, split by prompt length, from histograms, not averages.
+## Overview
 
-## The idea in plain English
+- **Streaming ends the blank screen sooner, not the total generation time:** Brightpost's answer completes at **1,500 ms** either way, but streaming shows the first words at **400 ms**.
+- **Core latency metrics:** **Time to first token (TTFT)** covers queueing plus prompt prefill; **time per output token (TPOT)** is **(end-to-end − TTFT) ÷ (output tokens − 1)** (**4.4 ms** for Brightpost); **inter-token latency (ITL)** measures each individual gap and exposes stalls at p99.
+- **Server-sent events (SSE) transport:** Tokens travel over one HTTP response of `text/event-stream`. Every proxy hop must flush events immediately; one buffering proxy turns a 400 ms TTFT back into a 1,500 ms wait with zero HTTP errors.
+- **End-to-end cancellation:** A closed browser tab must propagate hop by hop back to the inference engine so the GPU aborts decoding and frees KV-cache blocks immediately.
+- **Hold-back window for guardrails:** Inspecting a sliding 30-token window before release adds $30 \times 4.4 = \mathbf{132\text{ ms}}$ to visible TTFT while catching leaked card numbers or policy violations before the user sees them.
+- **Histogram monitoring:** Track **p50 and p95 TTFT** at the engine, gateway, and browser, sliced by prompt length and merged from histograms rather than averaged across replicas.
 
-A restaurant can bring the whole meal at once after 25 minutes, or bring the bread after 3 and each course as it is ready. Dinner ends at the same time, but the second table never sits staring at an empty cloth. Streaming is the second restaurant. It only works if every waiter between the kitchen and the table walks each plate straight out; one waiter who waits to collect all the plates on a tray puts you back in the first restaurant. And if the guests leave, someone has to tell the kitchen to stop cooking.
+## Mental model
+
+- **Course-by-course service vs holding the tray:** A kitchen can hold an entire meal for 25 minutes until every dish is plated, or bring bread at minute 3 and each dish as it finishes; dinner ends at the same time, but the table never stares at an empty cloth.
+- **No buffering along the path:** Streaming only works if every waiter between the kitchen and the table walks each plate straight out; one waiter who waits to fill a tray puts you back into batch mode.
+- **Propagating walk-outs:** If the guests leave the restaurant mid-meal, the front desk must tell the kitchen to stop cooking immediately rather than finishing four more courses for an empty table.
 
 ## Core concepts
 
 ### Time to first token and tokens per second
 
-Generating an answer has two phases (see [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference)). **Prefill** reads the whole prompt in one pass and produces the first output token; **decode** then writes one token per step. The latency metrics follow the phases. vLLM's metrics and the DistServe paper (Zhong et al., OSDI 2024) define them the same way:
+- Generating an answer has two distinct phases (see [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference)): **prefill** reads the whole prompt in one parallel pass and emits the first output token, while **decode** writes one token per step. vLLM's metrics and the DistServe paper (Zhong et al., OSDI 2024) define the latency metrics along that boundary:
 
-- **Time to first token (TTFT):** from the request's arrival to the first output token. It includes time in the queue and the prefill pass.
-- **Time per output token (TPOT):** one number per request, (end-to-end latency − TTFT) ÷ (output tokens − 1). Its inverse is the **tokens per second** a reader sees.
-- **Inter-token latency (ITL):** the gap between two consecutive streamed outputs, one sample per event. Its p99 shows the stalls an average hides.
-- **End-to-end latency:** TTFT + (output tokens − 1) × TPOT.
-
-Here is one Brightpost answer, streamed and not.
+- **Time to first token (TTFT):** Elapsed time from request arrival to the first output token, combining queue wait and the prefill pass.
+- **Time per output token (TPOT):** One summary number per request, $(\text{end-to-end latency} - \text{TTFT}) \div (\text{output tokens} - 1)$; its inverse is the **tokens per second** the reader sees.
+- **Inter-token latency (ITL):** The gap between two consecutive streamed tokens (one sample per event), whose p99 exposes stalls that averages hide.
+- **End-to-end latency:** $\text{TTFT} + (\text{output tokens} - 1) \times \text{TPOT}$.
 
 <AnimatedDiagram
   spec="animated/serving/stream-timeline"
   caption="Streaming does not make the answer finish sooner; it makes the screen stop being blank 1,100 ms sooner. A guardrail window gives back 132 ms of that (window size illustrative)."
 />
 
-**How to read it.** The top chart is the engine: a teal bar for queue and prefill, a green bar for decode. The bottom chart is the customer's screen, and each orange bar is the time it stays blank. Not streamed, the screen is blank for the whole 1,500 ms. Streamed, it is blank until the first token at 400 ms. Streamed through a 30-token guardrail check, it is blank until 532 ms.
+**How to read it:**
 
-**The numbers.** TPOT = (1,500 − 400) ÷ (250 − 1) = 1,100 ÷ 249 = 4.4 ms, about 227 tokens a second, faster than anyone reads. The hold-back costs 30 × 4.4 = 132 ms, so text appears at 400 + 132 = 532 ms.
+- **Engine timeline (top):** A teal bar for queue and prefill, followed by a green bar for token-by-token decode.
+- **Customer screen (bottom):** Each orange bar shows how long the screen stays blank—1,500 ms without streaming, 400 ms with direct streaming, and 532 ms when buffered through a 30-token guardrail window.
+
+**The numbers:**
+
+- **Decode speed (TPOT):** $(1,500 - 400) \div (250 - 1) = 1,100 \div 249 = \mathbf{4.4\text{ ms/token}}$ (~227 tokens/s, faster than human reading speed).
+- **Guardrail hold-back cost:** $30\text{ tokens} \times 4.4\text{ ms} = \mathbf{132\text{ ms}}$, shifting first visible text to $400 + 132 = \mathbf{532\text{ ms}}$.
 
 ### Server-sent events versus WebSockets
 
-**Server-sent events (SSE)** are a format defined in the WHATWG HTML standard: one HTTP response with content type `text/event-stream`, always UTF-8, made of events. Each event is a few `field: value` lines (`event`, `data`, `id`, `retry`) ended by a blank line; a line starting with a colon is a comment. The browser's `EventSource` reconnects on its own and sends the last `id` it saw as a `Last-Event-ID` header. The [Server-Sent Events page](/system-design/fundamentals/server-sent-events) covers the protocol in full.
-
-LLM APIs use the SSE format but rarely the `EventSource` object, because it can only send a GET with no body, and a chat request is a POST with a JSON body. Clients read the response body as a stream with `fetch` or an SDK instead, which also means they lose automatic reconnection. **WebSockets** give a two-way channel over one upgraded connection. They suit voice and live collaboration, where the client sends audio or edits while the model talks (see [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents) and [WebSockets](/system-design/fundamentals/websockets)). For text chat, SSE wins: it is plain HTTP, so load balancers, gateways, auth and logging work unchanged.
+- **SSE wire format (WHATWG standard):** One HTTP response with `Content-Type: text/event-stream` (UTF-8) carrying `field: value` lines (`event`, `data`, `id`, `retry`) separated by blank lines, plus colon-prefixed keep-alive comments (see [Server-Sent Events](/system-design/fundamentals/server-sent-events)).
+- **POST streaming via `fetch`:** Because browser `EventSource` only supports `GET` without a body and LLM requests send JSON via `POST`, clients read the response stream with `fetch` (`ReadableStream`) or provider SDKs and manage reconnection themselves.
+- **When to use WebSockets:** Two-way upgraded connections fit low-latency voice and live collaboration where the client streams audio or cursor edits while the model responds (see [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents) and [WebSockets](/system-design/fundamentals/websockets)).
+- **Why SSE wins for text chat:** SSE runs over standard HTTP, so existing load balancers, API gateways, auth middleware, and access logs work without sticky upgrade state.
 
 ### Cancellation and backpressure
 
-**Cancellation** is the reverse path. When the client goes away, each hop must notice the closed connection and close its own upstream call, until the engine drops the request from its batch and frees its KV cache (the stored keys and values of the request's tokens). vLLM's OpenAI-compatible server cancels the request handler when the client disconnects. A hosted API stops when you close the connection; what you are billed for the tokens around that moment is the provider's policy, so check it.
-
-**Backpressure** is what happens when a client reads slower than the server writes. Bandwidth is rarely the issue: an Anthropic-style event carrying one token is about 120 bytes, so 250 events are about 30 KB. Memory is the issue. A gateway holding 10,000 streams for clients on bad mobile links must cap each stream's buffer and close streams whose client stopped reading, or a few slow readers take the gateway's memory. A gateway can also coalesce tokens, flushing every 20 to 50 ms instead of every token: at 4.4 ms per token that packs about 5 to 11 tokens into each event, for a few milliseconds of smoothness.
+- **Hop-by-hop cancellation:** When a client disconnects, each proxy and gateway must close its upstream request so the inference engine removes the sequence from its running batch and frees its KV-cache blocks.
+- **Provider billing on disconnect:** vLLM's OpenAI-compatible server aborts the request handler on client disconnect; for hosted APIs, check provider billing rules for tokens generated just before socket close.
+- **Memory backpressure on slow readers:** Bandwidth is tiny (~120 bytes per SSE event, ~30 KB for 250 tokens), but holding 10,000 open buffers for slow mobile clients can exhaust gateway memory; cap per-stream buffer size and drop stalled readers.
+- **Token coalescing:** Flushing every 20–50 ms instead of every single token packs 5–11 tokens per SSE frame (at 4.4 ms/token), cutting syscall and framing overhead with negligible visual delay.
 
 ## Architecture
 
-Brightpost's answer passes four hops on its way out: the engine, the [LLM gateway](/ai-system-design/genai-system-design/llm-gateway), an edge proxy and the customer's browser.
+Brightpost's answer crosses four hops on its way out: the inference engine, the [LLM gateway](/ai-system-design/genai-system-design/llm-gateway), an edge reverse proxy, and the customer's browser.
 
 <AnimatedDiagram
   spec="animated/serving/stream-path"
@@ -66,20 +76,20 @@ Brightpost's answer passes four hops on its way out: the engine, the [LLM gatewa
 
 <StepCards>
   <StepCard n={1} title="The request goes in">
-    The browser posts the question with streaming on. The gateway checks the key and the rate limit, adds the retrieved passages and sends the 2,200-token prompt to the engine. The engine queues it, then prefills it: 400 ms until the first token.
+    The browser posts the question with streaming enabled. The gateway checks auth and rate limits, attaches retrieved passages, and forwards the 2,200-token prompt to the engine, which queues and prefills it in 400 ms.
   </StepCard>
   <StepCard n={2} title="Tokens come back as events">
-    The first token leaves the engine at 400 ms, and the gateway forwards it as a `content_block_delta` event. Each later token follows about 4.4 ms behind the one before it. The gateway counts tokens for billing and limits as they pass. The last event, `message_stop`, reaches the browser at 1,500 ms.
+    The first token leaves the engine at 400 ms as a `content_block_delta` event; subsequent tokens follow every 4.4 ms until `message_stop` at 1,500 ms while the gateway meters tokens in flight.
   </StepCard>
   <StepCard n={3} title="A buffering proxy holds them">
-    Many reverse proxies buffer responses by default; nginx's `proxy_buffering` is on unless turned off. The proxy collects every event and sends the lot when the response ends, so the customer waits the full 1,500 ms. Every status code is 200 and every event arrives, so nothing alerts.
+    Reverse proxies such as nginx enable `proxy_buffering` by default, collecting the entire stream before flushing to the browser at 1,500 ms while returning HTTP 200 with zero error alerts.
   </StepCard>
   <StepCard n={4} title="Turn buffering off, keep the line warm">
-    The gateway sends `X-Accel-Buffering: no` on streaming responses, which nginx honours per response, or the proxy route turns buffering off. On a stream that goes quiet, for example while a tool runs, the gateway writes an SSE comment line so idle timeouts along the path do not close it.
+    The gateway sets `X-Accel-Buffering: no` (or disables route buffering) and emits SSE comment pings during quiet tool-execution pauses so idle proxy timeouts never drop the stream.
   </StepCard>
 </StepCards>
 
-The events themselves follow the Anthropic Messages API stream format (checked November 2026); the JSON is trimmed, and the `content_block_start` and `content_block_stop` events around the text are left out:
+The events follow the Anthropic Messages API stream format (checked November 2026, trimmed for clarity):
 
 ```text
 event: message_start
@@ -98,43 +108,45 @@ event: message_stop
 data: {"type": "message_stop"}
 ```
 
-Two details matter to a gateway. Usage arrives in `message_delta` at the end, and its counts are cumulative, so a gateway that bills per request reads the last one. Errors can arrive mid-stream as an `error` event (for example `overloaded_error`) after the response already started with 200, so the client must handle failure after success.
+- **Cumulative usage in `message_delta`:** Token counts arrive at the end of the stream in `message_delta` and are cumulative, so billing logic reads the final event.
+- **Mid-stream error events:** Because HTTP headers (`200 OK`) flush on the first byte, downstream errors (such as `overloaded_error`) arrive mid-stream as an `event: error` frame that the client parser must handle explicitly.
 
-## Deep dive
+## Technical mechanics
 
 ### What drives time to first token
 
-TTFT is a sum, and each term has its own lever.
+TTFT is a sum of five distinct stages, each with its own engineering lever:
 
-- **Work before the model.** Brightpost embeds the question (20 ms), searches the index (15 ms) and builds the prompt (2 ms) before the engine sees anything: 37 ms. Gateway checks and network add more. Measure these separately; they are not the engine's fault.
-- **Queueing.** Under load, a request waits for a batch slot and free KV-cache memory. At Brightpost's peak of 12 requests a second, queue time is the term that grows first; it is the signal to scale on (see [Load Balancing & Autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling)).
-- **Prefill length.** Prefill cost grows with prompt tokens. Five 400-token passages are most of Brightpost's 2,200; a reranker that keeps three cuts the prompt by 800 tokens.
-- **Prompt caching.** A provider or engine that has already computed a prompt prefix skips its prefill. Put the stable parts first (instructions, tool definitions, policy) and the question last. Brightpost's 200-token instructions are below the 1,024-token minimum OpenAI documents for caching (as of November 2026), so caching only pays once tools and policy text join the prefix. See [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
-- **Other people's prefill.** A long prompt prefilled in the same batch delays everyone's next token. Chunked prefill splits it ([LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)); DistServe runs prefill and decode on separate GPUs and reports 7.4 times more requests served, or a 12.6 times tighter latency target met.
+- **Pre-model work:** Brightpost embeds the question (20 ms), searches the vector index (15 ms), and builds the prompt (2 ms) for **37 ms** before the engine sees the request; trace these spans separately from model latency.
+- **Queue wait:** Under load, requests wait for a batch slot and free KV-cache blocks; at Brightpost's peak of 12 req/s, queue time grows first and serves as the primary autoscaling signal (see [Load Balancing & Autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling)).
+- **Prefill token length:** Prefill compute scales with input length; adding a reranker that trims retrieved context from 5 chunks (2,000 tokens) to 3 chunks (1,200 tokens) cuts prefill by 800 tokens.
+- **Prompt caching:** Reusing precomputed KV blocks for the static prefix (tools + system prompt + policy, ≥ 1,024 tokens on OpenAI) skips prefill on the cached prefix (see [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)).
+- **Head-of-line blocking from other requests' prefill:** A long prompt prefilling in the same batch stalls decode steps for co-batched requests; **chunked prefill** ([LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)) or **disaggregated prefill/decode** (DistServe reports 7.4× higher goodput or 12.6× tighter SLO compliance) eliminates the stall.
 
 ### Streaming structured output and tool calls
 
-A stream of JSON is not valid JSON until it ends. Anthropic streams a tool call's arguments as `input_json_delta` events carrying partial JSON strings; OpenAI's Responses API sends function-call argument deltas the same way. Accumulate the fragments and parse when the block closes, or use a partial-JSON parser to show fields as they complete. Never run a tool on half its arguments. For structured answers shown to a user, such as Brightpost's refund summary card, stream the free-text parts and render the structured parts when each field is complete. Schema validation runs on the finished object (see [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)).
+- **Accumulate partial JSON deltas:** Providers stream tool arguments as partial JSON fragments (`input_json_delta` on Anthropic, function-call deltas on OpenAI); buffer fragments until `content_block_stop` before executing any tool.
+- **Progressive UI rendering:** Use a streaming partial-JSON parser only for read-only UI previews, and run strict schema validation on the completed object before triggering side effects (see [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)).
 
 ### Guardrails on a stream
 
-An output guardrail that needs the whole answer forces you back to not streaming. OpenAI's streaming guide warns that partial completions are harder to moderate. The usual compromise is a **hold-back window**: generation runs ahead, the guardrail checks a sliding window of the newest tokens, and text is released to the client only once the tokens after it have been checked. A 30-token window delays the first visible text by 30 × 4.4 = 132 ms, and lets the guardrail catch a card number or an invented refund rule before it is shown. Cheap pattern checks (card numbers, email addresses) fit in the window; a judge model that reads the whole answer does not, so it runs after the stream and can retract or flag. When a check fails mid-stream, stop generation, replace the shown text with a safe message, and log the event. See [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation).
+- **Sliding hold-back window:** Generation runs ahead by $W$ tokens (e.g., 30 tokens, costing $30 \times 4.4 = 132\text{ ms}$) while fast regex/NER checks scan the window and release verified tokens to the client.
+- **Two-tier moderation:** Run fast pattern and PII checks inside the hold-back window, and run full-answer LLM judge evaluations asynchronously at stream completion to retract or flag if needed (see [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation)).
 
 ### Proxies, timeouts and reconnects
 
-A long-lived response meets every timeout on the path. nginx closes a proxied connection after 60 s with no data (`proxy_read_timeout`). AWS Application Load Balancers close idle connections after 60 s by default. Cloudflare returns a 524 when the origin sends no response within 125 s by default (as of November 2026). A streaming answer rarely idles that long, but a stream that waits on a slow tool or a long reasoning phase can. The WHATWG standard suggests a comment line every 15 seconds or so as a keep-alive. Compression middleware is the other silent buffer: it holds output until it has enough to compress, so exclude `text/event-stream` from it.
-
-Reconnects are harder for LLMs than for news feeds. `Last-Event-ID` replay needs the server to keep the events, and LLM APIs mostly do not: Anthropic's documented recovery is a new request that includes the partial answer so the model continues from there. The cheaper design for chat is to save the finished answer by message id, and on reconnect fetch it if it completed or resume generation if it did not.
+- **Idle timeout defaults:** nginx `proxy_read_timeout` (60 s), AWS ALB idle timeout (60 s), and Cloudflare origin timeout (125 s, as of Nov 2026) will sever streams that pause during slow tool calls or long reasoning steps; send an SSE comment (`: ping\n\n`) every 15 s.
+- **Disable stream compression:** Gzip/Brotli middleware buffers chunks to build a compression window, turning token streams into choppy bursts; exclude `text/event-stream` from compression.
+- **Stateful resume on reconnect:** Because LLM APIs do not replay `Last-Event-ID` buffers, persist generated tokens by `message_id` in your gateway or store so a reconnecting client fetches the completed answer or resumes from the partial prefix.
 
 ### Measuring p50 and p95 time to first token
 
-Measure TTFT in three places, because each adds its own delay. The engine exports a histogram (vLLM's `vllm:time_to_first_token_seconds`); the gateway records the time from receiving the request to forwarding the first event; the browser records the time from submit to the first rendered word. For Brightpost, the customer-side TTFT is at least 37 + 400 = 437 ms before any network or hold-back time.
-
-Three rules keep the numbers honest. Merge histograms, never average percentiles across replicas. Split by prompt length, because a 20,000-token prompt has a high TTFT for a good reason and hides a queueing problem among short ones. Track p50 for the typical experience and p95 for the SLO, for example "p95 TTFT under 400 ms at the engine"; watch ITL p99 too, since preemptions and long prefills show up there first (see [Latency & Token Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring)).
+- **Instrument three measurement points:** Engine histogram (`vllm:time_to_first_token_seconds`), gateway first-event forward timestamp, and browser first-rendered-token timestamp (at least $37 + 400 = 437\text{ ms}$ for Brightpost before network and hold-back).
+- **Merge histograms, never average percentiles:** Aggregate Prometheus histogram buckets across replicas, slice TTFT by input token length buckets, and monitor **ITL p99** alongside **TTFT p50/p95** to catch decode stalls (see [Latency & Token Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring)).
 
 ### Worked example: the customer who leaves mid-answer
 
-A customer asks about order 4471, the cracked kettle, and closes the tab at 620 ms. The stepper follows the close from the browser to the GPU.
+A customer asks about order 4471 (the cracked kettle) and closes the browser tab at 620 ms:
 
 <AnimatedDiagram
   spec="animated/serving/stream-cancel"
@@ -144,92 +156,108 @@ A customer asks about order 4471, the cracked kettle, and closes the tab at 620 
 
 <StepCards>
   <StepCard n={1} title="The customer closes the tab">
-    The first token came at 400 ms, so by 620 ms the engine has written (620 − 400) ÷ 4.4 = 50 tokens. With the 30-token guardrail window, the customer has seen 50 − 30 = 20 of them. The browser closes the connection; 200 of the 250 tokens are still to come.
+    First token arrived at 400 ms, so by 620 ms the engine has emitted $(620 - 400) \div 4.4 = 50$ tokens (the customer saw $50 - 30 = 20$ after the guardrail window). The browser closes the socket with 200 tokens still remaining.
   </StepCard>
   <StepCard n={2} title="Each hop passes the close on">
-    The proxy sees the client's connection close and closes its own connection to the gateway. The gateway notices the closed downstream and cancels its call to the engine, which for a self-hosted engine is an abort of the request id.
+    The edge proxy detects the closed client socket and closes its upstream connection; the gateway catches the disconnect signal and aborts the engine request ID.
   </StepCard>
   <StepCard n={3} title="The engine frees the slot">
-    The engine drops the request from its batch and returns its KV-cache blocks to the free list. It would have spent 200 × 4.4 = 880 ms more on this answer; now a queued request takes the slot. The gateway logs 50 output tokens with the reason "cancelled", so cost reports and abandonment dashboards stay true.
+    The engine drops the sequence from its continuous batch and frees its KV-cache blocks 880 ms early ($200 \times 4.4\text{ ms}$), logging 50 output tokens with `status: cancelled`.
   </StepCard>
 </StepCards>
 
-**At scale.** If 5 % of Brightpost's 200,000 daily answers are abandoned this way (an illustrative rate), that is 10,000 × 200 = 2 million tokens a day that nobody reads, 4 % of the 50 million output tokens Brightpost generates a day.
+**At scale:**
+
+- **Wasted GPU output without cancellation:** If 5% of Brightpost's 200,000 daily answers are abandoned after 50 tokens, dropping disconnects wastes $10,000 \times 200 = \mathbf{2\text{ million output tokens/day}}$ (4% of the 50M daily output tokens).
 
 <Callout tone="red" title="What breaks">
-  A middleware layer that never surfaces the disconnect, a proxy that keeps the upstream open, or a gateway that retries a "failed" stream all break the chain. vLLM's own helper notes that the framework's disconnect check does not work with middleware. Test it: start a long answer, kill the client, and confirm that the engine's running-request count drops within a second.
+  Middleware that swallows socket close events, proxies that keep upstream connections open, or gateway retry loops that treat a client abort as an upstream failure all break cancellation. Test end-to-end by killing a client mid-stream and verifying that the engine's active request gauge drops within 1 second.
 </Callout>
 
 ## Trade-offs
 
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
-| Not streaming | Simplest client; whole-answer guardrails and validation | Blank screen for the whole answer | Server-to-server calls, batch, short answers |
-| SSE over HTTP | Works with standard gateways, auth and logs; easy to debug | One way only; proxies and timeouts need tuning | Text chat, most LLM APIs |
-| WebSockets | Two-way, low overhead per message | Sticky connections; more custom infrastructure | Voice, live collaboration, interruptions |
-| Token per event | Smoothest text | Most events and overhead | Small scale, demos |
-| Coalesce every 20 to 50 ms | Fewer events and writes | Slightly choppier text | High-traffic gateways |
-| Hold-back window | Guardrails see text before the user | Adds window × TPOT to TTFT | Regulated or PII-sensitive answers |
+| Non-streaming response | Simplest client; full-answer guardrails & schema validation | Blank screen for full generation duration | Background jobs, server-to-server pipelines, short classifications |
+| SSE over HTTP | Standard HTTP gateways, auth, and logging; simple framing | Unidirectional; requires proxy buffer/timeout tuning | Interactive text chat, standard LLM APIs |
+| WebSockets | Bidirectional, low framing overhead | Stateful sticky connections; custom load-balancing | Real-time voice agents, live collaborative canvases |
+| Flush every token | Smoothest visual typing effect | Highest event/syscall rate | Low-to-moderate traffic |
+| Coalesce every 20–50 ms | 5–10× fewer network writes | Imperceptible 20–50 ms batching jitter | High-concurrency gateways |
+| Hold-back window (e.g., 30 tokens) | Catches PII/policy leaks before display | Adds $\text{window} \times \text{TPOT}$ (132 ms) to TTFT | Customer-facing regulated or PII-sensitive chat |
 
-## Real-world examples
+## Production systems
 
-- **Anthropic Messages API:** with `"stream": true`, an SSE stream of `message_start`, content blocks with deltas, `message_delta` and `message_stop`, plus `ping` events; errors such as `overloaded_error` can arrive mid-stream; tool arguments stream as partial JSON (as of November 2026).
-- **OpenAI Responses API:** typed events such as `response.created`, `response.output_text.delta` and `response.completed`; the streaming guide warns that partial completions are harder to moderate (as of November 2026).
-- **vLLM:** exports histograms of time to first token, inter-token latency (one sample per streamed output) and time per output token, with TPOT defined as (end-to-end − TTFT) ÷ (output tokens − 1); TTFT counts from arrival, so it includes tokenisation and queueing.
-- **DistServe (OSDI 2024):** separates prefill and decode onto different GPUs to meet TTFT and TPOT targets together; 7.4 times more requests or a 12.6 times tighter target than the systems it compares with.
-- **nginx:** `proxy_buffering` is on by default; `X-Accel-Buffering: no` in a response turns it off for that response; `proxy_read_timeout` defaults to 60 s between reads.
+- **Anthropic Messages API:** Streams SSE events (`message_start`, `content_block_delta` with `text_delta` / `input_json_delta`, `ping`, `message_delta`, `message_stop`) and mid-stream `error` events (as of November 2026).
+- **OpenAI Responses API:** Emits typed SSE events (`response.created`, `response.output_text.delta`, `response.completed`) and notes that partial streams require dedicated moderation handling (as of November 2026).
+- **vLLM:** Exports Prometheus histograms for `time_to_first_token_seconds`, `inter_token_latency_seconds`, and `time_per_output_token_seconds`, and aborts running sequences when the HTTP client disconnects.
+- **DistServe (OSDI 2024):** Disaggregates prefill and decode onto separate GPU pools so long prefills never inflate decode TPOT/ITL, achieving 7.4× higher goodput.
+- **nginx:** Buffers upstream responses by default (`proxy_buffering on`); honours per-response `X-Accel-Buffering: no` and closes idle upstreams at `proxy_read_timeout` (60 s default).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- A proxy, CDN or compression layer buffering the stream, so TTFT looks fine at the engine and terrible in the browser.
-- Disconnects that never reach the engine, so abandoned answers keep their GPU slots and their cost.
-- Reporting average TTFT, or averaging p95 across replicas, instead of merging histograms and splitting by prompt length.
-- Treating HTTP 200 as success when an `error` event can arrive mid-stream.
-- Running a tool or a validator on partial JSON.
-- A guardrail that waits for the whole answer, which silently turns streaming off.
+- **Reverse-proxy or gzip buffering:** Proxy buffering or compression middleware holds the entire stream until `message_stop`, making browser TTFT equal full end-to-end latency while engine dashboards look green.
+- **Dropped client disconnects:** Failing to propagate socket close events leaves GPUs decoding hundreds of tokens for closed tabs.
+- **Averaging percentiles or ignoring prompt length:** Averaging p95 across pods or pooling 500-token and 20,000-token prompts hides queueing regressions.
+- **Assuming HTTP 200 means stream completion:** Provider rate limits or engine OOMs after the first byte arrive as mid-stream `error` events inside a 200 response.
+- **Executing tools on partial JSON deltas:** Running a side-effecting tool before `content_block_stop` risks acting on truncated or invalid arguments.
+- **Full-response output guardrails on a stream:** Waiting for the last token before running a synchronous guardrail silently disables streaming.
 
-## How to answer in an interview
+## Interview framework
 
-1. Separate the metrics: TTFT (queue + prefill), TPOT and ITL (decode), end-to-end; give the Brightpost arithmetic.
-2. Draw the path: engine → gateway → proxy → client as SSE, and say every hop must flush and pass cancellation back.
-3. List the TTFT levers: work before the model, queueing and autoscaling, prompt length, prompt caching, chunked or disaggregated prefill.
-4. Cover the hard parts: guardrails with a hold-back window, structured output and tool arguments, timeouts and reconnects.
-5. Close with measurement: p50 and p95 TTFT at engine, gateway and client, split by prompt length, with ITL p99 for stalls.
+1. **Define and separate the metrics:** TTFT (queue + prefill), TPOT and ITL (decode speed and stalls), and end-to-end latency, with concrete numbers (400 ms TTFT, 4.4 ms TPOT, 1,500 ms total).
+2. **Trace the transport path:** Engine → gateway → reverse proxy → browser over HTTP SSE, disabling buffering (`X-Accel-Buffering: no`) and compression (`text/event-stream`) and sending 15 s keep-alive pings.
+3. **Walk the cancellation path:** Browser close → proxy close → gateway abort → engine frees batch slot and KV cache.
+4. **Explain streaming guardrails and tools:** Sliding hold-back window ($30 \times 4.4 = 132\text{ ms}$) for pattern/PII checks, and buffering `input_json_delta` fragments until block close before tool execution.
+5. **List TTFT optimization levers:** Prompt caching, reranking to shrink context, chunked prefill / disaggregated prefill-decode, and queue-based autoscaling.
 
-**What interviewers listen for:** TTFT and TPOT kept apart, a number for each, buffering and cancellation named without prompting, and a plan for guardrails that does not wait for the whole answer.
+**What interviewers listen for:** Clear separation of prefill (TTFT) vs decode (TPOT/ITL), proxy buffering and disconnect propagation, and hold-back windows for streaming safety.
 
-**Red flags:** "streaming makes generation faster", WebSockets by default for text chat, or no answer for what happens when the user closes the tab.
+**Red flags:** Claiming streaming reduces total generation time, defaulting to WebSockets for unidirectional text chat, or having no mechanism to stop GPU generation when a user closes the tab.
 
 ## Further reading
 
 - [Server-sent events (WHATWG HTML Living Standard)](https://html.spec.whatwg.org/multipage/server-sent-events.html)
-- [Streaming messages (Anthropic docs)](https://platform.claude.com/docs/en/build-with-claude/streaming)
-- [Streaming API responses (OpenAI docs)](https://developers.openai.com/api/docs/guides/streaming-responses)
-- [Metrics design (vLLM docs)](https://docs.vllm.ai/en/latest/design/metrics/)
-- [Zhong et al., DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving (OSDI 2024)](https://arxiv.org/abs/2401.09670)
-- [ngx_http_proxy_module: proxy_buffering and proxy_read_timeout (nginx docs)](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)
+- [Streaming Messages (Anthropic docs)](https://platform.claude.com/docs/en/build-with-claude/streaming)
+- [Streaming API Responses (OpenAI docs)](https://developers.openai.com/api/docs/guides/streaming-responses)
+- [Metrics Design (vLLM docs)](https://docs.vllm.ai/en/latest/design/metrics/)
+- [DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving (Zhong et al., OSDI 2024)](https://arxiv.org/abs/2401.09670)
+- [ngx_http_proxy_module: `proxy_buffering` and `proxy_read_timeout` (nginx docs)](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)
 - Related pages: [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation) · [Server-Sent Events](/system-design/fundamentals/server-sent-events)
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between time to first token and time per output token, and what drives each?" category="Concepts" level="Junior">
-    Time to first token is the wait from the request's arrival to the first output token; it covers queueing and the prefill pass over the prompt, so it grows with load and prompt length. Time per output token is the average gap between later tokens, computed as end-to-end latency minus TTFT, divided by output tokens minus one. It is set by decode speed, which depends on model size, memory bandwidth and how many requests share the batch. Brightpost's answer has a TTFT of 400 ms and a TPOT of 4.4 ms.
+    - **Time to first token (TTFT):** Measures the delay from request arrival to the first emitted token; it is driven by queue wait time and the compute-bound prefill pass over the input prompt.
+    - **Time per output token (TPOT):** Measures the average gap between subsequent tokens, $(\text{end-to-end} - \text{TTFT}) \div (\text{output tokens} - 1)$; it is driven by memory-bandwidth-bound autoregressive decoding and batch size.
+    - **Concrete example:** In Brightpost's 250-token reply, TTFT is **400 ms** and TPOT is **4.4 ms**, giving a total duration of $400 + 249 \times 4.4 \approx \mathbf{1,500\text{ ms}}$.
   </InterviewQuestion>
   <InterviewQuestion question="Why do most LLM APIs stream over server-sent events rather than WebSockets?" category="Architecture" level="Junior">
-    The model's output flows one way, from server to client, which is exactly what SSE does: one long HTTP response made of small events. Because it is plain HTTP, existing load balancers, gateways, authentication and logging work unchanged, and there is no connection upgrade to manage. WebSockets earn their extra complexity when the client also sends a continuous stream, as in voice agents that send audio while the model speaks.
+    - **Matches unidirectional token flow:** A chat completion sends one JSON POST request and receives a one-way stream of tokens from server to client, which fits SSE (`text/event-stream`) directly.
+    - **Zero custom proxy state:** Because SSE is standard HTTP, existing API gateways, load balancers, auth headers, and observability tools work without stateful connection upgrades.
+    - **When WebSockets are justified:** Reserve WebSockets for bidirectional low-latency streams such as real-time voice agents where user audio and model audio flow simultaneously.
   </InterviewQuestion>
   <InterviewQuestion question="Users report that answers appear all at once after a few seconds, but the engine's TTFT dashboard looks healthy. What do you check?" category="Failure modes" level="Mid">
-    Something between the engine and the browser is buffering the stream. Check each hop: reverse proxies such as nginx buffer by default, CDNs may too, and compression middleware holds output until it has enough to compress. Measure time to first byte at the gateway's output and in the browser to find the hop where the gap appears. Fix it by disabling buffering for streaming routes (for nginx, `X-Accel-Buffering: no` or `proxy_buffering off`) and excluding `text/event-stream` from compression.
+    - **Intermediate hop buffering:** A reverse proxy (such as nginx with default `proxy_buffering on`), CDN, or gzip compression middleware is accumulating the response until stream close.
+    - **Isolate the offending hop:** Compare TTFT histograms at the engine, the gateway egress, and the browser client to see exactly where the 400 ms first byte turns into 1,500 ms.
+    - **Fix headers and middleware:** Emit `X-Accel-Buffering: no` (or set `proxy_buffering off` on streaming routes), disable response compression for `text/event-stream`, and flush each event immediately.
   </InterviewQuestion>
   <InterviewQuestion question="How do you run an output guardrail on a streamed answer without giving up streaming?" category="Trade-offs" level="Mid">
-    Use a hold-back window: let generation run ahead, check the newest tokens in a sliding window, and release text only after the tokens behind it have passed. The cost is the window size times the time per output token; for Brightpost, 30 tokens times 4.4 ms adds 132 ms to the first visible text. Fast checks such as card-number patterns fit in the window, while a judge model that needs the whole answer runs afterwards and can retract or flag. If a check fails mid-stream, stop generation and replace what was shown with a safe message.
+    - **Sliding hold-back window:** Buffer the newest $W$ tokens (e.g., 30 tokens) in the gateway, run fast pattern/PII/regex checks across the window, and release tokens to the client only after they pass.
+    - **Bounded latency trade-off:** At 4.4 ms per token, a 30-token window adds $30 \times 4.4 = \mathbf{132\text{ ms}}$ to visible TTFT while still streaming 1 second earlier than a full-response wait.
+    - **Async full-text judge + mid-stream abort:** Run heavier LLM-as-judge checks asynchronously on completed sentences or the full response, and emit a retraction/replacement event immediately if a check fails mid-stream.
   </InterviewQuestion>
   <InterviewQuestion question="A user closes the tab halfway through an answer. Walk through what should happen, and what goes wrong in practice." category="Failure modes" level="Senior">
-    The browser closes the connection, the proxy closes its upstream connection, the gateway notices and cancels its call to the engine, and the engine drops the request from its batch and frees its KV-cache blocks so a queued request can start. The gateway logs the tokens generated so far with a cancelled status. In practice the chain breaks at one hop: a proxy keeps the upstream open, middleware hides the disconnect from the framework, or the gateway treats the closed stream as a failure and retries it. The result is GPUs writing answers nobody reads; for Brightpost, 200 tokens and 880 ms of a batch slot per abandoned answer. Test it end to end by killing a client mid-answer and watching the engine's running-request count.
+    - **Ideal cancellation chain:** Browser closes socket → edge proxy closes upstream connection → gateway aborts the upstream engine request → engine evicts the sequence from the continuous batch, frees KV-cache blocks, and logs the partial token count as `cancelled`.
+    - **Where chains break in production:** Middleware swallows client disconnect events, proxies keep upstream sockets open until completion, or gateway retry wrappers misinterpret the abort as a transient error and re-send the request.
+    - **Cost at scale:** On Brightpost's 200,000 daily requests, a 5% abandonment rate at token 50 wastes 200 tokens and 880 ms of GPU slot time per drop (**2M wasted output tokens/day**) if disconnects do not reach the engine.
   </InterviewQuestion>
   <InterviewQuestion question="Your p95 time to first token doubled at peak while p50 barely moved. How do you find the cause?" category="Scaling" level="Senior">
-    Split TTFT into its terms using the engine's queue-time and prefill-time histograms and the gateway's own timings. If queue time grew, the fleet is saturated at peak: scale on queue depth or tokens in flight and check that admission control keeps KV-cache headroom. If prefill time grew for short prompts, long prompts are being prefilled in the same batches and delaying everyone, which chunked prefill or separate prefill capacity fixes. Also slice by prompt length and by tenant, since a new customer sending 20,000-token prompts can move p95 without anything being wrong for anyone else.
+    - **Decompose TTFT into queue vs prefill:** Inspect engine queue-wait and prefill-execution histograms separately alongside gateway pre-processing spans.
+    - **Diagnose queue saturation vs head-of-line blocking:** Rising queue wait points to batch/KV-cache saturation (fix with queue-based autoscaling); rising prefill time on short prompts points to long prompts blocking shared batches (fix with chunked prefill or disaggregated prefill pools).
+    - **Slice by prompt length and tenant:** Verify whether a single tenant burst of 20,000-token prompts shifted the unbucketed tail without degrading normal 2,000-token requests.
   </InterviewQuestion>
   <InterviewQuestion question="How do you stream a tool call or a structured JSON answer to the client safely?" category="Architecture" level="Senior">
-    Providers stream tool arguments as fragments of a JSON string, which are not valid JSON until the block ends. Accumulate the fragments per content block and parse when the block closes, or use a partial-JSON parser to update the interface as fields complete, but never execute a tool or commit a write on partial arguments. For structured answers, stream the free-text fields and render or validate the structured parts once each is complete, then run schema validation on the finished object. If validation fails after text was shown, replace it or re-ask the model rather than leaving a half-valid result on screen.
+    - **Buffer tool arguments until block completion:** Accumulate `input_json_delta` string fragments per content block and parse/validate against the schema only after `content_block_stop`; never execute a tool on partial JSON.
+    - **Separate display fields from machine fields:** For structured user-facing cards, stream free-text explanation fields progressively while rendering action buttons or structured tables only after their sub-objects validate.
+    - **Graceful rollback on schema failure:** If final schema validation fails after partial text was displayed, trigger a compact repair call or replace the card with a safe fallback state.
   </InterviewQuestion>
 </InterviewQuestions>

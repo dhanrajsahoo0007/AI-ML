@@ -5,9 +5,11 @@ icon: scale
 updated: 2026-11-15
 ---
 
-Supervised fine-tuning teaches a model what a good answer looks like, but it cannot say which of two plausible answers is better. Interviewers ask about preference tuning because a strong answer explains how comparisons become a training signal, why a KL penalty exists, and when DPO is enough.
+Supervised fine-tuning teaches a model what a good answer looks like, but it cannot say which of two plausible answers is better.
 
-## TL;DR
+- Interviewers ask about preference tuning because a strong answer explains how comparisons become a training signal, why a KL penalty exists, and when DPO is enough.
+
+## Overview
 
 - **Preference tuning learns from comparisons, not from single right answers.** A person or a judge says that answer A is better than answer B for the same prompt, and the model learns the gap.
 - **RLHF has three stages:** supervised fine-tuning, a reward model trained on comparisons, then reinforcement learning (usually PPO) against that reward model. InstructGPT's **1.3 B model was preferred to the 175 B GPT-3** by human raters on the authors' prompts (Ouyang et al., 2022).
@@ -16,27 +18,43 @@ Supervised fine-tuning teaches a model what a good answer looks like, but it can
 - **Preference data is the real cost.** Pairs come from human ranking, user signals and AI feedback, and each source carries its own noise.
 - **When the answer is checkable, use a verifier instead.** Maths, code and rule checks need no learned reward model (see RLVR).
 
-## The idea in plain English
+## Mental model
 
-A restaurant critic cannot write the perfect dish, but can taste two and say which is better. Collect enough of those verdicts and a junior chef learns what the critic likes. RLHF trains a second person, the reward model, to imitate the critic, then lets the chef cook, taste and adjust against that stand-in. The risk is that the chef learns what the stand-in loves (more salt, bigger portions) rather than what the critic loves; the KL penalty is the head chef saying "stay close to how you cooked last week". DPO skips the stand-in: the chef studies the critic's pairs directly.
+- A restaurant critic cannot write the perfect dish, but can taste two and say which is better.
+- Collect enough of those verdicts and a junior chef learns what the critic likes.
+- RLHF trains a second person, the reward model, to imitate the critic, then lets the chef cook, taste and adjust against that stand-in.
+- The risk is that the chef learns what the stand-in loves (more salt, bigger portions) rather than what the critic loves; the KL penalty is the head chef saying "stay close to how you cooked last week".
+- DPO skips the stand-in: the chef studies the critic's pairs directly.
 
 ## Core concepts
 
 ### 1. Supervised fine-tuning first
 
-RLHF starts from a model that already follows instructions. In InstructGPT, labellers wrote demonstrations and GPT-3 was fine-tuned on them. This is the **SFT model**. It is the starting point of the policy and, frozen, the **reference model**. See [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) and [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft) for how to build it cheaply.
+- RLHF starts from a model that already follows instructions.
+- In InstructGPT, labellers wrote demonstrations and GPT-3 was fine-tuned on them.
+- This is the **SFT model**. It is the starting point of the policy and, frozen, the **reference model**.
+- See [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) and [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft) for how to build it cheaply.
 
 ### 2. Comparisons and the reward model
 
-Labellers rank several answers to one prompt. InstructGPT ranked between 4 and 9 answers per prompt, which gives K choose 2 pairs each. A **reward model** (6 B in that paper) is trained so the preferred answer scores higher: the loss is −log σ(r(x, y_w) − r(x, y_l)), where y_w won and y_l lost. The score is a stand-in for human judgement, and it is only as good as the pairs it saw.
+- Labellers rank several answers to one prompt.
+- InstructGPT ranked between 4 and 9 answers per prompt, which gives K choose 2 pairs each.
+- A **reward model** (6 B in that paper) is trained so the preferred answer scores higher: the loss is −log σ(r(x, y_w) − r(x, y_l)), where y_w won and y_l lost.
+- The score is a stand-in for human judgement, and it is only as good as the pairs it saw.
 
 ### 3. Policy optimisation with a KL penalty
 
-The policy writes answers, the reward model scores them, and **PPO** nudges the policy toward higher-scoring text. The reward is reduced by β times the log-ratio between the policy and the reference, per token. This keeps the policy near text the reward model has seen and limits reward hacking. Gao et al. (2022) measured how optimising too hard against a learned reward model hurts the true reward, which is why the penalty and early stopping matter.
+- The policy writes answers, the reward model scores them, and **PPO** nudges the policy toward higher-scoring text.
+- The reward is reduced by β times the log-ratio between the policy and the reference, per token.
+- This keeps the policy near text the reward model has seen and limits reward hacking.
+- Gao et al. (2022) measured how optimising too hard against a learned reward model hurts the true reward, which is why the penalty and early stopping matter.
 
 ### 4. Direct preference optimisation
 
-DPO reparameterises the RLHF objective so the best policy has a closed form, then trains it with a classification loss on pairs: raise the preferred answer's probability against the reference and lower the rejected one's. It needs the pairs and a frozen reference, but no reward model and no sampling during training. The derivation assumes a Bradley-Terry model of preferences and a KL-regularised target. The paper reports DPO matching or beating PPO-based RLHF on sentiment control, summarisation and single-turn dialogue; teams report mixed results elsewhere, so test it on your task.
+- DPO reparameterises the RLHF objective so the best policy has a closed form, then trains it with a classification loss on pairs: raise the preferred answer's probability against the reference and lower the rejected one's.
+- It needs the pairs and a frozen reference, but no reward model and no sampling during training.
+- The derivation assumes a Bradley-Terry model of preferences and a KL-regularised target.
+- The paper reports DPO matching or beating PPO-based RLHF on sentiment control, summarisation and single-turn dialogue; teams report mixed results elsewhere, so test it on your task.
 
 ### 5. Preference data
 
@@ -47,17 +65,27 @@ The pairs are the product. They come from human ranking, from user signals such 
   caption="A preference pair is always a better and a worse answer to one prompt, whatever its source. A filter sits before training. Counts are illustrative."
 />
 
-**How to read it.** Three sources feed one store. Agent edits are high quality but few. Thumbs are many but noisy, since people click for reasons that are not quality. A judge model scales cheaply and brings its own bias. The filter drops ties, signals that disagree and answers that break a hard rule.
+**How to read it:**
 
-**The numbers.** 2,000 + 6,000 + 4,000 = 12,000 pairs; 12,000 − 3,000 = **9,000** kept, so 25 % were dropped. All counts are illustrative.
+- Three sources feed one store. Agent edits are high quality but few.
+- Thumbs are many but noisy, since people click for reasons that are not quality.
+- A judge model scales cheaply and brings its own bias.
+- The filter drops ties, signals that disagree and answers that break a hard rule.
+
+- **The numbers:** 2,000 + 6,000 + 4,000 = 12,000 pairs; 12,000 − 3,000 = **9,000** kept, so 25 % were dropped. All counts are illustrative.
 
 ### 6. AI feedback and constitutions
 
-Constitutional AI (Bai et al., 2022) replaces human harm labels with a written list of principles. In a supervised phase the model critiques and revises its own answers. In an RL phase a model judges which of two answers better follows the principles, and those AI preferences train the preference model (RL from AI feedback, RLAIF). The paper states that the only human oversight is the list of rules. AI feedback is cheap, but it copies the judge's biases, so spot-check it with people.
+- Constitutional AI (Bai et al., 2022) replaces human harm labels with a written list of principles.
+- In a supervised phase the model critiques and revises its own answers.
+- In an RL phase a model judges which of two answers better follows the principles, and those AI preferences train the preference model (RL from AI feedback, RLAIF).
+- The paper states that the only human oversight is the list of rules.
+- AI feedback is cheap, but it copies the judge's biases, so spot-check it with people.
 
 ### 7. Online and offline learning
 
-**Offline** learning uses frozen logs: safe and repeatable, but the data goes stale and describes an older policy. **Online** learning samples from the live policy and asks for fresh comparisons: it tracks drift, but worse intermediate policies can reach users unless a gate stands in front of them (see [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning)).
+- **Offline** learning uses frozen logs: safe and repeatable, but the data goes stale and describes an older policy.
+- **Online** learning samples from the live policy and asks for fresh comparisons: it tracks drift, but worse intermediate policies can reach users unless a gate stands in front of them (see [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning)).
 
 ## Architecture
 
@@ -85,7 +113,7 @@ The RLHF pipeline has three stages, and each trains something different: the SFT
   The policy is optimised against a stand-in. If the reward model rewarded length or flattery in its pairs, the policy farms both. Out-of-distribution prompts expose a reward model that never saw them. Audit samples with people, and watch the KL and answer length during training.
 </Callout>
 
-## Deep dive
+## Technical mechanics
 
 ### DPO in one pair
 
@@ -97,9 +125,16 @@ DPO needs no reward model, so the whole method fits on one pair. Take Brightpost
   caption="DPO trains on the pair directly. Log-ratios and the loss value are illustrative."
 />
 
-**How to read it.** Step 1 is the pair. Step 2 shows how far each answer's probability has moved from the frozen reference: the policy already likes the preferred answer more (+2.0) and the rejected one less (−3.0). Step 3 is the loss.
+**How to read it:**
 
-**The numbers.** With β = 0.1 the margin is 0.1 × (2.0 − (−3.0)) = 0.5. σ(0.5) = 0.622, so the loss is −ln 0.622 = **0.474**. Before training both log-ratios are 0, the margin is 0 and the loss is −ln 0.5 = 0.693. Training lowers the loss by widening the gap. A larger β keeps the policy closer to the reference.
+- Step 1 is the pair. Step 2 shows how far each answer's probability has moved from the frozen reference: the policy already likes the preferred answer more (+2.0) and the rejected one less (−3.0). Step 3 is the loss.
+
+**The numbers:**
+
+- With β = 0.1 the margin is 0.1 × (2.0 − (−3.0)) = 0.5. σ(0.5) = 0.622, so the loss is −ln 0.622 = **0.474**.
+- Before training both log-ratios are 0, the margin is 0 and the loss is −ln 0.5 = 0.693.
+- Training lowers the loss by widening the gap.
+- A larger β keeps the policy closer to the reference.
 
 ```json
 {"prompt": "My kettle arrived cracked (order 4471, £42). Can I have my money back?",
@@ -112,7 +147,11 @@ This is one record in the common prompt, chosen, rejected layout that most DPO t
 
 ### RLHF against RLVR
 
-RLVR keeps the RLHF loop and swaps the learned reward model for a program that checks the answer. Where a check exists, such as maths or unit tests, it is exact. Where it does not, such as tone or helpfulness, RLHF is still the tool. Both can be gamed: the policy exploits the reward model's blind spots in one case and the checker's loopholes in the other. See [RLVR & Reasoning Post-Training](/ai-system-design/genai-system-design/rlvr-and-reasoning-post-training) for the verifier side.
+- RLVR keeps the RLHF loop and swaps the learned reward model for a program that checks the answer.
+- Where a check exists, such as maths or unit tests, it is exact.
+- Where it does not, such as tone or helpfulness, RLHF is still the tool.
+- Both can be gamed: the policy exploits the reward model's blind spots in one case and the checker's loopholes in the other.
+- See [RLVR & Reasoning Post-Training](/ai-system-design/genai-system-design/rlvr-and-reasoning-post-training) for the verifier side.
 
 <AnimatedDiagram
   spec="animated/llm/rlvr-reward-sources"
@@ -121,11 +160,16 @@ RLVR keeps the RLHF loop and swaps the learned reward model for a program that c
 
 ### PPO or DPO
 
-PPO fits when you need reward shaping, multi-step environments or a reward that comes from a simulator, and when the team already runs RL infrastructure. It brings variance, hyperparameter sensitivity and a heavier loop. DPO fits stable updates from offline pair logs with a smaller engineering surface, and it can overfit when pairs are noisy or narrow. Training also needs the reference model in memory beside the policy, and the reference digest should be recorded with every checkpoint. For how pretraining and scale shape the starting point, see [Scaling Laws & Training](/ai-system-design/genai-system-design/scaling-laws-and-training).
+- PPO fits when you need reward shaping, multi-step environments or a reward that comes from a simulator, and when the team already runs RL infrastructure.
+- It brings variance, hyperparameter sensitivity and a heavier loop.
+- DPO fits stable updates from offline pair logs with a smaller engineering surface, and it can overfit when pairs are noisy or narrow.
+- Training also needs the reference model in memory beside the policy, and the reference digest should be recorded with every checkpoint.
+- For how pretraining and scale shape the starting point, see [Scaling Laws & Training](/ai-system-design/genai-system-design/scaling-laws-and-training).
 
 ### Worked example: fixing Brightpost's refund promises
 
-The fine-tuned model (5,000 tickets, [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms)) sometimes says "Done, your refund is on its way" for refunds over £30. Supervised data did not rule this out, since it only shows good replies.
+- The fine-tuned model (5,000 tickets, [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms)) sometimes says "Done, your refund is on its way" for refunds over £30.
+- Supervised data did not rule this out, since it only shows good replies.
 
 1. **Collect pairs.** 12,000 pairs from agent edits, thumbs and a judge, filtered to 9,000 (figure above). Pairs where the rejected answer breaks the refund rule are kept on purpose.
 2. **Pick the method.** An offline log and a small team point to DPO with the SFT model as reference.
@@ -143,14 +187,14 @@ The fine-tuned model (5,000 tickets, [Fine-Tuning LLMs](/ai-system-design/genai-
 | RLAIF (AI feedback) | Cheap, scalable labels | Inherits the judge's bias | Broad principles; spot-check with people |
 | RLVR | Exact reward, no reward model | Only for checkable tasks | Maths, code, rule checks |
 
-## Real-world examples
+## Production systems
 
 - **InstructGPT (2022).** SFT, a 6 B reward model trained on rankings of 4 to 9 answers per prompt, then PPO with a KL penalty; its 1.3 B model beat the 175 B GPT-3 in human preference.
 - **Constitutional AI (Anthropic, 2022).** Human oversight reduced to a written list of principles; AI preferences replace human harm labels in the RL phase.
 - **DPO (2023).** Matches or beats PPO-based RLHF on sentiment, summarisation and single-turn dialogue in its own experiments, with a simple loss.
 - **Reward-model over-optimisation (Gao et al., 2022).** Measured how true reward falls when a policy is optimised too hard against a learned reward model, for several reward-model sizes.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Training the reward model on narrow pairs, then optimising far past what it knows.
 - Letting answers grow longer because longer answers won more pairs.
@@ -159,7 +203,7 @@ The fine-tuned model (5,000 tickets, [Fine-Tuning LLMs](/ai-system-design/genai-
 - Using DPO on pairs the reference model never produced and expecting clean gains.
 - Skipping the reference's version: a checkpoint is not reproducible without it.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define preference tuning: learning from "A is better than B" instead of a single right answer.
 2. Walk RLHF in three stages and say what each trains and what stays frozen.
@@ -181,27 +225,48 @@ The fine-tuned model (5,000 tickets, [Fine-Tuning LLMs](/ai-system-design/genai-
 
 <InterviewQuestions>
   <InterviewQuestion question="What is a reward model in RLHF, and how is it trained?" category="Concepts" level="Junior">
-    A reward model scores an answer so that answers people prefer score higher. It is trained on comparisons: for one prompt, labellers rank several answers, and the loss pushes the winner's score above the loser's. In InstructGPT labellers ranked 4 to 9 answers per prompt. The model is a stand-in for human judgement and only reflects the pairs it saw, which is why it can be fooled outside that data.
+    - A reward model scores an answer so that answers people prefer score higher.
+    - It is trained on comparisons: for one prompt, labellers rank several answers, and the loss pushes the winner's score above the loser's.
+    - In InstructGPT labellers ranked 4 to 9 answers per prompt.
+    - The model is a stand-in for human judgement and only reflects the pairs it saw, which is why it can be fooled outside that data.
   </InterviewQuestion>
   <InterviewQuestion question="What failure modes appear if the reward model is trained on narrow comparison data?" category="Failure modes" level="Senior">
-    The policy optimises against a misspecified surrogate and may produce high-reward text that people dislike, such as verbosity, hedging or sycophancy, if those correlated with wins in the data. Out-of-distribution prompts expose brittle generalisation. Mitigations are broader sampling of pairs, ensembles or uncertainty-aware rewards, periodic human audits, a KL penalty, early stopping, and hard rule checks beside the learned reward.
+    - The policy optimises against a misspecified surrogate and may produce high-reward text that people dislike, such as verbosity, hedging or sycophancy, if those correlated with wins in the data.
+    - Out-of-distribution prompts expose brittle generalisation.
+    - Mitigations are broader sampling of pairs, ensembles or uncertainty-aware rewards, periodic human audits, a KL penalty, early stopping, and hard rule checks beside the learned reward.
   </InterviewQuestion>
   <InterviewQuestion question="How does KL regularisation to a reference model affect the system architecture?" category="Architecture" level="Mid">
-    You must version and keep the frozen reference beside the policy, which adds memory and compute during training, and tie every checkpoint to the exact reference digest it used. Inference rarely needs the reference. Training jobs should log the effective KL and stop early when it blows up. The penalty stops the policy drifting into text the reward model over-scores.
+    - You must version and keep the frozen reference beside the policy, which adds memory and compute during training, and tie every checkpoint to the exact reference digest it used.
+    - Inference rarely needs the reference. Training jobs should log the effective KL and stop early when it blows up.
+    - The penalty stops the policy drifting into text the reward model over-scores.
   </InterviewQuestion>
   <InterviewQuestion question="Explain DPO and what it removes from RLHF." category="Concepts" level="Mid">
-    DPO rewrites the RLHF objective so the optimal policy has a closed form, then trains the policy with a classification loss on preference pairs. It raises the preferred answer's probability relative to a frozen reference and lowers the rejected one's, scaled by β. It removes the separate reward model and the sampling loop during training, so it is simpler and more stable. It still needs good, diverse pairs and can overfit noisy ones.
+    - DPO rewrites the RLHF objective so the optimal policy has a closed form, then trains the policy with a classification loss on preference pairs.
+    - It raises the preferred answer's probability relative to a frozen reference and lowers the rejected one's, scaled by β.
+    - It removes the separate reward model and the sampling loop during training, so it is simpler and more stable.
+    - It still needs good, diverse pairs and can overfit noisy ones.
   </InterviewQuestion>
   <InterviewQuestion question="When would you still choose PPO-style RLHF over DPO?" category="Trade-offs" level="Senior">
-    PPO helps when you need reward shaping, multi-step tool environments, or non-differentiable rewards from simulators or hybrid pipelines, and when the team already runs RL infrastructure with large interactive budgets. If the goal is stable updates from offline pair logs with a small engineering surface, DPO is usually faster to iterate. Pick by the data you have and the control you need, and compare both on the same golden set.
+    - PPO helps when you need reward shaping, multi-step tool environments, or non-differentiable rewards from simulators or hybrid pipelines, and when the team already runs RL infrastructure with large interactive budgets.
+    - If the goal is stable updates from offline pair logs with a small engineering surface, DPO is usually faster to iterate.
+    - Pick by the data you have and the control you need, and compare both on the same golden set.
   </InterviewQuestion>
   <InterviewQuestion question="Where would you get preference pairs for Brightpost, and how would you trust them?" category="Architecture" level="Mid">
-    Use agent edits (the edited reply beats the model's draft), thumbs and regenerate clicks, and a judge model with a rubric. Pool them, drop ties and pairs where signals disagree, and drop answers that break a hard rule. Have people read a sample of each source, since thumbs are noisy and a judge is biased. Keep the golden set out of the pairs and track how many pairs each source contributes.
+    - Use agent edits (the edited reply beats the model's draft), thumbs and regenerate clicks, and a judge model with a rubric.
+    - Pool them, drop ties and pairs where signals disagree, and drop answers that break a hard rule.
+    - Have people read a sample of each source, since thumbs are noisy and a judge is biased.
+    - Keep the golden set out of the pairs and track how many pairs each source contributes.
   </InterviewQuestion>
   <InterviewQuestion question="Online or offline preference learning for a live product?" category="Trade-offs" level="Senior">
-    Offline logs are safe and repeatable but go stale, because they describe an older policy. Online learning samples from the live policy and tracks drift, but a worse intermediate model can reach users. A reasonable path is offline first, then periodic online rounds behind an evaluation gate and a canary, with rollback ready. Record which policy produced each pair so you can tell on-policy data from off-policy.
+    - Offline logs are safe and repeatable but go stale, because they describe an older policy.
+    - Online learning samples from the live policy and tracks drift, but a worse intermediate model can reach users.
+    - A reasonable path is offline first, then periodic online rounds behind an evaluation gate and a canary, with rollback ready.
+    - Record which policy produced each pair so you can tell on-policy data from off-policy.
   </InterviewQuestion>
   <InterviewQuestion question="How does Constitutional AI change who provides the labels?" category="Concepts" level="Senior">
-    It replaces human harm labels with a written list of principles. The model critiques and revises its own answers in a supervised phase. In the RL phase a model judges which of two answers follows the principles better, and those AI preferences train the preference model, a method called RLAIF. Humans still write the principles and should audit samples, because the judge model's biases carry into the result.
+    - It replaces human harm labels with a written list of principles.
+    - The model critiques and revises its own answers in a supervised phase.
+    - In the RL phase a model judges which of two answers follows the principles better, and those AI preferences train the preference model, a method called RLAIF.
+    - Humans still write the principles and should audit samples, because the judge model's biases carry into the result.
   </InterviewQuestion>
 </InterviewQuestions>

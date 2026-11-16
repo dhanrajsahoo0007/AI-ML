@@ -4,9 +4,13 @@ description: Placing models close to users while respecting latency, consistency
 updated: 2026-11-15
 ---
 
-A web app copies its servers to a second region and is done. An LLM service cannot, because GPUs are scarce in each region, a provider may not host your model there, prompts are personal data, and the KV caches that make follow-up turns cheap stay where they were built. Interviewers ask this to see whether you can place models for latency, residency and failure at once. This page covers what changes for LLMs; the general patterns (DNS, anycast, one writer, replication) are on [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region).
+A web app copies its servers to a second region and is done.
 
-## TL;DR
+- An LLM service cannot, because GPUs are scarce in each region, a provider may not host your model there, prompts are personal data, and the KV caches that make follow-up turns cheap stay where they were built.
+- Interviewers ask this to see whether you can place models for latency, residency and failure at once.
+- This page covers what changes for LLMs; the general patterns (DNS, anycast, one writer, replication) are on [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region).
+
+## Overview
 
 - **Capacity is the first constraint.** With N regions, each must be sized for the peak split over the survivors: **peak ÷ (N − 1)**. Brightpost's 12 requests/s needs **24 requests/s of capacity across 2 regions (4 GPUs)** or **18 across 3 (3 GPUs)** (illustrative GPU rates).
 - **Residency covers prompts, outputs and logs, not weights.** Model weights are identical everywhere; what must stay in a region is the traffic, the vector index and the traces. Provider controls differ, so check each one (as of November 2026).
@@ -15,9 +19,13 @@ A web app copies its servers to a second region and is done. An LLM service cann
 - **The edge buys the network trip and privacy, not quality.** A small model on the device or an edge site answers easy requests in **152 ms** against **396 ms** from the cloud; hard ones still go to the large model.
 - **Health checks must tell a regional outage from a bad model release**, or traffic shifts spread a bad deployment to every region.
 
-## The idea in plain English
+## Mental model
 
-Think of a bakery chain that sells one special cake that needs a rare oven. Opening a shop in a second city means buying a second rare oven, and the ovens in a city may be sold out. The recipe book stays the same in every shop, but customers' orders, which name them and their addresses, may have to stay in the local shop's ledger. If one shop burns down, the others must already have spare oven time, or the queue just moves and gets longer. A corner kiosk can sell cupcakes without calling anyone, but it cannot bake the special cake.
+- Think of a bakery chain that sells one special cake that needs a rare oven.
+- Opening a shop in a second city means buying a second rare oven, and the ovens in a city may be sold out.
+- The recipe book stays the same in every shop, but customers' orders, which name them and their addresses, may have to stay in the local shop's ledger.
+- If one shop burns down, the others must already have spare oven time, or the queue just moves and gets longer.
+- A corner kiosk can sell cupcakes without calling anyone, but it cannot bake the special cake.
 
 ## Core concepts
 
@@ -43,7 +51,11 @@ Brightpost runs a gateway and a GPU pool in each region. A global front door sen
   caption="One global address in front of two regions. This is the cloud section’s figure; for an LLM service, each region’s “shop app” is a gateway and a GPU pool."
 />
 
-**How to read it.** Shoppers in London and Sydney hit one anycast address. The front door health-checks each region and sends the shopper to the nearest one that answers. The figure is about databases and a double sale (the red poster is an earlier step of that story, not part of this page); read each region box as "gateway, engine, vector index and log sink".
+**How to read it:**
+
+- Shoppers in London and Sydney hit one anycast address.
+- The front door health-checks each region and sends the shopper to the nearest one that answers.
+- The figure is about databases and a double sale (the red poster is an earlier step of that story, not part of this page); read each region box as "gateway, engine, vector index and log sink".
 
 1. The user's request reaches the global front door.
 2. The front door picks the nearest healthy region.
@@ -52,7 +64,7 @@ Brightpost runs a gateway and a GPU pool in each region. A global front door sen
 5. Traces and logs go to a sink in the same region.
 6. If the region fails its checks, new requests go to the next nearest region, which must have spare GPUs.
 
-## Deep dive
+## Technical mechanics
 
 ### What residency covers for an LLM
 
@@ -65,7 +77,11 @@ The cloud section shows the pattern: an allowed-regions guardrail, a data perime
   caption="A region guardrail and a data perimeter keep copies in allowed regions. For an LLM service, the same rules cover the log sink, the vector index and the evaluation set."
 />
 
-**How to read it.** Step 2 of the original is the failure: a tool copies data to a third region. For Brightpost's assistant, replace "analytics store" with "prompt log" or "traces". A debugging copy that leaves the region breaks the rule as surely as the model call would.
+**How to read it:**
+
+- Step 2 of the original is the failure: a tool copies data to a third region.
+- For Brightpost's assistant, replace "analytics store" with "prompt log" or "traces".
+- A debugging copy that leaves the region breaks the rule as surely as the model call would.
 
 Provider controls (checked against official documentation, November 2026):
 
@@ -76,7 +92,8 @@ Provider controls (checked against official documentation, November 2026):
 | Azure Foundry | Global, Data Zone (US, EU, APAC) or Azure geography deployments | At rest data stays in the geography; processing follows the deployment type; Data Zone interruptions affect all traffic routed to that region |
 | OpenAI API | Region choice per project | Which regions cover storage and which cover processing differs; read its data controls guide before promising anything |
 
-Two cautions. A provider's "region" for inference is not your region: if you need Europe-only processing, confirm the exact value your plan supports. And residency of the model call does not cover your own gateway logs, which usually hold the full prompt.
+- Two cautions. A provider's "region" for inference is not your region: if you need Europe-only processing, confirm the exact value your plan supports.
+- And residency of the model call does not cover your own gateway logs, which usually hold the full prompt.
 
 ### Edge against cloud: a small model near the user
 
@@ -88,11 +105,21 @@ A device or an edge site removes the long network trip and keeps data local, but
   caption="One request on three routes: a phone, a nearby edge GPU and the home-region cloud. Rates are illustrative."
 />
 
-**How to read it.** Each bar is split into network (grey), prefill (teal) and decode (green). Step 1 is an easy request: 300 tokens in, 60 out. Step 2 is Brightpost's full request, on a scale 5 times longer. Step 3 states the routing rule.
+**How to read it:**
 
-**The numbers (all rates illustrative).** Easy request: device 0 + 300 + 1,500 = **1,800 ms**; edge 20 + 12 + 120 = **152 ms** (first token 34 ms); cloud 120 + 12 + 264 = **396 ms**. The edge saves 244 ms: 100 ms of network and 144 ms because its model decodes at 2 ms per token against 4.4. Hard request: device 2,200 + 6,250 = **8,450 ms**; edge 608 ms but with a small model that may get the refund policy wrong; cloud 120 + 88 + 1,100 = **1,308 ms**, inside the 1,500 ms target.
+- Each bar is split into network (grey), prefill (teal) and decode (green).
+- Step 1 is an easy request: 300 tokens in, 60 out.
+- Step 2 is Brightpost's full request, on a scale 5 times longer. Step 3 states the routing rule.
 
-Edge deployments also need an update channel: differential bundles, staged rollouts and signature checks for devices that connect rarely. Large checkpoints should not sit on a generic CDN without signed URLs and byte-range integrity. For making a model small, see [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization) and [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models).
+**The numbers (all rates illustrative):**
+
+- Easy request: device 0 + 300 + 1,500 = **1,800 ms**; edge 20 + 12 + 120 = **152 ms** (first token 34 ms); cloud 120 + 12 + 264 = **396 ms**.
+- The edge saves 244 ms: 100 ms of network and 144 ms because its model decodes at 2 ms per token against 4.4.
+- Hard request: device 2,200 + 6,250 = **8,450 ms**; edge 608 ms but with a small model that may get the refund policy wrong; cloud 120 + 88 + 1,100 = **1,308 ms**, inside the 1,500 ms target.
+
+- Edge deployments also need an update channel: differential bundles, staged rollouts and signature checks for devices that connect rarely.
+- Large checkpoints should not sit on a generic CDN without signed URLs and byte-range integrity.
+- For making a model small, see [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization) and [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models).
 
 ### Spare capacity for a failed region
 
@@ -104,9 +131,19 @@ If one of N regions fails, its traffic splits over the other N − 1. Each regio
   caption="Brightpost’s 12 requests/s peak over two regions and over three. Each bar’s line is the capacity the region is sized for."
 />
 
-**How to read it.** Step 1: two regions each carry 6 requests/s; when A fails, B carries 12, which fills it, so each must be sized for 12. Step 2: three regions carry 4 each; after a failure each survivor carries 4 + 2 = 6. Step 3 compares the designs.
+**How to read it:**
 
-**The numbers.** One request is 2,200 × 0.04 ms = 88 ms of prefill (illustrative); keep a GPU under 60% busy. Two regions: 12 × 0.088 ÷ 0.6 = 1.76, so 2 GPUs each, **4 in all**, against 2 for one region. Three regions: 6 × 0.088 ÷ 0.6 = 0.88, so 1 GPU each, **3 in all**. In requests/s the fleets are 24 (2.0× the peak) and 18 (1.5×). More regions lower the spare fraction to 1 ÷ (N − 1), but each region needs at least one whole GPU group, and you pay for every region's gateway, index and on-call. These counts leave out the spare replica each region already keeps for its own failures ([LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference)).
+- Step 1: two regions each carry 6 requests/s; when A fails, B carries 12, which fills it, so each must be sized for 12.
+- Step 2: three regions carry 4 each; after a failure each survivor carries 4 + 2 = 6. Step 3 compares the designs.
+
+**The numbers:**
+
+- One request is 2,200 × 0.04 ms = 88 ms of prefill (illustrative); keep a GPU under 60% busy.
+- Two regions: 12 × 0.088 ÷ 0.6 = 1.76, so 2 GPUs each, **4 in all**, against 2 for one region.
+- Three regions: 6 × 0.088 ÷ 0.6 = 0.88, so 1 GPU each, **3 in all**.
+- In requests/s the fleets are 24 (2.0× the peak) and 18 (1.5×).
+- More regions lower the spare fraction to 1 ÷ (N − 1), but each region needs at least one whole GPU group, and you pay for every region's gateway, index and on-call.
+- These counts leave out the spare replica each region already keeps for its own failures ([LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference)).
 
 <Callout tone="red" title="What breaks">
   Failover onto cold caches. The survivors have none of the failed region's prefixes, so every follow-up turn pays full prefill. The sizing above uses the full 88 ms, so it already covers this; sizing with the cached cost (about 11 ms for a second turn) would under-provision by up to 8 times. Also check that the survivors have quota and that the provider has the model in that region.
@@ -114,11 +151,14 @@ If one of N regions fails, its traffic splits over the other N − 1. Each regio
 
 ### Time to first token across regions
 
-A user in Sydney calling London adds a round trip, about 250 ms (the figure on the [cloud page](/cloud/resilience/multi-region)). On a reused connection time to first token is 250 + 88 + 4.4 ≈ 342 ms, just inside the 400 ms target. On a new connection, TCP and TLS 1.3 each take a round trip before the request travels: 3 × 250 + 88 ≈ 838 ms. A region 20 ms away gives 20 + 88 + 4.4 ≈ 112 ms. See [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token).
+- A user in Sydney calling London adds a round trip, about 250 ms (the figure on the [cloud page](/cloud/resilience/multi-region)).
+- On a reused connection time to first token is 250 + 88 + 4.4 ≈ 342 ms, just inside the 400 ms target.
+- On a new connection, TCP and TLS 1.3 each take a round trip before the request travels: 3 × 250 + 88 ≈ 838 ms. A region 20 ms away gives 20 + 88 + 4.4 ≈ 112 ms. See [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token).
 
 ### Keeping versions consistent
 
-Pin each region to an immutable digest, keep a manifest of approved digests per region, and promote one region at a time with checks. A bad model is not a regional outage: health checks should include a canary prompt set so a bad release does not pass as healthy, and a failed region should not receive traffic from a region that is also failing.
+- Pin each region to an immutable digest, keep a manifest of approved digests per region, and promote one region at a time with checks.
+- A bad model is not a regional outage: health checks should include a canary prompt set so a bad release does not pass as healthy, and a failed region should not receive traffic from a region that is also failing.
 
 ### Worked example: Brightpost opens a Sydney region
 
@@ -156,14 +196,14 @@ logs: regional-sink                    # prompts never leave the region
 | Edge small model | No network; private | Weaker; update channel; device limits | Easy, private or offline requests |
 | Self-hosted per region | Control of data and capacity | You hold GPUs and scale them | High volume, strict residency |
 
-## Real-world examples
+## Production systems
 
 - **Anthropic API data residency:** per-request `inference_geo` of `"us"` or `"global"` with a 1.1× price for US-only inference and shared rate limits across geos (documentation, November 2026).
 - **Amazon Bedrock cross-Region inference:** geographic profiles keep processing within a geography, global profiles route worldwide for about 10% lower cost, and CloudTrail records the region that served each call.
 - **Azure Foundry deployment types:** Global, Data Zone and geography options trade price and availability against processing location.
 - **On-device models:** phones and edge appliances run quantised small models through runtimes such as ONNX Runtime or TensorFlow Lite for easy or offline tasks.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Replicating weights globally but sending prompts, logs or traces to a central sink.
 - Sizing every region for its own peak and assuming failover will work.
@@ -172,7 +212,7 @@ logs: regional-sink                    # prompts never leave the region
 - Health checks that only test "is the endpoint up", so a bad model release spreads everywhere.
 - Putting multi-gigabyte checkpoints on a generic CDN without signed URLs and integrity checks.
 
-## How to answer in an interview
+## Interview framework
 
 1. Ask the constraints: user geography, latency target, residency rules, availability target.
 2. Place regions and a front door; keep weights, gateway and stores per region.
@@ -194,24 +234,38 @@ logs: regional-sink                    # prompts never leave the region
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you keep model versions consistent across regions without forcing a single global failure domain?" category="Architecture" level="Mid">
-    Treat each region as an independent deployment that pins to an immutable artifact digest, promoted through a control plane. A manifest lists the approved digest per region and environment, promotion is staged with checks, and rollback repoints the manifest. Do not share mutable storage for weights; replicate objects and mark a region ready only after checksum and canary-prompt checks pass there.
+    - Treat each region as an independent deployment that pins to an immutable artifact digest, promoted through a control plane.
+    - A manifest lists the approved digest per region and environment, promotion is staged with checks, and rollback repoints the manifest.
+    - Do not share mutable storage for weights; replicate objects and mark a region ready only after checksum and canary-prompt checks pass there.
   </InterviewQuestion>
   <InterviewQuestion question="What are the main latency pitfalls when serving from the edge versus a regional data center?" category="Trade-offs" level="Mid">
-    Round trips dominate: a new connection costs TCP and TLS round trips before the request travels, so a 250 ms path can cost 750 ms before prefill. Cold caches, large payloads over the last mile and device throttling also matter. Measure end to end, reuse connections and keep authentication and tokenisation where the data may exist.
+    - Round trips dominate: a new connection costs TCP and TLS round trips before the request travels, so a 250 ms path can cost 750 ms before prefill.
+    - Cold caches, large payloads over the last mile and device throttling also matter.
+    - Measure end to end, reuse connections and keep authentication and tokenisation where the data may exist.
   </InterviewQuestion>
   <InterviewQuestion question="How does data residency affect a retrieval-augmented generation system that indexes enterprise documents?" category="Architecture" level="Senior">
-    Chunk text, embeddings, prompts, outputs and logs for each tenant must stay in approved regions. That usually means a separate index and ingestion pipeline per jurisdiction, no cross-border vector search unless contracts allow it, and audit logs that prove nothing left. A global index is viable only when the content itself is portable.
+    - Chunk text, embeddings, prompts, outputs and logs for each tenant must stay in approved regions.
+    - That usually means a separate index and ingestion pipeline per jurisdiction, no cross-border vector search unless contracts allow it, and audit logs that prove nothing left.
+    - A global index is viable only when the content itself is portable.
   </InterviewQuestion>
   <InterviewQuestion question="Brightpost peaks at 12 requests/s. How much capacity do two regions need so one can fail?" category="Scaling" level="Senior">
-    Each region must carry the whole peak after the other fails, so each is sized for 12 ÷ (2 − 1) = 12 requests/s and the fleet for 24, twice the peak. At an illustrative 88 ms of prefill per request and a 60% busy limit that is 1.76, so 2 GPUs per region and 4 in all. With three regions each is sized for 6, one GPU each, 3 in all. I would confirm with a load test and check quota in each region.
+    - Each region must carry the whole peak after the other fails, so each is sized for 12 ÷ (2 − 1) = 12 requests/s and the fleet for 24, twice the peak.
+    - At an illustrative 88 ms of prefill per request and a 60% busy limit that is 1.76, so 2 GPUs per region and 4 in all.
+    - With three regions each is sized for 6, one GPU each, 3 in all.
+    - I would confirm with a load test and check quota in each region.
   </InterviewQuestion>
   <InterviewQuestion question="Why do KV caches matter when a region fails over?" category="Failure modes" level="Senior">
-    Prefix caches live in a replica's GPU memory in one region, so the surviving region has none of the failed region's conversations. Each follow-up turn pays full prefill instead of the cached cost, which can be about 8 times more GPU work. Size headroom with the full prefill cost, and warm caches gradually rather than assuming they carry over.
+    - Prefix caches live in a replica's GPU memory in one region, so the surviving region has none of the failed region's conversations.
+    - Each follow-up turn pays full prefill instead of the cached cost, which can be about 8 times more GPU work.
+    - Size headroom with the full prefill cost, and warm caches gradually rather than assuming they carry over.
   </InterviewQuestion>
   <InterviewQuestion question="What does data residency cover for an LLM application that calls a hosted model?" category="Concepts" level="Junior">
-    The model weights are the same everywhere, so residency is about the data: prompts, outputs, retrieved text, embeddings, logs and traces. Provider options differ, for example a US-only inference setting, geographic profiles or data-zone deployments, and they may cost more or offer fewer models. Your own gateway logs also need a regional sink.
+    - The model weights are the same everywhere, so residency is about the data: prompts, outputs, retrieved text, embeddings, logs and traces.
+    - Provider options differ, for example a US-only inference setting, geographic profiles or data-zone deployments, and they may cost more or offer fewer models.
+    - Your own gateway logs also need a regional sink.
   </InterviewQuestion>
   <InterviewQuestion question="When would you run a small model at the edge instead of calling the cloud?" category="Trade-offs" level="Mid">
-    For easy, private or offline requests where the answer does not need the large model. It removes the network trip and keeps data local; in the illustrative numbers it answers in 152 ms against 396 ms. Hard requests, such as a refund that needs policy text, still go to the large model, because a phone-sized model is slow and weaker. A router should choose per request.
+    - For easy, private or offline requests where the answer does not need the large model.
+    - It removes the network trip and keeps data local; in the illustrative numbers it answers in 152 ms against 396 ms. Hard requests, such as a refund that needs policy text, still go to the large model, because a phone-sized model is slow and weaker. A router should choose per request.
   </InterviewQuestion>
 </InterviewQuestions>

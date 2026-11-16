@@ -3,9 +3,11 @@ title: Multi-Agent Systems
 description: When multiple LLM agents beat one, the main orchestration patterns, how agents hand off work and share state, and the failure modes and costs to watch.
 ---
 
-Multi-agent systems are popular in demos and frequent in interviews. The best answers are skeptical: they explain when splitting work across agents helps, how to coordinate them, and why a single well-equipped agent is often the better default.
+Multi-agent systems are popular in demos and frequent in interviews.
 
-## TL;DR
+- The best answers are skeptical: they explain when splitting work across agents helps, how to coordinate them, and why a single well-equipped agent is often the better default.
+
+## Overview
 
 - Use multiple agents when work splits into parts that benefit from **separate context, tools or instructions**, or can run **in parallel**.
 - Main patterns: **orchestrator-workers (supervisor)**, **sequential pipeline**, **parallel fan-out and merge**, **debate or reviewer**, **hand-offs** between specialists.
@@ -13,9 +15,10 @@ Multi-agent systems are popular in demos and frequent in interviews. The best an
 - Costs: more tokens, more latency, **error compounding** and harder debugging. Anthropic measured its research team of agents at about **15 times the tokens of a chat**, against about 4 times for one agent.
 - Evaluate against a **single-agent baseline**.
 
-## The idea in plain English
+## Mental model
 
-One very capable person can do a lot alone. A team helps when the job is big enough to split, when parts need different expertise, or when several things can happen at once. But teams add meetings and miscommunication. Multi-agent design is about building the smallest team with the clearest hand-offs.
+- One very capable person can do a lot alone. A team helps when the job is big enough to split, when parts need different expertise, or when several things can happen at once.
+- But teams add meetings and miscommunication. Multi-agent design is about building the smallest team with the clearest hand-offs.
 
 ## Core concepts
 
@@ -30,9 +33,19 @@ Here three sub-agents each search on their own, then hand a lead agent a short s
   caption="Each sub-agent spends its own window on the search; the lead reads 8,000 tokens of summaries instead of 223,000 tokens of raw work (illustrative counts)."
 />
 
-**How to read it.** Each bar is one context window of 200,000 tokens, all on one scale. Step 1: each sub-agent fills its own window, mostly with tool results. Step 2: each one writes a summary of 1,500 tokens. Step 3: the lead's window holds only its instructions, the task and the three summaries. The lead never sees the raw search results.
+**How to read it:**
 
-**The numbers** (illustrative). The sub-agents use 75,000, 63,000 and 85,000 tokens: 223,000 together, more than one 200,000-token window can hold. The lead reads 3,000 + 500 + 3 × 1,500 = **8,000** tokens, about 1/28 of that. Isolation does not save tokens: all 231,000 are still paid for. It keeps each window small enough for its model to use well.
+- Each bar is one context window of 200,000 tokens, all on one scale.
+- Step 1: each sub-agent fills its own window, mostly with tool results.
+- Step 2: each one writes a summary of 1,500 tokens.
+- Step 3: the lead's window holds only its instructions, the task and the three summaries. The lead never sees the raw search results.
+
+**The numbers (illustrative):**
+
+- The sub-agents use 75,000, 63,000 and 85,000 tokens: 223,000 together, more than one 200,000-token window can hold.
+- The lead reads 3,000 + 500 + 3 × 1,500 = **8,000** tokens, about 1/28 of that.
+- Isolation does not save tokens: all 231,000 are still paid for.
+- It keeps each window small enough for its model to use well.
 
 2. **Specialization.** Different system prompts, tools and even models per role (researcher, coder, reviewer).
 
@@ -48,7 +61,14 @@ Orchestrator-workers (a supervisor) and the pipeline are two of four common ways
   caption="The same agents, wired four ways: who may talk to whom decides how errors travel and who owns the answer."
 />
 
-**How to read it.** Every box is an agent; darker boxes coordinate others. An arrow means "gives work to"; a plain line means two agents talk both ways. A **supervisor** owns the answer and every result passes through it. A **pipeline** fixes the order, so an error in the first agent reaches every later one. **Peers** have no owner, so they need a rule for when to stop. A **hierarchy** is supervisors of supervisors, for jobs too big for one lead to track.
+**How to read it:**
+
+- Every box is an agent; darker boxes coordinate others.
+- An arrow means "gives work to"; a plain line means two agents talk both ways.
+- A **supervisor** owns the answer and every result passes through it.
+- A **pipeline** fixes the order, so an error in the first agent reaches every later one.
+- **Peers** have no owner, so they need a rule for when to stop.
+- A **hierarchy** is supervisors of supervisors, for jobs too big for one lead to track.
 
 5. **Parallel fan-out.** Independent sub-tasks run concurrently and are merged, cutting wall-clock time.
 
@@ -62,7 +82,8 @@ Orchestrator-workers (a supervisor) and the pipeline are two of four common ways
 
 ## Architecture
 
-Here is an orchestrated research system, step by step. Brightpost's support manager asks: "Why are kettle refunds up this month?" Brightpost is the fictional shop from [AI security on the cloud](/cloud/resilience/ai-security) and [Agent architectures](/ai-system-design/genai-system-design/agent-architectures).
+- Here is an orchestrated research system, step by step.
+- Brightpost's support manager asks: "Why are kettle refunds up this month?" Brightpost is the fictional shop from [AI security on the cloud](/cloud/resilience/ai-security) and [Agent architectures](/ai-system-design/genai-system-design/agent-architectures).
 
 <AnimatedDiagram
   spec="animated/agents/orchestrator-workers"
@@ -94,7 +115,10 @@ Here is an orchestrated research system, step by step. Brightpost's support mana
   </StepCard>
 </StepCards>
 
-The task the lead sends is the most important message in the system. Anthropic's write-up says each sub-agent needs "an objective, an output format, guidance on the tools and sources to use, and clear task boundaries". Here is the lead's call that starts worker 1, as a `tool_use` block in the Anthropic Messages API shape. The `start_subagent` tool is this example's own; your harness defines it.
+- The task the lead sends is the most important message in the system.
+- Anthropic's write-up says each sub-agent needs "an objective, an output format, guidance on the tools and sources to use, and clear task boundaries".
+- Here is the lead's call that starts worker 1, as a `tool_use` block in the Anthropic Messages API shape.
+- The `start_subagent` tool is this example's own; your harness defines it.
 
 ```json
 {
@@ -111,7 +135,11 @@ The task the lead sends is the most important message in the system. Anthropic's
 }
 ```
 
-**The numbers.** Anthropic's research system starts 3 to 5 sub-agents at once, and each sub-agent calls 3 or more tools at once. Its prompts scale effort to the question: 1 agent with 3 to 10 tool calls for a simple fact, 2 to 4 sub-agents with 10 to 15 calls each for a comparison, and more than 10 sub-agents for complex research. Running in parallel cut research time by up to 90 % for complex queries.
+**The numbers:**
+
+- Anthropic's research system starts 3 to 5 sub-agents at once, and each sub-agent calls 3 or more tools at once.
+- Its prompts scale effort to the question: 1 agent with 3 to 10 tool calls for a simple fact, 2 to 4 sub-agents with 10 to 15 calls each for a comparison, and more than 10 sub-agents for complex research.
+- Running in parallel cut research time by up to 90 % for complex queries.
 
 <Callout tone="red" title="What breaks">
   Vague tasks. In Anthropic's write-up, a short instruction led one sub-agent to research the 2021 car chip shortage
@@ -120,11 +148,14 @@ The task the lead sends is the most important message in the system. Anthropic's
   sources.
 </Callout>
 
-## Deep dive
+## Technical mechanics
 
 ### Worked example: a refund passed between three agents
 
-The [agent loop](/ai-system-design/genai-system-design/agent-architectures#architecture) handled the Brightpost refund with one agent. Here a team handles it. A **hand-off** passes the conversation from one agent to another, which then talks to the customer itself. Customer 1847 writes: "My kettle arrived cracked. It's order 4471. Can I get my money back?" Refunds over £30 still wait for the support agent, a person.
+- The [agent loop](/ai-system-design/genai-system-design/agent-architectures#architecture) handled the Brightpost refund with one agent.
+- Here a team handles it. A **hand-off** passes the conversation from one agent to another, which then talks to the customer itself.
+- Customer 1847 writes: "My kettle arrived cracked.
+- It's order 4471. Can I get my money back?" Refunds over £30 still wait for the support agent, a person.
 
 <AnimatedDiagram
   spec="animated/agents/handoff-sequence"
@@ -156,7 +187,9 @@ The [agent loop](/ai-system-design/genai-system-design/agent-architectures#archi
   </StepCard>
 </StepCards>
 
-A hand-off is a tool call that the harness catches: instead of running a tool, it switches the active agent. The OpenAI Agents SDK names these tools `transfer_to_<agent name>`. Here is the orders agent's hand-off, in the Anthropic Messages API `tool_use` shape:
+- A hand-off is a tool call that the harness catches: instead of running a tool, it switches the active agent.
+- The OpenAI Agents SDK names these tools `transfer_to_<agent name>`.
+- Here is the orders agent's hand-off, in the Anthropic Messages API `tool_use` shape:
 
 ```json
 {
@@ -181,7 +214,8 @@ Count the model calls, agent by agent:
 | **Team**  | **7**       | 6 tool calls, 2 of them hand-offs            |                                           |
 | One agent | 5           | 4 tool calls                                 |                                           |
 
-The team makes 1 + 2 + 4 = **7** model calls where one agent made 5: 1.4 times as many, plus two hand-offs where context can be lost. For a four-tool refund that is a bad trade. A team pays off when each specialist's tools and instructions are large enough to crowd one agent's context, for example 40 tools across orders, payments and shipping.
+- The team makes 1 + 2 + 4 = **7** model calls where one agent made 5: 1.4 times as many, plus two hand-offs where context can be lost.
+- For a four-tool refund that is a bad trade. A team pays off when each specialist's tools and instructions are large enough to crowd one agent's context, for example 40 tools across orders, payments and shipping.
 
 <Callout tone="red" title="What breaks">
   Facts lost in the hand-off. If the orders agent passes only "refund £42?", the refunds agent does not know the kettle
@@ -200,15 +234,29 @@ Every agent in a team re-reads its own context on every call, so tokens multiply
   caption="A team spends about 15 times the tokens of a chat, nearly four times a single agent; it pays off only when the task is worth that much more."
 />
 
-**How to read it.** The bars share one scale, as multiples of the tokens one chat uses. One agent with tools uses about 4 times as many. A multi-agent system uses about 15 times as many. The line under the bars is what the extra tokens bought on Anthropic's research tasks.
+**How to read it:**
 
-**The numbers.** 15 ÷ 4 ≈ **3.75**: a team uses nearly four times the tokens of one agent. In the same write-up, a team with a Claude Opus 4 lead and Claude Sonnet 4 sub-agents beat a single Claude Opus 4 agent by 90.2 % on Anthropic's internal research eval. Token usage alone explained 80 % of the variance in scores on the BrowseComp benchmark. So much of the gain is the extra tokens: the team gets more search done in parallel. Anthropic's conclusion is that multi-agent systems need tasks whose value is high enough to pay for this.
+- The bars share one scale, as multiples of the tokens one chat uses.
+- One agent with tools uses about 4 times as many.
+- A multi-agent system uses about 15 times as many.
+- The line under the bars is what the extra tokens bought on Anthropic's research tasks.
 
-The same write-up names where teams fit badly: tasks where every agent needs the same context, tasks with many dependencies between agents, and most coding tasks, which split into fewer parallel pieces than research does.
+**The numbers:**
+
+- 15 ÷ 4 ≈ **3.75**: a team uses nearly four times the tokens of one agent.
+- In the same write-up, a team with a Claude Opus 4 lead and Claude Sonnet 4 sub-agents beat a single Claude Opus 4 agent by 90.2 % on Anthropic's internal research eval.
+- Token usage alone explained 80 % of the variance in scores on the BrowseComp benchmark.
+- So much of the gain is the extra tokens: the team gets more search done in parallel.
+- Anthropic's conclusion is that multi-agent systems need tasks whose value is high enough to pay for this.
+
+- The same write-up names where teams fit badly: tasks where every agent needs the same context, tasks with many dependencies between agents, and most coding tasks, which split into fewer parallel pieces than research does.
 
 ### Why multi-agent systems fail
 
-Cemri et al. (2025) built **MAST**, a taxonomy of how multi-agent systems fail. They annotated more than 1,600 traces from 7 frameworks and found 14 failure modes in 3 categories (inter-annotator agreement κ = 0.88). The share column is how often each mode appeared across 1,642 traces (paper version 3, October 2025). The examples apply each mode to this page's two teams.
+- Cemri et al. (2025) built **MAST**, a taxonomy of how multi-agent systems fail.
+- They annotated more than 1,600 traces from 7 frameworks and found 14 failure modes in 3 categories (inter-annotator agreement κ = 0.88).
+- The share column is how often each mode appeared across 1,642 traces (paper version 3, October 2025).
+- The examples apply each mode to this page's two teams.
 
 | Category                 | Failure mode                          | Share  | In the Brightpost teams                                                    |
 | ------------------------ | ------------------------------------- | ------ | -------------------------------------------------------------------------- |
@@ -227,7 +275,10 @@ Cemri et al. (2025) built **MAST**, a taxonomy of how multi-agent systems fail. 
 | Task verification        | 3.2 No or incomplete verification     | 8.2 %  | Nobody checks that every claim has a source                                |
 | Task verification        | 3.3 Incorrect verification            | 9.1 %  | The reviewer passes a claim whose source says the opposite                 |
 
-Adding up the shares: system design about 44 %, inter-agent misalignment about 32 %, task verification about 24 %. The paper's point is that many failures come from how the system is designed, not from the model. Most fixes are interface fixes: precise task specs, structured outputs, rules for shared state, a stop condition and a verifier that checks against something real. Systems in the study that had an explicit verifier, such as MetaGPT and ChatDev, showed fewer failures overall.
+- Adding up the shares: system design about 44 %, inter-agent misalignment about 32 %, task verification about 24 %.
+- The paper's point is that many failures come from how the system is designed, not from the model.
+- Most fixes are interface fixes: precise task specs, structured outputs, rules for shared state, a stop condition and a verifier that checks against something real.
+- Systems in the study that had an explicit verifier, such as MetaGPT and ChatDev, showed fewer failures overall.
 
 ## Trade-offs
 
@@ -239,7 +290,7 @@ Adding up the shares: system design about 44 %, inter-agent misalignment about 3
 | Debate / critique        | Better answers without ground truth  | Costly, can converge on wrong answers    | High-stakes reasoning                     |
 | Hand-offs to specialists | Focused prompts and tools per domain | Context lost in transfer                 | Customer service, multi-domain assistants |
 
-## Real-world examples
+## Production systems
 
 - AutoGen and CAMEL popularized conversational multi-agent frameworks with role-playing agents.
 - MetaGPT assigned software-company roles (product manager, architect, engineer) with standardized documents passed between them.
@@ -247,7 +298,7 @@ Adding up the shares: system design about 44 %, inter-agent misalignment about 3
 - Anthropic's Research feature (June 2025) uses a lead agent that starts sub-agents in parallel to search, then writes the answer from their summaries.
 - The OpenAI Agents SDK models hand-offs between specialist agents as tools named `transfer_to_<agent name>`.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Using many agents for a task one agent could do.
 - Passing full transcripts between agents instead of structured summaries, or summaries that drop the one fact the next agent needs.
@@ -255,7 +306,7 @@ Adding up the shares: system design about 44 %, inter-agent misalignment about 3
 - No verification step at the end.
 - Ignoring token cost, which can grow many times over.
 
-## How to answer in an interview
+## Interview framework
 
 1. Ask whether the task truly splits; propose a single-agent baseline.
 2. If it does, pick a pattern and draw it.
@@ -283,37 +334,30 @@ Adding up the shares: system design about 44 %, inter-agent misalignment about 3
     category="Trade-offs"
     level="Mid"
   >
-    When the task splits into sub-tasks that benefit from separate contexts, tools or instructions, or that can run in
-    parallel to save time, such as researching many independent sub-questions. If the task is sequential and tightly
-    coupled, a single agent with good tools is usually better, cheaper and easier to debug.
+    - When the task splits into sub-tasks that benefit from separate contexts, tools or instructions, or that can run in parallel to save time, such as researching many independent sub-questions.
+    - If the task is sequential and tightly coupled, a single agent with good tools is usually better, cheaper and easier to debug.
   </InterviewQuestion>
   <InterviewQuestion question="Describe the orchestrator-workers pattern." category="Concepts" level="Junior">
-    A lead agent plans the work, delegates sub-tasks to worker agents with focused context and tools, collects their
-    structured results, and synthesizes the final output, often with a review step. Workers typically do not coordinate
-    with each other directly.
+    - A lead agent plans the work, delegates sub-tasks to worker agents with focused context and tools, collects their structured results, and synthesizes the final output, often with a review step.
+    - Workers typically do not coordinate with each other directly.
   </InterviewQuestion>
   <InterviewQuestion question="How should agents pass information to each other?" category="Architecture" level="Mid">
-    Through well-defined, compact, structured messages: a clear task specification going down, and results with key
-    findings, sources and confidence coming back, rather than full transcripts. Shared state such as a task board needs
-    ownership rules so agents do not overwrite each other.
+    - Through well-defined, compact, structured messages: a clear task specification going down, and results with key findings, sources and confidence coming back, rather than full transcripts.
+    - Shared state such as a task board needs ownership rules so agents do not overwrite each other.
   </InterviewQuestion>
   <InterviewQuestion
     question="What are common failure modes of multi-agent systems?"
     category="Failure modes"
     level="Senior"
   >
-    Ambiguous task specs and overlapping roles, agents ignoring or misreading each other's outputs, duplicated work,
-    information lost during hand-offs, endless back-and-forth without termination, errors propagating through pipelines,
-    and no final verification. Token costs and latency also balloon.
+    - Ambiguous task specs and overlapping roles, agents ignoring or misreading each other's outputs, duplicated work, information lost during hand-offs, endless back-and-forth without termination, errors propagating through pipelines, and no final verification. Token costs and latency also balloon.
   </InterviewQuestion>
   <InterviewQuestion question="How do you debug a multi-agent system?" category="Failure modes" level="Senior">
-    Trace every agent's inputs, outputs, tool calls and messages with a shared run id, visualize the message flow, and
-    replay failing runs. Evaluate each agent's role in isolation with its own test cases, then end to end, and
-    categorize failures by where information was lost or misinterpreted.
+    - Trace every agent's inputs, outputs, tool calls and messages with a shared run id, visualize the message flow, and replay failing runs.
+    - Evaluate each agent's role in isolation with its own test cases, then end to end, and categorize failures by where information was lost or misinterpreted.
   </InterviewQuestion>
   <InterviewQuestion question="How do you control the cost of multi-agent systems?" category="Trade-offs" level="Mid">
-    Limit the number of agents and rounds, use cheaper models for workers and stronger ones for planning and synthesis,
-    pass summaries instead of transcripts, run sub-tasks in parallel only when they are truly independent, and stop
-    early when the answer meets the criteria. Compare cost per successful task with a single-agent baseline.
+    - Limit the number of agents and rounds, use cheaper models for workers and stronger ones for planning and synthesis, pass summaries instead of transcripts, run sub-tasks in parallel only when they are truly independent, and stop early when the answer meets the criteria.
+    - Compare cost per successful task with a single-agent baseline.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -5,9 +5,11 @@ icon: radio
 updated: 2026-11-15
 ---
 
-A phone agent is only as good as its ears and its mouth. Interviewers ask about speech recognition (ASR, automatic speech recognition) and speech synthesis (TTS, text to speech) because each hides a trap: one wrong digit in an order number, or a pause before every reply, breaks the call.
+A phone agent is only as good as its ears and its mouth.
 
-## TL;DR
+- Interviewers ask about speech recognition (ASR, automatic speech recognition) and speech synthesis (TTS, text to speech) because each hides a trap: one wrong digit in an order number, or a pause before every reply, breaks the call.
+
+## Overview
 
 - **ASR turns sound into text.** Whisper resamples audio to **16,000 Hz**, builds an **80-bin log-mel spectrogram** on 25 ms windows every 10 ms, and runs an encoder-decoder Transformer over **30-second chunks**.
 - **A spectrogram is the input, not the waveform.** 30 s of audio is 480,000 samples but only 3,000 frames of 80 numbers (240,000), which the encoder can read like a picture.
@@ -16,27 +18,46 @@ A phone agent is only as good as its ears and its mouth. Interviewers ask about 
 - **Batch and streaming are different jobs.** Batch recognition reads a whole recording; streaming recognition emits partial text while the caller is still talking, and that is what a live call needs.
 - **Voice is personal data.** Cloning a voice needs consent, and a synthetic voice on a phone call has legal rules in some countries.
 
-## The idea in plain English
+## Mental model
 
-Imagine a court stenographer who hears a call and types it, and a voice actor who reads a script aloud. The stenographer does not listen to raw air pressure. She hears pitch and loudness over short moments, like a musical score. A spectrogram is that score: time runs left to right, pitch runs up the page, and darker cells mean more energy. The encoder reads the score; the decoder types the words. The voice actor works backwards: from the script she decides pace and stress, then performs the sound. Both can slip: the stenographer mishears "four four seven one" as "for four seven one", and the actor reads "£42" as "pounds forty two" unless someone tells her the right order.
+- Imagine a court stenographer who hears a call and types it, and a voice actor who reads a script aloud.
+- The stenographer does not listen to raw air pressure.
+- She hears pitch and loudness over short moments, like a musical score.
+- A spectrogram is that score: time runs left to right, pitch runs up the page, and darker cells mean more energy.
+- The encoder reads the score; the decoder types the words.
+- The voice actor works backwards: from the script she decides pace and stress, then performs the sound.
+- Both can slip: the stenographer mishears "four four seven one" as "for four seven one", and the actor reads "£42" as "pounds forty two" unless someone tells her the right order.
 
 ## Core concepts
 
 ### ASR architectures: CTC, transducers and encoder-decoder models
 
-Three designs cover most recognisers. **CTC** (connectionist temporal classification) predicts one symbol per audio frame, including a "blank", and collapses repeats. It is fast and streams well, but each frame is guessed with little help from the words around it. A **transducer** (RNN-T and its relatives) adds a small prediction network that reads the words already written, so it keeps streaming and uses language context. An **encoder-decoder** model such as Whisper encodes the whole chunk, then a decoder writes tokens one at a time while attending to the encoder, as in a translation model. It is the most flexible (language, task and timestamps are tokens) and needs the whole chunk first.
+- Three designs cover most recognisers. **CTC** (connectionist temporal classification) predicts one symbol per audio frame, including a "blank", and collapses repeats.
+- It is fast and streams well, but each frame is guessed with little help from the words around it.
+- A **transducer** (RNN-T and its relatives) adds a small prediction network that reads the words already written, so it keeps streaming and uses language context.
+- An **encoder-decoder** model such as Whisper encodes the whole chunk, then a decoder writes tokens one at a time while attending to the encoder, as in a translation model.
+- It is the most flexible (language, task and timestamps are tokens) and needs the whole chunk first.
 
 ### Streaming versus batch recognition
 
-**Batch** recognition gets a finished file and may take its time: it can read the whole chunk twice, pick the best of several guesses and add punctuation. **Streaming** recognition must emit **partial results** while audio arrives, then a **final** result when the speaker pauses. Partials change as more audio comes in. Whisper reads fixed 30-second windows, so live use means re-running it on a growing buffer or choosing a model built for streaming. The partial-to-final gap feeds directly into the voice latency budget (see [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents)).
+- **Batch** recognition gets a finished file and may take its time: it can read the whole chunk twice, pick the best of several guesses and add punctuation.
+- **Streaming** recognition must emit **partial results** while audio arrives, then a **final** result when the speaker pauses.
+- Partials change as more audio comes in. Whisper reads fixed 30-second windows, so live use means re-running it on a growing buffer or choosing a model built for streaming.
+- The partial-to-final gap feeds directly into the voice latency budget (see [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents)).
 
 ### TTS: from text to waveform
 
-A classic pipeline has three stages. **Normalisation** writes digits, symbols and abbreviations as words. An **acoustic model** predicts acoustic frames (for example mel spectrogram frames) that carry pitch, pace and stress. A **vocoder** turns frames into waveform samples. A newer design lets a language model write discrete **audio-codec tokens**, and a codec decoder produces the waveform. Streaming TTS begins playing after the first sentence or clause, not after the whole reply (see [Streaming and Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)).
+- A classic pipeline has three stages. **Normalisation** writes digits, symbols and abbreviations as words.
+- An **acoustic model** predicts acoustic frames (for example mel spectrogram frames) that carry pitch, pace and stress.
+- A **vocoder** turns frames into waveform samples.
+- A newer design lets a language model write discrete **audio-codec tokens**, and a codec decoder produces the waveform.
+- Streaming TTS begins playing after the first sentence or clause, not after the whole reply (see [Streaming and Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)).
 
 ### Metrics: word error rate, MOS and latency
 
-**WER** is the standard recognition metric (worked below). **MOS** (mean opinion score) rates how natural a voice sounds, from 1 to 5, by averaging scores from human listeners. A third family is latency: for ASR, the time from the end of speech to the final text; for TTS, the time from text to the first audio chunk, and the **real-time factor** (seconds to generate one second of audio; below 1 means faster than real time).
+- **WER** is the standard recognition metric (worked below).
+- **MOS** (mean opinion score) rates how natural a voice sounds, from 1 to 5, by averaging scores from human listeners.
+- A third family is latency: for ASR, the time from the end of speech to the final text; for TTS, the time from text to the first audio chunk, and the **real-time factor** (seconds to generate one second of audio; below 1 means faster than real time).
 
 ## Architecture
 
@@ -66,7 +87,7 @@ How does a phone call become text?
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### What a spectrogram is
 
@@ -76,25 +97,46 @@ How does a phone call become text?
   caption="A toy signal: a 500 Hz tone, then a 2,000 Hz tone. Overlapping 25 ms windows each become one column of band energies. Whisper uses 80 bands at 16 kHz; the toy uses 8 at 8 kHz."
 />
 
-**How to read it.** The top trace is the waveform: the first half wiggles slowly, the second half fast. The three bars are the first three windows. Each window is passed through a Fourier transform, its energy is summed into bands spaced on the mel scale, and the logarithm is taken. The result is a grid. Dark cells in a low row mean a low tone; the jump to a higher row means the pitch rose. The spec computes every cell from the signal, so nothing is drawn by hand.
+**How to read it:**
 
-**The numbers.** 1,600 samples with a 200-sample window and an 80-sample hop give (1,600 − 200) ÷ 80 + 1 = 18 columns. In Whisper's real setting a window is 400 samples (25 ms × 16,000) and the hop is 160 samples. Taking a logarithm matters because ears and speech vary over orders of magnitude of loudness; the log squeezes that into a range a network can learn from.
+- The top trace is the waveform: the first half wiggles slowly, the second half fast.
+- The three bars are the first three windows. Each window is passed through a Fourier transform, its energy is summed into bands spaced on the mel scale, and the logarithm is taken.
+- The result is a grid. Dark cells in a low row mean a low tone; the jump to a higher row means the pitch rose.
+- The spec computes every cell from the signal, so nothing is drawn by hand.
+
+**The numbers:**
+
+- 1,600 samples with a 200-sample window and an 80-sample hop give (1,600 − 200) ÷ 80 + 1 = 18 columns.
+- In Whisper's real setting a window is 400 samples (25 ms × 16,000) and the hop is 160 samples.
+- Taking a logarithm matters because ears and speech vary over orders of magnitude of loudness; the log squeezes that into a range a network can learn from.
 
 ### Noise, accents and domain vocabulary
 
-Accuracy drops where the training audio was thin. **Noise** (a warehouse, a street, a speakerphone) hides the weak consonants that separate "fifteen" from "fifty". **Accents** that the training data held little of raise error rates. **Domain words** are the hardest: product names, order formats and policy terms were rarely in the training text. Three levers help: send audio at the quality the model expects (not over-compressed), add a **custom vocabulary** or biasing list where the service allows it (Brightpost's product names and the "order" plus four digits format), and fine-tune on your own labelled calls if the gap is large. Measure on your own recordings split by accent and noise level; one average WER hides the weak group.
+- Accuracy drops where the training audio was thin.
+- **Noise** (a warehouse, a street, a speakerphone) hides the weak consonants that separate "fifteen" from "fifty".
+- **Accents** that the training data held little of raise error rates.
+- **Domain words** are the hardest: product names, order formats and policy terms were rarely in the training text.
+- Three levers help: send audio at the quality the model expects (not over-compressed), add a **custom vocabulary** or biasing list where the service allows it (Brightpost's product names and the "order" plus four digits format), and fine-tune on your own labelled calls if the gap is large.
+- Measure on your own recordings split by accent and noise level; one average WER hides the weak group.
 
 ### Diarization and timestamps
 
-**Diarization** answers "who spoke when". The usual method cuts audio into short segments, turns each into a **speaker embedding**, and clusters the embeddings; end-to-end neural models exist too. It matters for two-party calls (agent and caller) and for meetings. **Timestamps** give a start and end for each word or segment, which you need for captions, for jumping to the moment a refund was promised, and for trimming audio. Word timestamps are estimated, not measured, so treat them as good to a fraction of a second.
+- **Diarization** answers "who spoke when". The usual method cuts audio into short segments, turns each into a **speaker embedding**, and clusters the embeddings; end-to-end neural models exist too.
+- It matters for two-party calls (agent and caller) and for meetings.
+- **Timestamps** give a start and end for each word or segment, which you need for captions, for jumping to the moment a refund was promised, and for trimming audio.
+- Word timestamps are estimated, not measured, so treat them as good to a fraction of a second.
 
 ### Voice cloning and consent
 
-A TTS model that can copy a voice from a short sample is useful (a brand voice, a person who lost theirs) and dangerous (fraud). Rules to build in: **consent first**, recorded and stored, for any real person's voice; no cloning from audio you do not have rights to; a **watermark or disclosure** that the voice is synthetic; and a log of who generated what. Rules also apply on the phone: in the United States, the FCC ruled in February 2024 that AI-generated voices in calls are "artificial" voices under the Telephone Consumer Protection Act, so the same consent requirements apply as for pre-recorded calls. Check the rules where your callers live.
+- A TTS model that can copy a voice from a short sample is useful (a brand voice, a person who lost theirs) and dangerous (fraud).
+- Rules to build in: **consent first**, recorded and stored, for any real person's voice; no cloning from audio you do not have rights to; a **watermark or disclosure** that the voice is synthetic; and a log of who generated what.
+- Rules also apply on the phone: in the United States, the FCC ruled in February 2024 that AI-generated voices in calls are "artificial" voices under the Telephone Consumer Protection Act, so the same consent requirements apply as for pre-recorded calls. Check the rules where your callers live.
 
 ### Worked example: Brightpost's phone line
 
-A customer phones about order 4471. She says: "i want a refund for order four four seven one". The recogniser sends partial results while she talks, then a final result when she stops. The message below is an illustrative shape, not one vendor's API.
+- A customer phones about order 4471. She says: "i want a refund for order four four seven one".
+- The recogniser sends partial results while she talks, then a final result when she stops.
+- The message below is an illustrative shape, not one vendor's API.
 
 ```json
 {"type": "partial", "text": "i want a refund for order four", "at_ms": 2100}
@@ -111,11 +153,23 @@ The WER arithmetic for this exact turn:
   caption="Align the words, count three kinds of edit, divide by the ten words said: 3 ÷ 10 = 30 %. The digit that was lost is the error that matters."
 />
 
-**How to read it.** The top row is what she said (N = 10 words). The second row is what was written. Red cells are edits: the word "a" is missing (a **deletion**), the first "four" became "for" (a **substitution**), and "please" was invented (an **insertion**). The alignment is the one with the fewest edits; the spec checks it against an edit-distance count.
+**How to read it:**
 
-**The numbers.** WER = (S + D + I) ÷ N = (1 + 1 + 1) ÷ 10 = 30 %. That is a poor-looking score for a sentence a person would understand. But the real damage is smaller in words and larger in effect: "four seven one" is 471, so the lookup would fail or, worse, find the wrong order. The agent therefore reads the number back ("order four four seven one, is that right?") and confirms it, and Brightpost reports **digit-string accuracy** next to WER.
+- The top row is what she said (N = 10 words). The second row is what was written.
+- Red cells are edits: the word "a" is missing (a **deletion**), the first "four" became "for" (a **substitution**), and "please" was invented (an **insertion**).
+- The alignment is the one with the fewest edits; the spec checks it against an edit-distance count.
 
-**The reply.** The agent writes "Refund of £42 for order 4471 approved". The normaliser turns it into "forty-two pounds" and "four four seven one", so the voice reads the digits one at a time, as people do for an order number.
+**The numbers:**
+
+- WER = (S + D + I) ÷ N = (1 + 1 + 1) ÷ 10 = 30 %.
+- That is a poor-looking score for a sentence a person would understand.
+- But the real damage is smaller in words and larger in effect: "four seven one" is 471, so the lookup would fail or, worse, find the wrong order.
+- The agent therefore reads the number back ("order four four seven one, is that right?") and confirms it, and Brightpost reports **digit-string accuracy** next to WER.
+
+**The reply:**
+
+- The agent writes "Refund of £42 for order 4471 approved".
+- The normaliser turns it into "forty-two pounds" and "four four seven one", so the voice reads the digits one at a time, as people do for an order number.
 
 <AnimatedDiagram
   spec="animated/multimodal/tts-pipeline"
@@ -123,7 +177,11 @@ The WER arithmetic for this exact turn:
   caption="Text, normaliser, acoustic model, acoustic frames, vocoder, waveform. Settings (24 kHz, 10 ms frames) are illustrative."
 />
 
-**How to read it.** The orange block is text, the violet blocks are audio, the green blocks are models. At 24,000 samples a second and one frame every 10 ms, each frame becomes 24,000 ÷ 100 = 240 samples. The first frame goes to the vocoder as soon as the acoustic model has made it, so audio can start before the sentence is finished.
+**How to read it:**
+
+- The orange block is text, the violet blocks are audio, the green blocks are models.
+- At 24,000 samples a second and one frame every 10 ms, each frame becomes 24,000 ÷ 100 = 240 samples.
+- The first frame goes to the vocoder as soon as the acoustic model has made it, so audio can start before the sentence is finished.
 
 ## Trade-offs
 
@@ -136,14 +194,14 @@ The WER arithmetic for this exact turn:
 | Two-stage TTS (frames, vocoder) | Controllable, fast, well understood | Two models to maintain | Brand voices with fixed style |
 | Codec language-model TTS | Expressive, can copy style from a sample | Harder to control; more consent risk | Rich voices where review is possible |
 
-## Real-world examples
+## Production systems
 
 - **Whisper (OpenAI, 2022).** Trained on 680,000 hours of labelled audio, of which 117,000 hours cover 96 languages other than English. An encoder-decoder Transformer reading 80-bin log-mel input in 30-second chunks.
 - **Brightpost's call recorder (assumed design).** Streaming recognition for the live agent, and a batch Whisper-style pass over the recording afterwards for the quality-review set and the golden transcripts.
 - **Live voice APIs (November 2026).** Gemini Live takes 16-bit PCM at 16 kHz in and returns 24 kHz audio out; OpenAI's Realtime API takes 24 kHz mono PCM. Both stream audio in both directions (docs read 16 November 2026).
 - **The FCC ruling (February 2024).** AI-generated voices on calls are treated as artificial voices under the TCPA.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Reporting one WER for all audio. Split by noise, accent and topic, or the worst group stays hidden.
 - Scoring raw text without normalising case, punctuation and numbers ("42" against "forty two"). Normalise both sides the same way before counting edits.
@@ -152,7 +210,7 @@ The WER arithmetic for this exact turn:
 - Letting the TTS read digits or symbols as it likes. Write the formats out (order numbers digit by digit, £42 as "forty-two pounds").
 - Cloning a voice without recorded consent, or using a synthetic voice on calls without checking local rules.
 
-## How to answer in an interview
+## Interview framework
 
 1. Draw the chain: waveform, spectrogram, encoder, decoder, tokens. Give two numbers (16 kHz, 80 bins, 30 s).
 2. Name the three architectures and the one trade-off that separates them: streaming against context.
@@ -176,24 +234,45 @@ The WER arithmetic for this exact turn:
 
 <InterviewQuestions>
   <InterviewQuestion question="Walk through how Whisper turns audio into text." category="Concepts" level="Junior">
-    Audio is resampled to 16,000 Hz and cut into 30-second chunks. Each chunk becomes an 80-bin log-mel spectrogram, computed on 25 ms windows every 10 ms, so 3,000 frames of 80 numbers. A Transformer encoder reads the spectrogram after a small convolutional stem. A decoder then writes text tokens one at a time, attending to the encoder output, starting from special tokens that set the language and task.
+    - Audio is resampled to 16,000 Hz and cut into 30-second chunks.
+    - Each chunk becomes an 80-bin log-mel spectrogram, computed on 25 ms windows every 10 ms, so 3,000 frames of 80 numbers.
+    - A Transformer encoder reads the spectrogram after a small convolutional stem.
+    - A decoder then writes text tokens one at a time, attending to the encoder output, starting from special tokens that set the language and task.
   </InterviewQuestion>
   <InterviewQuestion question="What is word error rate, and how do you compute it?" category="Concepts" level="Junior">
-    WER is (S + D + I) ÷ N, where S is substitutions, D deletions and I insertions after aligning the recogniser's text with a reference, and N is the number of words in the reference. For "i want a refund for order four four seven one" written as "i want refund for order for four seven one please", S = 1, D = 1, I = 1 and N = 10, so WER is 30 %. It can exceed 100 % if there are many insertions. Normalise case and punctuation first.
+    - WER is (S + D + I) ÷ N, where S is substitutions, D deletions and I insertions after aligning the recogniser's text with a reference, and N is the number of words in the reference.
+    - For "i want a refund for order four four seven one" written as "i want refund for order for four seven one please", S = 1, D = 1, I = 1 and N = 10, so WER is 30 %.
+    - It can exceed 100 % if there are many insertions. Normalise case and punctuation first.
   </InterviewQuestion>
   <InterviewQuestion question="Why is WER not enough to judge a voice agent's recogniser?" category="Trade-offs" level="Mid">
-    WER weights every word the same, but the words that decide the call are few: an order number, an amount, a name. A transcript with 5 % WER can still lose a digit and fail the lookup, while a transcript with 20 % WER made of filler words can still work. Add task metrics on the call set: digit-string accuracy, entity accuracy and the share of calls where the agent reached the right order. Read numbers back to the caller to catch what the metric misses.
+    - WER weights every word the same, but the words that decide the call are few: an order number, an amount, a name.
+    - A transcript with 5 % WER can still lose a digit and fail the lookup, while a transcript with 20 % WER made of filler words can still work.
+    - Add task metrics on the call set: digit-string accuracy, entity accuracy and the share of calls where the agent reached the right order.
+    - Read numbers back to the caller to catch what the metric misses.
   </InterviewQuestion>
   <InterviewQuestion question="Compare CTC, transducers and encoder-decoder models for a live call." category="Architecture" level="Mid">
-    CTC predicts a symbol per frame and streams easily, but it uses little language context, so rare words suffer. A transducer adds a prediction network that reads the words so far, which keeps streaming while adding context, at the price of harder training. An encoder-decoder model like Whisper is accurate and flexible but encodes a whole chunk first, so a live call needs a growing buffer or a streaming model. For a phone agent I would pick a streaming transducer or a streaming service, and keep a Whisper-style pass for recordings.
+    - CTC predicts a symbol per frame and streams easily, but it uses little language context, so rare words suffer.
+    - A transducer adds a prediction network that reads the words so far, which keeps streaming while adding context, at the price of harder training.
+    - An encoder-decoder model like Whisper is accurate and flexible but encodes a whole chunk first, so a live call needs a growing buffer or a streaming model.
+    - For a phone agent I would pick a streaming transducer or a streaming service, and keep a Whisper-style pass for recordings.
   </InterviewQuestion>
   <InterviewQuestion question="Explain what a vocoder does and why TTS can start before the sentence is finished." category="Architecture" level="Mid">
-    In a two-stage system the acoustic model predicts frames, for example one every 10 ms, and the vocoder turns each frame into waveform samples: at 24 kHz that is 240 samples a frame. Frames are produced left to right, so the first ones can go through the vocoder while later ones are still being planned. With text arriving from a streaming language model, the system can speak the first clause as soon as it exists. The cost is that prosody for a clause is planned with less context than for the whole sentence.
+    - In a two-stage system the acoustic model predicts frames, for example one every 10 ms, and the vocoder turns each frame into waveform samples: at 24 kHz that is 240 samples a frame.
+    - Frames are produced left to right, so the first ones can go through the vocoder while later ones are still being planned.
+    - With text arriving from a streaming language model, the system can speak the first clause as soon as it exists.
+    - The cost is that prosody for a clause is planned with less context than for the whole sentence.
   </InterviewQuestion>
   <InterviewQuestion question="Your recogniser works in the lab but fails on phone calls from a warehouse. What do you do?" category="Failure modes" level="Senior">
-    Collect a labelled sample of real calls and measure WER and entity accuracy split by noise level, device and accent, because the average hides the gap. Check the audio path: narrowband phone audio, aggressive compression and echo all hurt. Then try the cheap levers in order: noise suppression before recognition, a custom vocabulary for product names and order formats, a larger or noise-robust model. Fine-tune on labelled calls only if the gap remains. Keep a human review path for low-confidence turns.
+    - Collect a labelled sample of real calls and measure WER and entity accuracy split by noise level, device and accent, because the average hides the gap.
+    - Check the audio path: narrowband phone audio, aggressive compression and echo all hurt.
+    - Then try the cheap levers in order: noise suppression before recognition, a custom vocabulary for product names and order formats, a larger or noise-robust model.
+    - Fine-tune on labelled calls only if the gap remains.
+    - Keep a human review path for low-confidence turns.
   </InterviewQuestion>
   <InterviewQuestion question="Brightpost wants a branded cloned voice for its phone agent. What controls do you require?" category="Trade-offs" level="Senior">
-    Written, recorded consent from the voice's owner that names the uses, a fee and an end date, stored with the model. A clear disclosure to callers that they are talking to an automated agent, since US regulators treat AI-generated voices in calls as artificial voices under the TCPA. Technical controls: access limits on the cloning tool, a watermark or provenance mark on generated audio, and a log of every generation. Also a test set for pronunciation of names and numbers, and a way to retire the voice if consent ends.
+    - Written, recorded consent from the voice's owner that names the uses, a fee and an end date, stored with the model.
+    - A clear disclosure to callers that they are talking to an automated agent, since US regulators treat AI-generated voices in calls as artificial voices under the TCPA.
+    - Technical controls: access limits on the cloning tool, a watermark or provenance mark on generated audio, and a log of every generation.
+    - Also a test set for pronunciation of names and numbers, and a way to retire the voice if consent ends.
   </InterviewQuestion>
 </InterviewQuestions>

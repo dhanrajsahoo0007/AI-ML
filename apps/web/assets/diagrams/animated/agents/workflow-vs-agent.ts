@@ -1,7 +1,7 @@
 import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 import { AGENT_TONE, TOOLS } from "@/components/diagrams/presets/agents";
 
-// "The idea in plain English" on agent-architectures: the same Brightpost task and the same tools, wired two ways.
+// "Mental model" on agent-architectures: the same Brightpost task and the same tools, wired two ways.
 // Left, the workflow (the recipe): code calls the tools in a fixed order, the same path for every message. Right, the
 // agent (the chef): the model picks one tool per turn, the harness returns the result, and the model stops when it
 // asks for no tool.

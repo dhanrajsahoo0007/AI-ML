@@ -3,9 +3,13 @@ title: State Persistence & Retrieval
 description: Checkpoint orchestration and agent state with durable storage, serialization discipline, and recovery patterns so long workflows survive failures and scale.
 ---
 
-An agent run can take minutes of model calls and hours of waiting for a person. If its state lives only in a worker's memory, one deploy or one crash throws all of it away, or worse, repeats a payment. This page is about **durable run state**: the records a harness saves as it goes (threads, runs, checkpoints), how a crashed run resumes from its last checkpoint, how to replay an old one, and how to keep side effects from happening twice on resume. What the model remembers across conversations is on [Agent Memory](/ai-system-design/genai-system-design/agent-memory); what fits in the context window is on [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+An agent run can take minutes of model calls and hours of waiting for a person.
 
-## TL;DR
+- If its state lives only in a worker's memory, one deploy or one crash throws all of it away, or worse, repeats a payment.
+- This page is about **durable run state**: the records a harness saves as it goes (threads, runs, checkpoints), how a crashed run resumes from its last checkpoint, how to replay an old one, and how to keep side effects from happening twice on resume.
+- What the model remembers across conversations is on [Agent Memory](/ai-system-design/genai-system-design/agent-memory); what fits in the context window is on [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+
+## Overview
 
 - Persistence stores transcripts, partial plans, tool outputs awaiting approval and cursor positions, outside the process that runs the agent.
 - A **checkpoint** is a serializable snapshot of a run's state, saved at a stable boundary: after each tool call, after a human decision, or on a timer.
@@ -15,15 +19,20 @@ An agent run can take minutes of model calls and hours of waiting for a person. 
 - **Replay** (time travel) loads an old checkpoint to debug or fork a run; every step after it re-executes, side effects included.
 - Durable execution engines such as Temporal record an event history and replay the code against it, so finished work is not redone.
 
-## The idea in plain English
+## Mental model
 
-A checkpoint is a save point in a video game. Lose a life and you restart at the last save point, not at level 1. The catch: anything you did between the save point and the crash, you do again. If that was "pay the shopkeeper", you pay twice, unless the shopkeeper remembers your receipt number.
+- A checkpoint is a save point in a video game.
+- Lose a life and you restart at the last save point, not at level 1.
+- The catch: anything you did between the save point and the crash, you do again.
+- If that was "pay the shopkeeper", you pay twice, unless the shopkeeper remembers your receipt number.
 
-In numbers, for the refund on this page: restarting from the start repeats three model calls and two tool calls (an illustrative 5.1 s), asks the support agent to approve again, and refunds £42 a second time. Resuming from the last checkpoint repeats one tool call (0.3 s), and the payments service recognises it.
+- In numbers, for the refund on this page: restarting from the start repeats three model calls and two tool calls (an illustrative 5.1 s), asks the support agent to approve again, and refunds £42 a second time.
+- Resuming from the last checkpoint repeats one tool call (0.3 s), and the payments service recognises it.
 
 ## Core concepts
 
-The figures follow the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture): customer 1847 asks for their money back for order 4471, a £42 kettle. At step 5 of that loop the refund is over £30, so the harness saves the run and asks the support agent, who approves at 10:20. This page asks what "saves the run" means.
+- The figures follow the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture): customer 1847 asks for their money back for order 4471, a £42 kettle.
+- At step 5 of that loop the refund is over £30, so the harness saves the run and asks the support agent, who approves at 10:20. This page asks what "saves the run" means.
 
 ### Threads, runs and checkpoints
 
@@ -74,13 +83,16 @@ Here is `cp_4`, shaped like LangGraph's state snapshot (`config`, `parent_config
 }
 ```
 
-LangGraph uses the same split (as of November 2026): a **checkpointer** saves a thread's graph state at every super-step and serves conversation continuity, human-in-the-loop, time travel and fault tolerance. A **store** holds application data across threads, which is long-term memory.
+- LangGraph uses the same split (as of November 2026): a **checkpointer** saves a thread's graph state at every super-step and serves conversation continuity, human-in-the-loop, time travel and fault tolerance.
+- A **store** holds application data across threads, which is long-term memory.
 
 ### Checkpoint boundaries
 
-Save at **stable boundaries**: after each tool call returns, after a human confirms, or on a timer for long streaming tasks. Between two boundaries the state is half-made (a model reply with no tool result yet) and resuming from it is guesswork.
+- Save at **stable boundaries**: after each tool call returns, after a human confirms, or on a timer for long streaming tasks.
+- Between two boundaries the state is half-made (a model reply with no tool result yet) and resuming from it is guesswork.
 
-Without clear boundaries you either over-persist noisy intermediate states or under-persist and lose hours of work on a crash. LangGraph lets you choose how strict to be with a durability mode: `"sync"` saves before the next step starts, `"async"` saves while it runs and may lose a checkpoint in a crash, and `"exit"` saves only when the run ends, so a crash mid-run leaves nothing to recover. For a run that moves money, use `"sync"`.
+- Without clear boundaries you either over-persist noisy intermediate states or under-persist and lose hours of work on a crash.
+- LangGraph lets you choose how strict to be with a durability mode: `"sync"` saves before the next step starts, `"async"` saves while it runs and may lose a checkpoint in a crash, and `"exit"` saves only when the run ends, so a crash mid-run leaves nothing to recover. For a run that moves money, use `"sync"`.
 
 ### Serialization and schema versions
 
@@ -94,9 +106,13 @@ A checkpoint is read back by a newer version of your code, maybe weeks later, so
 
 ### Where state lives: Redis or a SQL database
 
-Session management ties user identity, device and workflow id to a state record. **Redis** suits low-latency, short-lived coordination: locks, rate limits, fast resume. **Postgres** suits authoritative records: transactions, auditing, complex queries and compliance trails. Hybrid designs use Redis as a hot cache with write-through to durable storage.
+- Session management ties user identity, device and workflow id to a state record.
+- **Redis** suits low-latency, short-lived coordination: locks, rate limits, fast resume.
+- **Postgres** suits authoritative records: transactions, auditing, complex queries and compliance trails.
+- Hybrid designs use Redis as a hot cache with write-through to durable storage.
 
-The difference is durability. Redis with its default append-only setting (fsync every second) can lose one second of writes in a crash; with snapshots alone, the last few minutes. A checkpoint that vanishes after the refund went out is exactly the gap this page is about, so the checkpoint itself belongs in the database.
+- The difference is durability. Redis with its default append-only setting (fsync every second) can lose one second of writes in a crash; with snapshots alone, the last few minutes.
+- A checkpoint that vanishes after the refund went out is exactly the gap this page is about, so the checkpoint itself belongs in the database.
 
 ### Coordination: leases and versions
 
@@ -147,7 +163,11 @@ Here is the refund run with a crash in the worst place: after the refund was mad
   </StepCard>
 </StepCards>
 
-**The numbers** (latencies illustrative: 1.5 s per model call, 0.3 s per tool call). Resuming from `cp_4` repeats one tool call: **0.3 s**. Restarting from the message repeats calls 1 to 3 and two tool calls, 3 × 1.5 + 2 × 0.3 = **5.1 s**, sends the support agent a second approval request, and refunds again with a fresh key: £42 + £42 = **£84** out for a £42 kettle. Add the lease timeout (an illustrative 30 s) to either.
+**The numbers (latencies illustrative: 1.5 s per model call, 0.3 s per tool call):**
+
+- Resuming from `cp_4` repeats one tool call: **0.3 s**.
+- Restarting from the message repeats calls 1 to 3 and two tool calls, 3 × 1.5 + 2 × 0.3 = **5.1 s**, sends the support agent a second approval request, and refunds again with a fresh key: £42 + £42 = **£84** out for a £42 kettle.
+- Add the lease timeout (an illustrative 30 s) to either.
 
 <Callout tone="red" title="What breaks">
   The gap between the side effect and the save. No checkpoint can close it: worker A can always die after the payments
@@ -156,7 +176,7 @@ Here is the refund run with a crash in the worst place: after the refund was mad
   retry and protects nothing.
 </Callout>
 
-## Deep dive
+## Technical mechanics
 
 ### Worked example: the refund crashes after approval
 
@@ -190,7 +210,7 @@ Three things to take from it:
 - **The key lives in two places.** Brightpost keeps it in the checkpoint; the payments service keeps it with the refund. Stripe's API works this way: it saves the first response for a key and returns it to any retry with the same parameters.
 - **Worker B never asked the model.** The checkpoint already held the model's decision, so resume is deterministic. Restarting from the message would ask the model again, and it might decide differently.
 
-The same refund as a fixed graph, with a timeout retry inside one live worker instead of a crash, is on [Chain / Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration#deep-dive).
+- The same refund as a fixed graph, with a timeout retry inside one live worker instead of a crash, is on [Chain / Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration#technical-mechanics).
 
 ### Replay and time travel
 
@@ -208,14 +228,17 @@ For the refund: fork from `cp_2` with the rule changed to "partial refund" to se
 
 ### Durable execution engines
 
-Temporal takes another route. Workflow code does not save snapshots; every command it issues (start an activity, set a timer) is recorded as an event in the workflow's **event history**. After a crash, a new worker re-runs the workflow code from the top and matches each command against the history. Activities that already completed are not run again; their recorded results are returned. Past the crash point, commands run for real.
+- Temporal takes another route. Workflow code does not save snapshots; every command it issues (start an activity, set a timer) is recorded as an event in the workflow's **event history**.
+- After a crash, a new worker re-runs the workflow code from the top and matches each command against the history.
+- Activities that already completed are not run again; their recorded results are returned. Past the crash point, commands run for real.
 
 Two rules follow (Temporal docs, checked November 2026):
 
 - **Workflow code must be deterministic.** The same input must produce the same commands in the same order. Model calls, API calls and the clock belong in activities. A change that breaks this raises a non-determinism error on replay.
 - **Activities run at least once.** If a worker finishes an activity and dies before reporting it, the activity runs again. Temporal tells you to make activities idempotent, for exactly the duplicate-charge case above.
 
-A workflow's history is capped: Temporal warns after 10,240 events and terminates a workflow past 51,200 events or 50 MB. A long-lived agent calls **Continue-As-New**, which starts a fresh run with the same workflow id, a new run id and an empty history, carrying over only the state it passes in.
+- A workflow's history is capped: Temporal warns after 10,240 events and terminates a workflow past 51,200 events or 50 MB.
+- A long-lived agent calls **Continue-As-New**, which starts a fresh run with the same workflow id, a new run id and an empty history, carrying over only the state it passes in.
 
 ### Recovery patterns
 
@@ -223,7 +246,8 @@ A workflow's history is capped: Temporal warns after 10,240 events and terminate
 - **Compensating transactions** for irreversible steps that must be undone: a refund reversed by a charge, an email followed by a correction.
 - **Dead-letter queues** for sessions that cannot proceed: a schema migration failed, or a referenced file is gone. Park the run with its last checkpoint and alert a person; do not retry it forever.
 
-Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery). Pausing for approval is on [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
+- Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery).
+- Pausing for approval is on [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
 
 ## Trade-offs
 
@@ -235,14 +259,14 @@ Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Err
 | Sync vs async saves                   | Nothing lost on a crash           | Lower latency per step                       | Sync whenever the next step has a side effect                    |
 | Keep all checkpoints vs prune         | Full replay and audit             | Bounded storage                              | Keep per your audit window, then prune by age                    |
 
-## Real-world examples
+## Production systems
 
 - LangGraph saves a checkpoint per super-step under a `thread_id`. It ships an in-memory saver for tests and SQLite, Postgres, MongoDB and Azure Cosmos DB savers; its docs recommend Postgres for production and note that in-memory checkpoints are lost on restart (as of November 2026).
 - Temporal records every workflow's event history and replays it after a worker crash. It caps a history at 51,200 events or 50 MB and recommends Continue-As-New for long-lived workflows.
 - Stripe's idempotency keys (API v1) save the status and body of the first request and return them to retries, including 500 errors. Keys are up to 255 characters and may be pruned after 24 hours.
 - Redis's default append-only fsync policy, every second, can lose one second of writes in a crash.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - An in-memory checkpointer in production: every paused run is lost on deploy.
 - Generating the idempotency key inside the step that retries.
@@ -253,7 +277,7 @@ Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Err
 - Replaying old checkpoints against production tools.
 - Unbounded checkpoint history with no retention policy.
 
-## How to answer in an interview
+## Interview framework
 
 1. Name the records: thread, run, checkpoint, and where each is stored.
 2. Say where the boundaries are: after each tool call, after each human decision.
@@ -285,61 +309,56 @@ Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Err
     category="Reliability"
     level="Mid"
   >
-    Reload the last successful checkpoint from durable storage, validate schema version and referenced artifacts still
-    exist, and resume from the next node in the graph. Re-execute idempotent steps freely; gate irreversible external
-    calls behind idempotency keys and compare stored intent hashes before retrying. Surface partial results to the user
-    with a clear resumed status and audit log of the failure window.
+    - Reload the last successful checkpoint from durable storage, validate schema version and referenced artifacts still exist, and resume from the next node in the graph.
+    - Re-execute idempotent steps freely; gate irreversible external calls behind idempotency keys and compare stored intent hashes before retrying.
+    - Surface partial results to the user with a clear resumed status and audit log of the failure window.
   </InterviewQuestion>
   <InterviewQuestion
     question="When would you choose Redis versus a SQL database for workflow state?"
     category="Architecture"
     level="Mid"
   >
-    Use Redis when you need sub-millisecond reads, ephemeral coordination, and can tolerate optional durability
-    trade-offs unless you enable persistence features carefully. Use SQL when you need strong durability guarantees,
-    complex querying, relational integrity across tables, and straightforward backup and compliance reporting. Many
-    systems use Redis for fast locks plus async persistence to SQL for source of truth.
+    - Use Redis when you need sub-millisecond reads, ephemeral coordination, and can tolerate optional durability trade-offs unless you enable persistence features carefully.
+    - Use SQL when you need strong durability guarantees, complex querying, relational integrity across tables, and straightforward backup and compliance reporting.
+    - Many systems use Redis for fast locks plus async persistence to SQL for source of truth.
   </InterviewQuestion>
   <InterviewQuestion
     question="What serialization pitfalls break agent checkpointing in production?"
     category="Implementation"
     level="Senior"
   >
-    Non-serializable objects such as open sockets or closures, unbounded growth of debug fields, implicit timezone-naive
-    timestamps, and breaking changes to field names without migrations. Also watch for secrets ending up in plaintext
-    snapshots. Mitigate with explicit DTOs, size limits, migration shims, and field-level encryption for credentials or
-    tokens referenced by state.
+    - Non-serializable objects such as open sockets or closures, unbounded growth of debug fields, implicit timezone-naive timestamps, and breaking changes to field names without migrations.
+    - Also watch for secrets ending up in plaintext snapshots.
+    - Mitigate with explicit DTOs, size limits, migration shims, and field-level encryption for credentials or tokens referenced by state.
   </InterviewQuestion>
   <InterviewQuestion
     question="What is the difference between a thread, a run and a checkpoint, and where does long-term memory fit?"
     category="Concepts"
     level="Junior"
   >
-    A thread is one conversation; it holds many runs. A run is one pass of the agent loop for one message, and it saves
-    a chain of checkpoints, each a snapshot of state that points to its parent. Loading a thread's latest checkpoint
-    restores the conversation and any paused run. Long-term memory, such as a customer's preferences, is not in the
-    checkpoint: it lives in a separate store that every thread can read.
+    - A thread is one conversation; it holds many runs.
+    - A run is one pass of the agent loop for one message, and it saves a chain of checkpoints, each a snapshot of state that points to its parent.
+    - Loading a thread's latest checkpoint restores the conversation and any paused run.
+    - Long-term memory, such as a customer's preferences, is not in the checkpoint: it lives in a separate store that every thread can read.
   </InterviewQuestion>
   <InterviewQuestion
     question="Your agent refunded a customer twice after a crash. Walk through why, and fix it."
     category="Failure modes"
     level="Senior"
   >
-    The worker sent the refund, the payments service made it, and the worker died before saving the next checkpoint. The
-    new worker resumed from the last checkpoint, where the refund was still next, and sent it again. Checkpoints cannot
-    close that window, so make the repeat harmless: build an idempotency key from the run id and the tool-call id, save
-    it in the checkpoint before the call, and send it with every attempt. The payments service returns the first result
-    for a key it has seen. Then add an evaluation that crashes runs at that point on purpose.
+    - The worker sent the refund, the payments service made it, and the worker died before saving the next checkpoint.
+    - The new worker resumed from the last checkpoint, where the refund was still next, and sent it again.
+    - Checkpoints cannot close that window, so make the repeat harmless: build an idempotency key from the run id and the tool-call id, save it in the checkpoint before the call, and send it with every attempt.
+    - The payments service returns the first result for a key it has seen.
+    - Then add an evaluation that crashes runs at that point on purpose.
   </InterviewQuestion>
   <InterviewQuestion
     question="How do graph checkpoints differ from Temporal-style durable execution, and how do you debug with either?"
     category="Trade-offs"
     level="Senior"
   >
-    A graph checkpointer saves a snapshot of state after each step; resume loads the latest snapshot and runs the next
-    step. Temporal records every command as an event and, after a crash, replays the workflow code against that history,
-    returning recorded activity results instead of running them again; the price is deterministic workflow code and a
-    history size limit. Both let you debug from history: LangGraph can replay or fork from any checkpoint, but every
-    step after it re-executes, so point replays at sandboxed tools.
+    - A graph checkpointer saves a snapshot of state after each step; resume loads the latest snapshot and runs the next step.
+    - Temporal records every command as an event and, after a crash, replays the workflow code against that history, returning recorded activity results instead of running them again; the price is deterministic workflow code and a history size limit.
+    - Both let you debug from history: LangGraph can replay or fork from any checkpoint, but every step after it re-executes, so point replays at sandboxed tools.
   </InterviewQuestion>
 </InterviewQuestions>

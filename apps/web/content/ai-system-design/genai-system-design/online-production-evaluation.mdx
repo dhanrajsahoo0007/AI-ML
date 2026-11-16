@@ -5,9 +5,9 @@ icon: activity
 updated: 2026-11-15
 ---
 
-An offline test set only contains the problems you thought of before release. Interviewers ask about online evaluation because production is where the unexpected arrives: new questions, a stale index, a provider update. The answer they want is how you score live traffic without slowing it, without breaking privacy, and without a bill that rivals serving.
+Offline tests only catch problems you anticipated before release. Interviewers ask about online evaluation to see how you score live traffic against new drift without adding latency, leaking PII, or doubling costs.
 
-## TL;DR
+## Overview
 
 - **Online evaluation** grades a **sample of real production traffic** after the answer has gone out, and turns the scores into a dashboard and alerts. **Offline evaluation** grades a fixed set before release.
 - Brightpost samples **5 %** of 200,000 requests: **10,000 traces a day**, graded **asynchronously** by judges, so the customer never waits.
@@ -15,9 +15,11 @@ An offline test set only contains the problems you thought of before release. In
 - A **guardrail** blocks a request on the request path and adds time to every request; an **evaluation** observes it beside the path and adds none. A judge call (about 2 s, illustrative) is too slow to block.
 - Stratify the sample (oversample failures and new features), redact personal data before judging, and turn every bad trace into an offline test case.
 
-## The idea in plain English
+## Mental model
 
-A restaurant tests its recipes in the kitchen before putting them on the menu. That is offline evaluation. It does not tell the owner that the new lunch crowd orders something nobody tested, or that the bread supplier changed. So the owner also sits at one table in twenty after the meal and asks how it was, and a manager reads those answers each morning. Nobody is stopped at the door, and the diner who is asked never waits longer for the soup. The answers rarely change tonight's meal. They change the next menu.
+- **Offline recipe testing:** A restaurant tests recipes in the kitchen before putting them on the menu—that is offline evaluation, which misses unscripted lunch crowds or a changed bread supplier.
+- **Sampling diners after the meal:** The owner asks one table in twenty how the meal was after they finish, and a manager reads those notes each morning; nobody is stopped at the door and no diner waits longer for soup.
+- **Improving the next menu:** Post-meal feedback rarely changes tonight's dish, but it drives what gets fixed on the next menu.
 
 ## Core concepts
 
@@ -47,7 +49,8 @@ The scoring system hangs off the side of the serving path. The model answers fir
     The assistant handles up to 12 requests a second. Nothing in the scoring system sits between the question and the answer.
   </StepCard>
   <StepCard n={2} title="A copy of the trace leaves after the answer">
-    The trace holds the question, the retrieved passages, the tool calls and the answer (see [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging)). Personal data is redacted before it is stored or judged (see [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)).
+    - The trace holds the question, the retrieved passages, the tool calls and the answer (see [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging)).
+    - Personal data is redacted before it is stored or judged (see [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)).
   </StepCard>
   <StepCard n={3} title="The sampler keeps 5 %">
     5 % of 200,000 requests is 10,000 traces a day. The sampler also keeps every hand-off and thumbs-down, with a weight so the rates stay true.
@@ -63,7 +66,7 @@ The scoring system hangs off the side of the serving path. The model answers fir
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### Why a sample is enough, and what it costs
 
@@ -71,10 +74,9 @@ A pass rate from n graded traces has a 95 % interval of about 1.96 × √(p × (
 
 - **One day:** n = 10,000, so 1.96 × √(0.09 ÷ 10,000) = **±0.59 points**.
 - **One hour** (2.3 requests/s × 3,600 = 8,280 requests, 5 % is 414 graded): 1.96 × √(0.09 ÷ 414) = **±2.9 points**.
-
-A single bad trace says almost nothing; a trend over a window says a great deal. The daily number is tight enough to catch a 2-point slip, the hourly one only a large collapse.
-
-The judge's cost is the other limit. Each grade reads the question and answer, 2,200 + 250 = 2,450 tokens, and writes about 100. At illustrative prices of \$3 and \$15 per million input and output tokens, one grade costs 2,450 × 3 ÷ 1,000,000 + 100 × 15 ÷ 1,000,000 ≈ \$0.00885. A day of 10,000 grades costs about **\$88.50**, and its 24.5 million input tokens are **5.6 %** of a day's 440 million live input. Doubling the rate to 10 % narrows the interval by only 29 % (the square root of 2) while doubling the cost: spend extra on stratification, not on a bigger random slice.
+- **Window sensitivity:** A single bad trace says almost nothing; the daily window is tight enough to catch a 2-point slip, while the hourly window catches only a large collapse.
+- **Per-grade token cost:** Each grade reads the question and answer (2,200 + 250 = 2,450 tokens) and writes about 100 tokens; at illustrative prices of \$3 and \$15 per million input/output tokens, one grade costs 2,450 × 3 ÷ 1,000,000 + 100 × 15 ÷ 1,000,000 ≈ \$0.00885.
+- **Daily budget and diminishing returns:** Grading 10,000 traces a day costs about **\$88.50** (24.5M input tokens, or **5.6 %** of 440M live input tokens); doubling the sample to 10 % narrows the interval by only 29 % (√2) for double the cost, so spend extra budget on stratification instead.
 
 ### What online catches that offline cannot
 
@@ -84,7 +86,10 @@ The judge's cost is the other limit. Each grade reads the question and answer, 2
   caption="Five kinds of failure against the offline golden set and the online 5 % sample. The 1-in-5,000 rate is illustrative; the other numbers are computed from Brightpost's traffic."
 />
 
-**How to read it.** The offline suite blocks the known refund regression before release and nothing else reliably. The online sample sees new question types, a stale help article and a provider update, but only after customers have met them. The rare failure shows the gap in numbers: at 1 request in 5,000, **40 happen a day**, the sample holds **2**, and the 200-ticket golden set expects **0.04** of them. Each system has blind spots the other covers.
+**How to read it:**
+
+- **Offline vs online coverage:** The offline suite blocks known refund regressions before release, while the online sample catches new question types, stale help articles, and provider updates after customers encounter them.
+- **Rare failure math:** At 1 failure in 5,000 requests, **40 happen a day**, the 5 % online sample catches **2**, and the 200-ticket golden set expects **0.04**—showing how each system covers the other's blind spots.
 
 ### Guardrail or evaluation: block or observe
 
@@ -106,17 +111,20 @@ The judge's cost is the other limit. Each grade reads the question and answer, 2
   </StepCard>
 </StepCards>
 
-Use a guardrail for harm that must never reach a customer (a card number in the answer, a refund over £30 with no approval): cheap, deterministic, on the path. Use an evaluation for quality you want to measure and improve (tone, correctness, grounding). A failing online score does not undo the answer; it feeds the dashboard, the alert and the next release. Where a harm is both severe and cheap to test, promote an online check into a guardrail.
+- **When to use a guardrail:** Use cheap, deterministic on-path checks for severe harms that must never reach a customer (a card number in the answer, or a refund over £30 without approval).
+- **When to use an evaluation:** Use off-path evaluation for quality dimensions you want to measure and improve over time (tone, correctness, grounding), feeding dashboards, alerts, and the next release.
+- **Promoting checks:** When a harm is both severe and cheap to test deterministically, promote the online check into a synchronous guardrail.
 
 ### Live signals and shadow runs
 
-Scores from a judge are one signal. Add the behavioural ones: thumbs, retries, edits to a draft, hand-offs to a person, and re-contact within 24 hours. Each is noisy and biased towards people who click, but they measure outcomes and they are free. Where a judge and the behaviour disagree, read the traces by hand before trusting either.
-
-For a new model or prompt, run a **shadow** copy on live requests and score both versions on the same inputs (paired). It carries no customer risk and doubles the model cost for the shadowed share. A user-visible A/B test then measures what customers do. The design of both is on [A/B Testing for Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models). In chat, strict interleaving is rarely used; paired shadow scoring and per-user A/B assignment are more common.
+- **Behavioural signals:** Combine judge scores with free user signals—thumbs, retries, draft edits, human hand-offs, and 24-hour re-contact rates; when judges and user behaviour disagree, inspect traces manually.
+- **Shadow evaluation:** Run a candidate model or prompt on live request copies and score both versions paired on the same inputs with zero customer risk, at double the model cost for the shadowed slice.
+- **A/B testing vs interleaving:** Follow shadow runs with a user-visible A/B test to measure customer outcomes (see [A/B Testing for Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)); strict interleaving is rare in chat compared to paired shadow scoring and per-user A/B assignment.
 
 ### Governance
 
-Scoring chats is processing of customer data. Redact personal data before storage and judging, cap retention, say in the privacy notice that conversations are used for quality evaluation, and keep that separate from consent for training. Limit who can read sampled traces. Run the judge on a model whose terms allow the data.
+- **PII redaction and retention:** Redact personal data before storage and judging, cap trace retention, and restrict who can read sampled traces.
+- **Consent and provider terms:** Disclose quality evaluation in the privacy notice separately from model-training consent, and run judges only on models whose terms permit the data.
 
 ### Worked example: Brightpost finds a gap after a Tuesday
 
@@ -142,14 +150,14 @@ Scoring chats is processing of customer data. Redact personal data before storag
 | Guardrail on the path | Stops harm before it ships | Adds latency; false blocks | Severe, cheap-to-check harms |
 | Shadow candidate | No customer risk; paired scores | Double cost; no outcomes | Before an A/B test |
 
-## Real-world examples
+## Production systems
 
 - **Online evaluators on production traces.** LangSmith documents online evaluation as scoring real interactions as they happen, with evaluators such as safety checks, format validation and reference-free LLM judges, filters and sampling rates to control cost, and failing traces added to a dataset for offline testing (LangChain docs, November 2026).
 - **Offline against online.** The same documentation separates offline evaluation on curated datasets, used to compare versions and catch regressions before shipping, from online evaluation of live traffic, which is the split this page uses.
 - **A/B tests with guardrail metrics.** Large web companies run controlled experiments with guardrail metrics next to the primary one (Kohavi, Tang and Xu, 2020), the practice behind the shadow-then-ramp path above.
 - **Judge bias on live data.** Position, length and self-preference biases in LLM judges were measured on MT-Bench and Chatbot Arena (Zheng et al., 2023), which is why sampled judge scores need periodic human checks.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Judging on the request path.** A judge outage or a slow call becomes a customer outage. Use a queue.
 - **An unstratified sample.** The average hides a failing language, plan or intent.
@@ -158,7 +166,7 @@ Scoring chats is processing of customer data. Redact personal data before storag
 - **No path back.** A dashboard that nobody turns into test cases finds the same bug every month.
 - **A judge nobody re-checks.** When the judge model changes, the scores shift with no change in the product; compare against human labels regularly.
 
-## How to answer in an interview
+## Interview framework
 
 1. Say what online evaluation is for: failures the offline set cannot contain, found on real traffic.
 2. Draw the architecture: serve first, then sample, queue, judge asynchronously, store, dashboard, alert.
@@ -180,27 +188,43 @@ Scoring chats is processing of customer data. Redact personal data before storag
 
 <InterviewQuestions>
   <InterviewQuestion question="When is shadow evaluation preferable to a user-visible A/B test for a new LLM version?" category="Architecture" level="Mid">
-    Shadow is better when the candidate is immature, its safety properties are unproven, or the product forbids changing user-visible outputs. It measures infrastructure compatibility, latency and paired scores on the same requests with no customer risk. It cannot measure adoption, satisfaction or business metrics that need exposure, and it doubles model cost for the shadowed share, so use it as the first stage before a limited A/B test.
+    - **Immature or unverified candidates:** Use shadow evaluation when a candidate's safety is unproven or policy forbids changing user-visible outputs.
+    - **Risk-free paired measurement:** It measures infrastructure compatibility, latency, and paired rubric scores on identical live requests without customer risk.
+    - **Limits and cost:** Because it doubles model cost for the shadowed slice and cannot measure user satisfaction or business conversions, use it as a stage gate before a limited A/B test.
   </InterviewQuestion>
   <InterviewQuestion question="How would you compare two answer generators in a support copilot without a full A/B test?" category="Trade-offs" level="Mid">
-    Score both on the same live requests: run the candidate as a shadow, judge both answers against one rubric, and compare the paired scores, which cuts noise because ticket difficulty cancels. Where policy allows, show agents blinded side-by-side drafts and record which they pick. Predefine the primary metric (resolution time or agent preference), guardrails for policy violations, and a minimum sample, and stratify by product area. Strict interleaving is rare in chat, so paired comparison or per-ticket assignment is more usual.
+    - **Paired shadow judging:** Run the candidate in shadow on live requests, score both answers against one rubric, and compare paired differences so ticket difficulty cancels out.
+    - **Blinded agent preference:** Where policy allows, show support agents blinded side-by-side drafts and record which draft they select or edit less.
+    - **Predefined metrics and slices:** Predefine the primary metric (resolution time or preference), policy guardrails, and minimum sample size, stratified by product area rather than interleaving chat turns.
   </InterviewQuestion>
   <InterviewQuestion question="What operational concerns matter most when running live LLM judges on production traffic?" category="Failure modes" level="Mid">
-    Keep them off the request path, behind a queue, with rate limits and a kill switch, so a judge outage cannot touch serving. Redact personal data before judging and cap retention. Watch cost, judge model version drift, and sampling bias such as judging only English. Avoid alert fatigue by alerting on windows and intervals, not single traces, and audit the judge against human spot checks regularly.
+    - **Asynchronous isolation:** Run judges off the request path behind a queue with rate limits and a kill switch so judge outages never impact serving.
+    - **Privacy and bias:** Redact PII before judging, cap retention, monitor cost and judge version drift, and stratify across languages so non-English regressions are not hidden.
+    - **Alert hygiene:** Alert on aggregated windows and confidence intervals rather than single traces, and calibrate judges against regular human spot checks.
   </InterviewQuestion>
   <InterviewQuestion question="Why not just run the judge before the answer is sent and block bad ones?" category="Concepts" level="Junior">
-    A judge is a full model call, about 2 seconds in our illustrative case, which is longer than Brightpost's 1,500 ms budget for the whole answer. Putting it on the path would add that delay to every request and make the judge a point of failure for serving. Use cheap checks (rules, small classifiers) as guardrails on the path, and keep the judge beside it, sampling a share of traffic and reporting later.
+    - **Latency budget violation:** A full LLM judge call takes roughly 2 seconds (illustrative), exceeding Brightpost's entire 1,500 ms response budget.
+    - **Availability risk:** Putting the judge on the critical path delays every customer request and turns a judge outage into a serving outage.
+    - **Split architecture:** Keep fast rules and small classifiers on the request path as guardrails, and run LLM judges asynchronously on a sampled queue.
   </InterviewQuestion>
   <InterviewQuestion question="How do you pick a sampling rate for online evaluation?" category="Scaling" level="Mid">
-    Work backwards from the precision you need and the cost you can bear. At a 90 % pass rate, 10,000 graded traces a day give about ±0.59 points and 414 an hour about ±2.9 points, so a daily window can catch a 2-point slip and an hourly one only a large drop. The interval shrinks with the square root of n, so doubling the rate buys 29 % tighter intervals for double the cost. Spend extra on stratification instead: oversample failures, new features and small languages, and weight the traces.
+    - **Work backwards from precision and cost:** At a 90 % pass rate, 10,000 daily traces yield ±0.59 points (catching a 2-point slip) while 414 hourly traces yield ±2.9 points (catching only major drops).
+    - **Square-root scaling:** Confidence intervals shrink with √n, so doubling the random sample rate buys only 29 % tighter intervals at double the cost.
+    - **Stratify instead of brute-forcing:** Keep a modest baseline rate and oversample failures, new features, and smaller languages with inverse-probability weights.
   </InterviewQuestion>
   <InterviewQuestion question="The offline suite is green, but the online pass rate fell from 90 % to 83.5 %. What do you do?" category="Failure modes" level="Senior">
-    Confirm the drop is real: with 10,000 graded traces the interval is about ±0.7 points, so it is. Slice by intent, language, plan, model version and time, to find where it started, and compare with deploys and provider announcements. Read a sample of failing traces; a new topic, a stale article and a model change look different in the traces. Fix the cause, add the failing cases to the golden set so offline evaluation covers them, and note why the old suite missed them.
+    - **Verify statistical significance:** With 10,000 graded traces the 95 % interval is about ±0.7 points, confirming the 6.5-point drop is real.
+    - **Slice and correlate:** Break the drop down by intent, language, plan, model version, and timestamp, and cross-check against recent deploys or provider updates.
+    - **Inspect and close the loop:** Read ~30 failing traces to distinguish a new product topic from a stale help article or model drift, fix the root cause, and add the failing cases to the offline golden set.
   </InterviewQuestion>
   <InterviewQuestion question="When would you turn an online evaluation into a guardrail?" category="Trade-offs" level="Senior">
-    When the harm is severe, cheap to detect and frequent enough that observing it afterwards is not acceptable: personal data in an answer, a refund above the approval limit with no approval. The check must run in milliseconds and be deterministic, or a small, well-tested classifier; a large judge cannot qualify. Measure its false-block rate first by running it in observe-only mode on the live sample, then enforce it, with a fallback reply and a kill switch.
+    - **Severe, frequent harms:** Promote a check when the failure is unacceptable even once—such as leaking PII or issuing an unapproved refund over £30.
+    - **Strict latency constraint:** The check must be deterministic or a tiny classifier that runs in milliseconds; a multi-second LLM judge cannot sit on the path.
+    - **Safe rollout:** Measure false-positive rates in observe-only mode on live samples first, then enforce on the request path with a safe fallback reply and a kill switch.
   </InterviewQuestion>
   <InterviewQuestion question="What are the privacy and governance concerns of scoring production chats?" category="Failure modes" level="Senior">
-    Chats hold personal data, so redact it before storing or sending it to a judge, cap retention, restrict who can read traces, and use a judge provider whose terms allow the data. Tell customers that conversations are used to evaluate quality, and keep that separate from consent for training models. Stratified sampling can over-represent sensitive groups, so review its effect, and keep audit logs of who accessed the sampled traces.
+    - **Data minimisation:** Redact PII before storage or judging, cap retention windows, restrict trace access, and use a judge provider whose terms prohibit training on your data.
+    - **Separated consent:** Disclose quality evaluation in the privacy notice separately from consent for model training.
+    - **Bias and auditing:** Review how stratified sampling weights affect sensitive user groups and maintain audit logs of everyone who accesses sampled traces.
   </InterviewQuestion>
 </InterviewQuestions>

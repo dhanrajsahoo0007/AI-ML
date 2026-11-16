@@ -4,9 +4,12 @@ description: Dashboard design, SLO burn rates, anomaly alerts, and on-call patte
 updated: 2026-11-15
 ---
 
-An LLM system can fail without a single error: the answers get worse, or the first token arrives late, and every status code stays 200. Interviewers ask about alerting to see whether you know what to put on a dashboard, what is worth waking a person for, and how a quality problem becomes an alert. The general method is in [SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call); this page covers what is different for LLMs.
+An LLM system can fail without a single error: the answers get worse, or the first token arrives late, and every status code stays 200.
 
-## TL;DR
+- Interviewers ask about alerting to see whether you know what to put on a dashboard, what is worth waking a person for, and how a quality problem becomes an alert.
+- The general method is in [SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call); this page covers what is different for LLMs.
+
+## Overview
 
 - **Four dashboard rows, in order:** traffic, latency, quality, cost. Brightpost's quality row is a **graded sample** (90 % pass, floor 85 %), because no status code marks a wrong answer.
 - **Page on symptoms, ticket on causes.** A symptom is something a customer feels (pass rate under the floor, TTFT p95 over **400 ms**). A cause (cache hit rate, stale index) sits on the dashboard to explain the page.
@@ -15,9 +18,13 @@ An LLM system can fail without a single error: the answers get worse, or the fir
 - **Cost belongs on the same board.** An incident that spares latency can still double the token bill.
 - **Every page links a runbook and the last deploy.** The bundle and prompt version are on the dashboard.
 
-## The idea in plain English
+## Mental model
 
-Think of the instrument panel in a car. The speedometer, the fuel gauge and the temperature light are not the same kind of signal. A flashing "engine hot" light means pull over now. A low tyre-pressure reading means book a garage visit this week. The skill is deciding which gauge gets a light that wakes you. An LLM application has one more gauge, the one for "is it right?", and it only moves if someone checks a sample of answers.
+- Think of the instrument panel in a car. The speedometer, the fuel gauge and the temperature light are not the same kind of signal.
+- A flashing "engine hot" light means pull over now.
+- A low tyre-pressure reading means book a garage visit this week.
+- The skill is deciding which gauge gets a light that wakes you.
+- An LLM application has one more gauge, the one for "is it right?", and it only moves if someone checks a sample of answers.
 
 ## Core concepts
 
@@ -42,18 +49,21 @@ Brightpost's dashboard has four rows. Each answers one question, and each is tie
   caption="Traffic, latency, quality, cost: four questions, four rows. Prices and decode speed are illustrative."
 />
 
-**How to read it.** Steps 1 to 4 reveal one row each. The tiles show the numbers an on-call engineer reads first: 2.3 requests/s on average and 12 at peak; a TTFT p95 target of 400 ms; a 90 % pass rate on 200 graded answers a week against an 85 % floor; and 440 M input and 50 M output tokens a day.
+**How to read it:**
+
+- Steps 1 to 4 reveal one row each. The tiles show the numbers an on-call engineer reads first: 2.3 requests/s on average and 12 at peak; a TTFT p95 target of 400 ms; a 90 % pass rate on 200 graded answers a week against an 85 % floor; and 440 M input and 50 M output tokens a day.
 
 1. **Traffic** tells you whether the system is used. A sudden drop is a symptom: a broken client sends no requests.
 2. **Latency** shows percentiles of time to first token and full answer. Brightpost's targets are 400 ms and 1,500 ms.
 3. **Quality** is the row status codes cannot give. It needs graded samples and an interval, since 200 answers carry about ±4 points.
 4. **Cost** shows tokens and spend. At the illustrative list price of \$2 per million input tokens and \$10 per million output tokens, one request costs \$0.0069 and a day costs \$1,380.
 
-## Deep dive
+## Technical mechanics
 
 ### Page on symptoms, ticket on causes
 
-A symptom is something a customer feels. A cause is something wrong inside the system that may never reach them. Google's SRE book says monitoring should answer "what's broken, and why?", and recommends paging on the first and using the second as an aid to debugging.
+- A symptom is something a customer feels. A cause is something wrong inside the system that may never reach them.
+- Google's SRE book says monitoring should answer "what's broken, and why?", and recommends paging on the first and using the second as an aid to debugging.
 
 <AnimatedDiagram
   spec="animated/llmops/alert-symptom-vs-cause"
@@ -61,7 +71,11 @@ A symptom is something a customer feels. A cause is something wrong inside the s
   caption="Pass rate, TTFT and budget burn page a person. Stale index, a falling cache hit rate and provider 429s open tickets. The cause readings are illustrative."
 />
 
-**How to read it.** Step 1 lists three symptoms. Step 2 lists three causes, each of which can produce one of them. Step 3 draws the dashed arrows: a stale index gives stale answers, a falling cache hit rate gives a slow first token, and rising 429s give failed requests. Only the symptom row wakes someone. The cause row sits on the dashboard so the person who wakes up sees the explanation next to the page.
+**How to read it:**
+
+- Step 1 lists three symptoms. Step 2 lists three causes, each of which can produce one of them.
+- Step 3 draws the dashed arrows: a stale index gives stale answers, a falling cache hit rate gives a slow first token, and rising 429s give failed requests.
+- Only the symptom row wakes someone. The cause row sits on the dashboard so the person who wakes up sees the explanation next to the page.
 
 A cause can still deserve a page when it is "very definite, very imminent" in the SRE book's words, such as a certificate expiring in an hour. Most are tickets.
 
@@ -75,13 +89,26 @@ The burn rate is the share of requests failing now divided by the share the SLO 
   caption="A 30-day error budget: a fast burn pages within minutes, a slow leak opens a ticket, and an empty budget freezes risky changes."
 />
 
-**How to read it.** This is the cloud track's figure for a checkout SLO; an LLM answer SLO works the same way. The dashed line is burn rate 1. Step 2 is a fast burn that pages. Step 3 is a slow leak that opens a ticket. Step 4 shows the budget at zero and the rule that follows: risky changes freeze. The cloud page also draws the [alert path](/cloud/operations/slos-alerting-and-on-call) from the SLI to the paging tool.
+**How to read it:**
 
-**The numbers.** The SRE Workbook's example for a 99.9 % SLO pages at a burn rate of 14.4 over 1 hour (short window 5 minutes) and 6 over 6 hours (30 minutes), and opens a ticket at 1 over 3 days (6 hours). The budget used is burn rate × window ÷ 30 days: 14.4 × 1 h ÷ 720 h = 2 %, 6 × 6 h ÷ 720 h = 5 %, and 1 × 72 h ÷ 720 h = 10 %. For Brightpost's illustrative 99 % answer SLO, 30 days is about 6,000,000 requests and the budget is 60,000 bad ones. At 14.4 times the safe rate, about 1,200 bad requests in an hour use 2 % of it.
+- This is the cloud track's figure for a checkout SLO; an LLM answer SLO works the same way.
+- The dashed line is burn rate 1. Step 2 is a fast burn that pages.
+- Step 3 is a slow leak that opens a ticket. Step 4 shows the budget at zero and the rule that follows: risky changes freeze.
+- The cloud page also draws the [alert path](/cloud/operations/slos-alerting-and-on-call) from the SLI to the paging tool.
+
+**The numbers:**
+
+- The SRE Workbook's example for a 99.9 % SLO pages at a burn rate of 14.4 over 1 hour (short window 5 minutes) and 6 over 6 hours (30 minutes), and opens a ticket at 1 over 3 days (6 hours).
+- The budget used is burn rate × window ÷ 30 days: 14.4 × 1 h ÷ 720 h = 2 %, 6 × 6 h ÷ 720 h = 5 %, and 1 × 72 h ÷ 720 h = 10 %.
+- For Brightpost's illustrative 99 % answer SLO, 30 days is about 6,000,000 requests and the budget is 60,000 bad ones.
+- At 14.4 times the safe rate, about 1,200 bad requests in an hour use 2 % of it.
 
 ### Alerting on quality
 
-A graded sample is noisy, so a quality alert needs three guards. Use a minimum sample (at least 100 graded answers in the window), a drop larger than the noise (the 95 % range on 200 answers is about ±4 points, so a fall from 90 % to 87 % is not yet news), and a second window as with burn rates. Route a slow drift to a daytime ticket. Page only when the pass rate is under the floor with the minimum sample behind it. A flaky judge produces false alarms, so keep the judge version fixed and log it with the score.
+- A graded sample is noisy, so a quality alert needs three guards.
+- Use a minimum sample (at least 100 graded answers in the window), a drop larger than the noise (the 95 % range on 200 answers is about ±4 points, so a fall from 90 % to 87 % is not yet news), and a second window as with burn rates.
+- Route a slow drift to a daytime ticket. Page only when the pass rate is under the floor with the minimum sample behind it.
+- A flaky judge produces false alarms, so keep the judge version fixed and log it with the score.
 
 ### Worked example: a slow first token on Tuesday
 
@@ -106,14 +133,14 @@ A graded sample is noisy, so a quality alert needs three guards. Use a minimum s
 | Page on causes | Early warning | Alert fatigue; many causes never hurt anyone | Definite, imminent causes only |
 | Ticket on slow burns | Protects sleep | Slower reaction | Slow leaks, drift, cost creep |
 
-## Real-world examples
+## Production systems
 
 - **Google SRE.** The Workbook's multiwindow, multi-burn-rate alerts (14.4, 6 and 1) are the standard pattern that many monitoring products implement.
 - **Grafana, Datadog and cloud monitors.** Dashboards and routing on existing on-call tools; LLM teams add a quality panel fed by sampled evaluations.
 - **Cloud SLO objects.** Amazon CloudWatch Application Signals and Google Cloud Monitoring can alarm on an SLO's burn rate directly; see the cloud page.
 - **LLM observability tools.** Trace-based products show token counts, latency and evaluation scores on one board; see [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Alerting on every machine metric and training the team to mute the channel.
 - No quality row, so silent degradation never alerts.
@@ -122,7 +149,7 @@ A graded sample is noisy, so a quality alert needs three guards. Use a minimum s
 - Changing the judge or the sample without recording it, so the pass rate jumps for no reason.
 - Alerts with no runbook, no owner and no link to the last deploy.
 
-## How to answer in an interview
+## Interview framework
 
 1. Start with the four rows and what each answers, and add the row an LLM needs: quality.
 2. Give the rule: page on symptoms, ticket on causes, and name examples of each.
@@ -143,27 +170,51 @@ A graded sample is noisy, so a quality alert needs three guards. Use a minimum s
 
 <InterviewQuestions>
   <InterviewQuestion question="What distinguishes a good on-call runbook for an LLM serving incident from a generic API outage runbook?" category="Failure modes" level="Mid">
-    It starts from the symptom and links the dashboard rows that explain it. It includes steps for checking the bundle and prompt version, tokenizer or template mismatches, GPU memory errors, index freshness and provider rate limits, as well as the quality row, not only status codes. It names who owns prompt changes and who owns infrastructure, and it documents the safe rollback, including the prior bundle. It also has a message template for the case where outputs are wrong but every response is a 200.
+    - It starts from the symptom and links the dashboard rows that explain it.
+    - It includes steps for checking the bundle and prompt version, tokenizer or template mismatches, GPU memory errors, index freshness and provider rate limits, as well as the quality row, not only status codes.
+    - It names who owns prompt changes and who owns infrastructure, and it documents the safe rollback, including the prior bundle.
+    - It also has a message template for the case where outputs are wrong but every response is a 200.
   </InterviewQuestion>
   <InterviewQuestion question="How would you architect dashboards so product and platform teams share one source of truth?" category="Architecture" level="Senior">
-    Store metrics in one time-series backend with consistent names and required labels such as route, model, bundle version and region. Build one board per audience that reads the same metric definitions, and keep complex formulas in recording rules so they live in one place. Version the dashboard files in git and write down what each panel means. Product reads the quality and cost rows, platform reads latency and saturation, and both can drill into the same trace.
+    - Store metrics in one time-series backend with consistent names and required labels such as route, model, bundle version and region.
+    - Build one board per audience that reads the same metric definitions, and keep complex formulas in recording rules so they live in one place.
+    - Version the dashboard files in git and write down what each panel means.
+    - Product reads the quality and cost rows, platform reads latency and saturation, and both can drill into the same trace.
   </InterviewQuestion>
   <InterviewQuestion question="When would you use multi-window burn-rate alerts instead of a simple threshold on error rate?" category="Concepts" level="Mid">
-    A threshold on the instantaneous rate misses a slow leak that spends the budget over days and misfires on noisy low-traffic routes. A burn rate compares the failure share with what the SLO allows, and two windows give both a proof that it is not a blip (the long window) and a proof that it is still happening (the short one). Google's example pages at 14.4 over 1 hour, which uses 2 % of a 30-day budget. The costs are needing an SLO and a minimum event count so sparse traffic does not flap.
+    - A threshold on the instantaneous rate misses a slow leak that spends the budget over days and misfires on noisy low-traffic routes.
+    - A burn rate compares the failure share with what the SLO allows, and two windows give both a proof that it is not a blip (the long window) and a proof that it is still happening (the short one).
+    - Google's example pages at 14.4 over 1 hour, which uses 2 % of a 30-day budget.
+    - The costs are needing an SLO and a minimum event count so sparse traffic does not flap.
   </InterviewQuestion>
   <InterviewQuestion question="Why page on symptoms and ticket on causes?" category="Trade-offs" level="Junior">
-    A symptom is something a customer feels, so a page is always actionable. A cause is something inside the system that may never reach a customer. A falling cache hit rate that does not push TTFT over its target is worth a ticket, not a wake-up call. Causes still belong on the dashboard, because the person paged for the symptom needs them to find the fix quickly.
+    - A symptom is something a customer feels, so a page is always actionable.
+    - A cause is something inside the system that may never reach a customer.
+    - A falling cache hit rate that does not push TTFT over its target is worth a ticket, not a wake-up call.
+    - Causes still belong on the dashboard, because the person paged for the symptom needs them to find the fix quickly.
   </InterviewQuestion>
   <InterviewQuestion question="How do you alert on answer quality without drowning the team in false alarms?" category="Failure modes" level="Senior">
-    Grade a sample of live answers with a fixed judge and plot the pass rate. Require a minimum sample, such as 100 graded answers, and alert on a drop larger than the interval: with 200 answers a 90 % pass rate carries about ±4 points. Page only when the rate is under the floor with enough data behind it, and route a slow decline to a daytime ticket. Log the judge version with each score and spot-check the judge against human labels so a drifting judge does not page you.
+    - Grade a sample of live answers with a fixed judge and plot the pass rate.
+    - Require a minimum sample, such as 100 graded answers, and alert on a drop larger than the interval: with 200 answers a 90 % pass rate carries about ±4 points.
+    - Page only when the rate is under the floor with enough data behind it, and route a slow decline to a daytime ticket.
+    - Log the judge version with each score and spot-check the judge against human labels so a drifting judge does not page you.
   </InterviewQuestion>
   <InterviewQuestion question="Which numbers go on an LLM dashboard that a standard web dashboard lacks?" category="Concepts" level="Junior">
-    Time to first token and tokens per second, not only request duration. Input, output and cached token counts. A graded pass rate on sampled answers. Cost per request and per day. Provider rate-limit replies, cache hit rate and index age as causes. Each has a Brightpost value: 400 ms TTFT target, 90 % pass rate against an 85 % floor, and 440 M input tokens a day.
+    - Time to first token and tokens per second, not only request duration.
+    - Input, output and cached token counts. A graded pass rate on sampled answers.
+    - Cost per request and per day. Provider rate-limit replies, cache hit rate and index age as causes.
+    - Each has a Brightpost value: 400 ms TTFT target, 90 % pass rate against an 85 % floor, and 440 M input tokens a day.
   </InterviewQuestion>
   <InterviewQuestion question="Latency and error rate are green, but customers complain that answers are wrong. What do you check, and what alert would have caught it?" category="Failure modes" level="Senior">
-    Check the quality row first, then the causes: index age, the latest prompt or model change, and whether the provider changed a model behind an alias. Compare the graded pass rate before and after the last release. An alert on the sampled pass rate under the floor, with a minimum sample and a second window, would have caught it. Add a regression test for the case you found and an index-age alert as a ticket.
+    - Check the quality row first, then the causes: index age, the latest prompt or model change, and whether the provider changed a model behind an alias.
+    - Compare the graded pass rate before and after the last release.
+    - An alert on the sampled pass rate under the floor, with a minimum sample and a second window, would have caught it.
+    - Add a regression test for the case you found and an index-age alert as a ticket.
   </InterviewQuestion>
   <InterviewQuestion question="A burn-rate alert fires on a low-traffic route at 3 a.m. after one failed request. How do you fix the rule?" category="Scaling" level="Mid">
-    The failure share is huge because the denominator is tiny. Add a minimum event count, for example at least 5 failed requests in the long window, as the cloud track's checkout rule does. Consider merging routes into one SLO, or alerting on a longer window for rarely used routes. Keep the two-window rule so a blip that has already stopped does not page.
+    - The failure share is huge because the denominator is tiny.
+    - Add a minimum event count, for example at least 5 failed requests in the long window, as the cloud track's checkout rule does.
+    - Consider merging routes into one SLO, or alerting on a longer window for rarely used routes.
+    - Keep the two-window rule so a blip that has already stopped does not page.
   </InterviewQuestion>
 </InterviewQuestions>

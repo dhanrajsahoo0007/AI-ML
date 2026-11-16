@@ -3,9 +3,11 @@ title: Agent Memory
 description: How agents remember, covering short-term context, summarization, long-term semantic and episodic memory, write and retrieval policies, forgetting and privacy.
 ---
 
-Memory questions ask how an assistant can stay coherent in long tasks and remember users across sessions without drowning its context window or storing the wrong things. Good answers treat memory as a system with explicit write, read and forget rules.
+Memory questions ask how an assistant can stay coherent in long tasks and remember users across sessions without drowning its context window or storing the wrong things.
 
-## TL;DR
+- Good answers treat memory as a system with explicit write, read and forget rules.
+
+## Overview
 
 - **Short-term memory** is what is in the context window now: recent messages, current plan, tool results.
 - **Long-term memory** persists across sessions in a store and is retrieved when relevant.
@@ -13,9 +15,11 @@ Memory questions ask how an assistant can stay coherent in long tasks and rememb
 - The hard parts are **what to write, when to retrieve, how to update conflicts and when to forget**.
 - Memory raises **privacy** questions: users must be able to see, correct and delete it.
 
-## The idea in plain English
+## Mental model
 
-Short-term memory is the notepad on your desk during a task; when it fills up, you summarize old notes. Long-term memory is your filing cabinet: you file important facts ("the client prefers email"), records of past jobs, and how-to notes, and pull out the relevant folder when a new task starts. A messy cabinet with wrong or outdated files is worse than none.
+- Short-term memory is the notepad on your desk during a task; when it fills up, you summarize old notes.
+- Long-term memory is your filing cabinet: you file important facts ("the client prefers email"), records of past jobs, and how-to notes, and pull out the relevant folder when a new task starts.
+- A messy cabinet with wrong or outdated files is worse than none.
 
 ## Core concepts
 
@@ -39,7 +43,9 @@ Short-term memory is the notepad on your desk during a task; when it fills up, y
 
 ## Architecture
 
-One customer shows how the loop works. Brightpost, a fictional shop, runs a support agent: a model that can look up orders and request refunds. Last week a customer's kettle (order 4471) arrived cracked, and a support agent approved a £42 refund. Today the customer writes: "Has my kettle refund gone through? Text me from now on, not email."
+- One customer shows how the loop works. Brightpost, a fictional shop, runs a support agent: a model that can look up orders and request refunds.
+- Last week a customer's kettle (order 4471) arrived cracked, and a support agent approved a £42 refund.
+- Today the customer writes: "Has my kettle refund gone through? Text me from now on, not email."
 
 <AnimatedDiagram
   spec="animated/rag/memory-read-write"
@@ -51,10 +57,14 @@ One customer shows how the loop works. Brightpost, a fictional shop, runs a supp
 
 <StepCards>
   <StepCard n={1} title="The message joins the recent turns">
-    The new message is added to this session's recent turns, the short-term memory, and the context builder starts the prompt from them. When the turns grow long, the oldest are summarised to keep the prompt small. A new session has almost nothing here. On its own, the agent does not know who this customer is or what happened last week.
+    - The new message is added to this session's recent turns, the short-term memory, and the context builder starts the prompt from them.
+    - When the turns grow long, the oldest are summarised to keep the prompt small.
+    - A new session has almost nothing here. On its own, the agent does not know who this customer is or what happened last week.
   </StepCard>
   <StepCard n={2} title="The message is embedded and recalls memories">
-    The latest message is turned into a vector by an embedding model, the same model that embedded each stored memory. The store searches only this customer's memories and returns the 3 closest: "prefers email", "4471: £42 refund approved on 12 Nov" and "kettle arrived cracked". This is retrieval, as in [RAG](/ai-system-design/genai-system-design/rag-fundamentals), over the customer's history instead of help articles.
+    - The latest message is turned into a vector by an embedding model, the same model that embedded each stored memory.
+    - The store searches only this customer's memories and returns the 3 closest: "prefers email", "4471: £42 refund approved on 12 Nov" and "kettle arrived cracked".
+    - This is retrieval, as in [RAG](/ai-system-design/genai-system-design/rag-fundamentals), over the customer's history instead of help articles.
   </StepCard>
   <StepCard n={3} title="The agent replies from turns and memories">
     The prompt holds the recent turns and the 3 memories, so the agent can answer "Yes, your £42 refund was approved on 12 Nov" without asking for the order number again. The reply follows today's request and goes by text. The store still says "prefers email".
@@ -70,13 +80,16 @@ One customer shows how the loop works. Brightpost, a fictional shop, runs a supp
   </StepCard>
 </StepCards>
 
-**The numbers** (illustrative): the store returns the top 3 memories for each message. At about 20 tokens each, they add 3 × 20 = 60 tokens to the prompt; replaying last week's whole chat instead would add thousands.
+**The numbers:**
+
+- (illustrative): the store returns the top 3 memories for each message.
+- At about 20 tokens each, they add 3 × 20 = 60 tokens to the prompt; replaying last week's whole chat instead would add thousands.
 
 <Callout tone="red" title="What breaks">
   Without the conflict check, "prefers email" and "prefers text" both stay in the store, and whichever is more similar to the next message wins. The agent then emails a customer who asked for texts. Fix: check related memories at write time, replace or mark the old one as superseded, and prefer the newest memory when two disagree.
 </Callout>
 
-## Deep dive
+## Technical mechanics
 
 ### Types of memory side by side
 
@@ -88,7 +101,12 @@ A common way to split memory into four kinds comes from the CoALA framework (Sum
   caption="Each memory type answers a different question, so each needs its own store and its own rules for writing and forgetting."
 />
 
-**How to read it.** Step 1 is working memory: what the model can see right now, the context window for this session, holding order 4471 and the cracked kettle. Step 2 saves a stable fact as semantic memory ("prefers email"), kept as a profile record so it can be updated or deleted exactly. Step 3 logs what happened as episodic memory ("12 Nov: £42 kettle refund approved"), an event log with vectors so similar past cases can be found. Step 4 distils a lesson from many episodes into procedural memory ("damaged item: ask for a photo first"), written into the prompt or a rules file, so it changes how the agent acts in every later chat.
+**How to read it:**
+
+- Step 1 is working memory: what the model can see right now, the context window for this session, holding order 4471 and the cracked kettle.
+- Step 2 saves a stable fact as semantic memory ("prefers email"), kept as a profile record so it can be updated or deleted exactly.
+- Step 3 logs what happened as episodic memory ("12 Nov: £42 kettle refund approved"), an event log with vectors so similar past cases can be found.
+- Step 4 distils a lesson from many episodes into procedural memory ("damaged item: ask for a photo first"), written into the prompt or a rules file, so it changes how the agent acts in every later chat.
 
 CoALA also counts the model's weights and the agent's code as procedural memory. The figure shows only the part an agent can edit for itself.
 
@@ -106,7 +124,12 @@ Recalling a memory is retrieval: the same search-a-store shape as [RAG](/ai-syst
   caption="The read half is the same. RAG's store is written ahead of time by people, for everyone; memory's store is written by the agent itself, after every chat, for one customer."
 />
 
-**How to read it.** Step 1 draws the read half twice: search a store, put the hits in the prompt of one support agent. Step 2 adds RAG's write half: staff write help articles, and an offline job embeds and indexes them for every customer. Step 3 adds memory's write half: the agent's own memory writer reads each finished chat and writes to a store that holds one customer's facts. The dashed line closes a loop: the reply becomes part of the chat the writer reads next.
+**How to read it:**
+
+- Step 1 draws the read half twice: search a store, put the hits in the prompt of one support agent.
+- Step 2 adds RAG's write half: staff write help articles, and an offline job embeds and indexes them for every customer.
+- Step 3 adds memory's write half: the agent's own memory writer reads each finished chat and writes to a store that holds one customer's facts.
+- The dashed line closes a loop: the reply becomes part of the chat the writer reads next.
 
 | | RAG (help centre) | Memory (this customer) |
 | --- | --- | --- |
@@ -153,7 +176,7 @@ Each term is scaled to 0–1 across the candidates (min-max: the lowest becomes 
   </StepCard>
 </StepCards>
 
-**The numbers** (hours, ratings and cosines are illustrative; the decay, the scaling and the weights are the paper's):
+- **The numbers:** (hours, ratings and cosines are illustrative; the decay, the scaling and the weights are the paper's):
 
 - Raw recency: 0.995^168 = 0.43, 0.995^720 = 0.03, 0.995^48 = 0.79. Scaled: (0.43 − 0.03) / (0.79 − 0.03) = 0.53 for the refund; 0 and 1 for the others.
 - Importance 7, 5, 2 scales to 1, (5 − 2) / (7 − 2) = 0.60, 0. Relevance 0.82, 0.61, 0.20 scales to 1, (0.61 − 0.20) / (0.82 − 0.20) = 0.66, 0.
@@ -175,9 +198,16 @@ After the reply, the memory writer decides what to save. Every candidate fact ta
   caption="Every candidate is compared before it is saved. A conflict replaces the old memory, a duplicate writes nothing, and only a new fact adds a row."
 />
 
-**How to read it.** Step 1: the writer pulls three candidate facts out of today's chat and skips guesses such as "seems impatient". Step 2: each candidate is compared with its nearest stored memories. "Prefers text" sets the same field as "prefers email", a conflict; the refund is already stored, a duplicate; "chased refund 4471" has nothing close, so it is new. Step 3 decides: update the conflict, drop the duplicate, add the new fact. Step 4 is the store afterwards: the duplicate has no arrow into it, because dropping writes nothing.
+**How to read it:**
 
-The update does not erase the old memory. It marks it as superseded, so the store can still answer "when did they switch?" and the change can be undone. Here are the two records after the write, in this page's own schema (not a standard):
+- Step 1: the writer pulls three candidate facts out of today's chat and skips guesses such as "seems impatient".
+- Step 2: each candidate is compared with its nearest stored memories.
+- "Prefers text" sets the same field as "prefers email", a conflict; the refund is already stored, a duplicate; "chased refund 4471" has nothing close, so it is new.
+- Step 3 decides: update the conflict, drop the duplicate, add the new fact.
+- Step 4 is the store afterwards: the duplicate has no arrow into it, because dropping writes nothing.
+
+- The update does not erase the old memory. It marks it as superseded, so the store can still answer "when did they switch?" and the change can be undone.
+- Here are the two records after the write, in this page's own schema (not a standard):
 
 ```json
 [
@@ -194,7 +224,9 @@ The update does not erase the old memory. It marks it as superseded, so the stor
 ]
 ```
 
-Recall filters on `"status": "active"`, so "prefers email" never reaches the prompt again. Mem0 (Chhikara et al., 2025), a memory layer for agents, runs the same policy: for each candidate fact it fetches the most similar stored memories (10 in the paper's tests), and a model call picks ADD, UPDATE, DELETE or NOOP. It deletes a contradicted memory, where this page keeps it as history.
+- Recall filters on `"status": "active"`, so "prefers email" never reaches the prompt again.
+- Mem0 (Chhikara et al., 2025), a memory layer for agents, runs the same policy: for each candidate fact it fetches the most similar stored memories (10 in the paper's tests), and a model call picks ADD, UPDATE, DELETE or NOOP.
+- It deletes a contradicted memory, where this page keeps it as history.
 
 <Callout tone="red" title="What breaks">
   Similarity finds the memories to compare; it should not decide. "Chased refund 4471" and "4471: £42 refund approved" share the order number and sit close together, so a rule such as "anything above 0.9 cosine is a duplicate" would drop the new episode. Fix: let a model call or an explicit rule compare the two facts and pick the operation, and log every decision so a wrong drop can be traced.
@@ -228,21 +260,21 @@ Three things to take from it:
 | Vector store vs structured records | Flexible recall | Precise updates and deletes | Structured for facts, vectors for fuzzy recall; often both |
 | Global vs per-task memory | Cross-task learning | Less interference | Scope memories by user and project |
 
-## Real-world examples
+## Production systems
 
 - Generative Agents (Park et al., 2023) used a memory stream with retrieval by recency, importance and relevance, summed with equal weights, plus reflection to form higher-level memories.
 - MemGPT (Packer et al., 2023) treated context management like an operating system's memory hierarchy: the prompt is main memory, outside storage is disk, and the model moves data between them with function calls. Old messages go to recall storage; arbitrary text goes to archival storage.
 - Mem0 (Chhikara et al., 2025) extracts candidate facts from each exchange and has a model pick ADD, UPDATE, DELETE or NOOP against the most similar stored memories.
 - Consumer AI assistants now offer user-visible memory that can be reviewed and deleted.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Storing everything, which makes retrieval noisy and costly.
 - Never updating or forgetting, so stale facts override new ones.
 - Storing sensitive personal data without consent or deletion support.
 - Retrieving memories by similarity alone and missing recency.
 
-## How to answer in an interview
+## Interview framework
 
 1. Separate short-term context management from long-term memory.
 2. Name memory types and give an example of each.
@@ -264,21 +296,27 @@ Three things to take from it:
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between short-term and long-term memory in an agent?" category="Concepts" level="Junior">
-    Short-term memory is the information in the current context window, such as recent messages, the plan and tool results. Long-term memory persists outside the model across sessions in a database or vector store and is retrieved into the context when relevant.
+    - Short-term memory is the information in the current context window, such as recent messages, the plan and tool results.
+    - Long-term memory persists outside the model across sessions in a database or vector store and is retrieved into the context when relevant.
   </InterviewQuestion>
   <InterviewQuestion question="How do you keep a long conversation within the context window?" category="Architecture" level="Mid">
-    Keep recent turns verbatim, summarize older ones into a running summary, move large artifacts out of the context and reference them, and retrieve specific older details on demand. Track token usage so compression happens before quality drops.
+    - Keep recent turns verbatim, summarize older ones into a running summary, move large artifacts out of the context and reference them, and retrieve specific older details on demand.
+    - Track token usage so compression happens before quality drops.
   </InterviewQuestion>
   <InterviewQuestion question="How do you decide what an assistant should remember?" category="Architecture" level="Mid">
-    Remember things that are stable and useful later: explicit preferences, confirmed facts about the user or project, and outcomes of tasks. Skip transient details and guesses. Let users see and remove memories, and ask before storing sensitive information.
+    - Remember things that are stable and useful later: explicit preferences, confirmed facts about the user or project, and outcomes of tasks.
+    - Skip transient details and guesses. Let users see and remove memories, and ask before storing sensitive information.
   </InterviewQuestion>
   <InterviewQuestion question="How do you handle conflicting memories?" category="Failure modes" level="Senior">
-    Store memories with timestamps and sources, detect conflicts when writing by checking related existing memories, and replace or mark old ones as superseded rather than keeping both. At retrieval, prefer recent and confirmed facts, and ask the user when a conflict matters.
+    - Store memories with timestamps and sources, detect conflicts when writing by checking related existing memories, and replace or mark old ones as superseded rather than keeping both.
+    - At retrieval, prefer recent and confirmed facts, and ask the user when a conflict matters.
   </InterviewQuestion>
   <InterviewQuestion question="How would you evaluate an agent's memory system?" category="Evaluation" level="Senior">
-    Create multi-session test scenarios where earlier sessions establish facts, then later tasks depend on them. Measure whether relevant memories are retrieved and used, how often stale or wrong memories cause errors, the token cost of memory, and user ratings of personalization, plus checks that deleted memories are truly gone.
+    - Create multi-session test scenarios where earlier sessions establish facts, then later tasks depend on them.
+    - Measure whether relevant memories are retrieved and used, how often stale or wrong memories cause errors, the token cost of memory, and user ratings of personalization, plus checks that deleted memories are truly gone.
   </InterviewQuestion>
   <InterviewQuestion question="What privacy concerns does agent memory raise?" category="Failure modes" level="Mid">
-    Memory can accumulate personal and sensitive data over time, possibly from third parties mentioned in conversations. It needs consent, user visibility, editing and deletion, retention limits, encryption and access controls, and it must never leak between users or tenants.
+    - Memory can accumulate personal and sensitive data over time, possibly from third parties mentioned in conversations.
+    - It needs consent, user visibility, editing and deletion, retention limits, encryption and access controls, and it must never leak between users or tenants.
   </InterviewQuestion>
 </InterviewQuestions>

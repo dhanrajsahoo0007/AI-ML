@@ -4,9 +4,12 @@ description: "Measuring a RAG system part by part: retrieval recall and ranking,
 icon: search
 ---
 
-A RAG answer can be wrong because the right passage was never found, or because the model ignored it. One overall "quality score" cannot tell those apart. This page measures each part on its own, so a bad number points at the stage to fix.
+A RAG answer can be wrong because the right passage was never found, or because the model ignored it.
 
-## TL;DR
+- One overall "quality score" cannot tell those apart.
+- This page measures each part on its own, so a bad number points at the stage to fix.
+
+## Overview
 
 - Evaluate **retrieval** and **generation** separately. Retrieval: recall@k, MRR, nDCG. Generation: faithfulness, answer relevance, correctness.
 - Three things are logged per question: the **question**, the **retrieved context** and the **answer**. Each check compares two of them.
@@ -14,17 +17,29 @@ A RAG answer can be wrong because the right passage was never found, or because 
 - An **LLM judge** scores answers at scale, but only after you check it agrees with human labels.
 - Run a **golden set** of labelled questions on every change and **block the release** when recall@5 or faithfulness drops.
 
-## The idea in plain English
+## Mental model
 
-Think of a student writing an essay from library books. The librarian can fetch the wrong books (a retrieval error). The student can misread the right books, or make things up (a generation error). To grade fairly you check three things: did the librarian bring useful books, does the essay match what the books say, and does the essay answer the question that was set? RAG evaluation is those three checks, done for hundreds of questions at once.
+- Think of a student writing an essay from library books.
+- The librarian can fetch the wrong books (a retrieval error).
+- The student can misread the right books, or make things up (a generation error).
+- To grade fairly you check three things: did the librarian bring useful books, does the essay match what the books say, and does the essay answer the question that was set?
+- RAG evaluation is those three checks, done for hundreds of questions at once.
 
 ## Core concepts
 
-The running example is the one used across the RAG pages: Brightpost's help centre of **1,200 articles** cut into **3,600 chunks**, and the question "How do I reset my password if I lost my phone?". The retriever returns the top **5** chunks; three chunks in the corpus are relevant, at ranks 2, 4 and 7. Every evaluation idea on this page compares two of three things the system produces for one question.
+- The running example is the one used across the RAG pages: Brightpost's help centre of **1,200 articles** cut into **3,600 chunks**, and the question "How do I reset my password if I lost my phone?".
+- The retriever returns the top **5** chunks; three chunks in the corpus are relevant, at ranks 2, 4 and 7.
+- Every evaluation idea on this page compares two of three things the system produces for one question.
 
 <AnimatedDiagram spec="animated/rag/eval-triad" stepper caption="Three things, three checks: one about retrieval and two about generation, each comparing two of the three." />
 
-**How to read it.** Step 1 shows what to log for every question: the question, the retrieved context and the answer. Step 2 compares the question with the context: did retrieval bring material that is on topic? Step 3 compares the context with the answer: is every claim backed? Step 4 compares the question with the answer: does it answer what was asked? RAGAS (Es et al., 2023) defines all three this way, and none of them needs a reference answer, which is why they are cheap to run on live traffic.
+**How to read it:**
+
+- Step 1 shows what to log for every question: the question, the retrieved context and the answer.
+- Step 2 compares the question with the context: did retrieval bring material that is on topic?
+- Step 3 compares the context with the answer: is every claim backed?
+- Step 4 compares the question with the answer: does it answer what was asked?
+- RAGAS (Es et al., 2023) defines all three this way, and none of them needs a reference answer, which is why they are cheap to run on live traffic.
 
 ### Retrieval metrics: recall@k, MRR and nDCG
 
@@ -36,25 +51,48 @@ Retrieval metrics need labels: for each test question, the ids of the chunks (or
 
 <AnimatedDiagram spec="animated/rag/retrieval-metrics" stepper caption="Score retrieval and generation separately; one ranked list gives three different retrieval numbers." />
 
-**How to read it.** Step 1 is the ranked list for the main question, with the three relevant chunks shaded and the k = 5 cut drawn. Step 2 computes the three metrics from that list. Step 3 names the two answer checks, which need the question, the chunks and the answer together.
+**How to read it:**
 
-**The numbers.** Recall@5 = 2 ÷ 3 = 0.67. MRR = 1 ÷ 2 = 0.5. nDCG@10 = 1.39 ÷ 2.13 = 0.65. Recall@10 is 1.0: the third relevant chunk sits at rank 7, so a reranker over more candidates could bring it into the top 5.
+- Step 1 is the ranked list for the main question, with the three relevant chunks shaded and the k = 5 cut drawn.
+- Step 2 computes the three metrics from that list.
+- Step 3 names the two answer checks, which need the question, the chunks and the answer together.
+
+**The numbers:**
+
+- Recall@5 = 2 ÷ 3 = 0.67. MRR = 1 ÷ 2 = 0.5. nDCG@10 = 1.39 ÷ 2.13 = 0.65.
+- Recall@10 is 1.0: the third relevant chunk sits at rank 7, so a reranker over more candidates could bring it into the top 5.
 
 ### Context relevance and precision
 
-Recall says whether the right chunks arrived. **Context relevance** asks the opposite question: how much of what arrived is needed? In RAGAS an LLM picks out the context sentences needed to answer, and the score is needed sentences ÷ all sentences. Irrelevant context costs tokens and can mislead the model. **Context precision** is the ranked version: is the relevant material near the top of the context? The RAGAS library averages precision@k over the ranks that hold a relevant chunk. **Context recall** in the same library checks how many claims of a reference answer the context supports, so it needs a reference answer.
+- Recall says whether the right chunks arrived.
+- **Context relevance** asks the opposite question: how much of what arrived is needed?
+- In RAGAS an LLM picks out the context sentences needed to answer, and the score is needed sentences ÷ all sentences.
+- Irrelevant context costs tokens and can mislead the model.
+- **Context precision** is the ranked version: is the relevant material near the top of the context?
+- The RAGAS library averages precision@k over the ranks that hold a relevant chunk.
+- **Context recall** in the same library checks how many claims of a reference answer the context supports, so it needs a reference answer.
 
-**The numbers.** In the top 5, chunks 2 and 4 are relevant: precision@5 = 2 ÷ 5 = 0.4. Context precision = (precision@2 + precision@4) ÷ 2 = (1/2 + 2/4) ÷ 2 = 0.5. Moving the rank-1 near miss ("Change your password") below them would raise it to 1.0.
+**The numbers:**
+
+- In the top 5, chunks 2 and 4 are relevant: precision@5 = 2 ÷ 5 = 0.4.
+- Context precision = (precision@2 + precision@4) ÷ 2 = (1/2 + 2/4) ÷ 2 = 0.5.
+- Moving the rank-1 near miss ("Change your password") below them would raise it to 1.0.
 
 ### Faithfulness and groundedness
 
-**Faithfulness** (also called groundedness) asks whether every claim in the answer can be inferred from the retrieved context. RAGAS splits the answer into statements, checks each against the context, and scores supported ÷ all. It does not ask whether the context is true, only whether the answer stayed inside it. A low score means the model added things the evidence does not say, which is how a RAG system hallucinates (see [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation)).
+- **Faithfulness** (also called groundedness) asks whether every claim in the answer can be inferred from the retrieved context.
+- RAGAS splits the answer into statements, checks each against the context, and scores supported ÷ all.
+- It does not ask whether the context is true, only whether the answer stayed inside it.
+- A low score means the model added things the evidence does not say, which is how a RAG system hallucinates (see [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation)).
 
-**The numbers** (illustrative). Brightpost's answer makes 4 claims; 3 are in the chunks, and "support can text you a new code" is not. Faithfulness = 3 ÷ 4 = 0.75.
+- **The numbers (illustrative):** Brightpost's answer makes 4 claims; 3 are in the chunks, and "support can text you a new code" is not. Faithfulness = 3 ÷ 4 = 0.75.
 
 ### Answer correctness and citation accuracy
 
-**Answer relevance** checks the answer addresses the question; RAGAS has an LLM write questions the answer would answer and measures their similarity to the real one. It ignores facts on purpose. **Answer correctness** needs a reference answer: compare the claims of the two, by people or by an LLM judge. **Citation accuracy** checks each citation: does the cited chunk support the sentence it is attached to, and is every factual sentence cited? Gao et al. (2023) score citation quality as its own dimension, next to fluency and correctness.
+- **Answer relevance** checks the answer addresses the question; RAGAS has an LLM write questions the answer would answer and measures their similarity to the real one.
+- It ignores facts on purpose. **Answer correctness** needs a reference answer: compare the claims of the two, by people or by an LLM judge.
+- **Citation accuracy** checks each citation: does the cited chunk support the sentence it is attached to, and is every factual sentence cited?
+- Gao et al. (2023) score citation quality as its own dimension, next to fluency and correctness.
 
 <Callout tone="red" title="What breaks">
   A faithful answer built on the wrong chunk is confidently wrong: "Change your password" was rank 1, and an answer that follows it scores 1.0 on faithfulness while useless to someone who lost their phone. Fix: never read faithfulness alone; pair it with recall@k on labelled questions and correctness against a reference.
@@ -66,7 +104,11 @@ Each metric attaches to a point in the pipeline. The retrieval metrics read the 
 
 <AnimatedDiagram spec="animated/rag/pipeline" highlight={["question", "retrieve", "answer"]} caption="The three things the triad compares are three nodes of the pipeline; log all three for every question." />
 
-**How to read it.** The question node feeds answer relevance. The retriever's top 5 feed recall@k, MRR, nDCG and context relevance. The answer feeds faithfulness, correctness and citation accuracy. Logging a trace id with all three makes every metric computable later, offline or on live traffic.
+**How to read it:**
+
+- The question node feeds answer relevance. The retriever's top 5 feed recall@k, MRR, nDCG and context relevance.
+- The answer feeds faithfulness, correctness and citation accuracy.
+- Logging a trace id with all three makes every metric computable later, offline or on live traffic.
 
 The metrics become a safeguard only when they run on every change. This is the offline loop that does it.
 
@@ -96,15 +138,25 @@ The metrics become a safeguard only when they run on every change. This is the o
   </StepCard>
 </StepCards>
 
-## Deep dive
+## Technical mechanics
 
 ### Component versus end-to-end evaluation
 
-**Component** metrics (recall@k, faithfulness) tell you which stage broke. They are fast and stable, and they are how you debug. **End-to-end** metrics (answer correctness against a reference, a human rating, a resolved support ticket) tell you whether users are helped. You need both: component metrics can all rise while the answers get worse, for example when a new prompt makes answers faithful but too short to help. Offline runs on the golden set guard releases; online signals (thumbs down, "no relevant context" rate, citation clicks, escalations to a human) catch what the set does not cover. See [Online / Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
+- **Component** metrics (recall@k, faithfulness) tell you which stage broke.
+- They are fast and stable, and they are how you debug.
+- **End-to-end** metrics (answer correctness against a reference, a human rating, a resolved support ticket) tell you whether users are helped.
+- You need both: component metrics can all rise while the answers get worse, for example when a new prompt makes answers faithful but too short to help.
+- Offline runs on the golden set guard releases; online signals (thumbs down, "no relevant context" rate, citation clicks, escalations to a human) catch what the set does not cover.
+- See [Online / Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
 
 ### Building a RAG test set
 
-Start from real questions in search logs or support tickets, so the set matches how users write. Add synthetic questions generated from chunks to cover articles nobody has asked about yet; RAGAS and ARES both generate synthetic data this way, but read a sample, because generated questions copy the chunk's wording and flatter vector search. Add questions the corpus cannot answer, where the right behaviour is "I don't know", and keyword questions such as "What does error E1234 mean?" that only BM25 finds. Label relevant material at the **section** level, not by chunk id: a change of chunk size creates new chunk ids, and labels tied to old ids would silently stop matching. Version the set and keep a held-out part that nobody tunes against. More on the general method in [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets).
+- Start from real questions in search logs or support tickets, so the set matches how users write.
+- Add synthetic questions generated from chunks to cover articles nobody has asked about yet; RAGAS and ARES both generate synthetic data this way, but read a sample, because generated questions copy the chunk's wording and flatter vector search.
+- Add questions the corpus cannot answer, where the right behaviour is "I don't know", and keyword questions such as "What does error E1234 mean?" that only BM25 finds.
+- Label relevant material at the **section** level, not by chunk id: a change of chunk size creates new chunk ids, and labels tied to old ids would silently stop matching.
+- Version the set and keep a held-out part that nobody tunes against.
+- More on the general method in [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets).
 
 ### Finding whether retrieval or generation failed
 
@@ -118,7 +170,8 @@ When an answer is wrong, walk the pipeline from the start and stop at the first 
 | In the top 5, answer faithful but incomplete | Generation (lost content) | Fewer, better-ranked chunks; strongest first |
 | No relevant section exists | Corpus | Write the article, or answer "I don't know" |
 
-Recall@100 and recall@5 together separate the first two rows; faithfulness separates the third. The main question shows the second row: the "No backup codes" chunk is at rank 7, inside the candidates but outside the top 5 (see [Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)).
+- Recall@100 and recall@5 together separate the first two rows; faithfulness separates the third.
+- The main question shows the second row: the "No backup codes" chunk is at rank 7, inside the candidates but outside the top 5 (see [Hybrid Search & Reranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)).
 
 ## Trade-offs
 
@@ -129,19 +182,19 @@ Recall@100 and recall@5 together separate the first two rows; faithfulness separ
 | Real vs synthetic questions | Match real wording | Cover every article | Mostly real, synthetic to fill gaps, read samples |
 | Strict vs loose release gate | Catches small regressions | Fewer false alarms | Gate on two or three metrics with a tolerance |
 
-## Real-world examples
+## Production systems
 
 - RAGAS (Es et al., 2023) introduced reference-free faithfulness, answer relevance and context relevance, and validated them against human judgements on its WikiEval set.
 - ARES (Saad-Falcon et al., 2023) trains small judge models for the same three dimensions and uses a few hundred human annotations to correct their errors statistically.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Reporting one overall score, so nobody knows which stage to fix.
 - Trusting an LLM judge without measuring its agreement with people.
 - Labelling by chunk id, then changing the chunk size and losing every label.
 - No unanswerable questions, so "I don't know" is never tested.
 
-## How to answer in an interview
+## Interview framework
 
 1. Split the system: retrieval metrics (recall@k, MRR, nDCG) and generation metrics (faithfulness, relevance, correctness).
 2. Describe the golden set: real questions, labelled sections, reference answers, unanswerable cases.
@@ -163,18 +216,31 @@ Recall@100 and recall@5 together separate the first two rows; faithfulness separ
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between faithfulness and answer correctness in a RAG system?" category="Concepts" level="Junior">
-    Faithfulness checks whether every claim in the answer is supported by the retrieved context; it needs no reference answer. Correctness checks whether the answer is right, against a reference answer. An answer can be fully faithful to the wrong chunk and still be wrong, so you need both, plus a retrieval metric to see whether the right chunk was there.
+    - Faithfulness checks whether every claim in the answer is supported by the retrieved context; it needs no reference answer.
+    - Correctness checks whether the answer is right, against a reference answer.
+    - An answer can be fully faithful to the wrong chunk and still be wrong, so you need both, plus a retrieval metric to see whether the right chunk was there.
   </InterviewQuestion>
   <InterviewQuestion question="How would you measure the retriever in a RAG system, and what labels do you need?" category="Evaluation" level="Mid">
-    Build a set of real questions and label, for each, the sections that contain the answer. Run the retriever and compute recall at k (the share of relevant material in the top k), MRR (how early the first hit appears) and nDCG (credit for every relevant hit, more near the top). Label sections rather than chunk ids so the labels survive a change of chunk size, and report recall at both the candidate depth and the final k to separate recall problems from ranking problems.
+    - Build a set of real questions and label, for each, the sections that contain the answer.
+    - Run the retriever and compute recall at k (the share of relevant material in the top k), MRR (how early the first hit appears) and nDCG (credit for every relevant hit, more near the top).
+    - Label sections rather than chunk ids so the labels survive a change of chunk size, and report recall at both the candidate depth and the final k to separate recall problems from ranking problems.
   </InterviewQuestion>
   <InterviewQuestion question="How do you know an LLM judge is trustworthy enough to gate releases?" category="Evaluation" level="Mid">
-    Have people grade a sample of answers, a few dozen to a few hundred, and measure how often the judge agrees with them, per metric and per question type. Fix the judge prompt, model and version, and re-check agreement when any of them changes. Watch known biases such as favouring longer answers, and keep sampling human audits after launch.
+    - Have people grade a sample of answers, a few dozen to a few hundred, and measure how often the judge agrees with them, per metric and per question type.
+    - Fix the judge prompt, model and version, and re-check agreement when any of them changes.
+    - Watch known biases such as favouring longer answers, and keep sampling human audits after launch.
   </InterviewQuestion>
   <InterviewQuestion question="Answer quality dropped after a change. How do you tell whether retrieval or generation is to blame?" category="Failure modes" level="Senior">
-    Compare per-question metrics between the old and new runs on the golden set. If recall at the candidate depth fell, the change hurt retrieval itself: chunking, embeddings or the query. If candidates are unchanged but recall at the final k fell, ranking changed. If retrieval is unchanged and faithfulness or correctness fell, the prompt, context order or model is at fault. Then read the questions that moved most to confirm.
+    - Compare per-question metrics between the old and new runs on the golden set.
+    - If recall at the candidate depth fell, the change hurt retrieval itself: chunking, embeddings or the query.
+    - If candidates are unchanged but recall at the final k fell, ranking changed.
+    - If retrieval is unchanged and faithfulness or correctness fell, the prompt, context order or model is at fault.
+    - Then read the questions that moved most to confirm.
   </InterviewQuestion>
   <InterviewQuestion question="Design an evaluation process that stops a bad RAG change from reaching production." category="Architecture" level="Senior">
-    Keep a versioned golden set with labelled sections, reference answers and unanswerable questions. On every change, run the full pipeline on it, score retrieval in code and the answers with a judge calibrated on human labels, and compare each metric with the production baseline per question type. Block the release when recall at k or faithfulness drops beyond a set tolerance. After release, watch online signals and feed failing production questions back into the set.
+    - Keep a versioned golden set with labelled sections, reference answers and unanswerable questions.
+    - On every change, run the full pipeline on it, score retrieval in code and the answers with a judge calibrated on human labels, and compare each metric with the production baseline per question type.
+    - Block the release when recall at k or faithfulness drops beyond a set tolerance.
+    - After release, watch online signals and feed failing production questions back into the set.
   </InterviewQuestion>
 </InterviewQuestions>

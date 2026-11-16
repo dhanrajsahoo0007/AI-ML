@@ -3,9 +3,11 @@ title: Data Versioning & Lineage
 description: Provenance, reproducibility, and governance for datasets and transformations in ML systems.
 ---
 
-A model, a benchmark score or a RAG answer can only be trusted if you can say exactly which data produced it. Data versioning keeps every version of that data reachable; lineage records how each version was made from the one before. Together they let you reproduce a result, explain an answer and undo a bad change.
+A model, benchmark score, or RAG answer is trustworthy only when you can prove which data produced it.
 
-## TL;DR
+- Data versioning keeps every dataset snapshot reachable, while lineage records how each version was built so you can reproduce results and roll back bad changes.
+
+## Overview
 
 - Machine learning experiments are only **reproducible** if you can reconstruct the exact inputs and code that produced a model.
 - **Content addressing** (DVC) and **branches over object storage** (LakeFS) give every data version a stable id without putting terabytes in Git.
@@ -13,9 +15,12 @@ A model, a benchmark score or a RAG answer can only be trusted if you can say ex
 - **Lineage** connects sources through transformations to features, training sets, models and, in RAG, to every chunk and answer.
 - For RAG, version the **index** too: each snapshot records its embedding model and corpus version, so a bad re-embed is undone by pointing back at the previous snapshot.
 
-## The idea in plain English
+## Mental model
 
-A good lab notebook records which batch of chemicals went into each experiment, so anyone can repeat it and anyone can find out what went wrong. Data versioning is keeping every batch on the shelf with a label that never changes. Lineage is the notebook: for each result, which batches and which steps produced it. Without both, "it worked last month" cannot be checked.
+- **The lab notebook analogy:** A good lab notebook records which batch of chemicals went into each experiment so anyone can repeat it or diagnose what went wrong.
+- **Data versioning:** Keeps every batch on the shelf with a permanent label that never changes.
+- **Lineage:** Acts as the notebook itself, recording which batches and transformation steps produced each result.
+- **Why both matter:** Without both immutable batches and step-by-step provenance, a claim like "it worked last month" cannot be verified.
 
 ## Core concepts
 
@@ -23,27 +28,41 @@ The RAG examples use the running example of these pages: Brightpost's help centr
 
 ### Content addressing
 
-Data versioning tools such as DVC treat large artifacts as **content-addressed** blobs: each file is identified by a hash of its bytes, and a small metadata file holding that hash is committed to Git. The data itself lives in a cache and a remote store. Diffs stay reviewable without committing terabytes, and two machines, or the same machine two months later, can prove they refer to identical bytes even if the file paths differ. The same idea works per document in RAG: a hash of each article's text tells you which of the 1,200 changed since the last build (see [Index Freshness](/ai-system-design/genai-system-design/index-freshness-and-updates)).
+- **Hash-based identity:** Data versioning tools such as DVC treat large artifacts as **content-addressed** blobs—each file is identified by a hash of its bytes, and a small metadata file holding that hash is committed to Git while the data lives in a cache and remote store.
+- **Verifiable diffs:** Diffs stay reviewable without committing terabytes, and two machines (or the same machine two months later) can prove they refer to identical bytes even if file paths differ.
+- **Per-document RAG hashing:** A hash of each article's text tells you which of the 1,200 articles changed since the last build (see [Index Freshness](/ai-system-design/genai-system-design/index-freshness-and-updates)).
 
 ### Branches and snapshots over object storage
 
-LakeFS layers Git-like branching over object storage. Teams isolate ETL changes on a branch, run experiments on snapshots, and merge curated datasets with atomic promotions, without copying the data. Both approaches complement rather than replace database migrations and contract tests: those guard the live schema, while versioning guards the history.
+- **Git-like lake branching:** LakeFS layers Git-like branching over object storage so teams can isolate ETL changes on a branch, run experiments on snapshots, and merge curated datasets with atomic promotions without copying data.
+- **Complementary safeguards:** Object-store branching and DVC complement rather than replace database migrations and contract tests—migrations guard the live schema while versioning guards historical snapshots.
 
 ### Immutable datasets and schema versions
 
-Immutable datasets are a practical discipline: once a snapshot is used for a benchmark or a regulatory submission, you never overwrite it in place. Instead you append new versions with explicit metadata, including the schema hash, row counts and sampling strategy. Schema versioning should be explicit in Avro, Protobuf or JSON Schema registries, so producers and consumers negotiate compatibility rules rather than failing silently when a new column appears.
+- **Never overwrite in place:** Once a snapshot is used for a benchmark or a regulatory submission, treat it as immutable and append new versions with explicit metadata (schema hash, row counts, and sampling strategy).
+- **Schema registries:** Track schema versions explicitly in Avro, Protobuf, or JSON Schema registries so producers and consumers negotiate compatibility rules rather than failing silently when a new column appears.
 
 ### Lineage graphs
 
-Lineage graphs connect raw sources through transformations to features, training sets and exported models. Standards such as OpenLineage describe each step as a job, its execution as a run, and its inputs and outputs as datasets, which unifies metadata across Spark, dbt and orchestrators such as Airflow. That is what lets you answer impact questions: when a source column is deprecated, which models and dashboards depend on it?
+- **End-to-end provenance:** Lineage graphs connect raw sources through transformations to features, training sets, and exported models.
+- **OpenLineage standard:** Describes each step as a job, its execution as a run, and its inputs and outputs as datasets, unifying metadata across Spark, dbt, and orchestrators such as Airflow.
+- **Impact analysis:** Answers blast-radius questions such as which models and dashboards depend on a deprecated source column.
 
 In a RAG system the same graph runs one step further, to the answer. Here is one Brightpost answer traced back to where its text came from.
 
 <AnimatedDiagram spec="animated/rag/lineage" stepper caption="An answer is traceable only if every hop was written down at the time: chunk id, model, snapshot, content hash, source revision." />
 
-**How to read it.** Step 1 is what the user saw: the answer, its trace id, the citation [2] and the prompt version. Step 2 follows the citation to chunk 2 of the article, the 400 tokens from 350 to 750, and records which embedding model embedded it and which index snapshot served it. Step 3 finds the document version that chunk was cut from, identified by its content hash and the corpus version that included it. Step 4 reaches the record in the help-centre CMS: revision 7, who edited it, and who may read it.
+**How to read it:**
 
-**The numbers.** Chunks start every 400 − 50 = 350 tokens, so chunk 2 spans tokens 350 to 750. Each hop is one id lookup; nothing is recomputed or guessed.
+- **Step 1 (User answer):** Shows what the user saw—the answer, its trace id, citation `[2]`, and the prompt version.
+- **Step 2 (Chunk and index):** Follows the citation to chunk 2 of the article (the 400 tokens from 350 to 750) and records which embedding model embedded it and which index snapshot served it.
+- **Step 3 (Document version):** Finds the document version that chunk was cut from, identified by its content hash and the corpus version that included it.
+- **Step 4 (Source record):** Reaches the record in the help-centre CMS—revision 7, who edited it, and who may read it.
+
+**The numbers:**
+
+- **Chunk offsets:** Chunks start every 400 − 50 = 350 tokens, so chunk 2 spans tokens 350 to 750.
+- **Lookup cost:** Each hop is a single id lookup; nothing is recomputed or guessed.
 
 <Callout tone="red" title="What breaks">
   If the chunk id is derived from its position alone, re-chunking reuses "a-0412#2" for different text, and an old trace points at the wrong words. Fix: store the chunk's own content hash and the document version beside its id, and keep both in the answer log.
@@ -51,7 +70,8 @@ In a RAG system the same graph runs one step further, to the answer. Here is one
 
 ### Reproducibility
 
-Reproducibility still breaks when nondeterminism enters: floating-point summation order on different hardware, distributed shuffles without fixed seeds, time-dependent splits ("the last 30 days" means something new each day), or silently updated vendor snapshots. Record seeds, pin dependency and model versions, write split boundaries as dates, and hash any external extract on arrival.
+- **Sources of nondeterminism:** Reproducibility breaks when floating-point summation order varies across hardware, distributed shuffles run without fixed seeds, splits are time-dependent ("the last 30 days" shifts daily), or vendor snapshots update silently.
+- **Countermeasures:** Record random seeds, pin dependency and model versions, write split boundaries as fixed dates, and hash any external extract on arrival.
 
 ## Architecture
 
@@ -67,7 +87,7 @@ What to record at each step:
 - **Embed → index:** the snapshot id, built from one corpus version with one model.
 - **Answer time:** a trace with the question, the snapshot that served it, the chunk ids, the prompt version and the LLM version.
 
-## Deep dive
+## Technical mechanics
 
 ### Versioning a RAG index: snapshots and rollback
 
@@ -75,9 +95,18 @@ An index that is updated in place has no past: after a bad change there is nothi
 
 <AnimatedDiagram spec="animated/rag/index-snapshots" stepper caption="A snapshot that is never changed in place can be returned to in one move; the alias is the only thing that changes." />
 
-**How to read it.** Step 1 shows two snapshots, each labelled with its embedding model and corpus version; the live alias points at snapshot 2. Step 2 builds snapshot 3 with a new embedding model from the same corpus, changing one thing at a time, and moves the alias to it. Step 3 runs the golden set of evaluation questions on it and finds recall@5 down. Step 4 points the alias back at snapshot 2; snapshot 3 stays for debugging. The [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation) page describes that golden-set check.
+**How to read it:**
 
-**The numbers.** Snapshot 2 re-embedded only the 12 changed articles × 3 = 36 chunks; snapshot 3 re-embedded all 3,600 chunks, 1.44 million tokens. The recall figures, 0.84 → 0.71, are illustrative. Raw vectors take about 22 MB per snapshot, so keeping three costs about 66 MB: storage is rarely the reason to delete old snapshots.
+- **Step 1 (Active alias):** Shows two snapshots, each labelled with its embedding model and corpus version; the live alias points at snapshot 2.
+- **Step 2 (New build):** Builds snapshot 3 with a new embedding model from the same corpus—changing one thing at a time—and moves the alias to it.
+- **Step 3 (Regression detected):** Runs the golden set of evaluation questions on snapshot 3 and finds recall@5 down (see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+- **Step 4 (Instant rollback):** Points the alias back at snapshot 2 while keeping snapshot 3 around for debugging.
+
+**The numbers:**
+
+- **Re-embed volume:** Snapshot 2 re-embedded only the 12 changed articles × 3 = 36 chunks; snapshot 3 re-embedded all 3,600 chunks (1.44 million tokens).
+- **Recall drop:** The recall figures (0.84 → 0.71) are illustrative.
+- **Storage footprint:** Raw vectors take about 22 MB per snapshot, so keeping three costs about 66 MB—storage is rarely the reason to delete old snapshots.
 
 <Callout tone="red" title="What breaks">
   Switching the alias without switching the question embedder: snapshot 2 needs questions embedded by embed-v2. Fix: version the alias and the query-side model together, as one deployment.
@@ -85,11 +114,14 @@ An index that is updated in place has no past: after a bad change there is nothi
 
 ### Governance
 
-Governance adds retention policies, access logs and PII tagging, so lineage is not only technical but auditable. Lineage also makes deletion possible: when a customer asks for their data to be removed, the graph lists every chunk, snapshot and training set that holds it. Snapshots kept for rollback must still honour deletions and retention rules, so give each one an expiry date.
+- **Auditability:** Governance adds retention policies, access logs, and PII tagging so lineage is both technical and auditable.
+- **Right to erasure:** When a customer asks for their data to be removed, the lineage graph lists every chunk, snapshot, and training set that holds it.
+- **Snapshot expiry:** Snapshots kept for rollback must still honour deletions and retention rules, so give each snapshot an explicit expiry date.
 
 ### Where lineage has gaps
 
-The hard parts are completeness across ad hoc notebooks, third-party SaaS extracts and manual human labels, which often become lineage gaps unless ingestion is forced through governed paths. A RAG corpus has the same gaps: a document pasted into the index by hand, or a connector that does not report revisions, leaves a hop with no id.
+- **Ungoverned ML paths:** Completeness breaks across ad hoc notebooks, third-party SaaS extracts, and manual human labels unless ingestion is forced through governed paths.
+- **RAG blind spots:** A document pasted into the index by hand, or a connector that does not report revisions, leaves a lineage hop with no id.
 
 ## Trade-offs
 
@@ -101,14 +133,14 @@ The hard parts are completeness across ad hoc notebooks, third-party SaaS extrac
 | Index snapshots vs in-place updates | One-move rollback | Less storage, simpler | Snapshot for model or chunking changes; incremental updates within one |
 | Fast tooling vs strict process | Engineers use it | Full auditability | Make the governed path the fastest path |
 
-## Real-world examples
+## Production systems
 
 - DVC commits small metadata files with an md5 hash to Git while the data goes to a cache and a remote store.
 - LakeFS offers branches over object storage with zero data copy and rollback after a data incident.
 - OpenLineage, an LF AI & Data Foundation project, lists integrations for Airflow, Spark, dbt, Flink and Trino.
 - Vector search services such as Elasticsearch and OpenSearch support index aliases, the switch used in the snapshot figure.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Overwriting a dataset or an index that a benchmark or a release already used.
 - Chunk ids that change meaning when chunking changes.
@@ -117,7 +149,7 @@ The hard parts are completeness across ad hoc notebooks, third-party SaaS extrac
 - Lineage that stops at notebooks, SaaS extracts and hand labels.
 - Keeping snapshots forever, so deletion and retention rules are broken.
 
-## How to answer in an interview
+## Interview framework
 
 1. Start with the goal: reproduce a result, explain an answer, undo a change.
 2. Explain content addressing and immutable versions with metadata.
@@ -138,12 +170,18 @@ The hard parts are completeness across ad hoc notebooks, third-party SaaS extrac
 
 <InterviewQuestions>
   <InterviewQuestion question="Why is content addressing useful for large training datasets?" category="Reproducibility">
-    Content hashes let you verify that two machines or two months later refer to identical bytes even if file paths differ. It prevents accidental overwrites, supports deduplication across experiments, and gives a stable identifier to log next to model checkpoints. Pair hashes with human-readable aliases or tags so scientists can discover datasets without memorizing digests.
+    - **Byte-level verification:** Content hashes let you verify that two machines—or the same machine two months later—refer to identical bytes even if file paths differ.
+    - **Immutability and deduplication:** Hashing prevents accidental overwrites, supports deduplication across experiments, and provides a stable identifier to log next to model checkpoints.
+    - **Human discoverability:** Pair cryptographic hashes with human-readable aliases or tags so scientists can discover datasets without memorizing digests.
   </InterviewQuestion>
   <InterviewQuestion question="How does LakeFS differ from only using DVC for data versioning?" category="Tooling">
-    LakeFS operates at the data lake layer with branches, merges, and isolation for ETL jobs against object storage, which helps multi-team workflows on shared tables. DVC is closer to Git-centric ML projects and excels at tying specific data revisions to code commits for single-repo experiments. Many organizations use both: LakeFS for warehouse-scale isolation and DVC for project-scoped experiment bundles.
+    - **LakeFS (data-lake layer):** Operates with branches, merges, and isolation for ETL jobs against object storage, supporting multi-team workflows on shared tables.
+    - **DVC (Git-centric layer):** Sits closer to Git-centric ML projects and excels at tying specific data revisions to code commits for single-repo experiments.
+    - **Combined usage:** Many organizations use both—LakeFS for warehouse-scale isolation and DVC for project-scoped experiment bundles.
   </InterviewQuestion>
   <InterviewQuestion question="What metadata belongs on a lineage edge between two pipeline tasks?" category="Governance">
-    Capture source and destination identifiers, transformation name and version, runtime environment fingerprint, start and end timestamps, row counts or byte metrics, and success status. For regulated workloads also log operator identity, purpose codes, and whether PII was transformed or masked. Rich edges make blast-radius analysis accurate when you need to invalidate downstream assets after a bad ingest.
+    - **Core execution metadata:** Capture source and destination identifiers, transformation name and version, runtime environment fingerprint, start and end timestamps, row counts or byte metrics, and success status.
+    - **Compliance metadata:** For regulated workloads, also log operator identity, purpose codes, and whether PII was transformed or masked.
+    - **Blast-radius analysis:** Rich edges make impact analysis accurate when you need to invalidate downstream assets after a bad ingest.
   </InterviewQuestion>
 </InterviewQuestions>

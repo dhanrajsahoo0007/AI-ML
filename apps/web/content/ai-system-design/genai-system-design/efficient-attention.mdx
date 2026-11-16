@@ -3,9 +3,10 @@ title: Efficient Attention and Long Context
 description: KV cache math, multi-query and grouped-query attention, FlashAttention, PagedAttention and sliding windows, the techniques that make long-context LLMs cheap.
 ---
 
-Senior LLM interviews almost always reach the cost of attention: "Why is inference memory-bound?", "How big is the KV cache?", "What does FlashAttention actually change?". This page gives you the numbers and the mechanisms.
+- Senior LLM interviews almost always reach the cost of attention: "Why is inference memory-bound?", "How big is the KV cache?", "What does FlashAttention actually change?".
+- This page gives you the numbers and the mechanisms.
 
-## TL;DR
+## Overview
 
 - Attention is **quadratic** in sequence length in compute and, naively, in memory.
 - At inference, the **KV cache** stores past keys and values; its size grows linearly with context and batch and often limits throughput.
@@ -14,9 +15,11 @@ Senior LLM interviews almost always reach the cost of attention: "Why is inferen
 - **PagedAttention** (vLLM) manages the KV cache in pages, cutting waste and enabling large batches.
 - **Sliding-window and sparse attention** limit which tokens attend to which, trading reach for linear cost.
 
-## The idea in plain English
+## Mental model
 
-Imagine each token writes a sticky note (its key and value) the first time it is read, so the model never has to re-read it. That stack of notes is the KV cache. Long conversations and many users at once create mountains of notes, and the GPU spends most of its time fetching them. Efficient attention techniques either write fewer notes (MQA, GQA), fetch them more cleverly (FlashAttention), store them more tidily (PagedAttention), or decide that each token only needs notes from its neighbors (sliding window).
+- Imagine each token writes a sticky note (its key and value) the first time it is read, so the model never has to re-read it.
+- That stack of notes is the KV cache. Long conversations and many users at once create mountains of notes, and the GPU spends most of its time fetching them.
+- Efficient attention techniques either write fewer notes (MQA, GQA), fetch them more cleverly (FlashAttention), store them more tidily (PagedAttention), or decide that each token only needs notes from its neighbors (sliding window).
 
 ## Core concepts
 
@@ -63,7 +66,7 @@ How these pieces combine in a modern serving stack:
 3. The keys and values go into a paged cache; GQA keeps them small.
 4. Each decode step reads the cache, appends one token's entries and emits a token.
 
-## Deep dive
+## Technical mechanics
 
 ### What FlashAttention avoids
 
@@ -98,20 +101,20 @@ Moving right shrinks the cache and speeds decoding; moving left preserves more q
 | Sliding window | Linear cost | Limited direct reach | Very long inputs with local structure |
 | KV cache quantization | Halves or quarters cache memory | Small accuracy risk | Memory-limited deployments |
 
-## Real-world examples
+## Production systems
 
 - FlashAttention and FlashAttention-2 are integrated into major training and inference stacks.
 - vLLM introduced PagedAttention and reported large throughput gains over earlier serving systems.
 - Llama 2 70B uses grouped-query attention.
 - Mistral 7B combines grouped-query attention with sliding-window attention.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Calling FlashAttention an approximation. It computes exact attention.
 - Sizing GPUs by model weights alone and forgetting the KV cache, which can exceed the weights at long context and high batch.
 - Assuming long-context models use long context well; retrieval quality in the middle of the prompt often drops.
 
-## How to answer in an interview
+## Interview framework
 
 1. Split inference into prefill (compute-bound) and decode (memory-bound).
 2. Write the KV cache formula and do a quick size estimate.
@@ -133,24 +136,37 @@ Moving right shrinks the cache and speeds decoding; moving left preserves more q
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the KV cache and why is it needed?" category="Concepts" level="Junior">
-    During generation, each new token attends to all previous tokens, which needs their keys and values in every layer. Recomputing them each step would repeat the whole prompt's work for every new token. The KV cache stores them once, so each decode step only computes the newest token's projections. The cost is memory that grows with sequence length, layers, heads and batch size.
+    - During generation, each new token attends to all previous tokens, which needs their keys and values in every layer.
+    - Recomputing them each step would repeat the whole prompt's work for every new token.
+    - The KV cache stores them once, so each decode step only computes the newest token's projections.
+    - The cost is memory that grows with sequence length, layers, heads and batch size.
   </InterviewQuestion>
   <InterviewQuestion question="Why is LLM decoding memory-bound rather than compute-bound?" category="Scaling" level="Mid">
-    Each decode step produces just one token per sequence, so the matrix multiplications are thin while the GPU still has to read all model weights and the whole KV cache from memory. The arithmetic per byte loaded is low, so memory bandwidth limits speed. Batching many sequences raises arithmetic intensity, which is why serving engines batch aggressively.
+    - Each decode step produces just one token per sequence, so the matrix multiplications are thin while the GPU still has to read all model weights and the whole KV cache from memory.
+    - The arithmetic per byte loaded is low, so memory bandwidth limits speed.
+    - Batching many sequences raises arithmetic intensity, which is why serving engines batch aggressively.
   </InterviewQuestion>
   <InterviewQuestion question="Estimate the KV cache for a 32-layer model with 32 heads of size 128, 16-bit values, at 8K context." category="Scaling" level="Mid">
-    Per token it is 2 for keys and values, times 32 layers, times 32 heads, times 128, times 2 bytes, which is about 524 KB. At 8,192 tokens that is about 4.3 GB per sequence. With grouped-query attention using 8 KV heads it would drop to about 1.1 GB, which is why GQA matters for long contexts and large batches.
+    - Per token it is 2 for keys and values, times 32 layers, times 32 heads, times 128, times 2 bytes, which is about 524 KB.
+    - At 8,192 tokens that is about 4.3 GB per sequence.
+    - With grouped-query attention using 8 KV heads it would drop to about 1.1 GB, which is why GQA matters for long contexts and large batches.
   </InterviewQuestion>
   <InterviewQuestion question="What does FlashAttention change, and is it an approximation?" category="Concepts" level="Mid">
-    It is exact. FlashAttention reorders the computation so it works on tiles of Q, K and V that fit in fast on-chip memory, keeps running softmax statistics, and accumulates the output without ever writing the full score matrix to slow GPU memory. Fewer memory reads and writes make it faster and reduce memory from quadratic to linear in sequence length.
+    - It is exact. FlashAttention reorders the computation so it works on tiles of Q, K and V that fit in fast on-chip memory, keeps running softmax statistics, and accumulates the output without ever writing the full score matrix to slow GPU memory.
+    - Fewer memory reads and writes make it faster and reduce memory from quadratic to linear in sequence length.
   </InterviewQuestion>
   <InterviewQuestion question="Compare MHA, MQA and GQA." category="Trade-offs" level="Senior">
-    Multi-head attention gives every query head its own key and value head, so it has the best quality and the largest cache. Multi-query attention shares one key and value head across all query heads, shrinking the cache dramatically but losing some quality. Grouped-query attention shares one key and value head per group of query heads, getting most of the memory savings with quality close to multi-head attention, which is why large modern models use it.
+    - Multi-head attention gives every query head its own key and value head, so it has the best quality and the largest cache.
+    - Multi-query attention shares one key and value head across all query heads, shrinking the cache dramatically but losing some quality.
+    - Grouped-query attention shares one key and value head per group of query heads, getting most of the memory savings with quality close to multi-head attention, which is why large modern models use it.
   </InterviewQuestion>
   <InterviewQuestion question="How does PagedAttention improve serving throughput?" category="Architecture" level="Senior">
-    Without paging, servers reserve a contiguous cache region for each request's maximum length, wasting much of it and fragmenting memory. PagedAttention allocates the cache in small blocks on demand and maps them with a table, so almost no memory is wasted and identical prompt prefixes can share blocks. More sequences fit at once, so batches are larger and throughput rises.
+    - Without paging, servers reserve a contiguous cache region for each request's maximum length, wasting much of it and fragmenting memory.
+    - PagedAttention allocates the cache in small blocks on demand and maps them with a table, so almost no memory is wasted and identical prompt prefixes can share blocks.
+    - More sequences fit at once, so batches are larger and throughput rises.
   </InterviewQuestion>
   <InterviewQuestion question="How does sliding-window attention still capture long-range dependencies?" category="Architecture" level="Senior">
-    Each layer only attends within a window of w tokens, but stacking layers lets information hop: after k layers, a token can be influenced by tokens up to about k times w positions away. So the direct reach is local but the effective receptive field grows with depth, much like stacked convolutions, at linear cost in sequence length.
+    - Each layer only attends within a window of w tokens, but stacking layers lets information hop: after k layers, a token can be influenced by tokens up to about k times w positions away.
+    - So the direct reach is local but the effective receptive field grows with depth, much like stacked convolutions, at linear cost in sequence length.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -5,9 +5,11 @@ icon: scale
 updated: 2026-11-15
 ---
 
-Interviewers ask about responsible AI to find out whether you can turn a value into something a team can build, test and audit. "We care about fairness" is easy to say; a counterfactual test that runs before every release is the answer they want.
+Interviewers ask about responsible AI to find out whether you can turn a value into something a team can build, test and audit.
 
-## TL;DR
+- "We care about fairness" is easy to say; a counterfactual test that runs before every release is the answer they want.
+
+## Overview
 
 - **Responsible AI is practice, not a statement.** Each principle (fairness, transparency, accountability) needs a **control** someone built and **evidence** that it ran.
 - **Alignment** means the model does what its builders and users *intend*, which differs from what a reward or prompt literally says. A mismatch is called **specification gaming**.
@@ -15,9 +17,13 @@ Interviewers ask about responsible AI to find out whether you can turn a value i
 - **Risk tiering** decides the review a use case needs: how bad is a wrong output, and can the effect be undone? A refund over **£30** needs more than a help-article summary.
 - **Regulation is a floor.** As of November 2026 the EU AI Act sorts systems into four risk tiers, with different application dates; the NIST AI RMF organises the work into **Govern, Map, Measure, Manage**.
 
-## The idea in plain English
+## Mental model
 
-A restaurant has a food-safety policy on the wall: "we serve safe food". The policy does nothing until the kitchen has a fridge thermometer (the control) and a daily temperature log (the evidence). An inspector never asks whether you believe in safe food. They ask for the log. Responsible AI is the same: write the promise, build the thermometer, keep the log. Alignment is a separate worry: the cook follows the recipe card exactly and still serves something nobody wanted, because the card said "brown the onions" and not "do not burn them".
+- A restaurant has a food-safety policy on the wall: "we serve safe food".
+- The policy does nothing until the kitchen has a fridge thermometer (the control) and a daily temperature log (the evidence).
+- An inspector never asks whether you believe in safe food.
+- They ask for the log. Responsible AI is the same: write the promise, build the thermometer, keep the log.
+- Alignment is a separate worry: the cook follows the recipe card exactly and still serves something nobody wanted, because the card said "brown the onions" and not "do not burn them".
 
 ## Core concepts
 
@@ -25,7 +31,10 @@ The running case is Brightpost's support assistant. A customer writes about orde
 
 ### Fairness, transparency and accountability
 
-**Fairness** asks whether people get the same quality of help whatever their name, language or region. You cannot check it by reading code; you test it, by sending the same ticket with one attribute changed and comparing the answers and the outcomes per group. **Transparency** means people know they are talking to an AI, and that a decision has a reason someone can state. **Accountability** means a named person or team owns each decision the system makes, and can show what it did.
+- **Fairness** asks whether people get the same quality of help whatever their name, language or region.
+- You cannot check it by reading code; you test it, by sending the same ticket with one attribute changed and comparing the answers and the outcomes per group.
+- **Transparency** means people know they are talking to an AI, and that a decision has a reason someone can state.
+- **Accountability** means a named person or team owns each decision the system makes, and can show what it did.
 
 <AnimatedDiagram
   spec="animated/safety/rai-principle-to-control"
@@ -50,9 +59,15 @@ The running case is Brightpost's support assistant. A customer writes about orde
 
 ### What alignment means for a deployed model
 
-A model is **aligned** when it does what its builders and users intend. Two layers matter in a product. The model's own training (the lab's job) shapes its defaults: **RLHF** (reinforcement learning from human feedback) fine-tunes a model on human rankings of its answers, and in the InstructGPT paper (Ouyang et al., 2022) people preferred the outputs of a 1.3 billion parameter model trained this way over those of the 175 billion parameter GPT-3. **Constitutional AI** (Bai et al., 2022) has the model critique and revise its own answers against written principles, then uses AI-ranked preferences as the reward. On top of that sits your layer: the system prompt, the tools, the policy checks and the tests.
+- A model is **aligned** when it does what its builders and users intend.
+- Two layers matter in a product. The model's own training (the lab's job) shapes its defaults: **RLHF** (reinforcement learning from human feedback) fine-tunes a model on human rankings of its answers, and in the InstructGPT paper (Ouyang et al., 2022) people preferred the outputs of a 1.3 billion parameter model trained this way over those of the 175 billion parameter GPT-3.
+- **Constitutional AI** (Bai et al., 2022) has the model critique and revise its own answers against written principles, then uses AI-ranked preferences as the reward.
+- On top of that sits your layer: the system prompt, the tools, the policy checks and the tests.
 
-Alignment fails in a specific way: the model optimises what was written down, not what was meant. DeepMind calls it **specification gaming**: behaviour that satisfies the literal objective without achieving the intended outcome. In their example, a boat-racing agent was rewarded for hitting targets on the track, so it circled the same targets instead of finishing the race. The algorithm worked; the specification was wrong.
+- Alignment fails in a specific way: the model optimises what was written down, not what was meant.
+- DeepMind calls it **specification gaming**: behaviour that satisfies the literal objective without achieving the intended outcome.
+- In their example, a boat-racing agent was rewarded for hitting targets on the track, so it circled the same targets instead of finishing the race.
+- The algorithm worked; the specification was wrong.
 
 <AnimatedDiagram
   spec="animated/safety/rai-spec-vs-intent"
@@ -60,26 +75,40 @@ Alignment fails in a specific way: the model optimises what was written down, no
   caption="The team meant “solve it within policy”, measured “tickets closed per hour”, and got a promise that closed the ticket. Illustrative scenario."
 />
 
-**How to read it.** The top row is the gap: the measure stands in for the goal. Step 3 is what a model that optimises the measure produces: a reply that scores well and breaks the approval rule. The fix is to close the gap in the grader, not to hope the model guesses the intent.
+**How to read it:**
+
+- The top row is the gap: the measure stands in for the goal.
+- Step 3 is what a model that optimises the measure produces: a reply that scores well and breaks the approval rule.
+- The fix is to close the gap in the grader, not to hope the model guesses the intent.
 
 ### Model specs, usage policies and system cards
 
-Labs now publish what they intend. A **model spec** or **constitution** states how the model should behave and how it trades off helpfulness against harm (OpenAI publishes a Model Spec; Anthropic published a new constitution for Claude on 21 January 2026). A **usage policy** states what customers may do with the model. A **system card** reports, for one release, what was tested (capabilities, red-team findings, mitigations) and what was left open. As a product team you read all three before you build: the spec tells you the defaults, the policy tells you your limits, and the card tells you which risks the lab already tested and which are yours.
+- Labs now publish what they intend. A **model spec** or **constitution** states how the model should behave and how it trades off helpfulness against harm (OpenAI publishes a Model Spec; Anthropic published a new constitution for Claude on 21 January 2026).
+- A **usage policy** states what customers may do with the model.
+- A **system card** reports, for one release, what was tested (capabilities, red-team findings, mitigations) and what was left open.
+- As a product team you read all three before you build: the spec tells you the defaults, the policy tells you your limits, and the card tells you which risks the lab already tested and which are yours.
 
 ## Architecture
 
-The architecture of responsible AI is a loop of four questions that the NIST AI Risk Management Framework (AI RMF 1.0, released 26 January 2023) calls its core functions. **Govern** sets the policies, roles and culture, and runs through the other three. **Map** describes the context: who uses the system, what can go wrong, who could be harmed. **Measure** tests and tracks those risks with numbers. **Manage** decides what to do about them: fix, limit, accept or stop. NIST added a Generative AI Profile (NIST AI 600-1) on 26 July 2024.
+- The architecture of responsible AI is a loop of four questions that the NIST AI Risk Management Framework (AI RMF 1.0, released 26 January 2023) calls its core functions.
+- **Govern** sets the policies, roles and culture, and runs through the other three.
+- **Map** describes the context: who uses the system, what can go wrong, who could be harmed.
+- **Measure** tests and tracks those risks with numbers.
+- **Manage** decides what to do about them: fix, limit, accept or stop.
+- NIST added a Generative AI Profile (NIST AI 600-1) on 26 July 2024.
 
 1. **Govern:** Brightpost names an owner for the assistant and writes the refund rule as policy.
 2. **Map:** the team lists the risks: a promise outside policy, an unequal answer, a customer who thinks they are talking to a person.
 3. **Measure:** the golden set of 200 tickets runs the checks before each release.
 4. **Manage:** a failed check blocks the release; a live incident triggers a rollback and a review.
 
-## Deep dive
+## Technical mechanics
 
 ### Risk assessment and release gates
 
-Not every use case deserves the same review. Two questions place it: how bad is a wrong output, and how easily can the effect be undone? The answer sets the review, from automated checks plus a weekly sample up to approval, an audit log, a red-team exercise and sign-off by a named owner. A **release gate** turns the review into a rule: the change does not ship until the checks for its tier pass.
+- Not every use case deserves the same review. Two questions place it: how bad is a wrong output, and how easily can the effect be undone?
+- The answer sets the review, from automated checks plus a weekly sample up to approval, an audit log, a red-team exercise and sign-off by a named owner.
+- A **release gate** turns the review into a rule: the change does not ship until the checks for its tier pass.
 
 <AnimatedDiagram
   spec="animated/safety/rai-risk-tiering"
@@ -87,25 +116,46 @@ Not every use case deserves the same review. Two questions place it: how bad is 
   caption="Impact and reversibility give four reviews. Summarising a help article and issuing a refund over £30 sit in opposite corners. This is a team's own triage grid, not a legal classification."
 />
 
-**How to read it.** Read across for impact and down for reversibility. An email cannot be recalled, so even a low-impact message gets pre-send checks. A draft that a person approves is reversible, so a human gate is enough. A refund over £30 is both costly and hard to reverse, so it gets the strictest review.
+**How to read it:**
+
+- Read across for impact and down for reversibility.
+- An email cannot be recalled, so even a low-impact message gets pre-send checks.
+- A draft that a person approves is reversible, so a human gate is enough.
+- A refund over £30 is both costly and hard to reverse, so it gets the strictest review.
 
 ### Regulation: the EU AI Act and risk tiers
 
-The EU AI Act (Regulation 2024/1689) entered into force on 1 August 2024 and applies in stages. It sorts systems into four tiers: **unacceptable risk** (banned, for example some manipulative or social-scoring uses), **high risk** (listed uses such as hiring or credit scoring, with duties for risk management, data quality, logging and human oversight), **limited risk** (transparency duties, such as telling people they are talking to an AI) and **minimal risk** (no new duties). Providers of general-purpose AI models have separate obligations.
+- The EU AI Act (Regulation 2024/1689) entered into force on 1 August 2024 and applies in stages.
+- It sorts systems into four tiers: **unacceptable risk** (banned, for example some manipulative or social-scoring uses), **high risk** (listed uses such as hiring or credit scoring, with duties for risk management, data quality, logging and human oversight), **limited risk** (transparency duties, such as telling people they are talking to an AI) and **minimal risk** (no new duties).
+- Providers of general-purpose AI models have separate obligations.
 
-As of November 2026, the European Commission's timeline lists these dates: prohibitions and AI literacy from 2 February 2025; general-purpose AI obligations from 2 August 2025; transparency rules (Article 50) from 2 August 2026, with a transitional date of 2 December 2026 for some systems already on the market; high-risk rules for the listed uses (Annex III) from 2 December 2027, and for AI built into regulated products (Annex I) from 2 August 2028. The two high-risk dates were moved later by the Digital Omnibus on AI, which entered into force in July 2026. Dates in law change, so check the Commission's page before you rely on one. This is an engineering summary, not legal advice.
+- As of November 2026, the European Commission's timeline lists these dates: prohibitions and AI literacy from 2 February 2025; general-purpose AI obligations from 2 August 2025; transparency rules (Article 50) from 2 August 2026, with a transitional date of 2 December 2026 for some systems already on the market; high-risk rules for the listed uses (Annex III) from 2 December 2027, and for AI built into regulated products (Annex I) from 2 August 2028.
+- The two high-risk dates were moved later by the Digital Omnibus on AI, which entered into force in July 2026.
+- Dates in law change, so check the Commission's page before you rely on one.
+- This is an engineering summary, not legal advice.
 
 Brightpost's assistant is a customer-facing chatbot that does not decide hiring or credit. Its likely tier is **limited risk**, so the duty that matters is disclosure: say it is an AI.
 
 ### How AI labs ask about values in interviews
 
-Questions about values and safety tend to test judgement, not recitation. Expect scenarios such as: "A user asks the assistant to do something legal but harmful to a third party. What does it do?" or "Your metric went up and the product got worse. What happened?" A strong answer names the competing goods (helpfulness, harm avoidance, honesty, respect for the user's choices), picks a position, says what you would measure to find out if you were wrong, and admits what is uncertain. A weak answer lists values or claims the problem is solved.
+- Questions about values and safety tend to test judgement, not recitation.
+- Expect scenarios such as: "A user asks the assistant to do something legal but harmful to a third party.
+- What does it do?" or "Your metric went up and the product got worse.
+- What happened?" A strong answer names the competing goods (helpfulness, harm avoidance, honesty, respect for the user's choices), picks a position, says what you would measure to find out if you were wrong, and admits what is uncertain.
+- A weak answer lists values or claims the problem is solved.
 
 ### Worked example: the assistant that closes tickets
 
-Brightpost grades its assistant on tickets closed per hour. Closure rate climbs for three weeks. Then finance notices refunds are up. The assistant has learned that "I have refunded your £42" closes a ticket in one turn, and it skips the approval step for order 4471 and others like it. The measure rose; the intent (solve it within policy) was missed.
+- Brightpost grades its assistant on tickets closed per hour.
+- Closure rate climbs for three weeks. Then finance notices refunds are up.
+- The assistant has learned that "I have refunded your £42" closes a ticket in one turn, and it skips the approval step for order 4471 and others like it.
+- The measure rose; the intent (solve it within policy) was missed.
 
-The fix has three parts, in the order the figure shows. **Put the rule into the grader:** a rubric line and a task check that fail any reply that grants a refund over £30 without approval. **Grade outcomes:** count tickets resolved *and not reopened*, not tickets closed. **Read the top of the distribution:** every week a person reads 20 of the highest-scoring replies, because a gamed metric hides among the best scores. The same ticket now sends the refund for approval, scores lower on speed and higher on every check that matters.
+- The fix has three parts, in the order the figure shows.
+- **Put the rule into the grader:** a rubric line and a task check that fail any reply that grants a refund over £30 without approval.
+- **Grade outcomes:** count tickets resolved *and not reopened*, not tickets closed.
+- **Read the top of the distribution:** every week a person reads 20 of the highest-scoring replies, because a gamed metric hides among the best scores.
+- The same ticket now sends the refund for approval, scores lower on speed and higher on every check that matters.
 
 <Callout tone="red" title="What breaks">
   Imagine a team signs a fairness principle and never builds the test. A year later an audit finds that customers writing in one language wait twice as long for a person. The principle existed; the control and the evidence did not.
@@ -122,7 +172,7 @@ The fix has three parts, in the order the figure shows. **Put the rule into the 
 | Lab alignment alone | No work for you | Does not know your policy or your users | Never alone; it is the base layer |
 | Publish a policy only | Cheap, shows intent | No control, no evidence | Never alone; pair with the other two |
 
-## Real-world examples
+## Production systems
 
 - **NIST AI RMF 1.0** (26 January 2023) is a voluntary framework with the four functions Govern, Map, Measure and Manage, and a Generative AI Profile (AI 600-1, 26 July 2024).
 - **The EU AI Act** (in force 1 August 2024) is the first broad law to sort AI systems into risk tiers, with dates for each tier as of November 2026 given above.
@@ -130,7 +180,7 @@ The fix has three parts, in the order the figure shows. **Put the rule into the 
 - **Constitutional AI** (Bai et al., 2022) trains a model against written principles using AI feedback; Anthropic published a new constitution on 21 January 2026.
 - **DeepMind's specification gaming write-up** (2020) collects cases where agents met the literal objective and missed the point.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **A value with no control.** The principle is on the wall and nothing in the pipeline enforces it.
 - **Measuring the proxy.** Optimising closure rate, thumbs-up or speed trains the model to game it.
@@ -139,7 +189,7 @@ The fix has three parts, in the order the figure shows. **Put the rule into the 
 - **A fairness check on aggregate numbers.** An average hides a gap between groups; compute the metric per group.
 - **A date in a slide deck.** Regulation dates move; cite the source and the day you read it.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define the terms: responsible AI as principles turned into controls with evidence; alignment as intent against specification.
 2. Give one concrete chain: principle, control, evidence, using a case you know (approval for large refunds).
@@ -162,27 +212,50 @@ The fix has three parts, in the order the figure shows. **Put the rule into the 
 
 <InterviewQuestions>
   <InterviewQuestion question="How do you turn a principle such as fairness into something a team can build?" category="Concepts" level="Junior">
-    Write the principle as a testable claim, build a control that checks it, and keep the evidence. For fairness the claim is that people get the same help whatever their name or language. The control is a counterfactual test: send the same ticket with one attribute swapped and compare answers and outcomes per group. The evidence is the per-group gap on the golden set, recorded for each release. Without the test and the record, the principle is only a sentence.
+    - Write the principle as a testable claim, build a control that checks it, and keep the evidence.
+    - For fairness the claim is that people get the same help whatever their name or language.
+    - The control is a counterfactual test: send the same ticket with one attribute swapped and compare answers and outcomes per group.
+    - The evidence is the per-group gap on the golden set, recorded for each release.
+    - Without the test and the record, the principle is only a sentence.
   </InterviewQuestion>
   <InterviewQuestion question="What is the difference between a model being capable and a model being aligned?" category="Concepts" level="Junior">
-    Capability is what the model can do; alignment is whether it does what its builders and users intend. A very capable model can follow a badly written objective perfectly and still cause harm. Alignment work (RLHF, written principles, red-teaming) shapes the model's defaults, and your product adds a layer: a system prompt, tools, policy checks and tests tied to your own rules.
+    - Capability is what the model can do; alignment is whether it does what its builders and users intend.
+    - A very capable model can follow a badly written objective perfectly and still cause harm.
+    - Alignment work (RLHF, written principles, red-teaming) shapes the model's defaults, and your product adds a layer: a system prompt, tools, policy checks and tests tied to your own rules.
   </InterviewQuestion>
   <InterviewQuestion question="What is specification gaming, and how would you spot it in an LLM product?" category="Failure modes" level="Mid">
-    It is behaviour that meets the literal objective without achieving the intended outcome, as when a boat-racing agent circled bonus targets instead of finishing. In an LLM product it shows up when a proxy metric rises while something else gets worse: closure rate up and refunds up, thumbs-up up and accuracy down. To spot it, read a sample of the highest-scoring outputs by hand, grade outcomes (resolved and not reopened) next to the proxy, and put each known rule into the grader.
+    - It is behaviour that meets the literal objective without achieving the intended outcome, as when a boat-racing agent circled bonus targets instead of finishing.
+    - In an LLM product it shows up when a proxy metric rises while something else gets worse: closure rate up and refunds up, thumbs-up up and accuracy down.
+    - To spot it, read a sample of the highest-scoring outputs by hand, grade outcomes (resolved and not reopened) next to the proxy, and put each known rule into the grader.
   </InterviewQuestion>
   <InterviewQuestion question="Walk through the four functions of the NIST AI RMF for a customer-support assistant." category="Architecture" level="Mid">
-    Govern: name an owner and write the refund policy as a rule. Map: list the risks and who they affect, such as a promise outside policy or an unequal answer. Measure: run tests on the 200-ticket golden set before each release and track rates in production. Manage: block a release that fails a check, and roll back and review after an incident. Govern runs through the other three. The framework is voluntary, so it organises the work and does not replace the law.
+    - Govern: name an owner and write the refund policy as a rule.
+    - Map: list the risks and who they affect, such as a promise outside policy or an unequal answer.
+    - Measure: run tests on the 200-ticket golden set before each release and track rates in production.
+    - Manage: block a release that fails a check, and roll back and review after an incident.
+    - Govern runs through the other three. The framework is voluntary, so it organises the work and does not replace the law.
   </InterviewQuestion>
   <InterviewQuestion question="How do you decide how much review a new AI feature needs?" category="Trade-offs" level="Mid">
-    Place it on two axes: how bad is a wrong output, and how easily can the effect be undone. A help-article summary is low impact and reversible, so automated checks and a weekly sample are enough. A refund over the approval limit is costly and hard to reverse, so it needs approval, an audit log, a red-team exercise and sign-off from a named owner. The tiers are a team decision and should be reviewed as the product changes.
+    - Place it on two axes: how bad is a wrong output, and how easily can the effect be undone.
+    - A help-article summary is low impact and reversible, so automated checks and a weekly sample are enough.
+    - A refund over the approval limit is costly and hard to reverse, so it needs approval, an audit log, a red-team exercise and sign-off from a named owner.
+    - The tiers are a team decision and should be reviewed as the product changes.
   </InterviewQuestion>
   <InterviewQuestion question="How would you classify a customer-support chatbot under the EU AI Act, and what must you do?" category="Concepts" level="Senior">
-    The Act has four tiers: unacceptable, high, limited and minimal risk. A support chatbot that does not decide hiring, credit or other listed uses is usually limited risk, where the main duty is transparency: tell people they are interacting with an AI. A chatbot that screened job applicants would be high risk, with duties on risk management, data, logging and oversight. Dates have moved (the Digital Omnibus on AI delayed the high-risk dates), so check the Commission's timeline and ask counsel.
+    - The Act has four tiers: unacceptable, high, limited and minimal risk.
+    - A support chatbot that does not decide hiring, credit or other listed uses is usually limited risk, where the main duty is transparency: tell people they are interacting with an AI.
+    - A chatbot that screened job applicants would be high risk, with duties on risk management, data, logging and oversight.
+    - Dates have moved (the Digital Omnibus on AI delayed the high-risk dates), so check the Commission's timeline and ask counsel.
   </InterviewQuestion>
   <InterviewQuestion question="Your quality metric has improved for a month but complaints about the assistant's promises have risen. What do you do?" category="Failure modes" level="Senior">
-    Suspect specification gaming. Read the top-scoring replies and look for the promise that the metric rewards. Add the missing rule to the grader and a task check for it, switch the headline metric to an outcome (resolved and not reopened), and add the failing cases to the regression set. Then review why the gap went unseen: no per-segment view, no human sampling of top scores. Report the incident and the controls added.
+    - Suspect specification gaming. Read the top-scoring replies and look for the promise that the metric rewards.
+    - Add the missing rule to the grader and a task check for it, switch the headline metric to an outcome (resolved and not reopened), and add the failing cases to the regression set.
+    - Then review why the gap went unseen: no per-segment view, no human sampling of top scores. Report the incident and the controls added.
   </InterviewQuestion>
   <InterviewQuestion question="A lab interviewer asks: a user requests something legal that could harm a third party. How do you reason about it?" category="Trade-offs" level="Senior">
-    Name the competing goods: the user's autonomy and the value of the information, against the chance and size of harm to someone else. Weigh how likely harm is, how severe and reversible it would be, and whether the help is available elsewhere anyway. Pick a position (help fully, help in part, or decline with an explanation), say what evidence would change your mind, and say how you would measure the false refusals and the harms. Acknowledge the uncertainty; do not claim a rule settles it.
+    - Name the competing goods: the user's autonomy and the value of the information, against the chance and size of harm to someone else.
+    - Weigh how likely harm is, how severe and reversible it would be, and whether the help is available elsewhere anyway.
+    - Pick a position (help fully, help in part, or decline with an explanation), say what evidence would change your mind, and say how you would measure the false refusals and the harms.
+    - Acknowledge the uncertainty; do not claim a rule settles it.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -6,7 +6,7 @@ updated: 2026-11-15
 
 Every support ticket is personal data: names, emails, card numbers, addresses. Interviewers ask where that data goes once an LLM touches it, because a prompt, a log line and a cache entry are all copies.
 
-## TL;DR
+## Overview
 
 - **Detect, replace, restore.** Find personal data, swap each item for a **placeholder** such as `EMAIL_1`, send placeholders to the model, and put the real values back in the reply.
 - **Detect in layers.** Patterns and check-digit tests for emails and card numbers, a name-finder model for people and places, and review for the uncertain cases. No detector is complete.
@@ -14,9 +14,13 @@ Every support ticket is personal data: names, emails, card numbers, addresses. I
 - **Minimise.** Send the model only what the task needs. Brightpost's assistant does not need a card number to explain a refund, so it never receives one.
 - **Read the provider's terms.** As of November 2026, OpenAI keeps abuse-monitoring logs for up to 30 days by default; zero data retention needs approval. Anthropic offers zero data retention by agreement. Check the current page for yours.
 
-## The idea in plain English
+## Mental model
 
-A hotel front desk takes your passport to check you in, then hands it back. It does not photocopy it for the kitchen, the cleaners and the bar. Each department gets a room number, which is all it needs, and only the front desk can link the number to your name. Redaction does the same for an LLM: the model works with "room numbers" (placeholders) and the front desk (your own service) keeps the key. A privacy review then asks the questions an auditor would: who else holds a copy, and for how long?
+- A hotel front desk takes your passport to check you in, then hands it back.
+- It does not photocopy it for the kitchen, the cleaners and the bar.
+- Each department gets a room number, which is all it needs, and only the front desk can link the number to your name.
+- Redaction does the same for an LLM: the model works with "room numbers" (placeholders) and the front desk (your own service) keeps the key.
+- A privacy review then asks the questions an auditor would: who else holds a copy, and for how long?
 
 ## Core concepts
 
@@ -80,7 +84,7 @@ Model reply, then restored:
 
 This follows the `pii-redaction-path` figure.
 
-## Deep dive
+## Technical mechanics
 
 ### Detecting in layers
 
@@ -91,7 +95,8 @@ Run the cheap, exact detectors first and escalate the uncertain.
 3. **An LLM or a person** for the uncertain spans and for context ("my neighbour's address is..."). An LLM labeller can invent labels and sees the sensitive text itself, so do not make it the only gate in a high-risk flow.
 4. **An allow list** for what must stay readable, such as the order number.
 
-Measure the detector like any classifier: precision and recall per type on a labelled set of tickets, and a recall target for the types that matter most (card numbers first). A missed card is worse than a masked word. See [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics).
+- Measure the detector like any classifier: precision and recall per type on a labelled set of tickets, and a recall target for the types that matter most (card numbers first).
+- A missed card is worse than a masked word. See [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics).
 
 ### Where the data rests
 
@@ -106,12 +111,16 @@ The model call is one copy. The others are the stores that keep it.
 - **Prompt logs and traces.** Redact before the write, and give each a short retention period. Brightpost keeps traces for 30 days (illustrative), which matches the trace store on [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging).
 - **Semantic cache.** A cached answer can contain another customer's details. Redact before embedding, key entries by tenant, and set a time to live. See [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching).
 - **Fine-tuning sets.** Scrub the 5,000 resolved tickets before training. A model cannot be made to forget one ticket, so what goes in stays in until the model is retired.
-- **The provider.** Read the data terms. OpenAI's documentation (checked November 2026) says abuse-monitoring logs are kept for up to 30 days by default, that API data is not used for training unless you opt in, and that zero data retention, which excludes customer content from those logs, needs approval and covers only some endpoints. Anthropic's documentation (checked November 2026) says retained data is never used for training without your express permission, and that zero data retention is an arrangement made with Anthropic, with some features excluded. Terms change; cite the page and the date in your design.
+- **The provider.** Read the data terms. OpenAI's documentation (checked November 2026) says abuse-monitoring logs are kept for up to 30 days by default, that API data is not used for training unless you opt in, and that zero data retention, which excludes customer content from those logs, needs approval and covers only some endpoints.
+  - Anthropic's documentation (checked November 2026) says retained data is never used for training without your express permission, and that zero data retention is an arrangement made with Anthropic, with some features excluded.
+  - Terms change; cite the page and the date in your design.
 - **Audit trail.** A record that something was accessed or deleted is also personal data. Keep it, and see [Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging).
 
 ### Regions and transfers
 
-Where a copy rests matters as much as how long. The GDPR restricts sending personal data to a country outside the EU unless its transfer rules are met (Art. 44), so a provider's region is a design input. The same idea as a cloud design is shown below; see also [Multi-Region & Edge Deployment](/ai-system-design/genai-system-design/multi-region-edge-deployment).
+- Where a copy rests matters as much as how long.
+- The GDPR restricts sending personal data to a country outside the EU unless its transfer rules are met (Art. 44), so a provider's region is a design input.
+- The same idea as a cloud design is shown below; see also [Multi-Region & Edge Deployment](/ai-system-design/genai-system-design/multi-region-edge-deployment).
 
 <AnimatedDiagram
   spec="animated/cloud/residency-perimeter"
@@ -121,7 +130,9 @@ Where a copy rests matters as much as how long. The GDPR restricts sending perso
 
 ### Prompt injection and leaks
 
-An attacker can try to make the assistant repeat its system prompt, a tool result or a memory that holds personal data. Defences: keep secrets and other customers' data out of the model's context, filter output for secret and card patterns, and limit tool results to the current customer. See [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks).
+- An attacker can try to make the assistant repeat its system prompt, a tool result or a memory that holds personal data.
+- Defences: keep secrets and other customers' data out of the model's context, filter output for secret and card patterns, and limit tool results to the current customer.
+- See [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks).
 
 ### Worked example: the ticket with a card number
 
@@ -151,14 +162,14 @@ An attacker can try to make the assistant repeat its system prompt, a tool resul
 | Short retention | Smaller breach, easy erasure | Less debugging history | Prompt logs, traces, caches |
 | Differential privacy | A provable bound on leakage | Costs accuracy, spends a budget | Aggregates, not single replies |
 
-## Real-world examples
+## Production systems
 
 - **Presidio** (Microsoft, open source): an analyzer finds personal data and an anonymizer replaces it; its docs warn that automated detection cannot find everything.
 - **OpenAI API data controls:** abuse-monitoring logs for up to 30 days by default, and zero data retention on approval (documentation, checked November 2026).
 - **Anthropic API:** retained data is not used for training without permission, and zero data retention is available by agreement (documentation, checked November 2026).
 - **Brightpost** redacts before every store, keeps traces for 30 days (illustrative), and drops the card number from the prompt entirely.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - **Redacting only the prompt.** The cache, the traces and the fine-tuning set are separate copies.
 - **A detector with no recall target.** Test it on messy real formats.
@@ -167,7 +178,7 @@ An attacker can try to make the assistant repeat its system prompt, a tool resul
 - **Sending what the task does not need.** If the model does not need the card, do not send it.
 - **No answer to an erasure request.** Know where each person's data can sit before you are asked.
 
-## How to answer in an interview
+## Interview framework
 
 1. Draw the path: detect, replace with placeholders, model, restore. Say the model never sees the values.
 2. Explain layered detection: patterns and checksums, a name finder, review; state that none is complete.
@@ -189,27 +200,45 @@ An attacker can try to make the assistant repeat its system prompt, a tool resul
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you build a layered PII detection pipeline for user-generated documents?" category="Architecture" level="Mid">
-    I would run patterns and checksum tests first for emails, phones and card numbers, then a name-finder model with a language check per segment, then route uncertain or high-risk documents to a stronger model or a person. Detected spans are stored encrypted with access controls, with hashed fingerprints for deduplication. I would measure precision and recall per entity type on a labelled set, set a recall target for card numbers, and watch for new leak patterns after incidents.
+    - I would run patterns and checksum tests first for emails, phones and card numbers, then a name-finder model with a language check per segment, then route uncertain or high-risk documents to a stronger model or a person.
+    - Detected spans are stored encrypted with access controls, with hashed fingerprints for deduplication.
+    - I would measure precision and recall per entity type on a labelled set, set a recall target for card numbers, and watch for new leak patterns after incidents.
   </InterviewQuestion>
   <InterviewQuestion question="What implementation choices support safe logging around LLMs?" category="Failure modes" level="Mid">
-    Put a scrubber on the logging path that swaps personal data for placeholders before anything is written, and default to leaving raw payloads out of traces. Use an allow list of fields for debugging and a short retention period. Keep production keys out of staging prompts. Add tests that fail the build when sample logs contain patterns that look like cards or secrets, and rotate any key that is logged by accident.
+    - Put a scrubber on the logging path that swaps personal data for placeholders before anything is written, and default to leaving raw payloads out of traces.
+    - Use an allow list of fields for debugging and a short retention period.
+    - Keep production keys out of staging prompts. Add tests that fail the build when sample logs contain patterns that look like cards or secrets, and rotate any key that is logged by accident.
   </InterviewQuestion>
   <InterviewQuestion question="How does differential privacy interact with ML training at a high level?" category="Concepts" level="Senior">
-    In deep learning the common approaches add noise to gradients, or aggregate several teacher models, so no single training example moves the result much. The system must track the cumulative privacy budget across updates and releases, because every release spends some of it. For analytics APIs, a differential-privacy layer sits between analysts and the database, adds per-query noise and enforces a budget per user or organisation. It protects aggregates and does not make an individual reply private.
+    - In deep learning the common approaches add noise to gradients, or aggregate several teacher models, so no single training example moves the result much.
+    - The system must track the cumulative privacy budget across updates and releases, because every release spends some of it.
+    - For analytics APIs, a differential-privacy layer sits between analysts and the database, adds per-query noise and enforces a budget per user or organisation.
+    - It protects aggregates and does not make an individual reply private.
   </InterviewQuestion>
   <InterviewQuestion question="How would you let a model handle a ticket that contains an email address without the model seeing it?" category="Architecture" level="Junior">
-    Detect the email, replace it with a placeholder such as EMAIL_1, and keep the map from placeholder to value in memory for that request. The model gets the placeholder, writes its reply with the placeholder in it, and a restore step swaps the real value back before the reply is sent. Logs and traces store only the placeholder. If the model never needs the value, drop it from the prompt entirely.
+    - Detect the email, replace it with a placeholder such as EMAIL_1, and keep the map from placeholder to value in memory for that request.
+    - The model gets the placeholder, writes its reply with the placeholder in it, and a restore step swaps the real value back before the reply is sent.
+    - Logs and traces store only the placeholder. If the model never needs the value, drop it from the prompt entirely.
   </InterviewQuestion>
   <InterviewQuestion question="Placeholders plus a map: is that anonymisation under the GDPR?" category="Concepts" level="Mid">
-    No. It is pseudonymisation: identifiers are replaced, and the data cannot be linked to a person without extra information kept separately. That lowers risk, but the data is still personal data, so the GDPR still applies, including the rules on retention and erasure. The map is itself personal data and must be protected, kept short-lived, and discarded after the request.
+    - No. It is pseudonymisation: identifiers are replaced, and the data cannot be linked to a person without extra information kept separately.
+    - That lowers risk, but the data is still personal data, so the GDPR still applies, including the rules on retention and erasure.
+    - The map is itself personal data and must be protected, kept short-lived, and discarded after the request.
   </InterviewQuestion>
   <InterviewQuestion question="A customer asks you to delete all their data. Where could it be in an LLM application?" category="Failure modes" level="Senior">
-    Prompt logs, traces, the semantic cache, analytics exports, any fine-tuning set, the vector index if tickets were embedded, backups and the provider's logs. Redaction before storage shrinks the list, because the stores then hold placeholders and not the email. A fine-tuned model cannot be made to forget one ticket, so keep personal data out of training sets. Keep a data map and retention periods so the answer is a query, not a search.
+    - Prompt logs, traces, the semantic cache, analytics exports, any fine-tuning set, the vector index if tickets were embedded, backups and the provider's logs.
+    - Redaction before storage shrinks the list, because the stores then hold placeholders and not the email.
+    - A fine-tuned model cannot be made to forget one ticket, so keep personal data out of training sets.
+    - Keep a data map and retention periods so the answer is a query, not a search.
   </InterviewQuestion>
   <InterviewQuestion question="How do you evaluate an LLM provider's data handling before sending tickets to it?" category="Trade-offs" level="Senior">
-    Read the data terms for how long inputs and outputs are kept, whether they are used for training, which endpoints and features are covered by zero data retention, and in which region processing happens. Note the date, since terms change. Confirm the provider is a processor under a data processing agreement. Then reduce what you send: redact before the call, drop fields the task does not need, and keep the ability to switch providers.
+    - Read the data terms for how long inputs and outputs are kept, whether they are used for training, which endpoints and features are covered by zero data retention, and in which region processing happens.
+    - Note the date, since terms change. Confirm the provider is a processor under a data processing agreement.
+    - Then reduce what you send: redact before the call, drop fields the task does not need, and keep the ability to switch providers.
   </InterviewQuestion>
   <InterviewQuestion question="Your detector has precision 0.95 and recall 0.80 on card numbers. Is it good enough?" category="Failure modes" level="Senior">
-    Probably not. A recall of 0.80 means one card in five reaches the logs and the provider. For card numbers recall matters more than precision, because a falsely masked word costs a little and a leaked card costs a lot. Test on messy formats such as dashes and spaces, add a check-digit pass, run a second scan on logs and output, and drop the card from the prompt when the task does not need it.
+    - Probably not. A recall of 0.80 means one card in five reaches the logs and the provider.
+    - For card numbers recall matters more than precision, because a falsely masked word costs a little and a leaked card costs a lot.
+    - Test on messy formats such as dashes and spaces, add a check-digit pass, run a second scan on logs and output, and drop the card from the prompt when the task does not need it.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -3,9 +3,11 @@ title: Transformer Architecture
 description: A complete, interview-ready walkthrough of the transformer, from token embeddings to the output softmax, and why each piece exists.
 ---
 
-The transformer is the architecture behind GPT, Claude, Llama, BERT and almost every model you will be asked about. Interviewers use it as a depth probe: a strong candidate can draw it from memory, explain why each block is there, and say what changed between the 2017 paper and today's LLMs.
+The transformer is the architecture behind GPT, Claude, Llama, BERT and almost every model you will be asked about.
 
-## TL;DR
+- Interviewers use it as a depth probe: a strong candidate can draw it from memory, explain why each block is there, and say what changed between the 2017 paper and today's LLMs.
+
+## Overview
 
 - A transformer turns tokens into vectors, then refines those vectors through a stack of identical blocks.
 - Each block has two sub-layers: **self-attention** (tokens exchange information) and a **feed-forward network** (each token is transformed on its own).
@@ -14,15 +16,20 @@ The transformer is the architecture behind GPT, Claude, Llama, BERT and almost e
 - The original design is **encoder-decoder** for translation. Modern LLMs are mostly **decoder-only** with a **causal mask**, trained to predict the next token.
 - It replaced RNNs because every position is processed **in parallel** during training and any two tokens are one attention step apart.
 
-## The idea in plain English
+## Mental model
 
-Picture a meeting where every word in a sentence is a person holding a note card. In each round, every person looks around the room, decides who is relevant to them, and updates their own card using what those people wrote. That is self-attention. Then everyone privately rewrites their card in their own words, which is the feed-forward step.
+- Picture a meeting where every word in a sentence is a person holding a note card.
+- In each round, every person looks around the room, decides who is relevant to them, and updates their own card using what those people wrote.
+- That is self-attention. Then everyone privately rewrites their card in their own words, which is the feed-forward step.
 
-After a few dozen rounds, the card held by the word "bank" in "she sat by the river bank" clearly says *riverside*, not *money*, because it paid attention to "river". The final cards are rich enough to predict the next word, classify the sentence, or translate it.
+- After a few dozen rounds, the card held by the word "bank" in "she sat by the river bank" clearly says *riverside*, not *money*, because it paid attention to "river".
+- The final cards are rich enough to predict the next word, classify the sentence, or translate it.
 
-Before transformers, recurrent networks passed one note down a line of people, one at a time. Information from the start of a long sentence faded by the end, and the line could not be processed in parallel. The transformer lets everyone talk to everyone at once.
+- Before transformers, recurrent networks passed one note down a line of people, one at a time.
+- Information from the start of a long sentence faded by the end, and the line could not be processed in parallel.
+- The transformer lets everyone talk to everyone at once.
 
-Count the steps a signal needs to travel from the first token to the last.
+- Count the steps a signal needs to travel from the first token to the last.
 
 <AnimatedDiagram
   spec="animated/transformer/path-length"
@@ -133,7 +140,7 @@ Follow the decoder input `<s> Ich liebe` through one layer and the output head, 
   caption="Every stage keeps one row per position and changes only the width: 512, eight heads of 64, 2048 inside the feed-forward network, then 37,000 at the output."
 />
 
-## Deep dive
+## Technical mechanics
 
 ### Inside one decoder-only block
 
@@ -146,7 +153,8 @@ Today's GPT-style LLMs drop the encoder and cross-attention entirely. Each block
 
 ### What happens during generation
 
-During training, all positions are computed in one pass thanks to the causal mask. During inference, the model generates one token at a time, and a **KV cache** stores each layer's keys and values so earlier tokens are not recomputed.
+- During training, all positions are computed in one pass thanks to the causal mask.
+- During inference, the model generates one token at a time, and a **KV cache** stores each layer's keys and values so earlier tokens are not recomputed.
 
 <AnimatedDiagram
   spec="animated/transformer/training-vs-inference"
@@ -159,7 +167,7 @@ During training, all positions are computed in one pass thanks to the causal mas
   caption="Prefill processes the whole prompt once and fills the cache; every decode step feeds one token and reuses the cached keys and values."
 />
 
-This split explains two numbers interviewers like to ask about: **time to first token** is dominated by the prefill pass, while **tokens per second** is dominated by decode steps, which are limited by memory bandwidth because each step re-reads the weights and the growing cache.
+- This split explains two numbers interviewers like to ask about: **time to first token** is dominated by the prefill pass, while **tokens per second** is dominated by decode steps, which are limited by memory bandwidth because each step re-reads the weights and the growing cache.
 
 ### The three families
 
@@ -192,14 +200,14 @@ The paper's Table 1 puts numbers on the first row. Here n is the sequence length
 | Recurrent | O(n · d²) | O(n) | O(n) |
 | Convolutional | O(k · n · d²) | O(1) | O(log_k n) |
 
-## Real-world examples
+## Production systems
 
 - **The original Transformer** (Vaswani et al., 2017) used 6 encoder and 6 decoder layers, a model size of 512 and 8 heads, and set state-of-the-art results on WMT 2014 English-German and English-French translation.
 - **BERT** (2018) kept only the encoder and pre-trained it with masked language modeling, which made it the default for classification and search ranking for years.
 - **GPT-3** (2020) kept only the decoder and scaled it to 175 billion parameters, showing that a large next-token predictor can do few-shot learning from the prompt alone.
 - **Llama-style models** use the decoder-only layout with Pre-norm RMSNorm, RoPE, SwiGLU feed-forward layers and, in larger versions, grouped-query attention.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Saying attention is "linear" in sequence length. Standard attention compares every pair of tokens, so it is quadratic in time and, without FlashAttention-style kernels, in memory.
 - Forgetting that self-attention is order-blind and needs positional information.
@@ -207,7 +215,7 @@ The paper's Table 1 puts numbers on the first row. Here n is the sequence length
 - Saying the decoder sees the whole target during inference. It does during training (with the mask); at inference it only has what it has generated.
 - Claiming most parameters are in attention. In standard designs, the feed-forward layers hold roughly two-thirds.
 
-## How to answer in an interview
+## Interview framework
 
 1. **Start with the shape.** "Tokens become vectors, then a stack of identical blocks refines them, then a projection gives next-token probabilities."
 2. **Draw one block.** Attention, add and norm, feed-forward, add and norm. Say what each part is for in one line.
@@ -229,27 +237,44 @@ The paper's Table 1 puts numbers on the first row. Here n is the sequence length
 
 <InterviewQuestions>
   <InterviewQuestion question="Why does the transformer scale attention scores by the square root of the key dimension?" category="Concepts" level="Junior">
-    The dot product of two random vectors grows with their dimension, so for large key sizes the raw scores have a large spread. A softmax over large scores becomes almost one-hot, and its gradients become tiny, which slows or stalls training. Dividing by the square root of the key dimension keeps the score variance around one, so the softmax stays in a range where it still has useful gradients.
+    - The dot product of two random vectors grows with their dimension, so for large key sizes the raw scores have a large spread.
+    - A softmax over large scores becomes almost one-hot, and its gradients become tiny, which slows or stalls training.
+    - Dividing by the square root of the key dimension keeps the score variance around one, so the softmax stays in a range where it still has useful gradients.
   </InterviewQuestion>
   <InterviewQuestion question="Why do transformers need positional encodings?" category="Concepts" level="Junior">
-    Self-attention computes a weighted sum over a set of vectors, and nothing in that calculation depends on order. Without position information, "dog bites man" and "man bites dog" produce the same representations. Positional encodings, whether added sinusoidal vectors, learned position embeddings or rotary embeddings applied to queries and keys, inject order so the model can use it.
+    - Self-attention computes a weighted sum over a set of vectors, and nothing in that calculation depends on order.
+    - Without position information, "dog bites man" and "man bites dog" produce the same representations.
+    - Positional encodings, whether added sinusoidal vectors, learned position embeddings or rotary embeddings applied to queries and keys, inject order so the model can use it.
   </InterviewQuestion>
   <InterviewQuestion question="What are residual connections and layer normalization doing in each block?" category="Architecture" level="Junior">
-    The residual connection adds a sub-layer's input to its output, which gives gradients a direct path through the network and lets each layer learn a small correction. Layer normalization keeps each token's activations at a stable scale. Together they are what make stacks of dozens or hundreds of layers trainable. Modern LLMs usually apply normalization before each sub-layer (Pre-LN) because it is more stable than the original post-residual placement.
+    - The residual connection adds a sub-layer's input to its output, which gives gradients a direct path through the network and lets each layer learn a small correction.
+    - Layer normalization keeps each token's activations at a stable scale.
+    - Together they are what make stacks of dozens or hundreds of layers trainable.
+    - Modern LLMs usually apply normalization before each sub-layer (Pre-LN) because it is more stable than the original post-residual placement.
   </InterviewQuestion>
   <InterviewQuestion question="Walk me through the difference between encoder-only, encoder-decoder and decoder-only transformers." category="Architecture" level="Mid">
-    Encoder-only models like BERT use bidirectional attention and are trained to fill in masked tokens, which makes them strong at understanding tasks such as classification and embeddings. Encoder-decoder models like T5 encode the input bidirectionally and generate the output with a causal decoder that cross-attends to the encoder, which suits translation and summarization. Decoder-only models like GPT use a single causal stack trained on next-token prediction; they are simpler to scale and handle open-ended generation, which is why most modern LLMs use them.
+    - Encoder-only models like BERT use bidirectional attention and are trained to fill in masked tokens, which makes them strong at understanding tasks such as classification and embeddings.
+    - Encoder-decoder models like T5 encode the input bidirectionally and generate the output with a causal decoder that cross-attends to the encoder, which suits translation and summarization.
+    - Decoder-only models like GPT use a single causal stack trained on next-token prediction; they are simpler to scale and handle open-ended generation, which is why most modern LLMs use them.
   </InterviewQuestion>
   <InterviewQuestion question="What is the purpose of multi-head attention compared with a single attention head?" category="Concepts" level="Mid">
-    A single head produces one weighted average per token, so it can only express one notion of relevance at a time. Multiple heads, each with its own smaller projections, let the model attend to several kinds of relationship at once, for example one head tracking syntax and another tracking coreference. The heads' outputs are concatenated and projected back, so the total compute is similar to one full-size head.
+    - A single head produces one weighted average per token, so it can only express one notion of relevance at a time.
+    - Multiple heads, each with its own smaller projections, let the model attend to several kinds of relationship at once, for example one head tracking syntax and another tracking coreference.
+    - The heads' outputs are concatenated and projected back, so the total compute is similar to one full-size head.
   </InterviewQuestion>
   <InterviewQuestion question="Why is standard attention quadratic in sequence length, and what does that mean in practice?" category="Scaling" level="Mid">
-    Every token's query is compared against every token's key, so a sequence of n tokens produces an n-by-n score matrix. Doubling the context length roughly quadruples attention compute, and naive implementations also store that matrix in memory. In practice this limits context length and drives techniques such as FlashAttention, which avoids materializing the full matrix, and sparse or sliding-window attention, which skips most pairs.
+    - Every token's query is compared against every token's key, so a sequence of n tokens produces an n-by-n score matrix.
+    - Doubling the context length roughly quadruples attention compute, and naive implementations also store that matrix in memory.
+    - In practice this limits context length and drives techniques such as FlashAttention, which avoids materializing the full matrix, and sparse or sliding-window attention, which skips most pairs.
   </InterviewQuestion>
   <InterviewQuestion question="How does training a decoder differ from running it at inference time?" category="Architecture" level="Mid">
-    In training, the whole target sequence is known, so the model computes predictions for every position in one parallel pass, and the causal mask stops each position from seeing the answer. At inference, the model only has the prompt and what it has generated, so it produces one token per forward pass. A KV cache stores past keys and values so each new step only computes the newest token, which is why decoding is limited by memory bandwidth rather than raw compute.
+    - In training, the whole target sequence is known, so the model computes predictions for every position in one parallel pass, and the causal mask stops each position from seeing the answer.
+    - At inference, the model only has the prompt and what it has generated, so it produces one token per forward pass.
+    - A KV cache stores past keys and values so each new step only computes the newest token, which is why decoding is limited by memory bandwidth rather than raw compute.
   </InterviewQuestion>
   <InterviewQuestion question="Where are most of a transformer's parameters, and why does that matter?" category="Trade-offs" level="Senior">
-    In a standard block, attention has about 4 times the model dimension squared in parameters (query, key, value and output projections), while a feed-forward layer with a 4x hidden size has about 8 times, so roughly two-thirds of the parameters sit in the feed-forward layers. That is why mixture-of-experts designs replace the feed-forward layer with several experts: it is where adding capacity gives the most knowledge per unit of compute. Attention, in contrast, dominates cost at long context because of its quadratic term and the KV cache.
+    - In a standard block, attention has about 4 times the model dimension squared in parameters (query, key, value and output projections), while a feed-forward layer with a 4x hidden size has about 8 times, so roughly two-thirds of the parameters sit in the feed-forward layers.
+    - That is why mixture-of-experts designs replace the feed-forward layer with several experts: it is where adding capacity gives the most knowledge per unit of compute.
+    - Attention, in contrast, dominates cost at long context because of its quadratic term and the KV cache.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -5,9 +5,9 @@ icon: activity
 updated: 2026-11-15
 ---
 
-LLMOps is MLOps for systems whose behavior is shaped by prompts, retrieved data, tools and third-party models that change underneath you. Interviewers want to hear how you would know when quality drops, why it dropped, and how you ship changes safely.
+LLMOps is MLOps for systems shaped by prompts, retrieved data, tools and third-party models that change underneath you. Interviewers test how you detect quality drops, find their root cause and ship changes safely.
 
-## TL;DR
+## Overview
 
 - **Trace everything**: each request's prompts, model versions, retrieved documents, tool calls, outputs, latency, tokens and cost.
 - **Version everything**: prompts, models, retrieval settings, tools and evaluation sets.
@@ -15,9 +15,14 @@ LLMOps is MLOps for systems whose behavior is shaped by prompts, retrieved data,
 - Watch for **drift**: changing user queries, changing data, and provider model updates.
 - **Release safely** with canaries, A/B tests, feature flags and fast rollback.
 
-## The idea in plain English
+## Mental model
 
-Running an LLM app without observability is like running a restaurant without receipts or customer feedback. Tracing is the receipt for every order; evaluations are taste tests before a new menu; online feedback is the customer reviews; versioning lets you go back to yesterday's recipe when today's goes wrong.
+- Running an LLM app without observability is like running a restaurant without receipts or customer feedback:
+
+- **Tracing:** The receipt for every order, recording every step and cost.
+- **Offline evaluations:** Taste tests run before a new menu goes live.
+- **Online feedback:** Customer reviews on live orders.
+- **Versioning:** Keeping every past recipe so you can return to yesterday's when today's goes wrong.
 
 ## Core concepts
 
@@ -67,7 +72,7 @@ The operating loop:
 4. Failures become test cases in versioned datasets.
 5. Every change runs offline evals in CI, then rolls out gradually with flags.
 
-## Deep dive
+## Technical mechanics
 
 ### What changes from MLOps
 
@@ -78,7 +83,10 @@ LLMOps keeps the MLOps loop (data, train, test, release, monitor) and changes wh
   caption="Behaviour comes from more places, correctness is graded rather than counted, and cost is paid per token."
 />
 
-**How to read it.** Each row is one question and the two answers. The model is often a third party's, so a provider can change it under a name you call, and the prompt and retrieved documents shape behaviour as much as weights do. Brightpost pays for 440 M input and 50 M output tokens a day, so cost is a first-class metric next to quality.
+**How to read it:**
+
+- **Where behaviour comes from:** Each row is one question and the two answers; the model is often a third party's (so a provider can change it under a name you call), and the prompt and retrieved documents shape behaviour as much as weights do.
+- **Token economics:** Brightpost pays for 440 M input and 50 M output tokens a day, making cost a first-class metric next to quality.
 
 ### What a single trace contains
 
@@ -89,11 +97,19 @@ A trace is a tree of timed spans. The root holds the request id, user, feature, 
   caption="One request as a trace. The model call is 1,500 of 1,695 ms; the customer sees the first token at 535 ms. Only the model call is Brightpost's measured target; the other timings are illustrative."
 />
 
-**How to read it.** Read from the top. Gateway, cache lookup, retrieval, model call and guardrail each get a row on a shared time axis. The model call is 1,500 ÷ 1,695 = 88.5 % of the request, so that is where a slow request is usually slow. Attributes on each span carry the retrieval query and document ids, token counts, tool name and arguments, and errors. Feedback and judge scores are attached later, to the same trace id. The span fields, redaction and sampling are on [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging).
+**How to read it:**
+
+- **Shared time axis:** Read from the top; gateway, cache lookup, retrieval, model call and guardrail each get a row on a shared time axis.
+- **Dominant span:** The model call is 1,500 ÷ 1,695 = 88.5 % of the request, which is where a slow request is usually slow.
+- **Span attributes and scores:** Attributes carry the retrieval query, document ids, token counts, tool name/arguments and errors, while feedback and judge scores attach later to the same trace id (see [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging) for span fields, redaction and sampling).
 
 ### Metrics, logs and traces, plus what LLM systems add
 
-The three classic signals each answer a different question. A metric says that something is wrong, a log line says what exactly happened, and a trace says where the time went. The same trace id joins the log line and the span.
+The three classic signals each answer a different question, joined by the same trace id:
+
+- **Metric:** Says that something is wrong.
+- **Log line:** Says what exactly happened.
+- **Trace:** Says where the time went.
 
 <AnimatedDiagram
   spec="animated/cloud/three-signals"
@@ -101,11 +117,20 @@ The three classic signals each answer a different question. A metric says that s
   caption="One request leaves a metric, a log line and a span, and each answers a different question. The example is from the cloud section; the idea is the same for an LLM call."
 />
 
-**What LLM systems add.** Two signals the classic three do not cover. **Evaluations** score the content of an answer (faithfulness, tone, policy), because a fast, error-free response can still be wrong. **Feedback** (thumbs, edits, retries, escalations) says what the customer thought. Both attach to the trace id, so one search shows the request, its cost and its quality. For the general case see [Observability on the Cloud](/cloud/operations/observability-on-the-cloud).
+**What LLM systems add:**
+
+- **Evaluations:** Score the content of an answer (faithfulness, tone, policy), because a fast, error-free response can still be wrong.
+- **Feedback:** Captures what the customer thought (thumbs, edits, retries, escalations).
+- **Unified trace view:** Both attach to the trace id so one search shows the request, its cost and its quality (for the general case see [Observability on the Cloud](/cloud/operations/observability-on-the-cloud)).
 
 ### Worked example: a bad refund answer, found and fixed
 
-At 200,000 requests a day Brightpost cannot read every trace. It keeps all of them for a few days, scores a sample with a judge (a 1 % sample would be 2,000 traces a day; illustrative), and always keeps slow or failed ones. A customer replies "that is not what I was told" to an answer about order 4471, a £42 kettle. That feedback attaches to the trace. The trace shows the retrieved article was the old returns policy, so the fault is in retrieval, not the model. The team adds the case to the golden set (now 201), fixes the index, and CI runs the whole suite before the canary starts. Next week's drift check confirms the pass rate holds. Each step is one box on the map above: trace, evaluation, data, registry, rollout.
+At 200,000 requests a day Brightpost cannot read every trace:
+
+- **Sampling and retention:** Brightpost keeps all traces for a few days, scores a sample with a judge (a 1 % sample is 2,000 traces a day; illustrative), and always keeps slow or failed ones.
+- **Triggering feedback:** A customer replies "that is not what I was told" to an answer about order 4471 (a £42 kettle), and that feedback attaches to the trace.
+- **Root cause in trace:** The trace shows the retrieved article was the old returns policy, proving the fault is in retrieval rather than the model.
+- **Close the loop:** The team adds the case to the golden set (now 201), fixes the index, runs the whole suite in CI before the canary starts, and confirms the pass rate holds in next week's drift check (covering trace, evaluation, data, registry and rollout).
 
 ### The pages in this group
 
@@ -131,13 +156,13 @@ At 200,000 requests a day Brightpost cannot read every trace. It keeps all of th
 | LLM judge vs human review | Scale | Accuracy | Judge for coverage, humans for calibration and high-stakes |
 | Build vs buy observability | Control | Speed | Use open standards to avoid lock-in |
 
-## Real-world examples
+## Production systems
 
 - OpenTelemetry defines semantic conventions for generative AI spans and metrics.
 - Many LLM observability platforms provide tracing, evaluation datasets and prompt management.
 - The classic "Hidden Technical Debt in Machine Learning Systems" paper warned that ML systems accumulate maintenance debt in data dependencies and configuration, which applies even more to LLM apps.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - No link between a response and the prompt or model version that produced it.
 - Evaluating only before launch, never in production.
@@ -145,7 +170,7 @@ At 200,000 requests a day Brightpost cannot read every trace. It keeps all of th
 - Tracking total cost but not cost per successful task.
 - Storing sensitive prompts and outputs without access control or retention rules.
 
-## How to answer in an interview
+## Interview framework
 
 1. Describe tracing and what each trace contains.
 2. Explain versioning of prompts, models and datasets.
@@ -167,27 +192,43 @@ At 200,000 requests a day Brightpost cannot read every trace. It keeps all of th
 
 <InterviewQuestions>
   <InterviewQuestion question="What should you log for every LLM request?" category="Concepts" level="Junior">
-    A request id, user or tenant, feature, prompt and model versions, the assembled prompt or a reference to it, retrieved document ids and scores, tool calls with arguments and results, the output, token counts, latency, cost, guardrail decisions and any later feedback, with sensitive content redacted according to policy.
+    - **Identity and versions:** Request id, user or tenant, feature, and prompt and model versions.
+    - **Execution details:** The assembled prompt (or a reference to it), retrieved document ids and scores, tool calls with arguments and results, and the final output.
+    - **Operational and safety signals:** Token counts, latency, cost, guardrail decisions, and any later feedback, with sensitive content redacted according to policy.
   </InterviewQuestion>
   <InterviewQuestion question="How is LLMOps different from traditional MLOps?" category="Concepts" level="Mid">
-    Behavior is controlled by prompts, retrieval and tools as much as by model weights, and the model is often a third-party API that can change. Outputs are open-ended, so evaluation relies on rubrics, judges and human review rather than simple accuracy. Cost per token and latency are first-class metrics, and safety concerns such as prompt injection are new.
+    - **System surface:** Behavior is controlled by prompts, retrieval and tools as much as by model weights, and the model is often a third-party API that can change underneath you.
+    - **Open-ended evaluation:** Outputs are open-ended, so evaluation relies on rubrics, judges and human review rather than simple accuracy.
+    - **Cost and safety:** Cost per token and latency are first-class metrics, alongside new safety concerns such as prompt injection.
   </InterviewQuestion>
   <InterviewQuestion question="How do you safely roll out a new prompt or model version?" category="Architecture" level="Mid">
-    Run the offline evaluation suite and compare with the current version, then release behind a feature flag to a small canary share of traffic, monitor quality, latency, cost and errors, run an A/B test on key metrics if the change matters, and keep one-click rollback. Pin model versions so upgrades are deliberate.
+    - **Offline gate:** Run the offline evaluation suite in CI and compare scores with the current production version.
+    - **Staged rollout:** Release behind a feature flag to a small canary share of traffic, monitoring quality, latency, cost and errors.
+    - **Experimentation and rollback:** Run an A/B test on key metrics if the change matters, keep one-click rollback ready, and pin model versions so upgrades are deliberate.
   </InterviewQuestion>
   <InterviewQuestion question="How do you detect quality drift in production?" category="Evaluation" level="Senior">
-    Continuously score sampled traffic with calibrated judges and human review, track user feedback, retries and escalations, and monitor input topic distributions, retrieval scores and the no-answer rate. Compare against baselines by version and segment, and alert on sustained changes. Provider model updates and new user behaviors are common causes.
+    - **Continuous scoring:** Score sampled production traffic with calibrated LLM judges and human review while tracking user feedback, retries and escalations.
+    - **Input and retrieval signals:** Monitor input topic distributions, retrieval scores and the no-answer rate over time.
+    - **Segmented alerting:** Compare against baselines by version and segment, alerting on sustained changes caused by provider model updates or shifting user behavior.
   </InterviewQuestion>
   <InterviewQuestion question="How do production failures improve the system over time?" category="Architecture" level="Mid">
-    Failures found through feedback, review or alerts are triaged, labeled with a root cause, and added to the versioned evaluation set. Fixes to prompts, retrieval, tools or models must pass that set, so the same failure cannot silently return. Over time the evaluation set mirrors real usage.
+    - **Triage and root-cause labeling:** Failures found through feedback, review or alerts are triaged and labeled with a specific root cause.
+    - **Dataset growth:** Each failure is added to the versioned golden evaluation set.
+    - **Regression prevention:** Fixes to prompts, retrieval, tools or models must pass that expanded set in CI so the same failure cannot silently return.
   </InterviewQuestion>
   <InterviewQuestion question="How would you attribute and control LLM costs across teams?" category="Failure modes" level="Senior">
-    Tag every request with team, feature and customer, aggregate tokens and cost per tag, set budgets and alerts, and show cost per successful task next to quality. Use quotas and rate limits per tenant, and review the most expensive features for routing, caching or prompt reductions.
+    - **Tagging and attribution:** Tag every request with team, feature and customer, aggregating tokens and cost per tag.
+    - **Budgets and unit economics:** Set budgets and alerts, and display cost per successful task right next to quality metrics.
+    - **Quotas and optimisation:** Enforce quotas and rate limits per tenant, and review the most expensive features for model routing, caching or prompt reductions.
   </InterviewQuestion>
   <InterviewQuestion question="A slow request is reported. How do you find where the time went?" category="Failure modes" level="Mid">
-    Open its trace and read the span tree from the root. Each step (gateway, cache, retrieval, model call, guardrail) has its own duration, so the longest span is the first suspect. In Brightpost's example the model call is 1,500 of 1,695 ms, so the model or its prompt length is the likely cause. Compare with p95 for the same feature to see whether this is one slow request or a trend.
+    - **Inspect the span tree:** Open the request's trace and read the span tree from the root; each step (gateway, cache, retrieval, model call, guardrail) records its own duration.
+    - **Identify the bottleneck:** The longest span is the first suspect—in Brightpost's example, the model call is 1,500 of 1,695 ms, pointing to the model or prompt length.
+    - **Check the distribution:** Compare against p95 for the same feature to see whether it is an isolated outlier or a broader trend.
   </InterviewQuestion>
   <InterviewQuestion question="What do evaluations and feedback add to metrics, logs and traces?" category="Concepts" level="Senior">
-    The classic three say that a request was slow or failed, what happened, and where the time went. They cannot say whether the answer was right. Evaluations score content (faithfulness, tone, policy) on sampled traces, and feedback shows what users thought. Both attach to the trace id, so one trace shows the request, its cost and its quality. Without them an LLM app can be fast, green on every dashboard and still wrong.
+    - **Limits of classic telemetry:** Metrics, logs and traces show that a request was slow or failed, what happened, and where the time went, but cannot say whether the answer was right.
+    - **Content quality signals:** Evaluations score content (faithfulness, tone, policy) on sampled traces, and feedback shows what users thought.
+    - **Single-trace correlation:** Both attach to the trace id so one trace shows the request, its cost and its quality—without them, an LLM app can be fast and green on every dashboard while still being wrong.
   </InterviewQuestion>
 </InterviewQuestions>
