@@ -2,43 +2,372 @@
 title: "Automated Prompt Optimization (DSPy & Meta-Prompting)"
 description: "Compiling prompts like code: declarative signatures, bootstrap few-shot, text gradients, GEPA optimizers and meta-prompting."
 icon: sparkles
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Automated prompt optimisation lets a program write and test prompt changes instead of a person. You give it a task, labelled examples and a metric, and it searches for the wording and examples that score best.
 
-**What it will cover:** Compiling prompts like code: declarative signatures, bootstrap few-shot, text gradients, GEPA optimizers and meta-prompting.
+- Interviewers ask about it to see whether you treat a prompt as a parameter you can measure and tune, and whether you know how a tuned prompt fools you.
+- This page follows one optimisation run on Brightpost's refund reply, from the live prompt v12 to a candidate that passes the release gate on [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning).
 
 ## Overview
 
+- An optimiser needs three things: a **program** (one or more prompted steps), a **metric** that scores one output, and **labelled examples**. The metric is the specification; the optimiser does what it rewards.
+- It changes one or more of three knobs: the **instructions**, the **few-shot demonstrations** and, for some optimisers, the model's **weights**.
+- **Demonstration search** (DSPy's `BootstrapFewShot`) runs the program on training examples and keeps the traces that pass the metric as examples.
+- **Instruction search** asks a model to propose new instructions and keeps the ones that score best: APE (2022), OPRO (2023), MIPROv2 (2024) and GEPA (2025). GEPA also reads the metric's written feedback.
+- Every optimiser **overfits the data it selects on**. Train on one split, select on a second, and check the winner once on a third that it never saw.
+- The output is a prompt, not a model. It goes through the same version, gate and canary as a hand-written change.
+
 ## Mental model
+
+- Hand-tuning a prompt is like tuning a machine-learning model by changing weights by hand and eyeballing a few outputs.
+- An optimiser does what gradient descent does for weights: propose a change, measure the loss on training data, keep what helps. The "gradient" here is a sentence: why the reply failed.
+- So the usual rules come with it. A model tuned against its test set reports a score nobody gets in production. So does a prompt.
 
 ## Core concepts
 
+The running task: Brightpost's support agent writes the reply after it has called `get_order` and, when needed, waited for a support agent's approval (refunds over £30 wait). v12 is the live prompt. On the fixed set of 200 first-visit chats it passes 184; the release gate's floor is 170.
+
 ### From hand-crafted strings to declarative signatures
+
+- A **signature** says what a step takes in and gives back, not how to ask for it. `message, order -> reply` is a signature; "You are a helpful assistant who…" is a prompt.
+- A **module** wraps a signature in a prompting strategy, such as a plain call or chain of thought. DSPy (Khattab et al., 2023) builds the actual prompt from the signature, the instructions and the demonstrations at call time.
+- Because the prompt is generated, an optimiser can rewrite its parts, and you can recompile when the model changes. DSPy's docs make this the main argument: rerun the optimiser against a new model and see whether it is worth switching.
+
+The refund reply as a DSPy program, with a metric that returns a score and a reason (DSPy 3.5, November 2026):
+
+```python
+import dspy
+
+class RefundReply(dspy.Signature):
+    """Reply to a Brightpost customer about a refund."""
+    message: str = dspy.InputField()
+    order: dict = dspy.InputField(desc="the get_order result")
+    reply: str = dspy.OutputField()
+
+def refund_metric(example, pred, trace=None, pred_name=None, pred_trace=None):
+    ok, why = check_reply(example, pred.reply)  # amount, refund status wording, hand-off rule
+    return dspy.Prediction(score=float(ok), feedback=why)
+
+program = dspy.Predict(RefundReply)
+```
+
+`check_reply` is your code. Deterministic checks (the amount matches `get_order`; the word "approved" appears only when the refund is approved) beat a judge wherever they can. A flaky metric gives you a prompt tuned to noise.
 
 ### Bootstrap few-shot and example selection
 
+A demonstration is an input with a good output, placed in the prompt. Bootstrapping makes the program find its own.
+
+<AnimatedDiagram
+  spec="animated/agents/few-shot-selection"
+  stepper
+  minWidth={620}
+  caption="The metric is the filter: a trace becomes an example only if its reply already passes. The chats are illustrative; the limits are DSPy's defaults."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Five training chats, a prompt with no examples">
+    The training split holds labelled chats. The compiled prompt starts with v12's instructions and nothing else.
+  </StepCard>
+  <StepCard n={2} title="The teacher runs each chat; the metric judges">
+    The teacher is the program itself (or a stronger model). t1 to t3 pass. t4 fails with v12's known fault: it calls a
+    £36 refund "on its way" while it still waits for approval. t5 refunds both items when only the kettle was cracked.
+  </StepCard>
+  <StepCard n={3} title="Passing traces become demos">
+    The three passing traces are copied in as demos 1 to 3. The failures are never copied: a demo is always a reply the
+    metric already accepts. DSPy allows up to 4 bootstrapped demos and 16 in total per step by default.
+  </StepCard>
+</StepCards>
+
+- **Random search** (`BootstrapFewShotWithRandomSearch`) repeats this with different shuffles, scores each demo set on a validation split and keeps the best.
+- **Per-input selection** (`KNNFewShot`) embeds the training set and picks the nearest examples for each new input, at the cost of a lookup per call.
+- DSPy's own rule of thumb: demonstration tuning tends to overfit and instruction tuning tends to generalise. A demo set chosen from 50 examples describes those 50.
+
 ### Text gradients, evolutionary search and GEPA
+
+Instruction search went through three ideas in three years: score candidates, show the model its history, then tell it why it failed.
+
+| Method | Year | How it proposes | How it chooses |
+| --- | --- | --- | --- |
+| APE (Zhou et al.) | 2022 | A model writes many candidate instructions from examples | Score each; keep the best |
+| OPRO (Yang et al.) | 2023 | The meta-prompt lists earlier instructions with their scores; the model writes a better one | Score; add to the list; repeat |
+| APO (Pryzant et al.) | 2023 | A model criticises the prompt from a minibatch of errors (a "text gradient") and edits against it | Beam search with bandit selection |
+| TextGrad (Yuksekgonul et al.) | 2024 | Feedback flows backward through every step of a pipeline, PyTorch-style | Apply the edits; repeat |
+| MIPROv2 (Opsahl-Ong et al.) | 2024 | Instructions grounded in the data and the program, plus bootstrapped demos | Search over instruction and demo combinations with a learned model of the score |
+| GEPA (Agrawal et al.) | 2025 | A reflection model reads full traces and the metric's written feedback, then rewrites | Keeps a Pareto front of candidates; returns the best on validation |
+
+- **Text gradient** means a sentence that says what to change and which way, like "the reply confirmed a refund that was still pending".
+- **Pareto front** means every candidate that is the best on at least one example. GEPA picks parents from it, so a candidate that alone handles return visits survives even if its average is lower.
+- GEPA's paper (an ICLR 2026 oral) reports beating GRPO reinforcement learning by 6 % on average and up to 20 %, with up to 35× fewer rollouts, and beating MIPROv2 by over 10 %.
 
 ### Meta-prompting and failure-driven rewrites
 
+- **Meta-prompting** here means a model writing or rewriting a prompt: "here is the prompt, here are three failures and why; write a better prompt". APE, OPRO and GEPA's reflection step are all automated versions of it.
+- The name has a second meaning. Suzgun and Kalai (2024) use "meta-prompting" for a conductor model that splits a task among expert copies of itself. Say which one you mean.
+- A **failure-driven rewrite** is the manual form: collect failing traces with reasons, ask a strong model for a revision, then score it on the same splits an optimiser would use.
+- Vendors put it in their consoles. OpenAI's dataset-backed prompt optimiser used annotations, written critiques and grader results. OpenAI is retiring it with the Evals platform, which became read-only on 31 October 2026 and shuts down on 30 November 2026.
+- The rewrite is cheap; the evaluation is the work. A rewrite you do not score is a guess.
+
 ## Architecture
+
+One GEPA run on the refund reply. The optimiser never sees the fixed set until the last step.
+
+<AnimatedDiagram
+  spec="animated/agents/optimization-loop"
+  stepper
+  minWidth={660}
+  caption="The training split teaches, the validation split chooses, and the fixed set is read once at the end. Scores other than the fixed set's floor (170) and v12's 184 are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="v12 is the seed">
+    The live prompt enters the candidate pool as c0. The validation split, 100 chats the reflection model never reads,
+    scores it 82 of 100. Every candidate must beat that.
+  </StepCard>
+  <StepCard n={2} title="A minibatch of 3 training chats">
+    The optimiser runs c0 on 3 chats from the training split of 200. Small minibatches keep each round cheap.
+  </StepCard>
+  <StepCard n={3} title="The metric scores and explains">
+    Two replies fail. The metric returns a score and a sentence for each, and only the failures go on.
+  </StepCard>
+  <StepCard n={4} title="The reflection model writes c1">
+    A stronger model reads the failing traces and the reasons and proposes new instructions. It runs a handful of
+    times per run, so its higher price matters little.
+  </StepCard>
+  <StepCard n={5} title="c1 is scored on validation and kept">
+    c1 scores 85 of 100. The pool keeps every candidate with its per-chat scores, which is what the Pareto front is
+    built from.
+  </StepCard>
+  <StepCard n={6} title="Repeat until the budget is spent">
+    With `auto="light"`, GEPA proposes 6 candidates in about 1,330 metric calls. c3 is the best on validation, at 89.
+  </StepCard>
+  <StepCard n={7} title="One look at the held-out set">
+    c3 runs once on the fixed set of 200: 189 pass, above the floor (170) and above v12 (184). It can now enter the
+    release flow.
+  </StepCard>
+</StepCards>
+
+What the reflection model reads for one failing chat in step 3. `score` and `feedback` are GEPA's metric contract; the record around them is illustrative:
+
+```json
+{
+  "chat": "train-117",
+  "inputs": {
+    "message": "Did my refund for order 4471 go through?",
+    "order": { "order_id": "4471", "refund": { "id": "R-2291", "status": "approved" } }
+  },
+  "reply": "I've asked for your refund of £42; a support agent will confirm it.",
+  "score": 0,
+  "feedback": "get_order shows refund R-2291 approved; the reply said a support agent will confirm it. Confirm the approved refund and give its id."
+}
+```
+
+The run in code. The budget, the reflection model and the two splits are the decisions; the rest are defaults:
+
+```python
+optimizer = dspy.GEPA(
+    metric=refund_metric,
+    auto="light",                                  # 6 candidates, about 1,330 metric calls here
+    reflection_lm=dspy.LM("provider/strong-model"),
+)
+compiled = optimizer.compile(program, trainset=train, valset=val)
+compiled.save("refund_reply_c3.json")              # a file you version, not a model
+```
 
 ## Technical mechanics
 
+### Worked example: v12 from 184 to 189, checked once
+
+This follows the [loop figure](#architecture) through one run. Every score except the gate's floor and v12's 184 is illustrative.
+
+**The data.** 300 refund chats from last month's traces, labelled by the support team, none of them in the fixed set (checked by hash). Unlike the fixed set, they include return visits. GEPA's docs say to keep as much as possible for training and make validation the smallest sample that still looks like traffic: 200 train, 100 validation.
+
+| Candidate | What the reflection model added | Train (of 200) | Val (of 100) |
+| --- | --- | --- | --- |
+| c0 = v12 | (the seed) | 168 | 82 |
+| c1 | Pending refunds: "a support agent will confirm" | 176 | 85 |
+| c2 | Quote the amount from `get_order` | 182 | 87 |
+| **c3** | **If `get_order` shows the refund approved, say so and give its id** | **186** | **89** |
+| c4 | 4 rules about named items (kettles, lamps…) | 190 | 88 |
+| c5 | 7 more item- and phrase-specific rules | 194 | 86 |
+| c6 | 5 more; the prompt is 3× v12's length | 196 | 84 |
+
+What happened:
+
+- **c1 fixed v12's known fault and overreached.** It is the rule v13 added on [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning#worked-example-the-refund-wording-change-v12-to-v13-and-back): it also told returning customers that a person would confirm a refund that was already approved.
+- **The training split caught what the fixed set could not.** It has return visits, so the metric's feedback on chat train-117 (the JSON above) reached the reflection model. Two rounds later, c3 carries the same fix the team wrote by hand as v14.
+- **The cost.** About 1,330 metric calls × 2,200 input tokens ≈ 2.9 M input tokens on the task model, plus about 6 reflection calls (illustrative). DSPy's docs warn that GEPA and MIPROv2 runs can cost hundreds of dollars, so compile once per version and save the result.
+
+**The held-out check.** c3 runs once on the fixed set: 189 of 200 (94.5 %) against v12's 184. It is above the floor and not below v12, so it passes the gate.
+
+- **Is +5 real?** Compared as two separate scores, no. At 92 % on 200 cases the 95 % interval is 1.96 × √(0.92 × 0.08 / 200) = ±3.8 points, and the gain is 2.5 points.
+- **Read it paired instead.** c3 passes 7 cases v12 failed and fails 2 that v12 passed: 184 + 7 − 2 = 189. Read those 2 by hand before release.
+- Then c3 is saved as a new registry version and goes through the canary, like any hand-written change.
+
 ### Co-optimizing multi-stage pipelines
+
+- Real programs have several prompted steps. Brightpost's could be `triage` (refund, return visit or other) then `reply`. Only the final reply has a label, so the optimiser must work out which step to blame: the **credit assignment** problem.
+- MIPROv2 learns which combinations of per-step instructions and demos score well from minibatch results. GEPA updates one step per round, in turn, and the metric can grade each step's own sub-trace.
+- Optimise the steps together when they interact. A triage step tuned alone may pick the labels the reply step handles worst.
+- DSPy marks a compiled module so that an outer optimiser leaves it alone. You can optimise `triage` first, embed it, then optimise the rest.
+- More steps mean more combinations and more metric calls. Freeze the steps that already work.
 
 ### Avoiding overfitting to small dev sets
 
+The same run, scored on both splits. The training score keeps rising because the reflection model learns from those chats.
+
+<AnimatedDiagram
+  spec="animated/agents/overfitting-to-the-dev-set"
+  stepper
+  minWidth={660}
+  caption="The training score always rises, because the optimiser learns from those chats. Only the validation split tells you when to stop, and the fixed set confirms it. Scores are illustrative except the floor (170) and v12's 184."
+/>
+
+**How to read it:**
+
+- Step 1: the dashed training line climbs every round, from 84 % to 98 %.
+- Step 2: the solid validation line peaks at c3 (89 %) and falls to 84 % as c4 to c6 add rules about kettles and lamps that only the training chats needed.
+- Step 3: the fixed set agrees with validation. c6, the pick by training score, gets 181, below v12's 184, so the gate blocks it.
+
+The defences:
+
+- **Three splits, three jobs.** Train teaches, validation selects, the fixed set confirms. If you omit GEPA's `valset`, it selects on the training set, which its docs say "deliberately allows prompts to overfit".
+- **Size the splits to the optimiser.** DSPy's data-size guidance: about 10 examples for `BootstrapFewShot`, 50 or more for random search, and 200 or more for `MIPROv2`. For most prompt optimisers it suggests an unusual 20 % train and 80 % validation, because a stable selection score matters more; GEPA prefers the usual large training split.
+- **Read the winning prompt.** Rules that name products, customers or phrases from the training chats are memorised cases, not policy.
+- **Count your looks at the fixed set.** Each check leaks a little. Check one candidate per run, and grow the set from production failures.
+
+<Callout tone="red" title="What breaks">
+  Picking by training score ships c6: 98 % in the optimiser's log, 181 of 200 on cases it never saw, and a prompt three
+  times longer that every request now pays for. Nothing in the run itself warns you; only a split the optimiser did not
+  learn from does.
+</Callout>
+
 ### When manual prompting still beats compilation
+
+- **Fewer than about 20 labelled examples.** There is little to select on, so a careful person with the evaluation suite wins.
+- **No metric you trust.** Tone, brand voice and legal wording need a judge, and an optimiser will find the judge's blind spots. Calibrate the judge first ([LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
+- **A known fix.** When the failure is one rule ("refunds over £30 wait"), write the rule. Spend metric calls on problems you cannot name.
+- **Instructions that must stay readable.** People review safety and policy text, and a prompt three times longer is three times harder to review.
+- **A task that keeps changing.** If policy changes monthly, the labels go stale faster than the optimiser pays back.
 
 ## Trade-offs
 
+| Decision | Option A | Option B | Guidance |
+| --- | --- | --- | --- |
+| Hand-tuned vs optimised | Readable, works with a handful of examples | Higher ceiling, re-runs when the model changes | Hand-tune until you have 100+ labelled cases and a metric you trust |
+| Demos vs instructions | Anchors format and style | Generalises beyond the training chats | Demos for format, instructions for behaviour; demos overfit more |
+| Score-only vs feedback metric | Works with any optimiser | GEPA reads why, and improves in fewer calls | Return the reason whenever the metric already knows it |
+| Small vs large validation split | More training data, more candidates per budget | Steadier selection | GEPA: small but representative; MIPROv2 and most others: large |
+| Strong vs cheap reflection model | Better proposals | Lower cost | Strong: it runs a handful of times; the task model runs hundreds |
+| Optimise the prompt vs fine-tune | Any API model, hours not days | Lower cost per call at scale | Try prompt-only first; DSPy's docs say fine-tuning's extra lift is usually small ([Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms)) |
+
 ## Production systems
+
+Facts checked on 16 November 2026.
+
+- **DSPy** (Stanford NLP): version 3.5.0, released 10 November 2026. Its optimisers include `LabeledFewShot`, `BootstrapFewShot`, `BootstrapFewShotWithRandomSearch`, `KNNFewShot`, `COPRO`, `MIPROv2`, `SIMBA`, `GEPA`, `BootstrapFinetune` and `BetterTogether`. Its docs report Shopify moving a GPT-5 prompt to a small Qwen model with GEPA at about 75× lower cost, and Dropbox moving to a smaller model while doubling accuracy.
+- **GEPA**: Agrawal et al., first posted July 2025, revised February 2026, an ICLR 2026 oral. In DSPy it is `dspy.GEPA`, with `light`, `medium` and `heavy` budgets of 6, 12 and 18 candidates.
+- **MIPROv2**: Opsahl-Ong et al., EMNLP 2024. It beat baseline optimisers on 5 of 7 multi-stage programs, by up to 13 % accuracy, with Llama-3-8B.
+- **TextGrad**: open source from Stanford's Zou group, published in Nature in March 2025. It raised GPT-4o's zero-shot accuracy on GPQA from 51 % to 55 %.
+- **OPRO**: Yang et al., ICLR 2024. Its best prompts beat human-written ones by up to 8 % on GSM8K and up to 50 % on Big-Bench Hard tasks.
+- **OpenAI's prompt optimiser**: the dataset-backed version is retired with the Evals platform (read-only from 31 October 2026, shut down 30 November 2026). The plain rewrite in the dashboard remains.
 
 ## Failure modes & pitfalls
 
+- Selecting on the training split, or using the fixed release set as the validation split.
+- A metric that rewards the wrong thing: a length-blind judge gets longer replies; a keyword check gets the keyword.
+- A non-deterministic metric. Bootstrapping then keeps whichever traces happened to pass on that run.
+- Training examples that overlap the fixed set. Check by hash, as for few-shot packs on [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning).
+- Shipping the optimised prompt without reading it. Look for memorised cases and for rules that contradict policy.
+- Re-running the optimiser after a model change but keeping the old gate scores. Score both prompts on the new model.
+- Forgetting the cost: the optimised prompt may be three times longer, and every production call pays for it.
+
 ## Interview framework
 
+1. **Frame it as learning.** Program, metric, labelled data; the optimiser searches instructions, demos or weights.
+2. **Define the metric first.** Deterministic checks where possible, a calibrated judge where not, with a written reason for each failure.
+3. **Split the data three ways.** Train to learn from, validation to select, a fixed set read once. Say how big each is and why.
+4. **Pick the optimiser by the bottleneck.** Demos for format, instructions for behaviour, GEPA when the metric can explain failures, fine-tuning last.
+5. **Ship it like any prompt.** Read it, version it, gate it, canary it. [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) covers the evaluation side.
+
+**What interviewers listen for:** a trusted metric before any optimiser, held-out data the optimiser never touches, and the optimised prompt going through the normal release flow.
+
+**Red flags:** "we let DSPy tune it on our eval set", or reporting the optimiser's own best score as the result.
+
 ## Further reading
+
+- [DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines (Khattab et al., 2023)](https://arxiv.org/abs/2310.03714)
+- [DSPy docs: choosing an optimizer](https://dspy.ai/current/diving-deeper/choosing-an-optimizer/) · [GEPA in depth](https://dspy.ai/current/diving-deeper/gepa-in-depth/) · [the BootstrapFewShot family](https://dspy.ai/current/diving-deeper/bootstrap-fewshot-family/) · [GEPA optimization: training and validation sets](https://dspy.ai/current/getting-started/gepa-optimization/)
+- [DSPy optimizer guidance by data size (docs source)](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md) · [optimization overview: the 20 / 80 split](https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/overview.md)
+- [GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning (Agrawal et al., 2025)](https://arxiv.org/abs/2507.19457)
+- [Optimizing Instructions and Demonstrations for Multi-Stage Language Model Programs (MIPRO, Opsahl-Ong et al., 2024)](https://arxiv.org/abs/2406.11695)
+- [Large Language Models Are Human-Level Prompt Engineers (APE, Zhou et al., 2022)](https://arxiv.org/abs/2211.01910)
+- [Large Language Models as Optimizers (OPRO, Yang et al., 2023)](https://arxiv.org/abs/2309.03409)
+- [Automatic Prompt Optimization with "Gradient Descent" and Beam Search (Pryzant et al., 2023)](https://arxiv.org/abs/2305.03495)
+- [TextGrad: Automatic "Differentiation" via Text (Yuksekgonul et al., 2024)](https://arxiv.org/abs/2406.07496), published in Nature as [Optimizing generative AI by backpropagating language model feedback (2025)](https://doi.org/10.1038/s41586-025-08661-4)
+- [Meta-Prompting: Enhancing Language Models with Task-Agnostic Scaffolding (Suzgun and Kalai, 2024)](https://arxiv.org/abs/2401.12954)
+- [OpenAI: prompt optimizer and its deprecation notice](https://developers.openai.com/api/docs/guides/prompt-optimizer)
+- Related pages: [Prompt Management & Versioning](/ai-system-design/genai-system-design/prompt-management-versioning) · [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [Prompt Engineering Types](/ai-system-design/genai-system-design/prompt-engineering-types)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What does a prompt optimiser like DSPy need from you, and what does it change?"
+    category="Concepts"
+    level="Junior"
+  >
+    - It needs a program (one or more prompted steps with declared inputs and outputs), a metric that scores one output, and labelled examples split into training and validation sets.
+    - It changes the instructions, the few-shot demonstrations, or both; some optimisers also fine-tune weights.
+    - The metric is the real specification, because the optimiser keeps whatever the metric rewards.
+    - The result is a saved prompt that you version and release like a hand-written one.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does BootstrapFewShot choose its examples, and what can go wrong?"
+    category="Concepts"
+    level="Mid"
+  >
+    - A teacher (the program or a stronger model) runs each training example, the metric judges the output, and only passing traces become demonstrations: up to 4 bootstrapped and 16 in total per step by default.
+    - The example being run is removed from the teacher's own demos first, so it cannot copy its answer.
+    - A noisy metric keeps whichever traces happened to pass, and a demo set chosen from a small training set describes those examples rather than traffic.
+    - Random search over demo sets with a separate validation split, or per-input selection, reduces both problems.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Compare APE, OPRO, text-gradient methods and GEPA."
+    category="Trade-offs"
+    level="Senior"
+  >
+    - APE has a model write many candidate instructions and keeps the best scorer. OPRO puts earlier instructions and their scores in the prompt, so the model writes a better one each round.
+    - Text-gradient methods (APO, TextGrad) have a model criticise the prompt from its errors and edit it in the opposite direction; TextGrad passes that feedback back through a whole pipeline.
+    - GEPA reads full traces plus the metric's written feedback, keeps a Pareto front of candidates that each win somewhere, and selects on a validation split.
+    - The shift across them is from scores alone to reasons, which needs fewer evaluations when the metric can say why an output failed.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your optimiser reports 98 % but the prompt is worse in production. What happened?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - The 98 % was almost certainly measured on the data the optimiser learned from or selected on, so it overfit: rules about specific products or phrases that only those examples needed.
+    - Check that a separate validation split did the selecting, and that the release set was read once and does not overlap the training data.
+    - Read the prompt for memorised cases, and compare it with the old prompt case by case, not by two headline scores.
+    - Then add the production failures to the datasets and rerun, with the canary as the last gate.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you split 300 labelled examples for prompt optimisation?"
+    category="Evaluation"
+    level="Mid"
+  >
+    - Keep the release set separate first; it never enters the optimiser and is read once per run.
+    - For GEPA, put most of the 300 in training (for example 200) and keep a validation split that still represents traffic (100), because every candidate is scored on it.
+    - For MIPROv2 and most other DSPy optimisers, the docs suggest the reverse, about 20 % train and 80 % validation, because a stable selection score matters more than many training examples.
+    - Make sure every split contains each conversation shape you see in production, such as return visits.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you not use an automated prompt optimiser?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - When you have only a handful of labelled examples, or no metric you trust; the optimiser would tune to noise or to a judge's blind spots.
+    - When the fix is a rule you can name, such as refunds over £30 waiting for a person; write it and test it.
+    - When the prompt must stay short and readable for review, as safety and policy text usually must.
+    - When the task changes faster than labels can be refreshed, since the optimised prompt goes stale with them.
+  </InterviewQuestion>
+</InterviewQuestions>
