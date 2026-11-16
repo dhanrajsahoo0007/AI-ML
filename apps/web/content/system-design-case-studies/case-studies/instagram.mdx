@@ -1,12 +1,679 @@
 ---
 title: "Design Instagram"
-description: "Photo storage, the follow graph, feed generation and stories."
+description: "Photo upload to blob storage and a CDN, ids that carry their shard, the follow graph, and a hybrid fan-out feed with cursors."
 logo: systems/instagram
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a photo-sharing app: users post photos, follow each other, and open a home feed that loads at once.
+The hard parts are a read load fifty times the write load, photos that dwarf every other byte, and accounts with a hundred million followers.
 
-**What it will cover:** photo storage, the follow graph, feed generation and stories.
+- Interviewers use this question to see whether you keep bytes apart from metadata, choose push or pull for the feed from the numbers, and page a changing list without repeats.
 
-**Patterns used:** [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Caching](/system-design/patterns/caching) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Materialized Views and Read Projections](/system-design/patterns/materialized-views) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [Zero-Downtime Migrations: Dual Writes, Backfill and Cutover](/system-design/patterns/online-migrations)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design Instagram: users post photos, follow each other, and open a feed that loads at once."
+  level="Senior"
+  minutes={45}
+  bankId="design-photo-storage"
+  tests={[
+    "Separating photo bytes from metadata, and serving bytes from the edge",
+    "Ids that sort by time and route to a shard without a lookup",
+    "Push, pull or hybrid fan-out, decided by the follower numbers",
+    "Paging a feed that changes while you scroll",
+  ]}
+  clarify={[
+    { q: "Photos only, or video too?", a: "Photos in this round; video is a follow-up (the media path changes, the feed does not)." },
+    { q: "How big is a photo?", a: "The app compresses it to about 2 MB; we store the original and four sizes." },
+    { q: "What scale?", a: "500 million daily users, 100 million new photos a day, 10 feed opens per user a day." },
+    { q: "How many followers?", a: "200 on average; the largest account has 100 million." },
+    { q: "Ranked or newest first?", a: "Ranked, but newest first is the fallback when ranking is down." },
+    { q: "How fresh must the feed be?", a: "A follower sees a post within seconds; the author sees their own post at once." },
+  ]}
+  outOfScope={["Stories", "Direct messages", "Explore and search", "Video transcoding", "Ads"]}
+/>
+
+## Overview
+
+- The app sends each photo **straight to blob storage** with a signed URL; only a small **metadata row** goes to the database.
+- **Resize workers** make four sizes off the request path, and a **CDN** serves every image, so photo bytes never cross the app servers.
+- A post id is **64 bits of time, shard and sequence**, made inside the database: ids sort by time and name their own shard.
+- **Fan-out on write** pushes each new post id into the followers' **feed lists** in memory; accounts with more than **100,000 followers** are **pulled and merged at read time**.
+- The feed service **ranks** about 500 candidates once per session, keeps the order as a **snapshot**, and pages it with an opaque **cursor**, so new or deleted posts never cause a repeat or a skip.
+- A like is a row with a **unique key**; counts are **batched** and may be a few seconds stale.
+
+<Numbers
+  items={[
+    { value: "50 : 1", label: "feed reads to new posts", hint: "58,000/s against 1,160/s" },
+    { value: "240 TB", label: "of photos a day", hint: "100 M × 2.4 MB" },
+    { value: "231,000/s", label: "feed appends", hint: "1,160 posts/s × 200 followers" },
+    { value: "100,000", label: "followers: pulled above this", hint: "pushed below it" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Post a photo with a caption", notes: "One photo per post, about 2 MB after the app compresses it." },
+    { id: "F2", requirement: "Follow and unfollow", notes: "Public accounts; a follow applies to new posts at once." },
+    { id: "F3", requirement: "Home feed", notes: "Posts from followed accounts, ranked, paged; your own new post on top." },
+    { id: "F4", requirement: "Like and comment", notes: "One like per user per post; counts on every post." },
+    { id: "F5", requirement: "Profile grid", notes: "One user's posts, newest first, paged." },
+  ]}
+/>
+
+- Out of scope: stories, direct messages, explore and search, video (see [Design YouTube](/system-design-case-studies/case-studies/youtube)), ads.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Feed latency", target: "First page p99 under 200 ms at the server", why: "The feed is the product; a slow open is a closed app." },
+    { id: "N2", property: "Freshness", target: "In followers' feeds within 10 s p99; in the author's own feed at once", why: "People check that their post went out." },
+    { id: "N3", property: "Image delivery", target: "p95 under 200 ms for a feed image", why: "A feed of grey boxes feels broken." },
+    { id: "N4", property: "Durability", target: "0 acknowledged photos or posts lost", why: "A lost photo is a lost memory." },
+    { id: "N5", property: "Availability", target: "99.95% for the feed; 99.9% for posting", why: "Reading is most of the use; a post can be retried." },
+    { id: "N6", property: "Scale", target: "3,500 posts/s and 174,000 feed opens/s at peak", why: "3 × the daily average (see the estimates)." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Daily users", assumption: "Given", result: "500,000,000" },
+    { quantity: "New photos", assumption: "100,000,000 a day ÷ 86,400 s", result: "≈ 1,160/s; peak 3 × ≈ 3,500/s" },
+    { quantity: "Feed opens", assumption: "500 M users × 10 a day ÷ 86,400 s", result: "≈ 58,000/s; peak ≈ 174,000/s" },
+    { quantity: "Read to write", assumption: "58,000 feed opens ÷ 1,160 posts", result: "≈ 50 : 1" },
+    { quantity: "Images served", assumption: "58,000 opens × 10 posts × 100 KB (640 px)", result: "580,000/s ≈ 58 GB/s ≈ 464 Gbit/s" },
+    { quantity: "Bytes per photo", assumption: "2 MB original + 10 + 30 + 100 + 250 KB sizes", result: "≈ 2.4 MB" },
+    { quantity: "Photo storage", assumption: "100 M × 2.4 MB", result: "240 TB a day ≈ 88 PB a year" },
+    { quantity: "Metadata", assumption: "100 M posts × 1 KB", result: "100 GB a day ≈ 37 TB a year" },
+    { quantity: "Feed appends (push)", assumption: "100 M posts × 200 followers ÷ 86,400 s", result: "≈ 231,000/s" },
+    { quantity: "One post by the largest account", assumption: "100 M followers × 8-byte id", result: "100 M appends, 800 MB, if pushed" },
+    { quantity: "Feed lists in memory", assumption: "500 M users × 500 ids × 8 bytes", result: "2 TB (≈ 4 TB with overhead)" },
+    { quantity: "Likes", assumption: "500 M users × 20 a day ÷ 86,400 s", result: "≈ 116,000/s" },
+  ]}
+  note="Photos are 99.96% of the bytes; feed reads are 50 × the writes."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 58,000 feed reads/s against 1,160 posts/s: 50 to 1; 580,000 image reads/s | Build feeds at write time; images from a CDN; posts from a cache |
+| D2 | Peak against average | 3 × the daily average; a celebrity post brings a burst of likes on one post | Size for 174,000 feed opens/s; a log absorbs fan-out bursts; batch hot counts |
+| D3 | Consistency per operation | Creating a post and following: strong for the author (read-your-writes); feeds seconds stale; counts 5 s stale | Post rows on a primary; feeds and counts eventual; the app shows its own post at once |
+| D4 | Latency target | Feed first page p99 200 ms (N1); images p95 200 ms (N3) | One list read and one batched hydrate per page; no joins at read time |
+| D5 | Durability | A photo or row is never lost once acknowledged; feeds and counts can be rebuilt | Replicated blob store and database; the feed cache is only a cache |
+| D6 | Ordering | Per author by time; the feed by rank, then time; no global order | Ids that sort by time; a cursor over a ranked snapshot |
+| D7 | Duplicates | A repeated post across pages is annoying; a double post or double like is harmful | Cursors and snapshots; an idempotency key on create; a unique key per like |
+| D8 | Data size and growth | 240 TB of photos a day against 100 GB of rows | Bytes in blob storage, rows in the database, never the other way |
+| D9 | Fan-out shape | 200 followers on average; 100,000,000 for the largest account | Push below 100,000 followers, pull and merge above |
+| D10 | Contention | Up to 10,000 likes a second on one celebrity post | No per-like update of one row: unique like rows, counts added in batches |
+| D11 | Geography | Users worldwide; one home region per user; EU data may have to stay in the EU | Metadata in the home region; images from the CDN everywhere; photos copied to a second region |
+| D12 | Availability and degradation | 99.95% for the feed; under stress drop ranking, then counts, then the big-account merge | Every stage of the feed read has a cheaper fallback |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/posts` | App | Create a post: caption and `Idempotency-Key`; returns `post_id` and a signed upload URL |
+| `PUT <signed upload URL>` | App | Send the photo to the blob store, through the nearest CDN edge |
+| `GET /v1/feed?cursor=…` | App | Open or scroll the home feed |
+| `GET /v1/users/{id}/posts?cursor=…` | App | Profile grid |
+| `PUT /v1/users/{id}/followers/me`, `DELETE` | App | Follow, unfollow |
+| `PUT /v1/posts/{id}/likes/me`, `DELETE` | App | Like, unlike |
+| `POST /v1/posts/{id}/comments` | App | Comment, with `Idempotency-Key` |
+| `DELETE /v1/posts/{id}` | Author | Delete a post |
+
+```http
+GET /v1/feed?limit=10&cursor=eyJzIjoiZjdhMSIsInAiOjEwfQ
+Authorization: Bearer <session>
+
+200 OK
+{ "posts": [ { "id": "232215124384528265", "author_id": "31341", "caption": "Sunrise",
+    "images": { "640": "https://img.example-cdn.net/p/232215124384528265/640.jpg" },
+    "like_count": 1204, "liked_by_me": false } ],
+  "next_cursor": "eyJzIjoiZjdhMSIsInAiOjIwfQ", "new_posts": 3 }
+```
+
+- **Idempotency:** creating a post or a comment takes an `Idempotency-Key`; a retry returns the first result. Likes and follows are `PUT`s on a resource named by the user, so repeating one writes nothing new.
+- **Pagination:** an opaque cursor on every list; never an offset (Deep dive 2). The feed cursor names a snapshot and a position; the grid cursor is the last post id.
+- **Ids are strings in JSON:** a 64-bit id is larger than 2⁵³, the biggest integer a JavaScript number holds exactly.
+- **Errors:** `404` a deleted post; `410` an expired feed cursor (start again from the top); `413` a photo over the size limit; `429` too many follows or likes a minute.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Posts, users, comments | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL), 8,192 logical shards on 64 servers | Small rows, strong writes, unique keys for retries, an index for the grid (D3, D7, D8) | Author's logical shard, carried in the post id | Strong on the primary | Wide-column store: no unique constraints or transactions for idempotency keys |
+| Likes | Same relational fleet | A unique (post, user) key removes double likes (D7) | Post's shard | Strong per row; counts eventual | A counter alone: cannot answer "did I like this" or drop a repeat |
+| Follow edges | Same relational fleet, two tables | Only one-hop lists, read by key (D9) | Follower; followee | `following` strong; `followers` seconds behind | Graph database: built for many-hop queries we never run |
+| Photos | Blob store (object storage) | 240 TB a day, written once, read by key (D5, D8) | Key: post id and size | Read-after-write for a new key | Photos as database values: 2.4 MB rows bloat replicas and backups |
+| Feed lists | In-memory store (<TechIcon id="oss/redis" /> Redis) | 174,000 reads/s inside 200 ms (D1, D4) | User id | Eventual; rebuilt on a miss (D5) | Wide-column table: a disk read on every open, for data we can rebuild |
+| Post objects, counts | In-memory cache (<TechIcon id="oss/redis" /> Redis) | 580,000 post reads/s (D1) | Post id | 5 s stale for counts | Read replicas: 580,000 queries/s on PostgreSQL |
+| Post events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Several readers, replay (D9) | Author id | Ordered per author | Work queue: one reader per message, no replay |
+| Resize jobs | Work queue (<TechIcon id="oss/rabbitmq" /> RabbitMQ, Amazon SQS) | Independent jobs, retried one by one | None | At least once | A log: one stuck photo holds up its whole partition |
+
+```sql
+-- In each logical shard: one PostgreSQL schema, insta_0000 … insta_8191
+CREATE TABLE posts (
+  id          bigint PRIMARY KEY DEFAULT next_id(), -- 41 bits time | 13 shard | 10 sequence
+  author_id   bigint NOT NULL,          -- shard = author_id % 8192
+  caption     text,
+  status      text NOT NULL,            -- 'pending' | 'ready' | 'deleted'
+  idem_key    text UNIQUE,              -- a retried create finds its post
+  like_count  bigint NOT NULL DEFAULT 0 -- added to in batches
+);
+CREATE INDEX posts_grid ON posts (author_id, id DESC);   -- profile grid, newest first
+
+CREATE TABLE likes (post_id bigint, user_id bigint, created_at timestamptz,
+  PRIMARY KEY (post_id, user_id));      -- on the post's shard; a second like is a no-op
+
+CREATE TABLE following (follower_id bigint, followee_id bigint,
+  PRIMARY KEY (follower_id, followee_id));   -- on the follower's shard
+CREATE TABLE followers (followee_id bigint, follower_id bigint,
+  PRIMARY KEY (followee_id, follower_id));   -- on the followee's shard
+```
+
+The caches and the blob store are keyed, not queried:
+
+```text
+feed:<user_id>        up to 500 post ids, newest first, trimmed on every append
+snap:<user_id>:<s>    the ranked ids of one feed session, expires after 30 minutes
+recent:<author_id>    the last 20 post ids of an account with over 100,000 followers
+post:<post_id>        author, caption, image keys, counts (refreshed every 5 s)
+o/<post_id>           the original photo; p/<post_id>/<150|320|640|1080>.jpg the sizes
+```
+
+- **Create:** insert into `posts` on the author's shard; `RETURNING id` gives the new id.
+- **Profile grid:** `WHERE author_id = ? AND id < :cursor ORDER BY id DESC LIMIT 12`, on one shard, from the index.
+- **Hydrate:** read posts by id from the cache; group the misses by the shard in their id bits, one query per shard.
+- **Fan-out:** read `followers` of the author in pages of 1,000 and append the post id to each `feed:<follower>`.
+- **Like:** insert into `likes` with `ON CONFLICT DO NOTHING`; only an inserted row adds 1 to the post's buffered count.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Upload a photo and a row (F1, F5)
+
+The smallest design: the post service stores the photo and writes one row about it.
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={1} caption="Step 1: the post service writes the photo to the blob store and a metadata row to the posts database." />
+
+- **Adds:** the app, a load balancer, the post service, the posts database, the blob store.
+- **Flow:**
+  1. The app sends the photo and caption to the post service.
+  2. The post service writes the photo to the blob store under a key, then inserts a row with the caption and the key.
+  3. The profile grid reads the author's rows, newest first.
+- **Why this and not that:** photo bytes go to a blob store, not a database column: 240 TB a day against 100 GB of rows (D8). Small rows keep each shard's working set in memory.
+- **The gap:** every photo crosses our servers: 1,160 × 2 MB ≈ 2.3 GB/s in, and every image read hits the blob store.
+
+<PremiumBreak />
+
+### Step 2: Direct upload, four sizes and a CDN (F1, N3)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={2} caption="Step 2: the app uploads with a signed URL through the CDN edge; resize workers write four sizes; the CDN serves every image." />
+
+- **Adds:** the **CDN** and the **resize workers** with their queue; the photo no longer passes through the post service.
+- **Flow:**
+  1. `POST /v1/posts` inserts a `pending` row and returns the id with a signed upload URL, valid for 15 minutes.
+  2. The app sends the photo to the nearest CDN edge, which forwards it to the blob store.
+  3. The blob store's "object created" event puts a job on the resize queue; a worker writes 150, 320, 640 and 1080 px sizes and marks the post `ready`.
+  4. The app loads images from the CDN; a miss fetches the size from the blob store once per edge.
+- **Why this and not that:** app servers now move 1 KB rows, not 2.3 GB/s of bytes (D8). A 640 px feed image is 100 KB instead of 2 MB: 20 × less to send (N3). Resizing takes seconds, so it runs after the response (D4).
+- **The gap:** one database will not hold 37 TB a year; once rows live on many shards, an auto-increment id repeats across them.
+
+### Step 3: Ids that sort by time and carry the shard (F1, F5)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={3} caption="Step 3: the posts database is split into logical shards, and each shard makes its own 64-bit ids on insert." />
+
+- **Adds:** no new box: 8,192 logical shards on 64 database servers, and an id function inside each shard.
+- **Flow:**
+  1. The post service picks the author's logical shard: `author_id % 8192`.
+  2. The insert runs on that shard; the database builds the id from the time, the shard number and a sequence, and returns it.
+  3. Any later read takes the shard from bits 22 to 10 of the id: no lookup table (Deep dive 1).
+- **Why this and not that:** logical shards move between servers as whole units, so growth never re-hashes rows (D8). Ids that sort by time let the grid and the feed order by id (D6). A UUID is twice the size and carries no shard; a separate id service is one more system to run.
+- **The gap:** nobody follows anybody yet.
+
+### Step 4: The follow graph (F2)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={4} caption="Step 4: the graph service stores each follow twice: under the follower and under the followee." />
+
+- **Adds:** the **graph service** and the **follow graph**: two edge tables on the same relational fleet.
+- **Flow:**
+  1. A follow writes `following(follower, followee)` on the follower's shard: the follower's own view is exact at once.
+  2. The reverse row `followers(followee, follower)` is written on the followee's shard through an outbox, a few seconds later.
+  3. Follower and following counts are added to the user rows in batches.
+- **Why this and not that:** "who do I follow" and "who follows X" are both one-hop lists read by key, so each lives on one shard (D9). A graph database earns its keep on many-hop queries, which this product never runs.
+- **The gap:** a feed built at read time asks 200 accounts for their posts on every open: 58,000 × 200 ≈ 11.6 million reads a second.
+
+### Step 5: Fan-out on write (F3, N1)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={5} caption="Step 5: each new post id is pushed into every follower's feed list; opening the feed is one list read and one batched hydrate." />
+
+- **Adds:** the **post log**, the **fan-out workers**, the **feed cache**, the **post cache** and the **feed service**.
+- **Flow:**
+  1. When a post turns `ready`, the post service puts a `post_published` event on the log, keyed by author.
+  2. Fan-out workers read the author's followers 1,000 at a time and append the id to each `feed:<follower>` list, trimmed to 500 ids.
+  3. Opening the feed reads up to 500 ids, then hydrates the first 10 posts from the post cache; misses go to the posts database, one query per shard.
+- **Why this and not that:** 231,000 appends a second at write time buy one list read per open instead of 200 (D1, N1). The lists hold ids only, 8 bytes each, so 500 million lists fit in 2 TB, and edits or deletes show because posts are read fresh (D8).
+- **The gap:** the largest account posts and the workers must make 100 million appends: 800 MB of writes, and followers wait minutes.
+
+### Step 6: Celebrities: merge at read time (F3, N2)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={6} caption="Step 6: accounts with more than 100,000 followers are not pushed; the feed service reads their recent posts and merges them in." />
+
+- **Adds:** a rule, not a box: accounts with more than 100,000 followers skip the fan-out; their last 20 post ids sit in `recent:<author>` in the post cache.
+- **Flow:**
+  1. A big account posts: one row, one event, one update of its recent list, no fan-out.
+  2. On open, the feed service reads the reader's list and the recent lists of the big accounts they follow, 3 on average.
+  3. It merges by id, drops duplicates and deleted posts, and passes the result on.
+- **Why this and not that:** push cost grows with followers, pull cost grows with the number of big accounts a reader follows (D9). At 100,000 the biggest push is 0.1 s of a 1,000,000-a-second fan-out fleet (Deep dive 2).
+- **The gap:** likes and comments; one celebrity post can draw 10,000 likes a second.
+
+### Step 7: Likes and counts (F4)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={7} caption="Step 7: a like is a unique row; counts are added to the post in batches, not one update per like." />
+
+- **Adds:** the **like service**.
+- **Flow:**
+  1. `PUT /likes/me` inserts `(post_id, user_id)` on the post's shard with `ON CONFLICT DO NOTHING`.
+  2. Only an inserted row adds 1 to an in-memory count for that post; each like-service instance writes `like_count = like_count + n` once a second.
+  3. The post cache picks up counts every 5 s.
+- **Why this and not that:** one `UPDATE` per like would queue 10,000 row locks a second on one post (D10); batching makes it one write per instance per second. The unique key makes a double tap harmless (D7); a count 5 s behind is fine (D3).
+- **The gap:** newest first buries the posts people care about, and paging a list that grows at the top repeats posts.
+
+### Step 8: Ranking and cursor pages (F3)
+
+<AnimatedDiagram spec="animated/instagram/architecture" step={8} caption="Step 8: the ranker orders about 500 candidates once per session; the feed is paged through that order with a cursor." />
+
+- **Adds:** the **ranker**; the feed call now carries a cursor.
+- **Flow:**
+  1. On the first page the feed service gathers about 500 candidates: the feed list, the big accounts' recent posts and the reader's own new posts.
+  2. The ranker scores them; the ordered ids are stored as `snap:<user>:<s>` for 30 minutes and page 1 is positions 0 to 9.
+  3. The next page reads positions 10 to 19 of the same snapshot; deleted posts are skipped and the page is refilled.
+  4. Posts that arrive later only raise a "new posts" count; pulling to refresh starts a new snapshot.
+- **Why this and not that:** a cursor into a fixed list never repeats or skips a post while new ones arrive (D7). Ranking once per session, not per page, keeps every later page to a cache read (N1).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/instagram/architecture" stepper caption="A photo-sharing feed: photos go straight to blob storage behind a CDN, ids carry their shard, ordinary posts are pushed into feeds and celebrities are merged at read time." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Phone and web app | Compress and upload photos, show the feed, show your own post at once |
+| **Edge** | Load balancer, CDN | Route API calls; take uploads in and send images out near the user |
+| **Feed core** | Feed service, ranker | Merge pushed and pulled ids, rank once per session, page with a cursor |
+| **Application services** | Post, like, graph services; resize workers | Create posts and ids, likes and batched counts, follow edges, four photo sizes |
+| **Async pipeline** | Post log, fan-out workers | Carry each new post to every follower's feed list |
+| **Storage** | Post cache, feed cache, posts database, follow graph, blob store | Hot posts and counts, feed lists, rows, edges, photo bytes |
+
+Opening the feed, step by step:
+
+1. The app calls `GET /v1/feed`; the load balancer routes it to a feed service instance.
+2. The feed service reads `feed:<user>` (up to 500 ids) and the recent lists of the 3 big accounts the user follows.
+3. It merges by id, drops duplicates, and the ranker orders the candidates; the order is saved as a snapshot.
+4. Positions 0 to 9 are hydrated from the post cache; the few misses go to the posts database, one query per shard.
+5. The response carries the posts with CDN image URLs and a cursor; the app loads the 640 px images from the nearest edge.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST over HTTPS, signed URLs for bytes
+
+- **Choice:** REST with JSON for every call; photo bytes go to a signed blob-store URL, never through the API.
+- **Why:** every action is a short request and response, and the API never touches 2.3 GB/s of photo bytes (D8). Cursors in the query string keep each feed page a plain `GET`.
+- **Why not GraphQL:** a good fit when many screens fetch different shapes; here the feed is one shape, and plain `GET`s are simpler to cache and debug. Revisit when the clients multiply.
+- **Why not gRPC:** fine between services, but browsers need a proxy for it, and the payloads are small JSON.
+- **Why not WebSockets for new posts:** 500 million open sockets to show a "new posts" count that the next `GET` can carry (D12).
+
+### Load balancer: layer 7
+
+- **Choice:** an HTTP (layer-7) load balancer that ends TLS, checks the session and routes by path (`/feed` to the feed service, `/posts` to the post service).
+- **Why:** every request is short HTTP, so path routing and health checks matter more than long-lived connections; the feed path can be scaled and shed apart from posting (D12).
+- **Why not layer 4:** it cannot route by path, and nothing here holds a socket open.
+- **Algorithm:** least outstanding requests, so a feed instance stuck on a slow shard gets fewer new requests.
+
+### CDN: images out, uploads in
+
+- **Choice:** a commercial CDN in front of the blob store; image URLs are immutable (`p/<post_id>/<size>.jpg`) and cached for a year; the signed upload also enters at the nearest edge.
+- **Why:** 580,000 image reads a second, about 464 Gbit/s, must come from near the user to meet 200 ms (D1, N3). An image never changes, so its cache hit rate is high; a delete purges four URLs.
+- **Why not serve from the blob store:** every read would cross to one region and pay origin egress; a reader on another continent waits on every image.
+- **Why not our own edge servers:** a multi-year build of sites and peering, worth it only when video bytes dominate; see [Design Netflix](/system-design-case-studies/case-studies/netflix) for that case.
+
+### Blob store: object storage
+
+- **Choice:** object storage (Amazon S3, Google Cloud Storage or an in-house equivalent), one key per original and per size, copied to a second region.
+- **Why:** photos are written once and read by key; the store replicates across zones and lets old photos move to a cheaper tier (D5, D8). 88 PB a year is a storage problem, not a database problem.
+- **Why not the database:** 2.4 MB values make replicas and backups move 240 TB a day, and push rows out of memory.
+- **Why not our own file servers (NFS, HDFS):** we would run replication, repair and capacity for 88 PB a year ourselves; HDFS suits large files read in bulk, not 580,000 small random reads a second.
+
+### Posts database: relational, sharded by author
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL: 8,192 logical shards (one schema each) on 64 servers, a primary and replicas per server; posts, comments, likes and follows all live here.
+- **Why:** rows are small and need strong writes, unique keys for retries and likes, and an index for the grid (D3, D7). The id function lives in the same database, so ids cost no extra service (D8).
+- **Why not a wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra):** it takes the write rate easily, but has no unique constraints, so idempotency keys and one-like-per-user need lightweight transactions on every write. A reasonable choice for the follow graph or feeds at much larger scale.
+- **Why not a managed key-value store (Amazon DynamoDB):** workable: posts by key, the grid by sort key, conditional writes for retries. We keep PostgreSQL so ids, unique keys and the grid index live in one place; revisit if running shards becomes the bottleneck.
+
+### Ids: 64-bit, made by each shard
+
+- **Choice:** 41 bits of milliseconds, 13 bits of logical shard, 10 bits of a per-shard sequence, built by a function in the database on insert.
+- **Why:** ids sort by time (D6), fit in a `bigint` and a Redis list entry (8 bytes, D8), and route to their shard with a shift and a mask.
+- **Why not auto-increment:** each shard would hand out the same numbers.
+- **Why not UUIDs:** 128 bits double every index and feed entry; random version 4 ids do not sort, and even time-ordered version 7 ids carry no shard.
+- **Why not a Snowflake-style id service:** the same idea, but one more service with its own coordination to run; the database already has a clock and a sequence.
+- **Why not a central ticket database:** every insert in the fleet waits on one server, a single point of failure.
+
+### Follow graph: two edge tables
+
+- **Choice:** `following` on the follower's shard and `followers` on the followee's shard, in the same PostgreSQL fleet.
+- **Why:** both questions are one-hop lists read by key, each from one shard (D9); a celebrity's 100 million `followers` rows are read in pages only by the fan-out workers, and not at all above 100,000.
+- **Why not one table with an index on followee:** the reverse lookup would scatter to all 8,192 shards.
+- **Why not a graph database:** its strength is many-hop traversal; we never ask for friends of friends.
+
+### Feed cache: Redis lists of ids
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, one list per user of up to 500 post ids, sharded by user id, with one replica.
+- **Why:** 174,000 list reads a second at peak in under a millisecond each (D1, N1); append-and-trim is one server-side command.
+- **Why not Memcached:** values are opaque blobs, so every append would be read, change, write back: 231,000 of them a second.
+- **Why not a wide-column table per user:** durable and cheaper per GB, but a disk read on every open, for data we can rebuild from the follow graph and the posts (D5). Revisit when 4 TB of memory costs more than the latency is worth.
+- **Inactive users:** lists expire after 30 days without an open; the next open rebuilds from the last 200 followed accounts.
+
+### Post cache: posts by id and recent lists
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis: post objects by id, counts refreshed every 5 s, and `recent:<author>` lists for big accounts.
+- **Why:** 580,000 post reads a second from memory (D1); the big-account lists need server-side lists, so one engine serves both.
+- **Why not database read replicas:** 580,000 queries a second, with replication lag we do not control.
+- **Hot posts:** a celebrity post read by millions is one hot key; feed instances keep it in local memory for 1 s, so each instance asks the cache once a second.
+
+### Post log: Kafka
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic `post_published`, keyed by author id.
+- **Why:** several readers need every post (fan-out, search indexing, notifications), each at its own pace, and a broken consumer can replay from where it stopped (D9). Keying by author keeps one author's posts in order.
+- **Why not a work queue:** each message goes to one consumer and is deleted; a second reader needs a second copy, and replay is gone.
+
+### Resize queue: a work queue
+
+- **Choice:** a work queue (<TechIcon id="oss/rabbitmq" /> RabbitMQ or Amazon SQS) with one job per photo, a 60 s visibility timeout and a dead-letter queue.
+- **Why:** jobs are independent; one slow or broken photo must not hold up others, and a job whose worker dies comes back after the timeout (D5).
+- **Why not Kafka:** a partition is read in order, so one stuck photo blocks every job behind it, and per-message retry needs extra topics.
+- **Why not resize in the request:** four sizes take seconds; the user would watch a spinner (D4).
+
+### Ranker: score once per session
+
+- **Choice:** a scoring service that orders about 500 candidates with a trained model, called once per feed session.
+- **Why:** ranking is what makes the first 10 posts worth opening the app for; once per session keeps later pages to a cache read (N1).
+- **Why not rank on every page:** scores would shift between pages, and positions with them: repeats and skips (D7).
+- **Degrade:** when the ranker is slow or down, serve the candidates newest first (D12).
+
+## Deep dives
+
+### The id: time, shard and sequence in 64 bits
+
+- **The goal:** an id that sorts by time, fits in 8 bytes and tells any service which shard holds the row, with no lookup table and no extra service.
+- **How:** each logical shard is a PostgreSQL schema with its own sequence; a function shifts the milliseconds left by 23 bits, puts the shard number in the next 13 and the sequence (mod 1,024) in the last 10.
+- **Routing:** `(id >> 10) & 8191` is the logical shard; a small map in code turns 8,192 logical shards into 64 servers, 128 each. Moving a logical shard means copying one schema and changing one map entry.
+- **Why time first:** sorting by id is sorting by creation time, so the grid, the feed lists and the chronological fallback all order by id (D6).
+
+<AnimatedDiagram spec="animated/instagram/id-bits" stepper caption="The id sorts by time and names its own shard: any service can find a post's database from the id alone." />
+
+<StepCards>
+  <StepCard n={1} title="41 bits of time">
+    Milliseconds since our epoch, 1 January 2026, from the database clock. 2⁴¹ ms is 69.7 years; as a signed 64-bit integer the id stays positive for 2⁴⁰ ms, 34.8 years.
+  </StepCard>
+  <StepCard n={2} title="13 bits of shard">
+    The author's logical shard, author id mod 8,192. Every post, comment and like on that author's content is made on, and routed back to, that shard.
+  </StepCard>
+  <StepCard n={3} title="10 bits of sequence">
+    The shard's own counter mod 1,024, so one shard can make 1,024 ids in one millisecond without a repeat.
+  </StepCard>
+  <StepCard n={4} title="One post id, and its route">
+    A post at 09:30 UTC on 17 November 2026 by author 31,341, with the sequence at 5,001, becomes 232,215,124,384,528,265. Shift and mask give shard 6,765, which lives on database 52 of 64.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Peak posting is 3,500 a second over 8,192 shards: about 0.4 a second per shard, against a ceiling of 1,024,000 a second per shard.
+- 13 bits allow up to 8,192 servers before a shard has to be split, 128 × today's 64.
+
+<Callout tone="red" title="What breaks">
+  A clock that steps backwards after a failover can repeat a time and sequence pair; the primary key rejects the second insert and the post service retries. Pick the epoch so the signed limit, 34.8 years, is far away.
+</Callout>
+
+### Hybrid fan-out, with cursors and deletes
+
+- **Push** (fan-out on write): each new post id goes into every follower's list. Reads are one list; writes grow with followers.
+- **Pull** (fan-out on read): the reader asks every followed account for recent posts. Writes are one row; reads grow with follows.
+- **Hybrid:** push for accounts with up to 100,000 followers, pull for the few above; the feed service merges both at read time.
+- **Cursors:** the first page stores a ranked snapshot of about 500 ids; every later page is a position in it, so a new post at the top never shifts a page.
+- **Deletes, edits, unfollows:** lists hold ids only and posts are read fresh, so an edit shows at once and a deleted post is skipped. Background jobs remove deleted and unfollowed ids; until then the feed service filters them.
+
+The pattern's figure shows the mechanism with an online shop's sellers and shoppers; here sellers are accounts and shoppers are readers.
+
+<AnimatedDiagram spec="animated/patterns/fanout-write-vs-read" stepper caption="Ordinary accounts are pushed into each follower's list at write time; the one huge account is pulled and merged when a reader opens the feed." />
+
+**How to read it:**
+
+- Steps 1 to 3 are push: one post, a queue, workers appending ids, then one list read per open.
+- Step 4 is the hybrid: the huge account writes once to a recent-posts store, merged at read time.
+
+Paging by offset breaks as soon as the list moves; a cursor does not.
+
+<AnimatedDiagram spec="animated/instagram/cursor-pages" stepper caption="An offset counts positions, so one new post on top repeats a post on page 2; a cursor names the last post seen, so inserts and deletes above it change nothing." />
+
+**How to read it:**
+
+- Row 2: one new post at the top pushes P7 from page 1 into page 2: the reader sees it twice.
+- Rows 3 and 4: the cursor starts after P7 whatever happens above it; a deleted post is skipped and the page is filled from the next id.
+
+**The numbers:**
+
+- Push for everyone: one post by the largest account is 100,000,000 appends; at 1,000,000 appends a second that is 100 s and 800 MB.
+- With a 100,000 threshold, the biggest push is 100,000 appends, 0.1 s; a reader following 3 big accounts adds 3 cache reads per open.
+- The snapshot is 500 ids × 8 bytes = 4 KB per active session.
+
+<Callout tone="red" title="What breaks">
+  A threshold that never changes: an account that crosses 100,000 followers while its old posts are already pushed is read both ways, so the merge must drop duplicate ids.
+</Callout>
+
+### The media path, and where data lives across regions
+
+- **Upload:** the app compresses the photo, creates the post, then sends the bytes with a signed URL; the URL is valid for 15 minutes and for one key.
+- **Sizes:** 150, 320, 640 and 1080 px, made after the upload by workers that write fixed keys, so a retry overwrites instead of adding.
+- **Serving:** immutable URLs, cached for a year at the edge; a delete purges four URLs and the origin answers `404` from then on.
+- **Home region:** each user's rows live in one home region (for example one in the US, one in the EU); other regions keep read replicas. Writes go home, so a quorum never crosses an ocean.
+- **Photos:** written in the uploader's home region and copied to a second region in the background; the CDN hides where the origin is.
+- **Old photos:** reads fall off fast after the first weeks, so photos older than 90 days move to a colder, cheaper storage tier.
+
+<AnimatedDiagram spec="animated/instagram/upload-path" stepper caption="The photo never passes through our servers, the resize runs after the response, and every retry lands on the same keys: a crash or a timeout never makes a second post." />
+
+<StepCards>
+  <StepCard n={1} title="Upload, then resize off the request path">
+    The app creates the post with key k7 and gets an id and a signed URL. It sends the 2 MB original to the blob store; the "object created" event becomes a resize job, and a worker writes four sizes and marks the post ready.
+  </StepCard>
+  <StepCard n={2} title="A worker dies mid-job">
+    The worker writes two sizes and dies without an ack. 60 s later the queue hands the same job to another worker, which writes all four sizes under the same keys; marking the post ready again changes nothing.
+  </StepCard>
+  <StepCard n={3} title="A retried create returns the same post">
+    The app's create call timed out and is sent again with key k7. The post service finds the key and returns the same id and URL, so no second post appears.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Sizes: 10 + 30 + 100 + 250 = 390 KB per photo; with the 2 MB original, 2.4 MB, so 240 TB a day and 88 PB a year.
+- Moving photos older than 90 days covers (365 − 90) ÷ 365 ≈ 75% of each year's bytes.
+- A 60 s visibility timeout is 20 × a 3 s resize: a slow worker is rarely mistaken for a dead one.
+
+<Callout tone="red" title="What breaks">
+  A pending post whose upload never arrives: the row waits forever. A sweeper marks `pending` rows older than one hour as abandoned and deletes their keys.
+</Callout>
+
+### Worked example: a photo from one phone to 200 feeds, and a celebrity's post
+
+1. 20:00:00.000: the app creates a post for author 31,341; shard 6,765 makes id 232,215,124,384,528,265 and the app shows the post at once.
+2. 20:00:02: the 2 MB original reaches the blob store through the nearest edge; at 20:00:05 the four sizes are written and the post turns `ready`.
+3. 20:00:05: `post_published` goes on the log; fan-out workers read 200 followers in one page and make 200 appends, about 0.2 ms of a 1,000,000-a-second fleet.
+4. 20:00:06: a follower opens the app: one list read, merge with 3 big accounts' recent lists, rank 500 candidates, hydrate 10 posts; the new photo is in the snapshot.
+5. 20:01:00: an account with 100,000,000 followers posts: one row, one event, one update of its recent list, no appends.
+6. 20:01:01 onwards: every follower who opens the app reads that post from the recent list; likes arrive at 10,000 a second and turn into about 50 batched count writes a second (one per like-service instance).
+
+**The numbers:** pushing the celebrity's post would have been 100,000,000 appends, 800 MB, and 100 s of the whole fan-out fleet; pulling it costs one cache read per open.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Feed fan-out | Push, pull, hybrid | Hybrid: push up to 100,000 followers, pull above | D1, D9, N1 | A merge at read time; two code paths | Few accounts are big, or most are |
+| Where photo bytes live | Database, blob store and CDN | Blob store and CDN | D8, D1, N3 | Two systems to keep in step (a row and its keys) | Never at this size |
+| Upload path | Through app servers, signed URL to the blob store | Signed URL through the CDN edge | D8, D2 | A `pending` state and a sweeper for abandoned uploads | Photos are tiny, or must be scanned before storing |
+| Ids | Auto-increment, UUID, id service, database-made shard ids | 64-bit ids made in each shard | D6, D8 | The 10-bit sequence caps a shard at 1,024 ids a millisecond | One shard needs more ids than that |
+| Pagination | Offset, cursor | Cursor over a ranked snapshot | D7, F3 | Snapshots in memory; a "new posts" refresh | Never for a feed |
+| Feed list contents | Whole posts, ids | Ids only | D8, D5 | A hydrate step on every page | Posts become immutable and tiny |
+| Like counts | `COUNT(*)`, one update per like, batched adds | Unique rows, batched adds | D10, D3, D7 | Counts up to 5 s behind | Counts must be exact for money |
+| Resize timing | In the request, after the response | After the response, from a queue | D4, D2 | The post shows to followers a few seconds later | Sizes must exist before the post is visible |
+| Feed order | Newest first, ranked | Ranked once per session, newest first as fallback | F3, D12 | A ranker to run; less predictable order | Users ask for a strictly chronological feed |
+| Regions | One region, a home region per user | Home region per user, CDN everywhere | D11, N5 | Cross-region reads are seconds stale | Residency rules forbid copies abroad |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | Feed lists, the 100,000 threshold | 50 reads per write, and one account with 100 million followers |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | 8,192 logical shards on 64 servers | 37 TB of rows a year; growth without re-hashing |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | Time, shard and sequence ids | Ids must sort by time and route without a lookup |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Photos and their sizes | 240 TB a day, written once, read by key |
+| [Caching](/system-design/patterns/caching) | CDN, post cache, feed cache | 580,000 image and post reads a second |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Celebrity posts, batched like counts | One post read by millions and liked 10,000 times a second |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Feed lists built from the post log | A read model kept ready before anyone asks |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | Post log, resize queue | Fan-out and resizing off the request path |
+| [Idempotency](/system-design/patterns/idempotency) | Create post, likes, resize jobs | Retries and redeliveries must not make a second post or like |
+| [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) (advanced) | Home region per user, photos copied | Users worldwide; quorums stay on one continent |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A text-post feed (Threads, Twitter) | Follow graph, hybrid fan-out, ids, cursors | No media pipeline; posts are small enough to cache whole; see [Design Twitter](/system-design-case-studies/case-studies/twitter) |
+| Short video in the same feed | Feed, ids, graph, CDN | Uploads are resumable and transcoded into segments; see [Design YouTube](/system-design-case-studies/case-studies/youtube) and [Design TikTok](/system-design-case-studies/case-studies/tiktok) |
+| A marketplace with image listings | Blob store, sizes, CDN, ids, cursors | No follow graph: the feed is search and ranking; listings change, so their images do too |
+| A private photo album app | Upload path, sizes, blob store | No fan-out; signed, short-lived image URLs for every read |
+
+## How real systems do it
+
+- **2011:** Instagram's stack post: Django app servers; users and photo metadata in sharded PostgreSQL; photos sent straight to Amazon S3 and served through Amazon CloudFront; Redis held the main feed; feed fan-out ran as background tasks in a Gearman queue.
+- **2012:** "Sharding & IDs at Instagram": several thousand logical shards, each a PostgreSQL schema, mapped to fewer servers; ids of 41 bits of milliseconds, 13 bits of logical shard and 10 bits of sequence, made by a PL/pgSQL function. UUIDs, a Snowflake service and ticket databases were considered and rejected.
+- **2017:** Instagram built Rocksandra, a RocksDB storage engine for Cassandra, and reported a 3 to 4 × reduction in p99 read latency in general, with more than 10 × in some cases (CASSANDRA-13474).
+- **2018:** a LISA18 talk summary on growing into Europe: one Cassandra cluster spanning US and EU data centres makes quorums cross the ocean, so the team was considering a US partition (replication factor 5) and an EU partition (3); TAO writes then went to a master region in the US.
+- **2023:** Explore ranking: each retrieval source picks hundreds of items from a pool of billions; a lightweight first-stage model, a heavier multi-task model on the 100 best first-stage candidates, then a final rerank with integrity rules.
+- **Where this design differs:** the posts do not say how big accounts are handled in the home feed, so the 100,000 threshold and the merge are this page's design. The real system also runs Cassandra and TAO beside PostgreSQL; this design keeps one relational fleet so the interview answer stays small.
+
+## Failure modes & pitfalls
+
+- **Photos in the database:** replicas and backups move 240 TB a day and rows fall out of memory; watch database size against row count; keep bytes in the blob store.
+- **Push for everyone:** one celebrity post queues 100 million appends and every other post waits behind it; watch fan-out lag in seconds; pull accounts above the threshold.
+- **Offset pagination:** readers see repeats and miss posts; count duplicate ids across a session's pages; use a cursor over a snapshot.
+- **Feed cache lost:** every open becomes a rebuild from the posts database; watch the feed-cache hit rate; rebuild lazily, newest 200 accounts first, and serve newest first meanwhile.
+- **Hot like counter:** one row takes 10,000 updates a second and its shard slows for everyone; watch lock waits per row; batch counts per instance.
+- **Abandoned uploads:** `pending` rows and orphan keys pile up; count `pending` rows older than an hour; sweep them.
+- **Cross-ocean quorums:** writes take 100 ms or more per round trip; watch write latency by region; keep each user's writes in their home region.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify photos against video, scale, follower spread, ranked or newest first; write F1 to F5 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 50 : 1 reads, 240 TB of photos a day, 231,000 appends a second, 100 million followers for the largest account.
+3. **Minutes 10 to 15:** API and data model: signed upload URLs, the posts table, two follow tables, the feed list.
+4. **Minutes 15 to 25:** Steps 1 to 4: bytes to the blob store, sizes and the CDN, ids with the shard, the follow graph.
+5. **Minutes 25 to 35:** Steps 5 to 8: push, the celebrity problem, likes, ranking and cursors.
+6. **Minutes 35 to 45:** one deep dive: the id, hybrid fan-out with cursors, or the media path across regions; say why for every choice.
+
+**What interviewers listen for:**
+
+- **Mid:** photos in a blob store behind a CDN, metadata in a database, a feed list per user, a cursor instead of an offset.
+- **Senior:** the push and pull arithmetic and a threshold, ids that carry their shard, resize off the request path, batched counts for hot posts.
+- **Staff:** snapshots for ranked pages, deletes and unfollows in pushed lists, home regions and quorums, what the feed drops first under stress.
+
+**Red flags:** photos stored in the database; uploads proxied through app servers; push for every account; offset pagination; one `UPDATE` per like on a hot post.
+
+## Further reading
+
+- [What Powers Instagram: Hundreds of Instances, Dozens of Technologies](https://instagram-engineering.com/what-powers-instagram-hundreds-of-instances-dozens-of-technologies-adf2e22da2ad) (Instagram Engineering, 2011)
+- [Sharding & IDs at Instagram](https://instagram-engineering.com/sharding-ids-at-instagram-1cf5a71e5a5c) (Instagram Engineering, 2012)
+- [CASSANDRA-13474: Cassandra pluggable storage engine](https://issues.apache.org/jira/browse/CASSANDRA-13474) (Apache Cassandra issue tracker, 2017)
+- [How Instagram is scaling its infrastructure across the ocean](https://www.usenix.org/blog/how-instagram-scaling-its-infrastructure-across-ocean) (USENIX, 2018)
+- [Scaling the Instagram Explore recommendations system](https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/) (Engineering at Meta, 2023)
+- Related pages: [Design Twitter](/system-design-case-studies/case-studies/twitter) · [Design YouTube](/system-design-case-studies/case-studies/youtube) · [Design TikTok](/system-design-case-studies/case-studies/tiktok) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why store photo metadata and the photos themselves in different places?" category="Concepts" level="Mid">
+  - Photos are 240 TB a day and rows 100 GB: 99.96% of the bytes are photos, written once and read by key.
+  - A blob store replicates and tiers those bytes cheaply, and a CDN serves them near the user.
+  - The database keeps small rows in memory for strong writes, unique keys and the grid index.
+  - Mixing them makes every replica and backup move the photos too.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which kind of storage would you use for the photos, and why?" category="Architecture" level="Mid">
+  - Object storage: write once, read by key, replicated across zones, with colder tiers for old photos.
+  - Immutable keys per size let the CDN cache each image for a year.
+  - Not a file system you run yourself: 88 PB a year of replication and repair to operate.
+  - Not the database: 2.4 MB values push rows out of memory.
+  </InterviewQuestion>
+  <InterviewQuestion question="Relational or key-value for posts and the follow graph?" category="Trade-offs" level="Senior">
+  - Relational, sharded by author: small rows that need unique keys (retries, one like per user) and an index for the grid.
+  - Two edge tables, one per direction, keep each follow query on one shard.
+  - A key-value or wide-column store takes the write rate easily but needs extra machinery for uniqueness.
+  - Revisit for the follow graph or the feed lists when they outgrow the relational fleet.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you generate post ids across thousands of shards?" category="Architecture" level="Senior">
+  - 64 bits: 41 of milliseconds, 13 of logical shard, 10 of a per-shard sequence, built by a function in the database.
+  - Ids sort by time, fit in a `bigint`, and give their shard with a shift and a mask: no lookup.
+  - No extra service to run, unlike a Snowflake-style id server; no single point, unlike a ticket database.
+  - A UUID doubles the size and carries no shard.
+  </InterviewQuestion>
+  <InterviewQuestion question="An account with 100 million followers posts. What does your system do?" category="Scaling" level="Senior">
+  - Push would be 100 million appends and 800 MB: 100 s of the whole fan-out fleet.
+  - Accounts above 100,000 followers are not pushed; their recent post ids sit in one cache list.
+  - Each reader's feed merges those lists with their pushed list at read time, a few extra cache reads.
+  - Dedupe by id, so an account that crossed the threshold is not shown twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why page the feed with a cursor instead of an offset?" category="Concepts" level="Mid">
+  - An offset counts positions; a new post on top shifts every position, so the reader sees a post twice.
+  - A cursor names where the reader is: a post id, or a position in a stored ranked snapshot.
+  - New posts wait for a refresh and a "new posts" count instead of moving the page.
+  - Offsets also make the database skip rows it has already read.
+  </InterviewQuestion>
+  <InterviewQuestion question="A post is deleted or edited while someone is scrolling. What do they see?" category="Failure modes" level="Senior">
+  - Feed lists hold ids only, and posts are hydrated at read time, so an edit shows on the next page.
+  - A deleted post is skipped during hydration and the page is filled from the next id.
+  - The delete event removes the id from lists in the background, and the CDN purges its four image URLs.
+  - The cursor is a position in the snapshot, so a removal never causes a repeat.
+  </InterviewQuestion>
+  <InterviewQuestion question="A celebrity post gets 10,000 likes a second. How do you count them?" category="Scaling" level="Senior">
+  - Insert a unique `(post_id, user_id)` row per like, so a double tap is a no-op.
+  - Do not update the post's count row per like: 10,000 row locks a second on one row.
+  - Add to an in-memory count per post and write `like_count + n` once a second per instance.
+  - Show counts from the cache, refreshed every 5 s; nobody can tell 1,204,551 from 1,204,560.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the author see their own post at once if feeds are eventual?" category="Trade-offs" level="Mid">
+  - The app shows the post from its local copy as soon as the create call returns.
+  - The feed service adds the reader's own posts of the last few minutes to the candidates.
+  - The post row is on the author's shard primary, so the profile grid reads it there for a few seconds.
+  - Followers see it within seconds, after fan-out: that lag is fine for them.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you extend this design to video?" category="Architecture" level="Senior">
+  - The feed, ids, follow graph and cursors stay the same: a video is a post with different media keys.
+  - Uploads become resumable chunks, because a video can be gigabytes on a mobile link.
+  - Resizing becomes transcoding into a ladder of bitrates and segments, a longer pipeline of retryable tasks.
+  - Playback switches bitrate as bandwidth changes, so the CDN serves segments, not one file.
+  </InterviewQuestion>
+</InterviewQuestions>
