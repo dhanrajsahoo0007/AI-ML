@@ -337,6 +337,9 @@ One or two sentences: what is designed and what makes it hard.
 - **Adds:** … · **Flow:** 1. … · **Why this and not that:** … (D1) · **The gap:** …
 <PremiumBreak />
 ## Final architecture    (hero with stepper, Group | Components | Responsibility, numbered walk-through)
+## Component choices and why
+### Message bus: a Kafka-style replicated log
+- **Choice:** … · **Why:** … (D5, D6) · **Why not a work queue:** … · **Why not Redis pub/sub:** …
 ## Deep dives            (three ### with a figure block each, then ### Worked example: …)
 ## Design decisions and why
 ## Patterns used

@@ -309,6 +309,89 @@ Buying two seats at the on-sale, step by step:
 4. `POST /v1/orders` with an idempotency key: authorise, claim and insert the order in one transaction, capture.
 5. The order on the stream updates the seat map and makes the ticket service send the tickets.
 
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST, with polling for the queue and the map
+
+- **Choice:** REST over HTTPS for every call; the queue status and the seat map are polled every few seconds.
+- **Why:** every action is a short request and response (hold, pay, list tickets), and the GETs can be cached at the edge (D1).
+- **Why not WebSockets for the waiting room:** 2,000,000 open sockets to show a number that changes every few seconds; polling with a `Retry-After` hint lets the server pace clients and costs nothing between polls (D2).
+- **Why not GraphQL:** the client needs a few fixed shapes, and queries sent as POST bodies are hard to cache at a CDN, which is where the map reads must land.
+- **Why not gRPC:** browsers cannot call it without a proxy, and nothing here needs streaming.
+- **Upgrade path:** for very large rooms, push seat-map changes with Server-Sent Events, one way, server to client.
+
+### CDN: the first line against the crowd
+
+- **Choice:** a CDN serves event pages, images, scripts and the venue's seat-map drawing; seat availability is cached there for 1 s.
+- **Why:** the refresh storm before 10:00 hits static pages, which the edge answers without touching our servers (D2, N4). A 1-second cache is allowed because the map may be 1 to 2 s stale (N3), so 75,000 reads/s become about one origin read per second per edge location.
+- **Why not serve from the origin:** 16,700 joins/s plus page loads would land on the same region as the booking path.
+- **Never cached:** holds, orders and anything with the fan's identity.
+
+### Waiting room: meter demand before it reaches us
+
+- **Choice:** a waiting room at the edge, built on the CDN's edge compute or bought as a service; queue positions in a sorted set in Redis.
+- **Why:** it turns a spike of about 700 × the average into a steady 500 fans/s, in a fair order, with an honest wait time (D2, N6).
+- **Why not autoscaling:** new servers take minutes, the spike takes seconds, and no number of web servers adds capacity to the hottest seat rows (D10).
+- **Why not rate limiting with `429` alone:** rejected fans refresh and retry, so the load stays and the order becomes luck; a queue gives every fan a place.
+- **Why a sorted set for positions:** inserts and rank lookups are logarithmic and the data lives an hour; the booking database never sees the crowd.
+
+### Load balancer: layer 7
+
+- **Choice:** an HTTP (layer-7) load balancer behind the gateway, routing by path (`/holds`, `/orders` to booking, `/events` to the event service) with health checks.
+- **Why:** every request is short HTTP, so there are no long-lived connections to pin, and path routing keeps the booking path separate from browsing (D12).
+- **Why not layer 4:** it cannot route by path; it fits long-lived sockets, which this design does not have.
+- **Algorithm:** least outstanding requests, so a slow booking node gets fewer new holds than a fast one.
+
+### API gateway: tokens and per-fan limits
+
+- **Choice:** authentication, a check of the waiting-room token's signature and expiry, and a per-fan limit on hold attempts.
+- **Why:** the token check needs no database call, so only admitted fans reach booking; the per-fan limit stops one script from spraying holds (D2, D10).
+- **Why not check tokens in the booking service:** rejected requests would already be inside the most protected tier.
+
+### Inventory database: relational (PostgreSQL, MySQL), sharded by event
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL, one row per seat, seats and orders in the same database, one shard per event (a big on-sale gets its own).
+- **Why:** a hold is a conditional update across up to 6 rows, all or nothing, and the claim must commit with the order (D3, D5, D10); 10 MB per event fits in memory, so one primary serves 1,500 conditional updates/s.
+- **Why not Cassandra:** its compare-and-set (lightweight transactions) runs consensus with several round trips per write, and it has no transaction that spans the seats and the order.
+- **Why not Redis as the system of record:** atomic and fast, but the order lives in another system and the two cannot commit together; a crash between them oversells or strands a seat.
+- **Why not DynamoDB or MongoDB:** both now offer conditional writes and transactions, so either could work; relational wins here for SQL reporting on orders, and because 10 MB per event needs no horizontally scaled store.
+
+### Seat-map cache: Redis, fed by the stream
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis holding one precomputed seat-map view per event, updated from the availability stream.
+- **Why:** 75,000 reads/s become single key reads, and the map is allowed to lag 1 to 2 s (D1, N3).
+- **Why not read replicas:** still 75,000 queries a second, with replication lag we do not control.
+- **Why not a copy in each server's memory:** possible, but thousands of copies to feed and warm; one shared view is simpler at this size.
+
+### Availability stream: Kafka, fed by change data capture
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `event_id`, filled by reading the inventory database's log (change data capture).
+- **Why change data capture:** the stream sees exactly what committed; if the booking service published after its commit, a crash in between would lose the change (the dual-write problem).
+- **Why Kafka:** several readers (the seat map, the ticket service, analytics) each need every change, in order per event, and the map can be rebuilt by replaying (D9).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is deleted; there is no replay.
+
+### Hold expiry: a sweeper, not a timer per hold
+
+- **Choice:** the hold condition treats an expired hold as free; a sweeper resets expired rows every few seconds and the change flows to the map.
+- **Why:** correctness never depends on the sweeper running on time; one batch query per event replaces 50,000 timers (D10).
+- **Why not a delayed message per hold:** 50,000 messages per show, and a lost one strands a seat until someone notices.
+- **Why not Redis key-expiry events:** they go out over pub/sub, which does not keep them for a listener that is down, and only when Redis actually deletes the key.
+
+### Payment: an external processor, authorise then capture
+
+- **Choice:** a card processor called with an idempotency key; authorise synchronously, capture after the claim.
+- **Why:** card data never touches our systems, which keeps us out of most card-security scope; the key makes retries safe (D7).
+- **Why not charge in one step:** an expired hold would mean a refund instead of a void (D5).
+
+### Ticket service: off the stream
+
+- **Choice:** issue tickets and send email or push from the confirmed order on the stream.
+- **Why:** issuing and email are slow and retryable; nobody waits on them, and they must not hold the claim transaction open (D4).
+- **Why not inside the claim transaction:** an email provider's timeout would hold seat rows locked.
+
 ## Deep dives
 
 ### Never double-sell

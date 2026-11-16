@@ -362,6 +362,98 @@ Sending a message, step by step:
 5. Online members get `new_message` from the chat server that holds their socket; their app replies with a delivered receipt.
 6. Offline members are handed to the **push service** (APNs, FCM); when they reconnect, the app calls `GET /v1/sync`.
 
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: a WebSocket for chat, REST for the rest
+
+- **Choice:** one WebSocket per device carries send, receive, receipts, typing and heartbeats; plain REST over HTTPS serves the inbox, history, groups, uploads and sync.
+- **Why:** the server must push a message the moment it arrives (D4, N1); one idle socket costs little battery and data (N7).
+- **Why not polling or long polling:** 100M devices asking every few seconds is billions of empty requests a day; long polling reopens a request after every message and every timeout. Keep long polling only as a fallback for networks that block sockets.
+- **Why not Server-Sent Events:** they only flow server to client; the app also sends on the hot path, so it would need a second channel.
+- **Why not MQTT:** a strong choice on mobile (see How real systems do it), but it needs its own broker and is awkward in a browser; a WebSocket serves the app and the web client with one protocol.
+- **Why REST for history, groups and uploads:** these are request and response, cacheable and paged by cursor; nothing there needs push, and REST is what every client and proxy understands.
+
+### Load balancer: layer 4 for sockets, layer 7 for REST
+
+- **Choice:** a layer-4 (TCP) load balancer in front of the chat servers; a layer-7 (HTTP) one, behind the API gateway, in front of the REST services.
+- **Why layer 4 for sockets:** a WebSocket lives for hours, and the balancer only has to pass bytes through; it keeps one TCP connection on one server for its whole life, so no sticky cookie is needed (N6).
+- **Why not layer 7 for sockets:** it would read every frame of 100M long-lived connections for no routing benefit; layer 7 earns its cost on REST, where it routes by path and retries a failed request.
+- **Algorithm:** least connections, because open connections, not requests, are the load on a chat server; round robin piles reconnect bursts unevenly.
+
+### Chat servers: stateful, sized by connections
+
+- **Choice:** a fleet that holds sockets and nothing durable: about 100K connections each, so about 1,000 servers (N6).
+- **Why:** a socket has to live on some machine; keeping these servers free of durable state means a dead one costs reconnects, never data.
+- **Why not a managed WebSocket service:** these bill per connection-minute; 100M always-on connections cost more than running the fleet (see the AWS section where the cloud view is on).
+
+### API gateway: on the REST path only
+
+- **Choice:** authentication, rate limiting and routing for every REST call.
+- **Why:** one place to check tokens and throttle abusive clients (N2).
+- **Why not on the socket path:** the chat server checks the token once when the socket opens; a gateway hop on every message would add latency for nothing (D4).
+
+### Session registry and presence: an in-memory key-value store (Redis)
+
+- **Choice:** keys with a TTL: `session:{user_id}` and `presence:{user_id}`, in their own cluster.
+- **Why:** 3.3M heartbeat writes/s, every value expires within a minute, and losing it is harmless because reconnects rebuild it (D3, D12).
+- **Why not the message database:** durable, replicated writes for data that is worthless after 60 s, competing with 230K message writes/s.
+- **Why not ZooKeeper or etcd:** they are built for small, strongly consistent configuration, not millions of writes a second.
+- **Why not broadcast to every chat server:** each of 1,000 servers would have to track where 100M users are.
+
+### Message bus: a Kafka-style replicated log
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, one topic keyed by `conversation_id`, three replicas, the ack sent after two have the message.
+- **Why:** order per key inside a partition (D6); acknowledged messages survive a broker loss (D5); the store writer and the fan-out workers each read every message at their own pace and can replay after a bug (D2).
+- **Why not a work queue (RabbitMQ, SQS):** a queue hands each message to one consumer and deletes it; we need two consumers reading the same messages in order, plus replay.
+- **Why not Redis pub/sub:** delivery is at most once and nothing is kept for a subscriber that is down, so an acked message could vanish (D5).
+- **Why not write to the database and fan out from it:** that is the Step 4 gap: a slow store or worker loses or reorders messages.
+
+### Message store: a wide-column database (Cassandra, HBase)
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra-style wide-column store; partition `(conversation_id, bucket)`, rows clustered by `seq`.
+- **Why:** 230K writes/s on average and 4.4 PB a year (D1, D8); log-structured storage turns writes into sequential appends; one partition read returns a page of a conversation already in order; capacity grows by adding nodes.
+- **Why not sharded PostgreSQL or MySQL:** it can work, but you build sharding, resharding and failover yourself, and B-tree pages split under this insert rate; a log-structured engine under MySQL closes much of that gap (see How real systems do it).
+- **Why not MongoDB:** documents give nothing extra for append-only rows, and ordering inside a partition is native to wide-column tables.
+- **Why not DynamoDB:** a fine managed equivalent (the AWS section uses it); the generic design names the store type, not the vendor.
+
+### Metadata: a relational database (PostgreSQL)
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL for users, conversations, members and media records, with read replicas.
+- **Why:** small and relational: adding a member touches several rows in one transaction, and support needs ad hoc queries (D3).
+- **Why not the wide-column store:** no joins, no multi-row transactions; membership changes would need hand-built consistency.
+
+### Cache: member lists and hot conversations (Redis)
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, cache-aside: a conversation's member list, the last 50 messages of recently opened chats, inbox previews.
+- **Why:** fan-out reads the member list for every group message, and membership rarely changes, so nearly every read is a hit (D1, D9).
+- **Why not cache all messages:** a message is read about once per device; caching every one buys memory, not speed.
+- **Keeping it right:** a membership change deletes the cached list; the next read refills it from the metadata database.
+
+### Blob store and CDN: media off the chat path
+
+- **Choice:** an object store for photos, video and files, uploaded with pre-signed URLs; a CDN in front for downloads, with short-lived signed URLs.
+- **Why a blob store:** 200 TB a day of large, immutable files (D8); object storage is cheap per gigabyte, durable and serves byte ranges.
+- **Why not the message database:** megabytes per row bloat partitions and are copied to every replica.
+- **Why a CDN:** a photo in a 200-member group is fetched up to 200 times, often from the same region; the edge serves the repeats close to users and keeps them off the origin.
+- **Why not serve straight from the blob store:** every view crosses to the origin region, which is slower and pays egress each time.
+
+### Push: APNs and FCM
+
+- **Choice:** the platform push services, called by our push service.
+- **Why:** they are the only way to wake an app in the background on iOS and Android (F7).
+- **Why not keep the socket open in the background:** the phone's operating system suspends it.
+
+### Message ids: Snowflake-style 64-bit ids
+
+- **Choice:** time-sortable 64-bit ids made on each chat server from time, server id and a counter.
+- **Why:** unique across 1,000 servers with no coordination at 700K/s (D2); roughly time-ordered for inbox sorting.
+- **Why not UUIDv4:** 128 bits and random, so no time order.
+- **Why not a database sequence:** one counter for 700K/s is a bottleneck.
+- Order inside a conversation comes from `seq`, not from this id (Deep dive 1).
+
 <CloudOnly>
 
 ## Running it on AWS

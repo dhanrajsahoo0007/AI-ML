@@ -27,6 +27,7 @@ The H2 titles are exact (the guard compares them). Every section is bullets, num
 | 7 | `Data model` | The store-choice table (below), one `sql` block per store with partition and clustering keys commented, the access patterns each table serves |
 | 8 | `Building the architecture, step by step` | `### Step n: <title> (<requirement ids>)`, 5–8 steps. Each: the hero at that step, then **Adds**, **Flow** (numbered), **Why this and not that**, **The gap**. `<PremiumBreak />` after Step 1 |
 | 9 | `Final architecture` | The hero with `stepper`; a `Group \| Components \| Responsibility` table; a numbered walk-through of the main request |
+| 9a | `Component choices and why` | One `###` per building block in the final diagram (API style, load balancer, CDN, cache, each database, message bus, blob store, push, ids…), 6 or more. Each has `- **Choice:**` (the product type, and an example with its `<TechIcon>`), `- **Why:**` with driver and requirement ids, and one `- **Why not <alternative>:**` bullet per rejected option. Real-company facts stay in "How real systems do it" |
 | | `Running it on AWS` | Optional, Messenger only (new pages do not get one), inside `<CloudOnly>` |
 | 10 | `Deep dives` | The three hardest problems, one `###` each with its own sequence or layout figure, then `### Worked example: …` with computed numbers |
 | 11 | `Design decisions and why` | The design-decisions table (below), 7–10 rows |

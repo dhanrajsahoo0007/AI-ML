@@ -203,6 +203,7 @@ describe("system-design case studies: interview-grade format", () => {
     "Data model",
     "Building the architecture, step by step",
     "Final architecture",
+    "Component choices and why",
     "Deep dives",
     "Design decisions and why",
     "Patterns used",
@@ -257,6 +258,21 @@ describe("system-design case studies: interview-grade format", () => {
       if (JSON.stringify(drivers) !== JSON.stringify(want)) violations.push(`${f}: drivers are ${drivers.join(",")}`);
       const decisions = tableRows(section(text, "Design decisions and why")).length;
       if (decisions < 7) violations.push(`${f}: ${decisions} design decisions (need 7+)`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("justifies every component: 6+ subsections, each with a choice, a why and a why-not", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const parts = section(text, "Component choices and why").split("\n### ").slice(1);
+      if (parts.length < 6) violations.push(`${f}: ${parts.length} component subsections (need 6+)`);
+      for (const p of parts) {
+        const title = p.split("\n")[0];
+        if (!p.includes("- **Choice:**")) violations.push(`${f}: "${title}" has no Choice bullet`);
+        if (!/- \*\*Why/.test(p)) violations.push(`${f}: "${title}" has no Why bullet`);
+        if (!p.includes("- **Why not")) violations.push(`${f}: "${title}" has no Why not bullet`);
+      }
     }
     expect(violations).toEqual([]);
   });
