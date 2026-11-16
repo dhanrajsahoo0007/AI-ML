@@ -1,12 +1,632 @@
 ---
 title: "Design Zillow"
-description: "Property listings, geo search and price estimates."
+description: "Map search over listings with many filters, a fresh index fed by listing feeds, and alerts when a new home matches a saved search."
 logo: systems/zillow
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a home search site: buyers pan a map with filters, open a listing with its photos, and save a search to hear about new homes.
+The hard parts are answering a map pan with ten filters in under 300 ms, keeping the index fresh from many messy feeds, and matching each new listing against millions of saved searches.
 
-**What it will cover:** property listings, geo search and price estimates.
+- Interviewers use this question to see whether you pick a search engine for a read-heavy, many-filter geo query, keep it as a rebuildable copy of one system of record, and turn alerts around so the listing finds the searches.
 
-**Patterns used:** [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing) · [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a home search site like Zillow. Buyers search listings on a map with filters, and get an alert when a new listing matches a saved search."
+  level="Senior"
+  minutes={45}
+  bankId="design-proximity"
+  tests={[
+    "A geo query combined with many attribute filters, fast",
+    "Keeping a search index fresh from external feeds without losing or reordering updates",
+    "Matching one new item against millions of stored queries",
+    "Saying why for every store, cache and queue",
+  ]}
+  clarify={[
+    { q: "How many listings, and which ones?", a: "2,000,000 active for sale or rent, plus 3,000,000 sold in the last two years: 5,000,000 searchable homes." },
+    { q: "Where do listings come from?", a: "Feeds from listing services and brokers every few minutes, plus edits by agents." },
+    { q: "How fresh must search be?", a: "A change is searchable within 5 minutes; a few minutes stale is fine." },
+    { q: "How fast must the map be?", a: "A pan or zoom answers in under 300 ms at p99." },
+    { q: "How fast must an alert be?", a: "Instant alerts within 10 minutes; others go in a daily digest." },
+    { q: "Do we draw the base map?", a: "No: base map tiles come from a map provider; we draw pins and counts on top." },
+  ]}
+  outOfScope={["The price-estimate model", "Mortgages", "Agent messaging", "Base map tiles"]}
+/>
+
+## Overview
+
+- Listings land in **one relational primary database**, the system of record, through an **ingest service** that deduplicates and normalises feeds and keeps only the newest version of each listing.
+- **Change data capture** puts every committed change on a **change log**; an **indexer** writes denormalised listing documents into a **search engine** with geo and attribute filters.
+- A map pan is **one search query**: a bounding box plus filters; zoomed out, it returns **counts per cell** instead of pins.
+- A **viewport cache** keyed by map tile and filters answers repeated areas; only the new tiles after a pan reach the index.
+- Photos live in a **blob store** behind a **CDN**: they are 12,000 times the bytes of the index.
+- Saved searches are stored as **queries in a query index**; each new listing is **percolated** against them, so alerts cost one match per listing, not one search per saved search.
+
+<Numbers
+  items={[
+    { value: "660:1", label: "reads to writes", hint: "2,300 searches/s, 3.5 changes/s" },
+    { value: "7,000/s", label: "map searches at peak", hint: "3 × the average" },
+    { value: "25 GB", label: "the whole search index", hint: "against 300 TB of photos" },
+    { value: "10,000,000", label: "saved searches to match", hint: "100 matches per new listing" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Search by map viewport and filters", notes: "Price, beds, baths, type, status; pins when zoomed in, counts per area when zoomed out, and a sorted list." },
+    { id: "F2", requirement: "Listing page with photos", notes: "Details, price history and 30 photos on average." },
+    { id: "F3", requirement: "Listings from feeds and agents", notes: "Create, update and remove; the same home may arrive from two sources." },
+    { id: "F4", requirement: "Saved searches and alerts", notes: "Instant (push or email) or a daily digest; each listing at most once per search." },
+  ]}
+/>
+
+- Out of scope: the price-estimate model, mortgages, agent messaging, drawing the base map.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Map latency", target: "p99 under 300 ms for a pan or zoom; under 100 ms in the search engine", why: "Buyers drag the map continuously." },
+    { id: "N2", property: "Index freshness", target: "A listing change searchable within 5 minutes (p99)", why: "A sold home shown for an hour sends buyers to a dead listing." },
+    { id: "N3", property: "Alert latency", target: "Instant alerts within 10 minutes; never twice per search and listing", why: "Good homes go fast; repeats are spam." },
+    { id: "N4", property: "Availability", target: "99.95% for search and listing pages", why: "Search is the product; ingest may pause for an hour without loss." },
+    { id: "N5", property: "Durability", target: "0 accepted listing changes lost; photos kept for the listing's life", why: "Feeds do not always resend old changes." },
+    { id: "N6", property: "Scale", target: "7,000 searches/s at peak over 5,000,000 homes", why: "Evenings and weekends are 3 × the average." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Map searches", assumption: "20,000,000 daily buyers × 10 pans or zooms", result: "200,000,000/day ≈ 2,300/s; peak 3 × ≈ 7,000/s" },
+    { quantity: "Listing page views", assumption: "20,000,000 × 5 pages", result: "100,000,000/day ≈ 1,160/s; peak ≈ 3,500/s" },
+    { quantity: "Listing changes", assumption: "50,000 new + 250,000 updates a day", result: "300,000/day ≈ 3.5/s; a feed burst ≈ 500/s for a minute" },
+    { quantity: "Read to write", assumption: "2,300 searches/s ÷ 3.5 changes/s", result: "≈ 660 to 1 on average" },
+    { quantity: "Search index", assumption: "5,000,000 homes × 5 KB a document", result: "25 GB: fits in memory on one node" },
+    { quantity: "Primary database", assumption: "5,000,000 homes × 10 KB with price history + 10,000,000 saved searches × 1 KB", result: "50 GB + 10 GB = 60 GB" },
+    { quantity: "Photos stored", assumption: "30 photos × 2 MB in all sizes × 5,000,000 homes", result: "300 TB, growing 50,000 × 60 MB = 3 TB/day" },
+    { quantity: "Photo traffic", assumption: "200 M searches × 20 thumbnails × 40 KB + 100 M pages × 10 × 300 KB", result: "460 TB/day ≈ 43 Gbit/s; peak ≈ 130 Gbit/s" },
+    { quantity: "Alert matches", assumption: "100,000 new listings and price drops × 100 matches each", result: "10,000,000/day ≈ 116/s" },
+    { quantity: "Re-running saved searches", assumption: "10,000,000 searches every 15 minutes ÷ 900 s", result: "≈ 11,100 queries/s: more than all buyers at peak" },
+    { quantity: "Index load after the cache", assumption: "7,000/s × 50% misses", result: "3,500 queries/s; at an assumed 600/s a node, 6 nodes, run 8" },
+  ]}
+  note="The data is small; the reads, the filters and the photos are the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | About 660 searches for every listing change | A read-optimised search index, fed asynchronously; caches in front |
+| D2 | Peak against average | Searches 3 × at evening peaks; feeds arrive in bursts of about 500 changes/s | Size the index for the peak; a log absorbs feed bursts |
+| D3 | Consistency per operation | Search may lag 5 minutes; the agent who edits sees the edit at once; alerts at least once | Search from an eventual copy; the listing page for the editor reads the primary |
+| D4 | Latency target | Map pan p99 300 ms, 100 ms in the engine (N1) | One query per pan, counts when zoomed out, cache by tile |
+| D5 | Durability | An accepted change is never lost; the index can be rebuilt | The primary database is the only store that needs backups |
+| D6 | Ordering | Per listing: a newer version must win; no global order | Version every change; the log is keyed by listing |
+| D7 | Duplicates | One home from two feeds is confusing; a repeated alert is annoying; a replayed update must be harmless | Dedup on ingest, versioned writes, a sent table for alerts |
+| D8 | Data size and growth | Index 25 GB; photos 300 TB, plus 3 TB/day | Photos in a blob store behind a CDN; the index stays in memory |
+| D9 | Fan-out shape | One new listing matches 100 of 10,000,000 saved searches | Reverse matching: store queries, match the listing |
+| D10 | Contention | Not a driver here: one source owns a listing, which changes a few times a month | No locks; a conditional upsert by version is enough |
+| D11 | Geography | One country, one home region with a standby; buyers nationwide | CDN edges for photos and scripts; no residency rule |
+| D12 | Availability and degradation | 99.95% for search (N4) | Delay digests first, then serve older cached tiles, then coarser counts; never the listing page |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/search` | Buyer | Every pan or zoom, debounced 300 ms; bounding box, zoom and filters |
+| `GET /v1/listings/{id}` | Buyer | The listing page; photos come from the CDN by URL |
+| `POST /v1/saved-searches` | Buyer | Save the current area and filters with `instant` or `daily` |
+| `DELETE /v1/saved-searches/{id}` | Buyer | Stop the alerts |
+| `PUT /v1/sources/{source}/listings/{source_id}` | Feed adapter, agent tool | Create or update, with the source's version |
+| Event `listing.changed` | Change log, from the primary DB | Every committed listing or saved-search change |
+| Event `alert.matched` | Indexer, on the change log | One per (saved search, listing) match |
+
+```http
+GET /v1/search?bbox=-122.52,37.70,-122.35,37.81&zoom=13
+    &status=for_sale&price_max=600000&beds_min=3&sort=newest
+
+200 OK  { "mode": "pins", "total": 450,
+          "pins": [{ "id": 912, "lat": 37.761, "lng": -122.431, "price": 480000 }],
+          "list": { "items": [ … 40 listings … ], "cursor": "c_2" } }
+
+GET /v1/search?bbox=-123.2,37.2,-121.8,38.3&zoom=11&status=for_sale&price_max=600000&beds_min=3
+200 OK  { "mode": "counts", "total": 1800,
+          "cells": [{ "key": "13/1310/3166", "lat": 37.77, "lng": -122.42, "count": 420 }] }
+```
+
+- **Idempotency:** `PUT` carries `source_version`; the same or an older version changes nothing, so a feed can resend a whole file safely.
+- **Pagination:** the list panel pages by cursor; the map never pages: it switches to counts above 500 matches.
+- **Errors:** `400` an unknown filter or a box too large for the zoom; `404` a removed listing (the page shows "off market" from the primary); `409` never: stale writes are ignored, not errors.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Listings, price history | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | System of record; versioned upserts and joins (D3, D5, D6) | `listing_id` (one primary: 60 GB in all) | Strong | A document store: no constraint stops two sources creating one home twice |
+| Saved searches | Same relational database | Small (10 GB), owned by users, changes flow through the same log (D5) | `user_id` | Strong | Only in the query index: a mapping change would lose them |
+| Search documents | Search engine (<TechIcon id="oss/elasticsearch" /> Elasticsearch or OpenSearch) | Geo filter + 10 attribute filters + counts per cell in one query (D1, D4) | Hash of `listing_id`, 5 shards | Eventual, under 5 min | PostGIS on read replicas: geo is fine, but per-cell counts across many filters at 3,500/s strain it |
+| Stored queries | Search engine percolator index | Match one listing against millions of queries (D9) | `search_id` | Eventual | Re-running every saved search: 11,100 queries/s |
+| Viewport results | In-memory store (<TechIcon id="oss/redis" /> Redis) | Repeated areas and filters (D1, D4) | `(zoom, x, y, filter hash)` | 60 s stale | Caching whole responses at the CDN: a 1-pixel pan is a new URL |
+| Change log | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Ordered per listing, replayable, many readers (D6, D7) | `listing_id` | Ordered per key | A work queue: no replay for a rebuild |
+| Photos | Blob store (S3, GCS, Azure Blob) | 300 TB, write once, read through the CDN (D8) | Object key by photo hash | Read after write | Database BLOBs: 300 TB of backups for data that never changes |
+| Alerts sent | Relational table (same database) | One row per (search, listing) blocks repeats (D7) | `search_id` | Strong | No record: every replay re-alerts |
+
+```sql
+CREATE TABLE listings (
+  listing_id     bigint PRIMARY KEY,
+  source         text, source_id text,      -- 'mls-ca-7', 'A12-993'
+  source_version bigint,                    -- from the feed; newer wins
+  parcel_id      text,                      -- dedup across sources
+  lat double precision, lng double precision,
+  status text, price int, beds int, baths numeric, sqft int, type text,
+  UNIQUE (source, source_id)
+);
+CREATE TABLE saved_searches (
+  search_id bigint PRIMARY KEY, user_id bigint,
+  bbox box, filters jsonb, frequency text,  -- 'instant' | 'daily'
+  tiles text[]                              -- zoom-12 tiles the area covers
+);
+CREATE TABLE alerts_sent (search_id bigint, listing_id bigint, sent_at timestamptz,
+  PRIMARY KEY (search_id, listing_id));
+```
+
+- **Upsert:** `INSERT … ON CONFLICT (source, source_id) DO UPDATE … WHERE listings.source_version < EXCLUDED.source_version`; an older version changes 0 rows.
+- **Listing page:** one row by `listing_id` from a read replica; the agent who made an edit reads the primary.
+- **Search:** never touches this database; the search engine holds one denormalised document per home (address, point, price, beds, status, first photo URL, school ids).
+- **Alerts:** insert into `alerts_sent` before sending; a duplicate key means it was already sent.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: A listing store and page (F2)
+
+The smallest design: a buyer opens a listing, and a first search runs on the same database.
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={1} caption="Step 1: the listing service reads listings from the primary database; a first search is a latitude and longitude range query on the same rows." />
+
+- **Adds:** the API gateway, the listing service and the primary database.
+- **Flow:**
+  1. The buyer opens a listing; the listing service reads one row by id.
+  2. A search runs `WHERE lat BETWEEN … AND lng BETWEEN … AND price < … AND beds >= …` on the same table.
+- **Why this and not that:** a relational row per listing because ingest needs versioned upserts and the page needs joins (D3, D5).
+- **The gap:** a B-tree index helps one range at a time; a box on two columns plus ten filters and per-area counts scans thousands of rows per pan, on the system of record (D1, D4).
+
+<PremiumBreak />
+
+### Step 2: Search in a search engine (F1)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={2} caption="Step 2: the search service sends the viewport and filters to a search index, filled by a nightly copy of the listings." />
+
+- **Adds:** the **search service** and the **search index**, filled by a nightly copy.
+- **Flow:**
+  1. The buyer's pan sends the bounding box, zoom and filters to the search service.
+  2. The search service runs one query: a geo bounding-box filter and the attribute filters, sorted for the list.
+  3. The listing page still reads the primary database.
+- **Why this and not that:** a search engine keeps a geo index and an inverted index per attribute, and intersects them in one pass (D1, D4); the primary stays the system of record (D5).
+- **The gap:** a nightly copy means a home sold this morning shows as for sale until tomorrow (N2).
+
+### Step 3: Ingest from listing feeds (F3, N2)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={3} caption="Step 3: feeds reach the ingest service, which upserts the primary database; change data capture puts each change on the change log, and the indexer updates the search index by version." />
+
+- **Adds:** listing feeds, the **ingest service**, the **change log** and the **indexer**; the nightly copy goes away.
+- **Flow:**
+  1. Feed files arrive every few minutes; ingest normalises addresses, maps fields to one schema and finds the home by parcel id.
+  2. Ingest upserts each listing only if its source version is newer.
+  3. Change data capture reads the database's log and puts each committed change on the change log, keyed by `listing_id`.
+  4. The indexer builds the document and writes it with the version as an external version; the index refreshes every second.
+- **Why this and not that:** change data capture sees exactly what committed, so no change is lost between the database and the index (D5); the version makes late and replayed updates harmless (D6, D7). See Deep dive 2.
+- **The gap:** zoomed out over a metro area, 1,800 matches cannot all be pins.
+
+### Step 4: Counts per cell when zoomed out (F1, N1)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={4} caption="Step 4: the same query returns pins when 500 or fewer homes match, and counts per map cell when more do." />
+
+- **Adds:** no new box: the search query gains a grid aggregation.
+- **Flow:**
+  1. The query counts matches first (the engine returns the total with the hits).
+  2. 500 or fewer: return pins. More: return counts per cell two zoom levels finer than the map, about 250 cells.
+- **Why this and not that:** 5,800 pins at zoom 9 is megabytes of JSON and an unreadable map; counts per cell are a few kilobytes and fit the 300 ms budget (D4). The engine's tile grid aggregation computes them over the already-filtered matches.
+- **The gap:** 30 photos a listing and 20 thumbnails a search are 43 Gbit/s on average.
+
+### Step 5: Photos behind a CDN (F2)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={5} caption="Step 5: ingest resizes photos into the photo store; buyers load them from the CDN, which pulls from the store on a miss." />
+
+- **Adds:** the **photo store** and the **CDN**.
+- **Flow:**
+  1. Ingest downloads each new photo, resizes it into four sizes and writes them under a key made from the photo's hash.
+  2. Listing documents carry photo URLs; buyers fetch them from the CDN, which pulls from the store on a miss.
+- **Why this and not that:** photos are 300 TB and never change once written, so a hash-named object is cached forever (D8); the origin sees only first views.
+- **The gap:** buyers must come back and search again to find new homes.
+
+### Step 6: Saved-search alerts (F4, N3)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={6} caption="Step 6: saved searches flow through the change log into a query index; the indexer matches each new listing against them, and the saved-search service sends the alerts." />
+
+- **Adds:** the **saved-search service** and the **query index**.
+- **Flow:**
+  1. The buyer saves an area and filters; the row goes into the primary database and, through the change log, into the query index as a stored query.
+  2. Each new listing or price drop on the log is percolated: the query index returns the saved searches it matches.
+  3. Matches go back on the log; the saved-search service checks `alerts_sent`, then pushes now or queues for the digest.
+- **Why this and not that:** re-running 10,000,000 saved searches every 15 minutes is 11,100 queries/s and still 15 minutes late; percolating 100,000 events a day is about 1 a second (D9, N3). See Deep dive 3.
+- **The gap:** 7,000 searches/s at peak, many for the same city and default filters, all reach the index.
+
+### Step 7: Cache popular viewports (N1, N4)
+
+<AnimatedDiagram spec="animated/zillow/architecture" step={7} caption="Step 7: the search service reads per-tile results from the viewport cache first; only the missing tiles reach the search index." />
+
+- **Adds:** the **viewport cache**.
+- **Flow:**
+  1. The search service snaps the viewport to map tiles and reads each `(zoom, x, y, filter hash)` key with one multi-get.
+  2. Missing tiles become one query for their bounding box; the results are split by tile and cached for 60 s.
+- **Why this and not that:** tiles make neighbouring pans share keys, so a pan costs only its new edge (D1, D4); 60 s is far inside the 5-minute freshness target (N2).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/zillow/architecture" stepper caption="Home search: listings flow from feeds through one primary database and a change log into a search index; map queries hit a cache, then the index; saved searches are matched as each listing arrives." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Buyer's browser or app; listing feeds (external) | Pan, filter, save; send listing files |
+| **Edge** | API gateway, CDN | Route and authenticate; serve photos and scripts |
+| **Search core** | Search service | Viewport and filters to pins or counts, through the cache |
+| **Application services** | Listing, ingest and saved-search services | Listing pages; normalise and dedup feeds; save searches and send alerts |
+| **Async pipeline** | Change log, indexer | Carry every committed change; keep the search and query indexes current |
+| **Storage** | Primary DB, search index, query index, viewport cache, photo store | System of record; read copies; photos |
+
+A buyer pans east over a city, step by step:
+
+1. The app waits 300 ms after the drag stops, then sends `GET /v1/search` with the box, zoom 13 and three filters.
+2. The search service snaps the box to 30 tiles and reads them from the cache: 20 hit.
+3. One query for the 10 new tiles goes to the search index: geo filter, attribute filters, 150 homes.
+4. The service writes the 10 tiles back, merges 450 pins and the first 40 list items, and answers in about 120 ms.
+5. Thumbnails load from the CDN by URL; tapping a pin opens the listing page from a read replica.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST with JSON, debounced on the client
+
+- **Choice:** REST over HTTPS; the app sends one search when the drag stops for 300 ms, and the list pages by cursor.
+- **Why:** every call is a short request and response; a debounce cuts a drag of 20 frames to one search (D2, D4).
+- **Why not WebSockets:** nothing is pushed while the buyer looks at the map; alerts go out as push and email, which reach a closed app.
+- **Why not GraphQL:** the search response has two fixed shapes (pins or counts); a POST body per query makes edge caching harder.
+- **Why not gRPC:** browsers need a proxy for it, and nothing here streams.
+
+### Load balancer and API gateway: layer 7
+
+- **Choice:** an HTTP (layer-7) load balancer inside the gateway, routing `/search` to the search service and `/listings` to the listing service, with authentication and per-client rate limits.
+- **Why:** all traffic is short HTTP, and path routing lets the search fleet scale for 7,000/s without touching listing pages (D2, D12).
+- **Why not layer 4:** it cannot route by path, and there are no long-lived connections to balance.
+- **Algorithm:** least outstanding requests, so a node stuck on a heavy zoomed-out query gets fewer new ones.
+
+### CDN: photos and scripts
+
+- **Choice:** a CDN in front of the photo store, with photo URLs named by content hash and cached for a year.
+- **Why:** 43 Gbit/s on average and 130 Gbit/s at peak would swamp any origin; hash-named photos never change, so every edge copy stays valid (D8).
+- **Why not serve photos from our servers:** 130 Gbit/s at peak against about 1 Gbit/s of search responses (7,000/s × 20 KB), all for bytes that never change.
+- **Why not cache search responses at the CDN:** every pan by one pixel and every filter change is a new URL, so the hit rate is near zero; the tile cache below shares work across pans.
+
+### Search engine: Elasticsearch or OpenSearch, one index per role
+
+- **Choice:** <TechIcon id="oss/elasticsearch" /> Elasticsearch or OpenSearch with a `geo_point` per home, keyword and numeric fields for filters, 5 shards and 8 copies across 8 nodes.
+- **Why:** one query intersects a bounding box with ten filters and returns the total, a sorted page and counts per tile; 25 GB fits in memory on every node (D1, D4, D8).
+- **Why not PostGIS on read replicas:** its R-tree (GiST) index answers the box well, but intersecting it with ten filters and computing per-cell counts at 3,500 queries/s is a search engine's job; it fits a site 10 × smaller.
+- **Why not a hand-built quadtree service:** fast for geo alone, but each new filter, sort and count is code you write; you end up rebuilding a search engine.
+- **Why not Redis geo commands:** they answer "within this box" on one sorted set, with no attribute filters or counts.
+- **Why not MongoDB with a 2dsphere index:** geo plus filters work, but it has no percolator for alerts, so alerts need a second engine anyway.
+
+### Primary database: PostgreSQL, the system of record
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL holding listings, price history, saved searches and the alerts-sent table: one primary with a synchronous standby and two read replicas.
+- **Why:** versioned upserts, a unique key per source listing and joins for dedup by parcel (D5, D6, D7); 60 GB of listings and 3.5 writes/s fit one primary many times over.
+- **Why not the search engine as the source of truth:** a mapping change means a reindex from somewhere, and it has no transactions or unique constraints across documents.
+- **Why not Cassandra or DynamoDB:** they scale writes we do not have; dedup by parcel needs secondary lookups and constraints that a relational database gives for free.
+- **Why not sharding now:** 60 GB and 500 writes/s at a burst are far below one primary; shard by `listing_id` only if the catalogue grows 50 ×.
+
+### Change log: Kafka, fed by change data capture
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topics keyed by `listing_id` (and `search_id`), filled by reading PostgreSQL's write-ahead log, kept 7 days.
+- **Why change data capture:** the log carries exactly what committed; if ingest wrote the database and then published, a crash in between would lose the change (the dual-write problem) (D5).
+- **Why Kafka:** order per listing (D6), several readers (indexer, alerts, analytics), and replay from any offset for a rebuild (Deep dive 2); it absorbs a 500/s feed burst (D2).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is deleted, so there is no replay and no second reader.
+- **Why not the nightly copy:** it breaks the 5-minute target by 24 hours (N2).
+
+### Indexer: stateless workers with versioned writes
+
+- **Choice:** a consumer group, one worker per log partition, writing documents with the source version as the external version, in bulk requests of 1,000.
+- **Why:** an older or repeated version is rejected by the index, so retries and replays are safe without coordination (D6, D7); bulk writes keep a 500/s burst to one request a second per worker.
+- **Why not write the index from the ingest service:** two writes per change with no atomic step; a crash leaves the index wrong until the next rebuild.
+
+### Viewport cache: Redis, per tile and filter set
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis keyed by `(zoom, x, y, filter hash)`, values of pins or counts for that tile, 60 s time to live.
+- **Why:** a pan shares most tiles with the previous view, and popular cities with default filters repeat across buyers; at an assumed 50% hit rate the index sees 3,500/s instead of 7,000/s (D1, D4).
+- **Why not cache whole responses:** a 1-pixel pan is a new key; tiles make neighbouring views reuse work.
+- **Why not invalidate on every listing change:** 300,000 changes a day against millions of keys; a 60 s expiry is simpler and inside N2.
+
+### Query index: stored queries, matched by percolation
+
+- **Choice:** a separate search-engine index of saved searches as stored queries (`percolator` field), each tagged with the zoom-12 tiles its area covers.
+- **Why:** one new listing is checked against the queries that could match it; the tile terms cut 10,000,000 queries to about 2,000 candidates (D9, N3).
+- **Why not re-run every saved search on a schedule:** 11,100 queries/s, more than all buyers at peak, and alerts are still up to 15 minutes late.
+- **Why not a hand-built predicate index:** possible (tile → searches, then filters in code), but the engine already stores, shards and evaluates the same queries buyers run.
+- **Why a separate index:** stored queries and listing documents have different fields and scale differently; the engine's documentation suggests separate indices for them.
+
+### Photo store: blob storage
+
+- **Choice:** an object store (S3, GCS or Azure Blob), keys by photo hash, four sizes per photo.
+- **Why:** 300 TB growing 3 TB a day, written once, read through the CDN; replication and repair are the store's job (D5, D8).
+- **Why not files on our servers:** we would build replication, repair and capacity planning for 1 PB a year.
+- **Why not in the database:** backups and replicas would carry 300 TB of bytes that never change.
+
+### Notifications: push and email providers, from the saved-search service
+
+- **Choice:** the saved-search service consumes `alert.matched`, inserts into `alerts_sent`, then calls the push or email provider; digests are built by a daily job from the same table.
+- **Why:** the sent table makes delivery once per (search, listing) even when matches are replayed (D7, N3).
+- **Why not send from the indexer:** a slow email provider would hold up indexing and freshness (N2).
+
+## Deep dives
+
+### Viewport plus filters, under 300 ms
+
+- **The query:** one `bool` query with a `geo_bounding_box` filter and term and range filters for status, price and beds; filters skip scoring and are cached by the engine.
+- **The count first:** the engine returns the total with the hits; over 500 matches, the same filters feed a tile grid aggregation instead of returning pins.
+- **The cell size:** two zoom levels finer than the map, so a cell is 64 pixels and a screen holds about 250 cells; the aggregation returns only cells that contain matches.
+- **The list:** the first 40 by the chosen sort come back in the same query; the map and the list never disagree.
+- **Uneven density:** a city tile holds 100 × the homes of a rural one; the box and the 500-pin rule adapt on their own, with no fixed cell count per area.
+
+Zoomed out, the answer is counts; zoomed in, it is pins.
+
+<AnimatedDiagram spec="animated/zillow/cluster-zoom" stepper caption="Zoomed out, the search returns a count per cell; zoomed in past 500 matches, it returns one pin per listing." />
+
+<StepCards>
+  <StepCard n={1} title="Zoom 9: counts">
+    About 5,800 homes match across 38,400 km², so the engine returns a count per cell; the darkest cell holds 1,500.
+  </StepCard>
+  <StepCard n={2} title="Zoom 11: still counts">
+    1,800 matches is still over 500, so the map still shows counts, now for smaller cells.
+  </StepCard>
+  <StepCard n={3} title="Zoom 14: pins">
+    About 110 homes match, under the limit, so the engine returns one pin per home.
+  </StepCard>
+</StepCards>
+
+**The numbers:** zoom 13 covers 150 km² × 20 homes a km² = 3,000 homes, and the filters keep 15%: 450 pins; each zoom level out multiplies the area by 4.
+
+After a pan, most tiles are already in the cache.
+
+<AnimatedDiagram spec="animated/zillow/viewport-query" stepper caption="After a pan, the tiles already seen come from the cache; only the new tiles cost one query, with the filters, to the search index." />
+
+**How to read it:**
+
+- Step 1: a 1,200 × 800 pixel viewport at zoom 13 touches 6 × 5 = 30 tiles of 256 pixels.
+- Step 2: the buyer panned east, so the 20 tiles seen before (violet dots) come from one multi-get.
+- Step 3: the 10 new tiles become one bounding box and one query with the filters; the 150 results are split by tile and cached.
+
+**The numbers:** 20 of 30 tiles hit (67%); the query fetches 450 × 10 ÷ 30 = 150 homes instead of 450.
+
+<Callout tone="red" title="What breaks">
+  A cache key without the filter hash serves a buyer looking for 3 beds the pins of a buyer looking for 1. Hash every filter, in a fixed order, into the key.
+</Callout>
+
+### A fresh index from many feeds
+
+- **Normalise on the way in:** feeds name the same field ten ways; ingest maps each to one schema and rejects a row with no location rather than guessing.
+- **Dedup by home:** the same house can arrive from a listing service and a broker; ingest finds it by parcel id and unit, and one source wins by a fixed priority.
+- **Newest wins:** every change carries the source's version (or modification time); the upsert changes a row only when the version is newer.
+- **Stream, then rebuild:** change data capture keeps the index current within seconds; a weekly full rebuild catches drift from bugs and mapping changes.
+- **The rebuild without downtime:** build a new index from a database snapshot, replay the change log from the snapshot's position, then switch the alias that searches read.
+
+Every change carries a version, so late and repeated updates do nothing.
+
+<AnimatedDiagram spec="animated/zillow/listing-ingest" stepper caption="Every change carries the source's version: a late update changes nothing in the database, and a replay changes nothing in the index." />
+
+<StepCards>
+  <StepCard n={1} title="A price change reaches search">
+    The feed sends listing 77 at the new price with version 5. Ingest updates the row because 5 is newer than 4; the change rides the log to the indexer, which writes version 5 to the index.
+  </StepCard>
+  <StepCard n={2} title="Late and repeated updates do nothing">
+    A retried version 4 arrives late: the upsert changes no row. After a restart the log replays version 5: the index refuses it as not newer.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The index refreshes every second and the log lags by seconds: a change is searchable well inside the 5-minute target.
+- A feed burst of 30,000 changes at 1,000 documents a bulk request is 30 requests.
+
+<Callout tone="red" title="What breaks">
+  Indexing without versions lets a slow retry of an old price overwrite a newer one, and the index shows a price the seller changed an hour ago. Make every write conditional on the version, in the database and in the index.
+</Callout>
+
+### Alerts at scale: match each listing against stored searches
+
+- **Turn it around:** store each saved search as a query; for each new listing or price drop, ask which stored queries match it (percolation).
+- **Cut the candidates first:** a geo shape gives the engine no terms to preselect on, so each saved search also stores the zoom-12 tiles its area covers as terms; the listing's tile picks about 2,000 candidates out of 10,000,000.
+- **Then the filters:** price, beds and type run only on the candidates; about 100 match.
+- **Batch it:** a bulk percolate request checks a batch of listings in one call, so a 500/s feed burst is a few requests a second.
+- **Deliver once:** insert `(search_id, listing_id)` into `alerts_sent` before sending; a duplicate key means the alert already went out.
+
+One new listing passes through a funnel of tiles, then filters, then the sent check.
+
+<AnimatedDiagram spec="animated/zillow/reverse-match" stepper caption="A new listing is matched against stored searches, not the other way round: the tile cuts ten million searches to two thousand candidates before any filter runs." />
+
+<StepCards>
+  <StepCard n={1} title="Candidates by tile">
+    The listing's zoom-12 tile is a term; only saved searches tagged with it are candidates: 10,000,000 becomes 2,000.
+  </StepCard>
+  <StepCard n={2} title="Filters on the candidates">
+    Price, beds and type run on the 2,000; 100 match.
+  </StepCard>
+  <StepCard n={3} title="Skip repeats, then deliver">
+    Pairs already in the sent table are skipped; 30 instant searches get a push now and 70 go into tomorrow's digest.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 100,000 events a day × 100 matches = 10,000,000 matches a day, about 116 a second; the same alerts by re-running every search every 15 minutes would cost 11,100 queries a second.
+
+<Callout tone="red" title="What breaks">
+  A cheap new home in a big city can match 50,000 saved searches at once. Put matches on the log and let the sender drain them at the providers' rate, so one listing cannot stall the indexer.
+</Callout>
+
+### Worked example: a new listing at 18:00
+
+1. 18:00:00: a broker feed delivers listing 912, a 3-bed home at \$480k, with version 1.
+2. 18:00:02: ingest normalises the address, finds no existing home for its parcel, inserts the row and stores 30 photos in four sizes.
+3. 18:00:03: change data capture puts the insert on the log; the indexer writes the document; the index refreshes at 18:00:04.
+4. 18:00:04: the indexer percolates 912: tile 12/1205/1539 selects 2,000 saved searches; 100 match; the matches go on the log.
+5. 18:00:06: the saved-search service inserts 100 rows into `alerts_sent`, sends 30 pushes, and adds 70 to tomorrow's digest.
+6. 18:01:00: the cached tiles around 912 expire; the next buyer to pan there sees the new pin.
+
+**The numbers:** about 60 s from feed to map (the cache's time to live dominates) and about 6 s from feed to push, inside N2 (5 minutes) and N3 (10 minutes).
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Search store | PostGIS on replicas, hand-built quadtree, search engine | Search engine with geo and filters | D1, D4, F1 | A second store to run and keep in sync | The catalogue is small and has 2 filters: PostGIS is enough |
+| Index freshness | Synchronous dual write, nightly copy, change data capture | Change data capture into a log | D3, D5, N2 | Minutes of staleness; a log to run | A buyer must see their own change in search at once |
+| Out-of-order updates | Last write wins, versioned writes | Source version, checked in the database and the index | D6, D7 | Every feed must supply a version or time | Never: feeds retry and reorder |
+| Zoomed-out map | All pins, client-side clustering, server counts per cell | Counts per cell above 500 matches | D4, N1 | Pins appear only when zoomed in | Very few homes per area |
+| Map caching | None, whole responses at the CDN, per tile in Redis | Per tile and filter set, 60 s | D1, D4, N2 | Up to 60 s more staleness | Most queries carry unique filters |
+| Alerts | Re-run saved searches, percolate stored queries | Percolate, candidates by tile | D9, N3 | Stored queries to keep in sync | Few saved searches: a nightly re-run is simpler |
+| Source of truth | Search engine, relational database | Relational database; indexes are rebuildable | D5, D7 | Two copies of every listing | Never while feeds need dedup and versions |
+| Photos | Database, file servers, blob store + CDN | Blob store + CDN, hash-named | D8 | A CDN bill | Never at 300 TB |
+| Partitioning | Shard the database, one primary | One primary, replicas; the index sharded 5 ways | D8, D10 | A primary to fail over | Writes or data grow 50 × |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Geospatial Indexing](/system-design/patterns/geospatial-indexing) | The geo filter, tiles for counts, cache keys and alert candidates | Every query and every alert starts from a place |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | The search index and the query index, built from the primary | 660 reads per write need a read-shaped copy |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | The primary's log onto the change log | No change may be lost between the database and the index |
+| [Caching](/system-design/patterns/caching) | Viewport tiles in Redis; photos at the CDN | Repeated areas and never-changing photos |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Hash-named photos in an object store | 300 TB, written once |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | One listing to many saved searches | Match at write time, not at every read |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The change log and the match topic | Several readers, replay and burst absorption |
+| [Idempotency](/system-design/patterns/idempotency) | Versioned upserts and index writes; the alerts-sent table | Feeds retry; logs replay |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Holiday-rental search | Map search, filters, counts when zoomed out, CDN photos | Availability by date joins the filters; it changes far more often than a price |
+| A car marketplace | Search engine, feeds from dealers, saved-search alerts | Make and model facets matter more than the map; location is a radius from the buyer |
+| Job search with alerts | Stored queries matched against each new posting | Full-text relevance dominates; geo is a commute radius |
+| Local business search | Geo plus filters, tile cache | Businesses rarely change; reviews and opening hours do |
+
+## How real systems do it
+
+- **Compass, 2020 (AWS blog):** listings go from a relational database (Aurora PostgreSQL) through Spark and a Kafka stream into an OpenSearch listings index; the move cut a full reindex from 8 hours to 1.
+- **Compass, 2020:** about 250,000 saved searches are stored in the OpenSearch percolator; matches go to a Kafka topic that a saved-search service consumes, and alert lag fell from 1 hour to 1 minute, replacing a batch job that re-ran saved searches.
+- **Rightmove, 2018 (Elastic blog):** geo distance, polygon and bounding-box queries in Elasticsearch over more than 1.2 million properties; about 3.5 million saved searches stored in the percolator; the old system was re-indexed nightly.
+- **Rightmove (Elastic customer story, read 2026):** instant property alerts are built on Elasticsearch percolators, and geo search gives map-centric results.
+- **Homegate, 2024 (Elastic blog):** saved searches are indexed as queries; a new property triggers a percolate query, and matching users get an email or app push.
+- **S2 Geometry (documentation, read 2026):** the sphere is cut into a hierarchy of cells, each split into 4 children over 31 levels, the smallest about 1 cm across, numbered along a Hilbert curve; the same idea as the map tiles used here.
+- **Where this design differs:** this page states nothing about Zillow's own systems; the design follows the published designs of Compass, Rightmove and Homegate, which answer the same read-heavy geo search and saved-search alerts.
+
+## Failure modes & pitfalls
+
+- **Search on the primary database:** listing writes slow during evening peaks; watch primary CPU and query time; move search to the index.
+- **Dual writes from ingest:** the index misses changes after a crash; compare index and database counts per status nightly; use change data capture.
+- **No versions:** an old price returns after a retry; alert on documents whose version is older than the database row; version every write.
+- **Re-running saved searches:** alert jobs fall behind at evening peaks and alerts arrive hours late; watch alert lag; percolate instead.
+- **Percolating without candidate terms:** every listing evaluates millions of queries and matching takes seconds; watch percolate latency; tag saved searches with tiles.
+- **A cache key without the filters:** buyers see homes that fail their filters; sample responses against a fresh query; hash every filter into the key.
+- **Index rebuild in place:** search returns half the homes while it runs; build a new index, replay the log, then switch the alias.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify catalogue size, sources, freshness, map latency and alert types; write F1 to F4 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 7,000 searches/s, 660 to 1, 25 GB index against 300 TB of photos, 11,100/s to re-run saved searches.
+3. **Minutes 10 to 15:** API and data model: the search call, the listings table with versions, the search document.
+4. **Minutes 15 to 25:** Steps 1 to 4: why not SQL, the search engine, ingest through change data capture, counts per cell.
+5. **Minutes 25 to 35:** Steps 5 to 7: photos and the CDN, alerts by percolation, the tile cache.
+6. **Minutes 35 to 45:** one deep dive: the viewport query, freshness and versions, or alerts at scale; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** a search engine for geo plus filters, photos on a CDN, a saved-search table and a job that sends alerts.
+- **Senior:** change data capture instead of dual writes, versions against reordering, counts when zoomed out, reverse matching with candidate preselection.
+- **Staff:** rebuilds by alias swap, cache keys by tile, what degrades first, how dedup across feeds works, when PostGIS would be enough.
+
+**Red flags:** searching the primary database with `LIKE` and lat/lng ranges; dual writes from the app to the database and the index; alerts by re-running every saved search; no plan for photos.
+
+## Further reading
+
+- [Simplifying and modernizing home search at Compass with Amazon OpenSearch Service](https://aws.amazon.com/blogs/big-data/simplifying-and-modernizing-home-search-at-compass-with-amazon-opensearch-service/) (AWS Big Data Blog, 2020)
+- [Elasticsearch and Rightmove: mapping out your new home with search](https://www.elastic.co/blog/elasticsearch-and-rightmove-mapping-out-your-new-home-with-search) (Elastic, 2018)
+- [Rightmove customer story](https://www.elastic.co/de/customers/rightmove) (Elastic)
+- [Homegate's fast and modern search experience](https://www.elastic.co/blog/homegate-search-experience) (Elastic, 2024)
+- [S2 cell hierarchy](https://s2geometry.io/devguide/s2cell_hierarchy) (S2 Geometry documentation)
+- [Percolate query](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-percolate-query) and [Geotile grid aggregation](https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-geotilegrid-aggregation) (Elasticsearch documentation)
+- Related pages: [Design Tinder](/system-design-case-studies/case-studies/tinder) · [Design Google Maps](/system-design-case-studies/case-studies/google-maps) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Search Engines](/system-design/databases/search-engines)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not run map search on the relational database with a latitude and longitude range?" category="Trade-offs" level="Mid">
+  - A B-tree index serves one range well; a box on two columns plus ten filters and per-area counts scans thousands of rows per pan.
+  - At 7,000 searches a second it would load the system of record that ingest writes to.
+  - A search engine intersects a geo index with an index per attribute in one pass and returns counts; PostGIS is a fair answer for a site 10 × smaller.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep the search index in sync with the listings database?" category="Architecture" level="Senior">
+  - Read the database's log with change data capture and put each committed change on a log keyed by listing.
+  - An indexer writes documents with the source version, so late and replayed updates are refused.
+  - Never write the database and the index from the app: a crash between the two leaves them different.
+  - Rebuild weekly into a new index, replay the log from the snapshot position, then switch the alias.
+  </InterviewQuestion>
+  <InterviewQuestion question="The user zooms out to a whole state. What does the search return?" category="Scaling" level="Mid">
+  - Count the matches first; over 500, return counts per map cell instead of pins.
+  - Use cells two zoom levels finer than the map: about 250 cells, a few kilobytes.
+  - The engine computes them with a tile grid aggregation over the filtered matches, in the same query.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you send an alert when a new listing matches one of ten million saved searches?" category="Architecture" level="Senior">
+  - Store each saved search as a query in a percolator index; match each new listing against them.
+  - Tag each saved search with the map tiles its area covers, so the listing's tile picks about 2,000 candidates before filters run.
+  - Put matches on the log; the sender checks a sent table, pushes instant alerts and queues the rest for the digest.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not re-run every saved search every few minutes?" category="Trade-offs" level="Mid">
+  - 10,000,000 searches every 15 minutes is 11,100 queries a second, more than all buyers at peak.
+  - Alerts are still up to 15 minutes late, and most runs find nothing new.
+  - Percolating the 100,000 new listings and price drops a day is about one match request a second.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two feeds send the same house, and one resends an old price after a newer one. What happens?" category="Failure modes" level="Senior">
+  - Ingest finds the home by parcel id and unit, so both feeds update one listing; a fixed source priority decides which fields win.
+  - Each change carries the source version, and the upsert applies only a newer one: the old price changes 0 rows.
+  - The index uses the same version as an external version, so a replay of the log changes nothing either.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you cache map searches when every pan is a slightly different box?" category="Scaling" level="Senior">
+  - Snap the viewport to map tiles and cache per `(zoom, x, y, filter hash)`, not per box.
+  - After a pan, most tiles are already cached; one query fetches only the new ones.
+  - A 60 s time to live is well inside the 5-minute freshness target, so no invalidation is needed.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where do the photos live, and how are they served?" category="Concepts" level="Mid">
+  - In a blob store, four sizes per photo, keyed by the photo's hash: 300 TB, growing 3 TB a day.
+  - Served by a CDN with a one-year cache: a hash-named photo never changes.
+  - Never in the database: backups and replicas would carry bytes that never change.
+  </InterviewQuestion>
+  <InterviewQuestion question="Search slows down during the evening peak. What do you switch off first?" category="Failure modes" level="Senior">
+  - Delay digest alerts and the weekly rebuild first; nobody is waiting on them.
+  - Serve cached tiles for longer than 60 s; freshness has 5 minutes of room.
+  - Then return counts at a coarser cell size; keep listing pages and instant alerts working.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Geospatial indexing for the box, the cells and the alert candidates.
+  - A materialised read copy built by change data capture, because reads outnumber writes 660 to 1.
+  - Caching for repeated tiles and never-changing photos.
+  - Fan-out at write time for alerts, and idempotent versioned writes because feeds retry and logs replay.
+  </InterviewQuestion>
+</InterviewQuestions>

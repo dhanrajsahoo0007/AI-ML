@@ -879,6 +879,11 @@ import s873 from "../../../assets/diagrams/animated/youtube/abr-ladder";
 import s874 from "../../../assets/diagrams/animated/youtube/architecture";
 import s875 from "../../../assets/diagrams/animated/youtube/transcode-dag";
 import s876 from "../../../assets/diagrams/animated/youtube/upload-resume";
+import s877 from "../../../assets/diagrams/animated/zillow/architecture";
+import s878 from "../../../assets/diagrams/animated/zillow/cluster-zoom";
+import s879 from "../../../assets/diagrams/animated/zillow/listing-ingest";
+import s880 from "../../../assets/diagrams/animated/zillow/reverse-match";
+import s881 from "../../../assets/diagrams/animated/zillow/viewport-query";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/agents/a2a-discovery": s0,
@@ -1758,4 +1763,9 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/youtube/architecture": s874,
   "diagrams/animated/youtube/transcode-dag": s875,
   "diagrams/animated/youtube/upload-resume": s876,
+  "diagrams/animated/zillow/architecture": s877,
+  "diagrams/animated/zillow/cluster-zoom": s878,
+  "diagrams/animated/zillow/listing-ingest": s879,
+  "diagrams/animated/zillow/reverse-match": s880,
+  "diagrams/animated/zillow/viewport-query": s881,
 };

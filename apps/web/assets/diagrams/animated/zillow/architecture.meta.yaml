@@ -1,0 +1,19 @@
+title: Home search high-level architecture
+alt: >-
+  An architecture diagram in seven steps across six zones: clients, edge, search core, application services, async
+  pipeline and storage. Step 1: a buyer opens a listing page through the API gateway and the listing service reads it
+  from the primary database; a first search runs a latitude and longitude range query on the same database, drawn red
+  because it cannot serve map search with many filters. Step 2: the search service, the green accent block, sends the
+  viewport and filters to a search index, filled by a nightly copy. Step 3: listing feeds reach the ingest service,
+  which deduplicates and upserts the primary database; change data capture puts each change on the change log, and the
+  indexer updates the search index by version. Step 4: when zoomed out, the same query returns counts per cell instead
+  of pins. Step 5: the ingest service resizes photos into the photo store, and buyers load them from a CDN that pulls
+  from the store. Step 6: the saved-search service stores saved searches; the indexer registers them in a query index,
+  matches each new listing against them, and the saved-search service sends a push or email for each match. Step 7: the
+  search service reads per-tile results from a viewport cache first.
+caption: >-
+  Home search: listings flow from feeds through one primary database and a change log into a search index; map
+  queries hit a cache, then the index; saved searches are matched as each listing arrives.
+tags: [case-studies, zillow, architecture, geo-search]
+source: original
+created: 2026-11-17
