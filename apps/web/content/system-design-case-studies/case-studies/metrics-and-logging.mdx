@@ -1,15 +1,666 @@
 ---
 title: "Design a Metrics and Logging Service"
-description: "Ingesting, storing and querying metrics and logs at high volume."
+description: "A million points a second stored at under 2 bytes each, dashboards in under a second, and alerts that still fire when everything else is down."
 logo: systems/metrics-and-logging
 modelledOn: [tech/oss/prometheus, tech/oss/clickhouse, tech/oss/elasticsearch]
-status: outline
+updated: 2026-11-17
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a metrics and logging service: thousands of services send measurements and log lines, engineers read dashboards, and alerts fire within a minute.
+The hard parts are a write load that never stops, a cost set by the bytes each point takes, and a system that must keep working while the things it watches are failing.
 
-**What it will cover:** ingesting, storing and querying metrics and logs at high volume.
+- Interviewers use this question to see whether you can design for writes over reads, put a number on storage cost, and keep the alerting path alive when everything else is degraded.
 
-**Related reading on this site:** [LLMOps and Observability](/ai-system-design/genai-system-design/llmops-observability)
+## The interview question
 
-**Patterns used:** [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)
+<InterviewPrompt
+  prompt="Design a metrics and logging service. Thousands of services send measurements and log lines, engineers query dashboards, and alerts fire within a minute."
+  level="Senior"
+  minutes={45}
+  bankId="design-metrics-monitoring"
+  tests={[
+    "A write-heavy store sized from bytes per point",
+    "Controlling cardinality and cost per tenant",
+    "Back pressure when ingestion spikes during an incident",
+    "An alerting path that survives the failures it reports",
+  ]}
+  clarify={[
+    { q: "Metrics, logs, or traces too?", a: "Metrics and logs; tracing is a separate question." },
+    { q: "How many series, and how often?", a: "10,000,000 active series, one point every 10 s." },
+    { q: "How many log lines?", a: "20 billion lines a day, 300 bytes each." },
+    { q: "How long is data kept?", a: "Raw metrics 15 days, rollups up to 2 years; logs 30 days." },
+    { q: "How fast must an alert fire?", a: "A page within 60 s of the condition starting." },
+    { q: "One team or many?", a: "About 500 teams as tenants, each with its own limits." },
+    { q: "Can a point be lost?", a: "A few in a crash, yes; the alerting path, never." },
+  ]}
+  outOfScope={["Distributed tracing", "Anomaly detection models", "Billing for usage", "The dashboard editor"]}
+/>
+
+## Overview
+
+- Agents on every host collect points and log lines and **push them in batches** to an ingest gateway that enforces **per-tenant limits**.
+- An **ingest log**, partitioned by a hash of the series, absorbs spikes; **ingesters** read it and keep the last **2 hours in memory**, 3 replicas per partition.
+- Points are **compressed to about 1.4 bytes** with delta-of-delta timestamps and XOR-ed values, cut into **2-hour blocks** and written to **object storage**.
+- **Queriers** fan a query out to the ingesters (recent) and object storage (older) and merge; a **query frontend** splits ranges by day and caches the results.
+- **Alert rules** run as standing queries **straight against the ingesters' memory**, so a page goes out even when dashboards and object storage are down.
+- **Logs** share the gateway and the ingest log; they are indexed **by labels only** and stored as compressed chunks that queries scan.
+
+<Numbers
+  items={[
+    { value: "1,000,000/s", label: "metric points written", hint: "10,000,000 series ÷ 10 s" },
+    { value: "1.37 B", label: "per stored point", hint: "16 bytes raw: 12 × less" },
+    { value: "118 GB", label: "of metrics a day", hint: "1.38 TB raw" },
+    { value: "60 s", label: "from problem to page" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Ingest metric points", notes: "Counters, gauges and histograms, each a series named by labels." },
+    { id: "F2", requirement: "Ingest log lines", notes: "Each line with a timestamp and a few labels (service, pod, level)." },
+    { id: "F3", requirement: "Query a time range", notes: "Dashboards over metrics; search logs by labels and a text filter." },
+    { id: "F4", requirement: "Alert rules", notes: "Evaluated continuously; notify on-call, grouped and without duplicates." },
+    { id: "F5", requirement: "Retention with downsampling", notes: "Raw 15 days, 1-minute rollups 90 days, 1-hour rollups 2 years; logs 30 days." },
+    { id: "F6", requirement: "Many tenants", notes: "Each team has its own data, limits and rules." },
+  ]}
+/>
+
+- Out of scope: distributed tracing (its own question), anomaly detection models, usage billing, the dashboard editor.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Ingest availability", target: "99.9%; keeps accepting writes with one zone down", why: "A gap in the data hides the incident it should show." },
+    { id: "N2", property: "Alert latency", target: "Page within 60 s of the condition starting", why: "Every minute of an outage is lost money." },
+    { id: "N3", property: "Dashboard latency", target: "p99 under 1 s for the last 6 hours; under 5 s for 30 days", why: "Engineers click through dashboards during an incident." },
+    { id: "N4", property: "Freshness", target: "A point is queryable within 15 s", why: "A dashboard that lags hides the recovery." },
+    { id: "N5", property: "Alerting availability", target: "99.99%, with no dependency on dashboards or object storage", why: "The pager must work when everything else is down." },
+    { id: "N6", property: "Loss", target: "Under 0.1% of points lost in a node crash; no acknowledged log line lost", why: "A few points do not change a graph; a missing log line can hide the cause." },
+    { id: "N7", property: "Cost", target: "Under 2 bytes stored per metric point", why: "Bytes per point set the storage bill." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Active series", assumption: "20,000 hosts × 500 series", result: "10,000,000 series" },
+    { quantity: "Metric writes", assumption: "10,000,000 ÷ 10 s", result: "1,000,000 points/s" },
+    { quantity: "Raw bytes", assumption: "16 bytes a point (8 timestamp + 8 value) × 86,400 s", result: "16 MB/s = 1.38 TB a day" },
+    { quantity: "Stored bytes", assumption: "1.37 bytes a point after compression", result: "118 GB a day" },
+    { quantity: "Memory for 2 hours", assumption: "1,000,000/s × 7,200 s × 1.37 B × 3 replicas", result: "30 GB of points" },
+    { quantity: "Memory per series", assumption: "≈ 4 kB (labels, index, open chunk) × 10,000,000 × 3", result: "120 GB: series cost more than points" },
+    { quantity: "Incident catch-up", assumption: "Agents resend 5 minutes of backlog over 150 s on top of live", result: "3,000,000 points/s: 3 ×" },
+    { quantity: "Dashboard queries", assumption: "300 open × 20 panels ÷ 30 s; 5,000 open in an incident", result: "200/s normally, 3,300/s: 16 ×" },
+    { quantity: "Alert evaluations", assumption: "100,000 rules ÷ 15 s", result: "≈ 6,700/s" },
+    { quantity: "Log volume", assumption: "20 billion lines × 300 B; 10 × compression", result: "6 TB raw, 600 GB stored a day; 18 TB for 30 days" },
+  ]}
+  note="Write-heavy, cost set by bytes per point and series count, and the peak arrives exactly when something is broken."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 1,000,000 points/s written against 200 queries/s; reads cluster on the last few hours | A store built for appends; recent data in memory |
+| D2 | Peak against average | Ingest 3 × after an outage, dashboards 16 × during an incident | A buffer in front of storage; shed dashboards before ingest |
+| D3 | Consistency per operation | Points: availability over consistency, replicas may differ by a few points; rules and limits: strong | Leaderless replicas merged at query time; rules in a relational database |
+| D4 | Latency target | Dashboards p99 1 s over 6 h (N3); alerts evaluated every 15 s (N2) | Last 2 hours in memory; a results cache; rules beside the data |
+| D5 | Durability | An acknowledged point survives one ingester crash; a few unacknowledged points may go | Ack after the ingest log write; 3 replicas; agents retry |
+| D6 | Ordering | Per series only: timestamps must increase inside a chunk | Partition by series hash, so one series has one ordered stream |
+| D7 | Duplicates | Harmless: the same series and timestamp twice is one point | Deduplicate on (series, timestamp) at query and compaction |
+| D8 | Data size and growth | 118 GB of metrics and 600 GB of logs a day; 10,000,000 series in memory | Compression, rollups, object storage, and a limit on series |
+| D9 | Fan-out shape | Fan-in: one panel reads from every ingester that holds its series | Scatter-gather queriers; split long ranges by day |
+| D10 | Contention | Not a driver here: each series has one writer; the hot spot is a tenant with too many series, not a key | Per-tenant limits instead of locks |
+| D11 | Geography | One stack per region; logs may hold personal data and stay in their region | Evaluate alerts in the region; a global query fans out across regions |
+| D12 | Availability and degradation | It must stay up when what it watches is down; shed dashboards first, never alerts | Alerting with few dependencies; a watcher outside the system |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/metrics:write` | Agent on every host | Every 10 s, one batch of that host's series |
+| `POST /v1/logs:push` | Agent | Every second or every 1 MB of lines |
+| `GET /v1/query_range` | Dashboard | Every 30 s per panel while open |
+| `GET /v1/logs/query_range` | Engineer | Searching logs by labels and text |
+| `PUT /v1/rules/{namespace}` | Team, through CI | When alert rules change |
+| `GET /v1/alerts` | On-call | To see what is firing |
+
+```http
+POST /v1/metrics:write
+Authorization: Bearer <tenant token>
+Content-Type: application/x-protobuf
+Content-Encoding: snappy
+(body: 500 series × 1 point, about 10 kB)
+
+204 No Content
+429 Too Many Requests  Retry-After: 5  { "error": "series_limit", "limit": 500000 }
+
+GET /v1/query_range?query=sum by (route) (rate(http_requests_total{status="500"}[5m]))
+    &start=2026-11-17T09:00:00Z&end=2026-11-17T10:00:00Z&step=60s
+```
+
+- **Idempotency:** a resent batch writes the same (series, timestamp) pairs; storage keeps one, so retries are safe (D7).
+- **Errors:** `429` with `Retry-After` when a tenant is over its rate or series limit; `400` for a point older than the ingesters accept; `422` for a query that would touch too many series.
+- **Pagination:** log queries return at most `limit` lines and a cursor (the last timestamp and stream); metric queries are bounded by `step` instead.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Recent points (2 h) | In-memory time-series head with a write-ahead log (<TechIcon id="oss/prometheus" /> Prometheus TSDB layout) | Appends at 1,000,000/s, reads of the last hours (D1, D4) | Hash of the series labels | Each replica on its own; merged at query | A relational table: a row and index entry per point |
+| Older metric blocks | Object storage (S3-compatible) | 118 GB a day for years at the lowest price per byte (D8) | Tenant, then 2-hour block | Immutable blocks | Ingester disks: cost and rebalancing grow with retention |
+| Series index | Inverted index of labels inside each block | Find series by `service="checkout"` without a scan (D4) | Per block | Built with the block | A global index store: another dependency on the query path |
+| Ingest buffer | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Absorbs the 3 × catch-up and replays after a crash (D2, D5) | Hash of the series | Ordered per partition | Writing straight to ingesters: a spike becomes errors |
+| Log chunks and label index | Object storage, with small index files | 600 GB a day; queries filter by labels, then scan (D8) | Tenant, stream labels, time | Immutable chunks | A full-text index (<TechIcon id="oss/elasticsearch" /> Elasticsearch): an index that grows with every word in 6 TB a day |
+| Rules, tenants, limits | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | Small, edited by people, needs constraints (D3) | None: one primary | Strong | A key-value store: no constraints or joins for a few MB |
+| Query results | In-memory cache (<TechIcon id="oss/redis" /> Redis or Memcached) | 16 × dashboard spikes repeat the same queries (D2) | Query hash and day | Rebuilt on miss | No cache: every refresh rereads the same blocks |
+
+A series is its sorted labels; its id is a hash of them.
+
+```text
+series   http_requests_total{service="checkout", route="/pay", status="500", pod="checkout-7"}
+id       xxhash64(sorted labels) = 0x9c1f…        -> ingest log partition = id mod 64
+
+block    tenant=payments / 2026-11-17T08:00 to 10:00
+  chunks/   per series: delta-of-delta timestamps, XOR values (≈ 1.37 B a point)
+  index     label=value -> sorted list of series ids (postings)
+  meta.json min/max time, series count, resolution (raw | 1m | 1h)
+```
+
+```sql
+CREATE TABLE tenants (
+  tenant_id    text PRIMARY KEY,
+  max_series   int  NOT NULL DEFAULT 500000,   -- the cardinality cap
+  max_points_s int  NOT NULL DEFAULT 50000,    -- ingest rate limit
+  log_bytes_s  int  NOT NULL DEFAULT 5000000
+);
+CREATE TABLE alert_rules (
+  tenant_id text REFERENCES tenants, name text,
+  expr      text NOT NULL,                      -- the standing query
+  for_secs  int  NOT NULL DEFAULT 15,           -- how long it must hold
+  PRIMARY KEY (tenant_id, name)
+);
+```
+
+- **Write:** hash the labels, append to the partition, the ingester adds the point to the series' open chunk.
+- **Query:** intersect the postings for each label matcher, then read only those series' chunks for the time range.
+- **Logs:** a stream is one label set (`service`, `pod`, `level`); its lines go into one compressed chunk until it reaches about 1 MB or 1 hour.
+
+Raw points live 15 days; rollups keep the history for 2 years at a ninth of the size.
+
+<AnimatedDiagram spec="animated/metrics-and-logging/retention-tiers" caption="Raw points for two weeks, then rollups: the same two years of history in 9.8 TB instead of 86 TB." />
+
+**How to read it:**
+
+- Violet boxes are the three tiers; the compactor turns one into the next; the blue cells are what each tier holds at its full age.
+- Each rollup keeps four values (min, max, sum, count), so an average, a rate and a peak can all be rebuilt.
+
+**The numbers:**
+
+- Raw: 10,000,000 series × 8,640 points a day × 1.37 B = 118 GB a day; × 15 days = 1.8 TB.
+- 1-minute: 4 × 1,440 × 10,000,000 × 1.37 B = 79 GB a day; × 90 = 7.1 TB. Four values a minute against six raw points: only a third smaller per day.
+- 1-hour: 4 × 24 × 10,000,000 × 1.37 B = 1.3 GB a day; × 730 = 0.96 TB. The saving comes from this tier and from deleting raw data after 15 days.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: A row per point (F1)
+
+The smallest design: agents send points to a gateway, which inserts them into a relational database.
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={1} caption="Step 1: the ingest gateway inserts every point as a row in a relational database." />
+
+- **Adds:** the agents, the ingest gateway, a relational database with a `points (series_id, ts, value)` table.
+- **Flow:**
+  1. Each agent sends a batch of its host's points every 10 s.
+  2. The gateway inserts one row per point.
+- **Why this and not that:** it is the design most candidates draw first, and it works for a few thousand series.
+- **The gap:** 1,000,000 inserts a second, each with a row header and an index entry, is tens of bytes a point and millions of index updates a second (D1, D8).
+
+<PremiumBreak />
+
+### Step 2: A time-series store (F1, N7)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={2} caption="Step 2: ingesters keep each series as a compressed chunk in memory; the row per point goes away." />
+
+- **Adds:** the **ingesters**: an in-memory head of open chunks, one per series, with a write-ahead log on local disk.
+- **Flow:**
+  1. The gateway sends a batch to an ingester.
+  2. The ingester appends each point to its series' chunk: the timestamp as a delta of deltas, the value XOR-ed with the previous one.
+  3. The point is logged to the write-ahead log and acknowledged.
+- **Why this and not that:** points of one series arrive in time order and look like their neighbours, so storing them together costs about 1.37 bytes, not 16 (Deep dive 1, N7). A general database stores each point alone and cannot use that.
+- **The gap:** an ingester restart or a 3 × spike turns into failed writes at every agent.
+
+### Step 3: A buffer in front of storage (F1, N1)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={3} caption="Step 3: the gateway writes to an ingest log partitioned by series; ingesters read from it at their own pace." />
+
+- **Adds:** the **ingest log**, 64 partitions keyed by the series hash; the direct gateway-to-ingester path goes away.
+- **Flow:**
+  1. The gateway checks the tenant's limits and writes the batch to the partitions of its series.
+  2. The gateway acknowledges once the log has the batch.
+  3. Ingesters consume their partitions; after a restart they replay from their last offset.
+- **Why this and not that:** the log takes the 3 × catch-up and lets ingesters drain it over minutes (D2, D5). A per-tenant bound at the gateway answers `429` fast instead of letting one tenant fill the log ([Back Pressure and Load Shedding](/system-design/patterns/back-pressure)).
+- **The gap:** one ingester cannot hold 10,000,000 series, and losing it loses the last 2 hours.
+
+A bounded queue turns overload into fast answers, and a quota keeps one tenant from taking all of it.
+
+<AnimatedDiagram spec="animated/patterns/bp-bounded" stepper caption="The gateway's limits work like a bounded queue: overload gets a fast 429, and a per-tenant quota stops one tenant from taking the whole buffer." />
+
+**How to read it:**
+
+- The pattern page's shop stands in for the gateway; its bound is the tenant's rate limit.
+- The rejected requests are `429`s that agents retry after `Retry-After`; the bulk import is one noisy tenant held to its quota.
+
+**The numbers:** a tenant limited to 50,000 points/s that sends 80,000 gets 30,000 refused a second; the agent keeps them in a local buffer and resends when the rate drops.
+
+### Step 4: Shard, replicate, tier (N1, N6)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={4} caption="Step 4: three ingesters read each partition; finished 2-hour blocks go to object storage." />
+
+- **Adds:** **object storage**; each partition is read by **3 ingesters in different zones**.
+- **Flow:**
+  1. Each of the 3 replicas builds the same series from the same partition, independently.
+  2. Every 2 hours each ingester cuts a block (chunks plus a label index) and uploads it; the compactor later drops the duplicate copies.
+  3. Ingesters keep only the open 2 hours in memory.
+- **Why this and not that:** sharding by series hash spreads 10,000,000 series over about 30 ingesters (D8); 3 replicas keep the last 2 hours when a node or zone dies (N1). Replicas do not agree with each other: a query merges them and takes any value for a (series, timestamp), because a missing point is acceptable (D3).
+- **The gap:** nobody can read the data yet.
+
+### Step 5: Queries and a results cache (F3, N3)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={5} caption="Step 5: the query frontend splits and caches; queriers read the last 2 hours from ingesters and older blocks from object storage." />
+
+- **Adds:** the **query frontend**, the **queriers**, the **results cache**.
+- **Flow:**
+  1. A dashboard asks for 7 days of a rate; the frontend splits it into 7 one-day queries and finds 6 in the cache.
+  2. The querier for today asks the ingesters for the last 2 hours and reads older blocks from object storage.
+  3. It merges replicas, deduplicates (D7), computes the rate and returns.
+  4. The frontend caches each finished day.
+- **Why this and not that:** past days never change, so a cache keyed by query and day turns 16 × refresh storms into one computation (D2). Splitting by day also spreads one long query over many queriers (D9).
+- **The gap:** nobody is told when something breaks.
+
+### Step 6: Alerting beside the data (F4, N2, N5)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={6} caption="Step 6: alert rules run every 15 s straight against the ingesters, and firing alerts go through a notifier to on-call." />
+
+- **Adds:** **alert rules**, the **notifier**, the on-call pager; rules load from the relational database.
+- **Flow:**
+  1. Every 15 s each rule queries the ingesters in its own zone for the recent window.
+  2. A condition that holds for its `for` time becomes firing and goes to the notifier.
+  3. The notifier groups related alerts, removes duplicates and pages on-call.
+- **Why this and not that:** rules need only recent data, which is in memory, so they skip the frontend, the cache and object storage. Each dependency removed is one less thing that can fail with the systems being watched (D12, Deep dive 3).
+- **The gap:** raw points pile up forever.
+
+### Step 7: Retention and downsampling (F5)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={7} caption="Step 7: the compactor merges blocks, removes replica copies and writes 1-minute and 1-hour rollups." />
+
+- **Adds:** the **compactor**.
+- **Flow:**
+  1. It merges twelve 2-hour blocks into a day and keeps one copy of each point from the 3 replicas.
+  2. It writes 1-minute and 1-hour rollups (min, max, sum, count).
+  3. It deletes raw blocks after 15 days and 1-minute blocks after 90.
+  4. Queriers pick the coarsest tier that still fills the chart: a 30-day panel 600 pixels wide needs about one point an hour.
+- **Why this and not that:** two years raw is 86 TB; tiered it is 9.8 TB (D8). Rollups at write time would save the compactor's work but make a wrong rollup permanent.
+- **The gap:** logs have nowhere to go.
+
+### Step 8: Logs: labels and chunks (F2, F3)
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" step={8} caption="Step 8: log lines share the gateway and the ingest log; log ingesters build compressed chunks per stream and a small label index." />
+
+- **Adds:** the **log ingesters**; logs get their own topic in the ingest log.
+- **Flow:**
+  1. Agents push lines with a few labels (`service`, `pod`, `level`).
+  2. Log ingesters append each line to its stream's chunk, compress it and flush at 1 MB or 1 hour, with an index of labels to chunks.
+  3. A search selects streams by label and time, then scans only those chunks for the text, in parallel across queriers.
+- **Why this and not that:** an index of every word grows with the 6 TB a day. A label index has one entry per chunk: 80,000 streams (500 services × 40 pods × 4 levels) × 24 hourly chunks × about 100 bytes ≈ 190 MB a day (D8).
+- **Search cost:** 1 hour of one service is 6 TB ÷ 24 ÷ 500 ≈ 0.5 GB; at an assumed 250 MB/s per core that is 2 core-seconds, under a second on a few cores.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/metrics-and-logging/architecture" stepper caption="Metrics and logs: buffer the write spike in a log, keep recent series in memory, push old data to object storage, and evaluate alerts beside the data." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Agents on every host; engineers' dashboards; the on-call pager (external) | Collect and push; read; get paged |
+| **Edge** | Ingest gateway behind a layer-7 load balancer; query frontend | Auth, per-tenant limits; split queries and cache results |
+| **Ingest core** | Ingest log, ingesters | Buffer writes; hold 2 hours of series in memory, 3 replicas |
+| **Read path** | Queriers, alert rules, notifier | Fan out and merge; standing queries every 15 s; group and page |
+| **Logs and compaction** | Log ingesters, compactor | Chunks per log stream; merge blocks and write rollups |
+| **Storage** | Object storage, results cache, relational DB | Blocks and chunks; cached results by day; rules, tenants, limits |
+
+An error spike at 10:00, end to end:
+
+1. 10:00:00: `checkout` starts returning 500s; its agent's next batch arrives at 10:00:10.
+2. The gateway checks the tenant's limits and writes the batch to the ingest log; three ingesters append it within 5 s.
+3. At 10:00:15 and 10:00:30 the rule `rate(5xx) > 5% for 15 s` reads the ingesters' memory: pending, then firing.
+4. The notifier waits 10 s for related alerts, then pages: 10:00:40.
+5. The engineer opens the dashboard; the frontend serves yesterday from cache and today's 2 hours from the ingesters.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### Collection: agents that scrape locally and push batches
+
+- **Choice:** an agent on each host scrapes the processes beside it every 10 s and pushes one compressed batch to the gateway.
+- **Why:** one connection per host instead of one per process, a local buffer when the gateway says `429`, and short-lived jobs are still collected (D2, D5).
+- **Why not pull from a central server:** a central scraper must reach every process across networks and firewalls and scales with the number of targets; pulling locally keeps its one benefit, a missed scrape shows the target is down.
+- **Why not push every point as it happens:** 1,000,000 requests a second instead of 2,000; batching is what makes the gateway cheap.
+
+### API style: batched protobuf over HTTP to write, a query language over HTTP to read
+
+- **Choice:** writes are snappy-compressed protobuf batches over HTTP; reads are `GET` requests carrying a query language (`rate`, `sum by`).
+- **Why:** a batch of 500 series is about 10 kB and one request; a query language lets one call express "error rate per route", which dashboards and rules both need (F3, F4).
+- **Why not JSON per point:** several times the bytes and parsing cost at 1,000,000 points/s (D1).
+- **Why not gRPC streams from agents:** long-lived streams pin an agent to one gateway and defeat request balancing; batches every 10 s gain nothing from a stream.
+- **Why not let agents write to Kafka directly:** 20,000 clients with broker credentials and no place to enforce tenant limits.
+
+### Load balancer: layer 7 in front of the gateway
+
+- **Choice:** an HTTP (layer-7) load balancer, least outstanding requests, health-checked gateways.
+- **Why:** each batch is a separate short request, so every one can go to the least busy gateway; the balancer can also shed by path, query traffic before ingest (D12).
+- **Why not layer 4:** it balances connections, not requests; with keep-alive, one busy agent stays stuck on one gateway.
+
+### Ingest gateway: auth and per-tenant limits
+
+- **Choice:** stateless gateways that check the tenant token, the points-per-second rate and the active-series count, then write to the log.
+- **Why:** the cardinality cap and the rate limit must act before data reaches memory (D8, D10); `429` with `Retry-After` is back pressure the agents understand (D2).
+- **Why not enforce limits in the ingesters:** the excess would already be in the log and every replica would pay for it.
+
+### Ingest log: Kafka, partitioned by series
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, 64 partitions keyed by the series hash, kept 24 hours; one topic for metrics, one for logs.
+- **Why:** it absorbs the 3 × catch-up without failing writes, keeps one series in one ordered partition (D6), and lets a restarted ingester replay instead of losing its memory (D5).
+- **Why not a work queue (SQS, RabbitMQ):** a message goes to one consumer and is deleted, but 3 replicas must each read every point, and replay after a crash needs the data kept.
+- **Why not replicate straight from the gateway to 3 ingesters:** it works and has one fewer system, but a slow ingester then slows the gateway and every agent; the log decouples them.
+- **What it costs:** one more dependency on the write path; alerting reads the ingesters, so a log outage delays alerts by the outage but never stops them evaluating what is in memory.
+
+### Ingesters: a purpose-built time-series store
+
+- **Choice:** ingesters with a <TechIcon id="oss/prometheus" /> Prometheus-style head: one open chunk per series in memory, compressed as it is written, a write-ahead log on local disk, 2-hour blocks.
+- **Why:** appends of 1,000,000 points/s at about 1.37 bytes each (D1, D8, N7), and the last 2 hours, where most reads land, served from memory (D4).
+- **Why not a relational database:** a row and an index entry per point is tens of bytes and an index update per point; time partitioning helps deletes, not the bytes.
+- **Why not a wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra) with a cell per point:** writes scale, but each cell carries its own key and timestamp, so storage is many times 1.37 bytes. Storing compressed chunks as blobs in it works, and is then a more expensive object store.
+- **Why not a columnar database (<TechIcon id="oss/clickhouse" /> ClickHouse):** it compresses well and scans fast, but works best with large batched inserts, and a series-and-label model has to be built on top; it is a good fit for logs and events, less so for 10,000,000 small series updated every 10 s.
+
+### Object storage: blocks and chunks
+
+- **Choice:** S3-compatible object storage for metric blocks and log chunks.
+- **Why:** 9.8 TB of metrics and 18 TB of logs, written once and read rarely, at the lowest price per byte and with durability handled for us (D8).
+- **Why not ingester disks:** retention would set the size of the ingester fleet, and moving shards would copy years of data.
+- **Why not HDFS:** a cluster to operate for data that object storage already keeps durably.
+
+### Series and log index: labels only
+
+- **Choice:** an inverted index from `label=value` to sorted series ids inside each metric block; for logs, an index from label sets to chunks.
+- **Why:** queries name labels (`service="checkout"`), so intersecting two sorted lists finds the series without a scan (D4).
+- **Why not a full-text index for logs (<TechIcon id="oss/elasticsearch" /> Elasticsearch):** it answers any word in milliseconds, but the index grows with every distinct word in 6 TB a day and every line pays to be indexed; most searches already narrow to one service and one hour.
+- **Bloom filters:** a small filter per chunk for "might contain this trace id" lets a search skip most chunks without a full index ([Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter)).
+
+### Results cache: Redis or Memcached
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis or Memcached, keyed by the query, the step and the day; the current day is never cached.
+- **Why:** 5,000 dashboards in an incident ask the same questions; a finished day never changes, so its answer can be kept for hours (D2, N3).
+- **Why not cache in each querier:** 30 queriers would each compute the same day once; a shared cache computes it once.
+
+### Relational database: rules, tenants and limits
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL holding tenants, limits, alert rules and dashboards.
+- **Why:** a few MB that people edit, which needs constraints and an audit trail, and which every gateway and rule evaluator caches (D3).
+- **Why not keep rules in the time-series store:** it is built for numbers over time, not for edited configuration.
+- **On the alerting path:** rule evaluators cache the rules in memory, so a database outage stops edits, not alerts (D12).
+
+### Alert rules and notifier: standing queries beside the data
+
+- **Choice:** rule evaluators in each zone run every rule every 15 s against the ingesters there; a separate notifier groups, deduplicates and routes to the pager.
+- **Why:** recent data is in memory in that zone, so a page needs the ingesters, the evaluator and the notifier, nothing else (N2, N5, D12).
+- **Why not run rules through the query frontend:** the frontend, cache and object storage would all sit on the alerting path, and dashboard storms would slow alerts.
+- **Why not a stream processor (<TechIcon id="oss/apache-flink" /> Flink) over the ingest log:** good for fixed aggregations, but rules are arbitrary queries over windows of history, and teams change them daily.
+
+### CDN: only for the dashboard app
+
+- **Choice:** a CDN serves the dashboard app's scripts and styles; nothing else.
+- **Why:** query results are per tenant, change every 30 s and must not leak between teams.
+- **Why not cache results at the edge:** the results cache inside the query frontend does that job with tenant isolation.
+
+## Deep dives
+
+### The cost of a point: delta of delta and XOR
+
+- **Timestamps:** points of a series arrive every 10 s, so store the change in the gap, not the time. A gap that did not change is a single `0` bit.
+- **Values:** XOR each value with the previous one. Equal values give 0, stored as one bit; close values share their sign, exponent and first bits, so only a short run of differing bits is stored.
+- **Blocks:** compression runs over a 2-hour chunk; longer chunks compress a little better but make short-range reads decode more.
+- **Why it decides the design:** at 16 bytes a point the 2 hours in memory are 345 GB across 3 replicas; at 1.37 bytes they are 30 GB (D8, N7).
+
+<AnimatedDiagram spec="animated/metrics-and-logging/compression" stepper caption="Most points repeat their neighbour's interval and value, so delta of delta and XOR store them in a bit or two." />
+
+<StepCards>
+  <StepCard n={1} title="Raw: 16 bytes a point">
+    Five points of one series take 80 bytes: an 8-byte timestamp and an 8-byte float each.
+  </StepCard>
+  <StepCard n={2} title="Timestamps: delta of delta">
+    The first time is stored whole and the first 10 s gap in 14 bits. After that only the change in the gap is stored: 0 is one bit, a point 1 s late costs 9 bits.
+  </StepCard>
+  <StepCard n={3} title="Values: XOR with the previous">
+    An unchanged value is one bit. 12.0 to 12.5 flips a single bit, stored with its position and length in 14 bits.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Points 2 to 5: timestamps 14 + 1 + 1 + 9 = 25 bits; values 1 + 1 + 14 + 1 = 17 bits; 42 bits ÷ 4 = 10.5 bits ≈ 1.3 bytes a point.
+- The first point's 16 bytes spread over a 2-hour chunk of 720 points add 0.02 bytes a point.
+
+<Callout tone="red" title="What breaks">
+  Random values defeat XOR: a gauge with noise in every digit stores close to 8 bytes a value. Round values at the agent to the precision anyone reads, and never store ids or hashes as metric values.
+</Callout>
+
+### Cardinality: one unbounded label breaks the index
+
+- **The multiplication:** a series exists for every combination of label values, so labels multiply, they do not add.
+- **What it costs:** memory (about 4 kB per active series in the head), index size, and query time, since `sum by (route)` touches every series that matches.
+- **The cause is always the same:** a label whose values grow without limit: a user id, a request id, an email, a full URL with query strings.
+- **The caps:** a series limit per tenant (500,000) and per metric (50,000), checked at the gateway against a count of active series. A write that would create a new series over the limit gets `429`; existing series keep flowing.
+- **Show the owner:** publish each tenant's top metrics by series count, so a team sees which label grew before it hits the limit.
+- **Where the id goes instead:** into the log line, or as an exemplar (one sample request id attached to a histogram bucket).
+
+<AnimatedDiagram spec="animated/metrics-and-logging/cardinality" stepper caption="Every label multiplies the series count; one label with a value per user turns 20,000 series into 2 billion." />
+
+<StepCards>
+  <StepCard n={1} title="Bounded labels: 20,000 series">
+    One request counter with method, status, route and pod labels: 4 × 5 × 25 × 40 = 20,000 series, about 80 MB of memory.
+  </StepCard>
+  <StepCard n={2} title="One unbounded label: 2 billion">
+    Add user_id with 100,000 active users and the same counter is 2 billion series: about 8 TB, more memory than the whole cluster has.
+  </StepCard>
+  <StepCard n={3} title="Limits, and the id moves to logs">
+    The tenant and per-metric limits refuse new series past the cap with a 429, and the user id becomes a field in the log line.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 20,000 × 100,000 = 2,000,000,000 series × 4 kB = 8 TB.
+- The tenant cap is 500,000 × 4 kB = 2 GB; all 500 tenants at their caps would need 1 TB per replica, so caps are sold, not all used at once.
+
+### Monitoring the monitor: few dependencies, alerts first
+
+- **Few dependencies:** a page needs the ingesters, the rule evaluator and the notifier in one zone. Not the query frontend, not the cache, not object storage, not the relational database (rules are cached).
+- **Evaluate in the zone:** each zone's evaluator reads that zone's ingesters, so a network split between zones does not stop alerts in either.
+- **Shed in order:** under load, first stop long-range dashboard queries, then all dashboard queries, then slow log ingestion; ingest of metrics and alert evaluation go last (D12).
+- **Watch from outside:** a watchdog rule that always fires sends a heartbeat through the notifier to a small service in another provider; if the heartbeat stops for 3 minutes, that service pages on its own.
+- **Do not monitor yourself with yourself only:** the monitoring stack's own metrics also go to a small, separate instance.
+
+<AnimatedDiagram spec="animated/metrics-and-logging/alert-path" stepper caption="Alerts read recent data straight from memory in the same zone, and a watcher outside the system pages when the monitor itself goes quiet." />
+
+<StepCards>
+  <StepCard n={1} title="An error spike pages in 40 s">
+    The rule sees 7.2% errors at 10:00:15 and 7.5% for 15 s at 10:00:30. The notifier waits 10 s to group related alerts and pages at 10:00:40.
+  </StepCard>
+  <StepCard n={2} title="Storage down; the monitor dies">
+    With dashboards shed and object storage down, the rule still reads memory in its zone and pages. When the whole stack stops, its heartbeat stops too, and the outside watcher pages after 3 minutes.
+  </StepCard>
+</StepCards>
+
+**The numbers:** worst case 10 s (collection) + 5 s (ingest) + 15 s (evaluation interval) + 15 s (hold) + 10 s (group wait) + 5 s (delivery) = 60 s, the N2 budget.
+
+<Callout tone="red" title="What breaks">
+  Alert rules that query through the dashboard path page late or not at all during the incident that fills every dashboard. Keep the rule evaluator on its own path to the ingesters, with its own capacity.
+</Callout>
+
+### Worked example: five minutes without ingest
+
+1. 14:00: the gateways' load balancer fails for 5 minutes. All 20,000 agents keep scraping and buffer locally: 1,000,000 points/s × 300 s = 300,000,000 points.
+2. 14:01: no new points arrive, so rate rules see stale data; one "no data from 20,000 hosts" rule fires and the notifier groups it into a single page. The rules still run, because they read memory, not the gateway.
+3. 14:05: ingest returns. Agents send live points plus backlog: 3,000,000 points/s for 150 s. The log grows by about 20 bytes a point on the wire (10 kB ÷ 500 points), 300,000,000 × 20 B = 6 GB, far inside its 24 hours.
+4. Ingesters consume at 2,000,000 points/s, 2 × normal: the log's lag grows by 1,000,000/s for 150 s, then drains at 1,000,000/s for 150 s. Fresh data is back by 14:10, and a consumer-lag alert says so meanwhile.
+5. At the same time 5,000 engineers open dashboards: 3,300 queries/s. Past days come from the cache; only today's slices reach the queriers.
+
+**The numbers:** without the log, 3,000,000 points/s would hit ingesters sized for 2,000,000, and agents would see errors exactly when the backlog matters most.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Metric store | Relational, wide-column, columnar, time-series | Time-series head plus blocks | D1, D8, N7 | General queries and joins | Most queries become ad hoc analytics over events |
+| Collection | Central pull, push per point, local pull plus batched push | Local pull, batched push | D2, D5 | An agent on every host | Hosts you cannot install an agent on |
+| Consistency of points | Quorum writes, independent replicas merged at read | Independent replicas | D3, D7, N1 | Two replicas may disagree by a few points | Metrics used for billing |
+| Ingest path | Straight to ingesters, a durable log | Durable log | D2, D5 | One more system on the write path | Ingest is steady and small |
+| Where recent data lives | Disk, memory | Memory for 2 h, object storage after | D4, D8 | RAM cost; replay on restart | Most queries read older than a day |
+| Log indexing | Full text, labels only | Labels only, chunks scanned | D8, F3 | Slower search across all services | Searches across all services become the norm |
+| Alert evaluation | Through the query path, beside the data | Beside the data, per zone | D12, N2, N5 | Rules cannot easily read old blocks | Rules over months of data |
+| Cardinality | Unlimited, per-tenant caps | Caps per tenant and per metric | D8, D10, F6 | Some writes refused | Never: one tenant can sink the cluster |
+| Downsampling | At collection, by a compactor | Compactor | D8, F5 | Compaction work and lag | Storage of raw data dominates the bill |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Series hash to ingest partitions and ingesters | 10,000,000 series do not fit one node |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | Gateway limits, `429` to agents, shedding dashboards first | Ingest peaks 3 ×, dashboards 16 × |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The ingest log | Absorb spikes, replay after a crash |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | Rollups and windowed alert rules | Aggregate points over minutes and hours |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Agent batches; queriers fanning out and merging | 2,000 requests/s instead of 1,000,000; one panel reads many ingesters |
+| [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) | A filter per log chunk | Skip chunks without a full-text index |
+| [Caching](/system-design/patterns/caching) | Results cache by query and day | Incident refresh storms repeat the same queries |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) (advanced) | Per-tenant limits, zone-local alerting | One tenant or zone must not take down the rest |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | Query deadlines, shedding order | Dashboards degrade so alerts do not |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| IoT telemetry | Batched push, a log, compressed series, rollups | Devices on bad networks: larger buffers and late points accepted for hours |
+| Usage metering for billing | The ingest log, series per customer | No loss allowed: exactly-once counting, idempotency keys, strong reads |
+| A tracing back end | Gateway, log, object storage, label index | Spans grouped by trace id; sampling decides cost, not compression |
+| A security event store | Log ingestion, chunks in object storage | Full-text search and long retention for audits; tamper evidence |
+
+## How real systems do it
+
+- **Facebook Gorilla (VLDB 2015):** delta-of-delta timestamps and XOR-ed values bring a point to 1.37 bytes on average, a 12 × reduction; about 51% of values compress to a single bit. It keeps the most recent 26 hours in memory in front of an HBase store, was built for 2 billion series and 700 million points a minute, and runs two independent instances in different regions with no attempt to keep them consistent.
+- **Google Monarch (VLDB 2020):** stores monitoring data in memory, despite the cost, to keep few dependencies on the alerting path: Bigtable, Colossus and Spanner rely on Monarch, so it cannot use them there. Zones are autonomous, and the majority of standing queries are evaluated by zone evaluators. As of July 2019 it held nearly 950 billion series in about 750 TB of memory.
+- **Prometheus storage docs (read 2026):** samples are grouped into two-hour blocks; the in-memory head is protected by a write-ahead log; an average of 1 to 2 bytes a sample; local storage is not clustered or replicated; retention defaults to 15 days.
+- **Uber M3 (2018):** over 6.6 billion series; aggregates 500 million metrics a second and persists 20 million a second; downsamples at collection time, with policies such as 10 s for 2 days, 1 minute for 30 days and 1 hour for 5 years.
+- **Datadog Husky (2022):** event and log storage built around object storage, split into separate writers, compactors and readers so that ingest, storage and queries scale independently.
+- **Grafana Loki docs (read 2026):** Loki indexes only the labels of each log stream, not the contents; lines are compressed into chunks in an object store, which keeps the index small and the cost low.
+- **Where this design differs:** we downsample in a compactor rather than at collection as M3 does, and we use one ingest log in front of ingesters rather than Gorilla's two independent regional copies. Both answer the same drivers: write-heavy, cost per point, and alerts that must survive.
+
+## Failure modes & pitfalls
+
+- **A label with unbounded values:** memory climbs on every ingester at once; watch active series per tenant and per metric; cap at the gateway and move ids to logs.
+- **Alerts routed through the dashboard path:** pages arrive late during the incident; measure rule evaluation lag; give the evaluator its own path to the ingesters.
+- **The monitor monitors only itself:** a full outage is silent; a watchdog heartbeat to a watcher on other infrastructure.
+- **Ingest log full or lagging:** freshness drops and dashboards look flat; alert on consumer lag in seconds; scale ingesters or shed the noisiest tenant.
+- **Ingester restart without replay:** the last 2 hours vanish from one replica; queries hide it by merging 3, but two restarts at once lose data; roll restarts one zone at a time and replay from the log.
+- **Rollups that keep only the average:** a 20 s spike disappears in a 1-minute average; always store min, max, sum and count.
+- **Full-text indexing logs by default:** the index costs more than the logs; index labels, scan chunks, and add a per-chunk filter for ids.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify metrics against logs and traces, series count and interval, retention, alert latency, tenants; write F1 to F6 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 1,000,000 points/s, 16 against 1.37 bytes, 118 GB a day, 30 GB of memory for 2 hours, 3 × and 16 × peaks.
+3. **Minutes 10 to 15:** the write API, the series identity, the block layout; say where consistency is relaxed and why.
+4. **Minutes 15 to 25:** Steps 1 to 4: the row per point fails, the time-series store, the log, sharding and replicas.
+5. **Minutes 25 to 35:** Steps 5 to 8: queries and the cache, alerting beside the data, retention, logs.
+6. **Minutes 35 to 45:** one deep dive: compression, cardinality, or monitoring the monitor; answer "why not" for each component.
+
+**What interviewers listen for:**
+
+- **Mid:** a time-series store, batching, retention with downsampling, an alert evaluator.
+- **Senior:** bytes per point and how compression gets there, cardinality caps, back pressure with `429`, alerts that read memory not the query path.
+- **Staff:** what is shed first, zone-local evaluation, the watcher outside the system, cost per tenant, when to keep logs full-text indexed.
+
+**Red flags:** a relational table with a row per point at 1,000,000/s; no answer to cardinality; alerts that depend on the dashboard path; "replicate with strong consistency" for metric points.
+
+## Further reading
+
+- [Gorilla: A Fast, Scalable, In-Memory Time Series Database](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf) (Facebook, VLDB 2015)
+- [Monarch: Google's Planet-Scale In-Memory Time Series Database](https://www.vldb.org/pvldb/vol13/p3181-adams.pdf) (Google, VLDB 2020)
+- [Prometheus storage](https://prometheus.io/docs/prometheus/latest/storage/) (Prometheus documentation)
+- [M3: Uber's metrics platform](https://www.uber.com/blog/m3/) (Uber Engineering, 2018)
+- [Introducing Husky](https://www.datadoghq.com/blog/engineering/introducing-husky/) (Datadog Engineering, 2022)
+- [Loki overview](https://grafana.com/docs/loki/latest/get-started/overview/) (Grafana documentation)
+- Related pages: [Time-Series Databases](/system-design/databases/time-series-databases) · [Design a Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Sharding and Partitioning](/system-design/patterns/sharding)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not store metric points in a relational database?" category="Concepts" level="Mid">
+  - A row per point carries a row header and an index entry: tens of bytes against about 1.37 bytes in a time-series chunk.
+  - 1,000,000 points a second means 1,000,000 index updates a second, for data that is only ever appended.
+  - A time-series store keeps each series' points together, so it can compress them against their neighbours and read a range in one pass.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do points get down to about a byte and a half each?" category="Concepts" level="Mid">
+  - Timestamps arrive at a steady interval, so store the change in the gap: an unchanged gap is one bit.
+  - XOR each value with the previous one: an unchanged value is one bit; a small change stores only the bits that differ.
+  - Compress per series over a 2-hour chunk; noisy gauges compress worse, so round values at the agent.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you control metric cardinality and cost?" category="Scaling" level="Senior">
+  - Every label value multiplies the series count, and memory, index size and query time all grow with series, not points.
+  - Count active series per tenant and per metric at the gateway; refuse new series past the cap with a 429 and keep existing ones flowing.
+  - Keep ids (users, requests, URLs) out of labels; put them in log lines or as exemplars.
+  - Show each team its top metrics by series count, so they see the growth before the limit does.
+  </InterviewQuestion>
+  <InterviewQuestion question="Ingestion triples during an incident. How do you apply back pressure?" category="Scaling" level="Senior">
+  - Put a durable log between the gateway and the ingesters, so a spike becomes lag, not errors.
+  - Enforce a rate and burst limit per tenant at the gateway; answer 429 with Retry-After, and let agents buffer locally and resend.
+  - Shed in order: long dashboard queries first, then dashboards, then log ingestion; metric ingest and alert evaluation last.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where are the hot spots under heavy write load?" category="Architecture" level="Senior">
+  - Not a single key: each series has one writer, and hashing spreads series over partitions.
+  - The hot spot is a tenant or metric whose series count explodes, which loads every ingester at once; caps fix it.
+  - Head memory and the write-ahead log are the next limits; add ingesters and partitions, and rebalance by moving partitions, not series.
+  - On the read side, one panel over many series fans out to every ingester; split by day and cache past days.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep the alerting path reliable when the systems it watches are failing?" category="Failure modes" level="Senior">
+  - Evaluate rules beside the data: in each zone, straight from the ingesters' memory, not through the query frontend or object storage.
+  - Cache rules in the evaluator so the configuration database is not on the path.
+  - Shed dashboards before alerts, and give the evaluator its own capacity.
+  - Send a heartbeat from an always-firing watchdog rule to a watcher on other infrastructure, which pages if it stops.
+  </InterviewQuestion>
+  <InterviewQuestion question="How are alert thresholds defined and evaluated?" category="Architecture" level="Mid">
+  - A rule is a query, a threshold and a hold time, such as error rate above 5% for 15 s.
+  - An evaluator runs every rule every 15 s; a true result becomes pending, then firing once it holds for the hold time.
+  - A notifier groups related alerts, removes duplicates and routes them to the right on-call rotation.
+  - Alert on symptoms users feel (errors, latency) and on missing data, not on every cause.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you collect metrics by push or by pull?" category="Trade-offs" level="Mid">
+  - Pull from a central server sees a dead target as a failed scrape, but must reach every process and scales with the number of targets.
+  - Push crosses networks easily and covers short-lived jobs, but a silent target looks the same as an idle one.
+  - Use both: an agent on each host pulls locally, then pushes batches; alert on missing data per host.
+  </InterviewQuestion>
+  <InterviewQuestion question="Logs are billions of lines a day. How do you keep them and search them efficiently?" category="Trade-offs" level="Senior">
+  - Index only labels (service, pod, level) and store lines as compressed chunks in object storage: a small index instead of one as large as the data.
+  - A search picks streams by label and time, then scans those chunks in parallel; one service for one hour is about 0.5 GB.
+  - Add a small filter per chunk for ids, so a search for one request id skips most chunks.
+  - Keep a full-text index only for the few sources that need it, such as security events.
+  </InterviewQuestion>
+</InterviewQuestions>

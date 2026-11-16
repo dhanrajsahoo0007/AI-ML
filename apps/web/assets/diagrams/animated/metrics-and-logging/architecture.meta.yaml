@@ -1,0 +1,18 @@
+title: Metrics and logging service high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, ingest core, read path, logs and
+  compaction, and storage. Step 1: agents send batches to an ingest gateway, which inserts every point as a row in a
+  relational database, drawn red. Step 2: the solid green ingesters keep series in compressed chunks in memory and
+  replace the row-per-point path. Step 3: an ingest log sits between the gateway and the ingesters, partitioned by
+  series. Step 4: three ingester replicas per partition, with two-hour blocks written to object storage. Step 5:
+  engineers' dashboards go through a query frontend with a results cache to queriers, which read the last two hours
+  from the ingesters and older blocks from object storage. Step 6: alert rules run standing queries against the
+  ingesters, load rules from the relational database and send firing alerts to a notifier that pages on-call. Step 7: a
+  compactor merges blocks and writes rollups. Step 8: log lines go through the same ingest log to log ingesters,
+  which write compressed chunks and a label index to object storage.
+caption: >-
+  Metrics and logs: buffer the write spike in a log, keep recent series in memory, push old data to object storage,
+  and evaluate alerts beside the data.
+tags: [case-studies, metrics-and-logging, architecture, time-series]
+source: original
+created: 2026-11-17
