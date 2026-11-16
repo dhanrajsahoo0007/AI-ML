@@ -67,6 +67,8 @@ shapes.push({
 shapes.push({
   id: "axis",
   type: "path",
+  x: 0,
+  y: 0,
   points: [
     [tx(0), 62],
     [tx(AXIS), 62],
