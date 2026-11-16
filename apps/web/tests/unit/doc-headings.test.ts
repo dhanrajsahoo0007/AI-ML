@@ -3,6 +3,28 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { rehypeHeadingIds, slugify, type DocHeading } from "@/lib/doc-headings";
 
+// Lines outside code fences, with the text of JSX blocks (lines inside an open tag or a component) dropped.
+function proseLines(text: string) {
+  const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+  const out: { line: string; n: number }[] = [];
+  let inCode = false;
+  let jsxDepth = 0;
+  body.split("\n").forEach((line, i) => {
+    const t = line.trim();
+    if (t.startsWith("```")) {
+      inCode = !inCode;
+      return;
+    }
+    if (inCode) return;
+    const opens = (t.match(/<[A-Z][A-Za-z]*\b(?![^>]*\/>)/g) ?? []).length;
+    const closes = (t.match(/<\/[A-Z][A-Za-z]*>/g) ?? []).length;
+    const inJsx = jsxDepth > 0 || t.startsWith("<");
+    jsxDepth = Math.max(0, jsxDepth + opens - closes);
+    if (!inJsx) out.push({ line: t, n: i + 1 });
+  });
+  return out;
+}
+
 describe("slugify", () => {
   it("lowercases, strips punctuation and joins words with hyphens", () => {
     expect(slugify("What is RAG? (Retrieval-Augmented Generation)")).toBe("what-is-rag-retrieval-augmented-generation");
@@ -120,28 +142,6 @@ describe("system-design patterns v2 headings and point-wise format", () => {
     "Related patterns",
   ]);
 
-  // Lines outside code fences, with the text of JSX blocks (lines inside an open tag or a component) dropped.
-  const proseLines = (text: string) => {
-    const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
-    const out: { line: string; n: number }[] = [];
-    let inCode = false;
-    let jsxDepth = 0;
-    body.split("\n").forEach((line, i) => {
-      const t = line.trim();
-      if (t.startsWith("```")) {
-        inCode = !inCode;
-        return;
-      }
-      if (inCode) return;
-      const opens = (t.match(/<[A-Z][A-Za-z]*\b(?![^>]*\/>)/g) ?? []).length;
-      const closes = (t.match(/<\/[A-Z][A-Za-z]*>/g) ?? []).length;
-      const inJsx = jsxDepth > 0 || t.startsWith("<");
-      jsxDepth = Math.max(0, jsxDepth + opens - closes);
-      if (!inJsx) out.push({ line: t, n: i + 1 });
-    });
-    return out;
-  };
-
   it("uses Overview and Mental model and no retired heading", () => {
     const violations: string[] = [];
     for (const { f, text } of pages) {
@@ -177,5 +177,102 @@ describe("system-design patterns v2 headings and point-wise format", () => {
       .filter(({ text }) => !/<Callout\b[^>]*title="Interview edge[^"]*"/.test(text))
       .map(({ f }) => f);
     expect(missing).toEqual([]);
+  });
+});
+
+// Case studies (plan: plans/case-studies-plan.md §5 and §6.4). A page is held to the format once it is converted:
+// it has `updated:` and no `status: outline`. Every page, outline or not, carries its system logo.
+describe("system-design case studies: interview-grade format", () => {
+  const dir = path.join(process.cwd(), "content", "system-design-case-studies", "case-studies");
+  const all = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".mdx"))
+    .sort()
+    .map((f) => ({ f, text: fs.readFileSync(path.join(dir, f), "utf8") }));
+  const pages = all.filter(({ text }) => /^updated:/m.test(text) && !/^status:\s*outline/m.test(text));
+  const ORDER = [
+    "The interview question",
+    "Overview",
+    "Functional requirements",
+    "Non-functional requirements",
+    "Estimates and decision drivers",
+    "API design",
+    "Data model",
+    "Building the architecture, step by step",
+    "Final architecture",
+    "Deep dives",
+    "Design decisions and why",
+    "Patterns used",
+    "Same design, other systems",
+    "How real systems do it",
+    "Failure modes & pitfalls",
+    "Interview framework",
+    "Further reading",
+  ];
+  // Messenger keeps its cloud section after Final architecture (plan §3 decision 12).
+  const OPTIONAL = new Set(["Running it on AWS"]);
+  const section = (text: string, h2: string) => {
+    const start = text.indexOf(`\n## ${h2}\n`);
+    if (start < 0) return "";
+    const next = text.indexOf("\n## ", start + 4);
+    return text.slice(start, next < 0 ? undefined : next);
+  };
+  const tableRows = (chunk: string) =>
+    chunk
+      .split("\n")
+      .filter((l) => l.startsWith("|"))
+      .slice(2);
+
+  it("gives every case study a system logo", () => {
+    expect(all.length).toBe(27);
+    expect(all.filter(({ text }) => !/^logo: \S+/m.test(text)).map(({ f }) => f)).toEqual([]);
+  });
+
+  it("uses the section order of the format", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const h2s = proseLines(text)
+        .filter(({ line }) => line.startsWith("## "))
+        .map(({ line }) => line.slice(3).trim())
+        .filter((h) => !OPTIONAL.has(h));
+      if (JSON.stringify(h2s) !== JSON.stringify(ORDER)) violations.push(`${f}: H2s are ${h2s.join(" / ")}`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("has the prompt, requirement and estimate tables, drivers D1-D12 and at least 7 decisions", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      if (!text.includes("<InterviewPrompt")) violations.push(`${f}: no <InterviewPrompt>`);
+      if ((text.match(/<RequirementsTable\b/g) ?? []).length !== 2)
+        violations.push(`${f}: needs two <RequirementsTable>`);
+      if ((text.match(/<EstimateTable\b/g) ?? []).length < 1) violations.push(`${f}: no <EstimateTable>`);
+      const drivers = tableRows(section(text, "Estimates and decision drivers"))
+        .map((r) => r.match(/^\|\s*(D\d+)\s*\|/)?.[1])
+        .filter(Boolean);
+      const want = Array.from({ length: 12 }, (_, i) => `D${i + 1}`);
+      if (JSON.stringify(drivers) !== JSON.stringify(want)) violations.push(`${f}: drivers are ${drivers.join(",")}`);
+      const decisions = tableRows(section(text, "Design decisions and why")).length;
+      if (decisions < 7) violations.push(`${f}: ${decisions} design decisions (need 7+)`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("has 4+ figures with one stepper, 8+ bulleted questions, no Mermaid and no long prose", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const figures = text.match(/<AnimatedDiagram\b[^>]*>/g) ?? [];
+      if (figures.length < 4) violations.push(`${f}: ${figures.length} figures (need 4+)`);
+      if (!figures.some((d) => /\bstepper\b/.test(d))) violations.push(`${f}: no stepper figure`);
+      if (/^\s*```mermaid/m.test(text)) violations.push(`${f}: Mermaid fence`);
+      const answers = [...text.matchAll(/<InterviewQuestion\b(?:[^>"]|"[^"]*")*>([\s\S]*?)<\/InterviewQuestion>/g)];
+      if (answers.length < 8) violations.push(`${f}: ${answers.length} questions (need 8+)`);
+      for (const m of answers) if (!m[1].trim().startsWith("- ")) violations.push(`${f}: unbulleted answer`);
+      for (const { line, n } of proseLines(text)) {
+        const listed = /^(- |\* |\d+\. |\| |#|>)/.test(line);
+        if (!listed && line.length > 200) violations.push(`${f}:${n}: prose line of ${line.length} characters`);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
