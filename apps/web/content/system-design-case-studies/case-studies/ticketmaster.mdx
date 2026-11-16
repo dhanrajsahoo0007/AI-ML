@@ -2,11 +2,512 @@
 title: "Design Ticketmaster"
 description: "Seat selection, holds under heavy contention and fair queuing for big on-sales."
 logo: systems/ticketmaster
-status: outline
+updated: 2026-11-16
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+Design a ticket booking system: fans pick seats on a map, hold them while they pay, and a popular on-sale brings millions of fans in the same minute.
+The hard parts are forty fans wanting every seat, a spike hundreds of times the normal load, and never selling a seat twice.
 
-**What it will cover:** seat selection, holds under heavy contention and fair queuing for big on-sales.
+- Interviewers use this question to see whether you can find the one place that needs strong consistency, protect it from a crowd, and justify every other shortcut.
 
-**Patterns used:** [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Idempotency](/system-design/patterns/idempotency) · [Saga and Distributed Transactions](/system-design/patterns/saga)
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a ticket booking system like Ticketmaster. Fans pick seats on a map, and a popular on-sale brings millions of fans in the same minute. No seat is ever sold twice."
+  level="Senior"
+  minutes={45}
+  bankId="design-ticket-booking"
+  tests={[
+    "Contention: many fans racing for one seat",
+    "Surviving a spike far above capacity without overselling",
+    "A hold that expires, and a payment that never double-charges",
+    "Saying why for every choice when requirements change",
+  ]}
+  clarify={[
+    { q: "Assigned seats or general admission?", a: "Assigned seats on a seat map; general admission is a variant." },
+    { q: "How long is a seat held while the fan pays?", a: "Ten minutes, then it goes back on sale." },
+    { q: "How big is the biggest on-sale?", a: "2,000,000 fans for one 50,000-seat show." },
+    { q: "How many seats per order?", a: "Up to 6, all or nothing; 2.5 on average." },
+    { q: "Must the seat map be exact?", a: "No: a second or two stale is fine; the hold itself must be exact." },
+    { q: "Do we handle payment ourselves?", a: "No: an external card processor, called with an idempotency key." },
+  ]}
+  outOfScope={["Resale", "Dynamic pricing", "Venue setup tools", "Fraud scoring"]}
+/>
+
+## Overview
+
+- Seats live as **one row per seat** in a relational database; a fan **holds** seats with one **conditional update** that only succeeds while they are available.
+- A hold lasts **10 minutes**; paying **claims** the held seats and writes the order **in the same transaction**, so a paid seat is always a sold seat.
+- Payment is **authorise, claim, capture** with an **idempotency key**: a hold that expires mid-payment costs the fan nothing.
+- Expired holds fall back to available, lazily in the hold condition and by a **sweeper** that publishes the change.
+- A **waiting room** admits fans at the rate checkout can take, with **signed tokens**; early arrivals are **shuffled** at the start.
+- The **seat map** is read from a cache fed by an **availability stream**, never from the primary.
+
+<Numbers
+  items={[
+    { value: "40", label: "fans for every seat", hint: "2,000,000 for 50,000" },
+    { value: "500/s", label: "admission rate", hint: "= checkout capacity" },
+    { value: "67 min", label: "to drain the whole queue", hint: "2,000,000 ÷ 500/s" },
+    { value: "0", label: "seats sold twice" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Browse events and a seat map", notes: "Events, venues, prices and which seats are available." },
+    { id: "F2", requirement: "Hold seats", notes: "Up to 6 seats, all or nothing, for 10 minutes." },
+    { id: "F3", requirement: "Pay and get tickets", notes: "One charge per order, never two." },
+    { id: "F4", requirement: "Release expired holds", notes: "An unpaid seat goes back on sale after 10 minutes." },
+    { id: "F5", requirement: "A waiting room for big on-sales", notes: "Fair order; admission at a set rate." },
+    { id: "F6", requirement: "My tickets", notes: "The fan sees and receives their tickets after paying." },
+  ]}
+/>
+
+- Out of scope: resale, dynamic pricing, venue setup tools, fraud scoring.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Correctness", target: "0 seats sold twice; 0 orders charged twice", why: "A double sale is two fans at one seat." },
+    { id: "N2", property: "Hold latency", target: "p99 under 300 ms", why: "The fan is clicking on a live map." },
+    { id: "N3", property: "Seat-map freshness", target: "Under 2 s stale", why: "Stale maps send fans to taken seats." },
+    { id: "N4", property: "Peak intake", target: "2,000,000 fans in 10 minutes without falling over", why: "The on-sale is the product." },
+    { id: "N5", property: "Availability", target: "99.95% for browse and hold", why: "An outage during an on-sale is national news." },
+    { id: "N6", property: "Fairness", target: "No advantage from arriving early or refreshing", why: "Fans and artists judge the sale by it." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Fans and seats", assumption: "Given", result: "2,000,000 fans, 50,000 seats: 40 per seat" },
+    { quantity: "Orders to sell out", assumption: "50,000 seats ÷ 2.5 seats an order", result: "20,000 orders" },
+    { quantity: "Admission rate R", assumption: "Checkout handles 500 orders/s", result: "R = 500 fans/s" },
+    { quantity: "Queue drain", assumption: "2,000,000 ÷ 500/s", result: "4,000 s ≈ 67 minutes" },
+    { quantity: "Fans inside the sale", assumption: "500/s × 300 s spent picking seats", result: "150,000 at once" },
+    { quantity: "Seat-map reads", assumption: "150,000 fans × one refresh per 2 s", result: "75,000 reads/s" },
+    { quantity: "Hold attempts", assumption: "500/s × 3 tries (seats already taken)", result: "1,500 conditional updates/s" },
+    { quantity: "Waiting-room joins", assumption: "1,000,000 fans in the first minute", result: "≈ 16,700 joins/s" },
+    { quantity: "A normal day", assumption: "2,000,000 page views across all events ÷ 86,400 s", result: "≈ 23 views/s: the peak is ≈ 700 ×" },
+    { quantity: "Inventory size", assumption: "50,000 seats × 200 bytes", result: "10 MB per event" },
+  ]}
+  note="The data is tiny; the crowd is the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 75,000 seat-map reads/s against 1,500 hold writes/s: 50 to 1 | The map from a cache fed by a stream; holds on the primary |
+| D2 | Peak against average | 16,700 joins/s against 23 views/s: about 700 ×, in one minute | A waiting room; autoscaling cannot add a hot row's capacity |
+| D3 | Consistency per operation | Seat ownership strong; seat map 1 to 2 s stale; my tickets read-your-writes after paying | Conditional updates on the primary; everything else may lag |
+| D4 | Latency target | Hold p99 300 ms (N2); a wait in the queue is minutes, shown honestly | Holds are one statement; the queue shows position and time |
+| D5 | Durability | A confirmed order is never lost; a captured payment always has its seat | Claim and order in one ACID transaction |
+| D6 | Ordering | Queue order is fairness, not correctness; per seat, the database orders writes | Shuffle the pre-queue; no global ordering anywhere |
+| D7 | Duplicates | A duplicate charge is harmful; a repeated hold by the same fan is harmless | An idempotency key on every payment call |
+| D8 | Data size and growth | Not a driver here: 10 MB per event | One database per event shard fits in memory |
+| D9 | Fan-out shape | One seat change is seen by 150,000 map viewers | Publish changes once to a read store; clients refresh from it |
+| D10 | Contention | Extreme: 40 fans per seat, far more for the front rows | Row per seat, conditional updates, shard by event, a hot event gets its own capacity |
+| D11 | Geography | One home region per event (the venue's); fans everywhere | The waiting room and CDN at the edge, booking in one region |
+| D12 | Availability and degradation | 99.95%; under stress fans wait, the system never oversells | Slow admission first, then live map updates, never the hold check |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/events/{id}` | Fan | Event page, cached at the CDN |
+| `GET /v1/events/{id}/seatmap` | Fan | Every 2 s while choosing; served from the seat-map cache |
+| `POST /v1/queue/{event}/join` | Fan | Before or at the on-sale; returns a queue id |
+| `GET /v1/queue/{event}/status` | Fan | Every few seconds; returns position, or a signed token |
+| `POST /v1/holds` | Fan with token | Pick seats; returns `hold_id` and `expires_at` |
+| `POST /v1/orders` | Fan | Pay for a hold, with `Idempotency-Key` |
+| `GET /v1/me/tickets` | Fan | After paying |
+
+```http
+POST /v1/holds
+Authorization: Bearer <session>
+X-Queue-Token: <signed: event, fan, admitted_at, expires_at>
+{ "event_id": 7001, "seat_ids": ["A12", "A13"] }
+
+201 Created   { "hold_id": "h_93f1", "expires_at": "2026-11-16T10:10:00Z" }
+409 Conflict  { "error": "seat_taken", "seat_ids": ["A13"] }
+```
+
+- **Idempotency:** `POST /v1/orders` requires `Idempotency-Key`; a retry returns the first result, never a second charge.
+- **Errors:** `409` a seat is taken; `410` the hold expired; `402` the card was declined; `302` to the waiting room when the queue token is missing or expired.
+- **Pagination:** only `GET /v1/me/tickets`, by cursor.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Seats and holds | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL) | Conditional updates and transactions (D3, D10) | `event_id` | Strong | An in-memory `SET NX` hold: it cannot commit with the order |
+| Orders | Same relational database | Claim and order in one transaction (D5) | `event_id` | Strong | A separate orders store: a two-system write with no atomic step |
+| Seat-map view | In-memory store (<TechIcon id="oss/redis" /> Redis) | 75,000 reads/s (D1, D9) | `event_id` | 1 to 2 s stale | Reading the primary: 50 × the writes on the hottest rows |
+| Availability stream | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | One change, many readers (D9) | `event_id` | Ordered per event | Polling the primary for changes |
+| Queue positions | In-memory sorted set | 16,700 joins/s, short-lived (D2) | `event_id` | Eventual | The booking database: the crowd would reach it |
+| Events, venues | Relational database + CDN | Read-mostly, cacheable | `event_id` | Eventual | None worth the cost |
+
+```sql
+CREATE TABLE seats (
+  event_id    bigint,
+  seat_id     text,          -- 'A12'
+  section     text,
+  price_cents int,
+  status      text,          -- 'available' | 'held' | 'sold'
+  hold_id     uuid,          -- set while held or sold
+  held_until  timestamptz,
+  order_id    bigint,
+  PRIMARY KEY (event_id, seat_id)   -- shard by event_id
+);
+
+CREATE TABLE orders (
+  order_id bigint PRIMARY KEY, event_id bigint, fan_id bigint,
+  hold_id uuid UNIQUE,             -- one order per hold
+  idempotency_key text UNIQUE,     -- one charge per key
+  amount_cents int, status text    -- 'authorised' | 'confirmed' | 'voided'
+);
+```
+
+- **Hold:** set `held` on the requested seats where they are available or their hold has expired; the hold succeeds only if every requested row changed.
+- **Claim:** set `sold` on the rows with this `hold_id` whose `held_until` is still in the future, and insert the order, in one transaction.
+- **Seat map:** read the event's view from the cache; a change on the stream updates it.
+
+A seat only moves forward through one conditional statement.
+
+<AnimatedDiagram spec="animated/ticketmaster/seat-states" caption="A seat only moves forward through one conditional statement, and an unpaid hold falls back to available." />
+
+**How to read it:**
+
+- Grey is on sale, lime is held by one fan, green is sold; the text under each box is the statement that moves a seat there.
+- The dashed arrow back is the expiry: lazy in the hold condition, and made visible by the sweeper.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Browse and the seat map (F1)
+
+The smallest design: a fan reads events and seat status through an API gateway.
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={1} caption="Step 1: event pages from the CDN; the event service reads the catalog and seat status from the inventory database." />
+
+- **Adds:** the API gateway, a CDN for event pages, the event service, the event catalog, the inventory database (one row per seat).
+- **Flow:**
+  1. The fan loads the event page from the CDN.
+  2. The seat map call reads seat status straight from the inventory database.
+- **Why this and not that:** one row per seat, not a count per section, because fans pick exact seats (F1, F2).
+- **The gap:** nobody can hold a seat yet.
+
+<PremiumBreak />
+
+### Step 2: Book a seat the naive way: two fans get it (F2)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={2} caption="Step 2: the booking service reads the seat, then writes it: two fans can both see it free and both win." />
+
+- **Adds:** the **booking service**.
+- **Flow:**
+  1. Fan A asks to hold A12; the service reads it as available.
+  2. Fan B asks within the same milliseconds and also reads available.
+  3. Both writes succeed; the last one wins and both fans are told "held".
+- **Why this and not that:** this is the design most candidates draw first; at 40 fans per seat the race is not rare, it is every popular seat (D10).
+- **The gap:** the check and the write must be one step.
+
+### Step 3: An atomic hold with an expiry (F2, F4)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={3} caption="Step 3: one conditional UPDATE per hold: the database changes the seat only while it is available." />
+
+- **Adds:** nothing new: the hold becomes one conditional update with `held_until = now() + 10 minutes`.
+- **Flow:**
+  1. The service runs one `UPDATE … WHERE status = 'available'` for all requested seats.
+  2. If every row changed, the hold is the fan's; if not, it rolls back and returns `409` with the taken seats.
+- **Why this and not that:** the database serialises writes to one row, so exactly one fan wins (D3, D10). A `SELECT … FOR UPDATE` works too but holds a lock across a round trip; an in-memory `SET NX` cannot commit with the order (Deep dive 1).
+- **The gap:** a hold is not a sale; the fan still has to pay.
+
+### Step 4: Pay with an idempotency key, then confirm (F3)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={4} caption="Step 4: the payment service authorises the card with an idempotency key; the booking service claims the seats and writes the order." />
+
+- **Adds:** the **payment service** and the external **card processor**.
+- **Flow:**
+  1. The fan pays with an `Idempotency-Key`; the payment service authorises the card (funds reserved, not taken).
+  2. The booking service claims the held seats and inserts the order in one transaction, only if the hold is still theirs.
+  3. Then the payment is captured and the order confirmed.
+- **Why this and not that:** a retry with the same key never charges twice (D7). Capturing only after the claim means an expired hold voids the authorisation instead of refunding a charge (D5).
+- **The gap:** fans who never pay keep seats off sale.
+
+### Step 5: Release expired holds (F4)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={5} caption="Step 5: a hold-expiry worker returns unpaid seats to available and publishes the change." />
+
+- **Adds:** the **hold-expiry** sweeper.
+- **Flow:**
+  1. The hold condition already treats `held_until < now()` as available, so an expired seat can be re-held at once.
+  2. Every few seconds the sweeper sets expired holds back to `available` in batches, so the map shows them again.
+- **Why this and not that:** a timer per hold is 50,000 timers per show; one sweep query per event is one statement (D10). Correctness never waits for the sweeper.
+- **The gap:** at the on-sale, 2,000,000 fans hit the gateway in the same minute.
+
+### Step 6: The on-sale: a waiting room and an admission rate (F5)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={6} caption="Step 6: fans join a waiting room and reach the gateway only with a signed token, at the rate checkout can take." />
+
+- **Adds:** the **waiting room**; the direct path from fan to gateway goes away.
+- **Flow:**
+  1. Fans join the waiting room before the sale; at the start, the pre-queue is shuffled and everyone gets a position.
+  2. Fans are admitted at R = 500 per second with a signed token valid for 10 minutes.
+  3. The gateway checks the token's signature and expiry before any hold.
+- **Why this and not that:** the peak is about 700 × the average (D2). Autoscaling adds web servers in minutes but cannot add capacity to the hottest seat rows; the waiting room meters demand to what checkout serves (N4, D12).
+- **The gap:** 150,000 fans inside the sale refresh the seat map every 2 s, all on the primary.
+
+### Step 7: A fresh seat map from a stream (F1, N3)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={7} caption="Step 7: seat changes flow from the inventory database through an availability stream into a seat-map cache." />
+
+- **Adds:** the **availability stream** and the **seat-map cache**; the event service stops reading the primary.
+- **Flow:**
+  1. Every committed hold, sale and release is captured from the database's log onto the stream, keyed by event.
+  2. A consumer applies it to the event's seat-map view in the cache.
+  3. Fans read the map from the cache, at most 1 to 2 s behind.
+- **Why this and not that:** 75,000 reads/s would sit on the same rows as 1,500 writes/s (D1). A stale map costs a `409` and a second click; the hold check stays exact (D3).
+- **The gap:** a paid fan has no tickets yet.
+
+### Step 8: Tickets and notifications (F6)
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" step={8} caption="Step 8: the ticket service issues tickets from confirmed orders on the stream and serves my tickets." />
+
+- **Adds:** the **ticket service**.
+- **Flow:**
+  1. A confirmed order on the stream makes the ticket service issue tickets and send the email or push.
+  2. `GET /v1/me/tickets` reads them; right after paying, the order page reads the primary (read-your-writes).
+- **Why this and not that:** issuing is slow and retryable, so it runs off the stream, never inside the claim transaction (D4).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/ticketmaster/architecture" stepper caption="Ticket booking: browse from caches, hold with one conditional update, pay once, release on expiry, and meter the crowd through a waiting room." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Fan app or browser; the card processor (external) | Pick seats, pay; authorise and capture cards |
+| **Edge** | Waiting room, API gateway, CDN | Meter the crowd, check tokens, serve pages and map tiles |
+| **Booking core** | Booking service | Hold, claim and confirm: the only strongly consistent path |
+| **Application services** | Payment, ticket and event services | Idempotent payments, ticket issue, events and the seat map |
+| **Async pipeline** | Hold expiry, availability stream | Release unpaid seats; carry every seat change to readers |
+| **Storage** | Inventory DB, seat-map cache, event catalog | Seats and orders (ACID), the map view, events and venues |
+
+Buying two seats at the on-sale, step by step:
+
+1. The fan joins the waiting room at 09:50; at 10:00 the pre-queue is shuffled and they get a position.
+2. At their turn they receive a signed token and load the seat map from the cache.
+3. `POST /v1/holds` runs one conditional update for A12 and A13: both rows change, so the hold is theirs until 10:10.
+4. `POST /v1/orders` with an idempotency key: authorise, claim and insert the order in one transaction, capture.
+5. The order on the stream updates the seat map and makes the ticket service send the tickets.
+
+## Deep dives
+
+### Never double-sell
+
+- **The rule:** the check and the change are one statement, so the database decides; no service ever decides from a value it read earlier.
+- **Hold:** `UPDATE seats SET status = 'held', hold_id = :h, held_until = now() + interval '10 minutes' WHERE event_id = :e AND seat_id = ANY(:seats) AND (status = 'available' OR held_until < now())`; succeed only if the row count equals the seats asked for.
+- **Claim:** in one transaction, `UPDATE … SET status = 'sold' WHERE hold_id = :h AND held_until > now()`, then `INSERT INTO orders`; a count short of the hold means the hold expired: roll back.
+- **Why not a cache lock:** an in-memory `SET seat:A12 NX EX 600` gives the hold, but the sale happens in the database; the two cannot commit together, so a crash between them oversells or strands a seat (D3, D5).
+
+<AnimatedDiagram spec="animated/ticketmaster/double-sell" stepper caption="Read, then write lets two fans win the same seat; one conditional update lets the database pick exactly one winner." />
+
+<StepCards>
+  <StepCard n={1} title="Read, then write: both fans get A12">
+    Both requests read A12 as available before either writes. Both writes succeed; the second overwrites the first, and two fans are told the seat is theirs.
+  </StepCard>
+  <StepCard n={2} title="One conditional update: one winner">
+    Each request is one statement that changes A12 only while it is available. The database applies them one after the other: A's changes one row, B's changes none, and B is asked to pick another seat.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 1,500 conditional updates/s on one event is well within one relational primary.
+- The limit is the hottest rows, not the database: the reason the waiting room meters the crowd before it gets here.
+
+### The spike: cut demand, then meter it
+
+- **Cut demand before the sale:** registration ahead of time and access codes shrink 2,000,000 hopefuls to the fans who can buy; bots never get a code.
+- **Pre-queue:** fans who arrive early wait off the booking path; at the start the pre-queue is shuffled, so arriving at 09:50 is no better than 09:59 (N6).
+- **Admission rate R:** set to what checkout can finish: 500/s. Faster admission only moves the queue from the waiting room into `409`s and timeouts.
+- **Signed tokens:** the waiting room signs `(event, fan, admitted_at, expires_at)`; the gateway checks the signature without a database call, and a token is bound to one fan.
+- **Close the queue when it is over:** when held plus sold reaches capacity, tell the back of the queue the show is sold out instead of making them wait 67 minutes.
+
+<AnimatedDiagram spec="animated/ticketmaster/waiting-room" stepper caption="Arriving early gives no head start, and nobody reaches the booking service faster than checkout can serve them." />
+
+**How to read it:** step 1 is a fan's whole path from pre-queue to hold; step 2 is a request without a token being sent back.
+
+**The numbers:** position 812,345 at 500 admissions a second is 812,345 ÷ 500 = 1,625 s, about 27 minutes; the display updates every few seconds from the same arithmetic.
+
+<Callout tone="red" title="What breaks">
+  Tokens that are not bound to a fan get shared and resold, and a token with no expiry lets one admitted fan return all day. Bind the token to the session and expire it with the hold window.
+</Callout>
+
+### Hold, pay, confirm as a workflow
+
+- **Order of operations:** authorise the card, claim the seats with the order, capture the payment. Money moves only for a seat that is already the fan's.
+- **The hold expires mid-payment:** the claim changes 0 rows, so the authorisation is voided: no charge, no refund (D5, D7).
+- **The service crashes after authorising:** the order row in state `authorised` is the workflow record; a recovery job finds old ones, re-checks the claim, and captures or voids.
+- **Retries:** every call to the processor carries the same idempotency key, so a retry after a timeout returns the first result.
+
+<AnimatedDiagram spec="animated/ticketmaster/hold-pay-confirm" stepper caption="Authorise first, claim the seat, then capture: a hold that expires mid-payment costs the fan nothing." />
+
+<StepCards>
+  <StepCard n={1} title="Authorise, claim, capture">
+    The fan pays for A12 with key k9. The card is authorised, the seat is claimed with order 5521 in one transaction, and only then is the payment captured.
+  </StepCard>
+  <StepCard n={2} title="The hold expired mid-payment">
+    The fan pays at 10:11, a minute after the hold ran out and the seat was re-sold. The claim changes no rows, so the authorisation is voided and the fan is asked to pick again.
+  </StepCard>
+</StepCards>
+
+### Worked example: the 10:00 on-sale
+
+1. 09:50 to 10:00: 2,000,000 fans join; 1,000,000 in the last minute is about 16,700 joins/s, all at the waiting room.
+2. 10:00: the pre-queue is shuffled; admission starts at 500 fans/s.
+3. 10:05: 150,000 fans are inside, refreshing the map every 2 s: 75,000 cache reads/s and about 1,500 hold attempts/s.
+4. The 20,000 orders that sell out the show need 20,000 ÷ 500 = 40 s of checkout capacity; held seats that are not paid return after 10 minutes and sell again.
+5. When held plus sold reaches 50,000 and no holds are pending, the waiting room tells the remaining fans the show is sold out.
+
+**The numbers:** without the waiting room, 16,700 requests/s would reach a booking path sized for 500 orders/s: 33 × its capacity.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Seat claim | Read then write, `SELECT FOR UPDATE`, in-memory `SET NX`, conditional update | Conditional update on a row per seat | D3, D10, N1 | One primary per event caps write throughput | General admission: a pool of rows with `SKIP LOCKED` or a counter |
+| Hold and order | Two systems, one database | Same ACID database | D5, F3 | Booking data cannot move to a cheaper store | Never while payment and seat must agree |
+| Surge | Autoscaling, waiting room | Waiting room at R = checkout capacity | D2, D12, N4 | Fans wait; another component to run | Demand stays within capacity |
+| Seat-map source | Primary, read replica, stream into a cache | Stream into a cache | D1, D9, N3 | 1 to 2 s staleness: some `409`s | Small venues with few viewers |
+| Hold length | 3, 5, 10 minutes | 10 minutes | F2, D10 | Seats sit locked while fans dither | Abandoned holds pass a set share of seats |
+| Arrival order | First come first served, shuffled pre-queue | Shuffle early arrivals | N6, D6 | Arriving early earns nothing | Never for big on-sales |
+| Partitioning | By seat, by event | By event; a hot event gets its own database | D10, D11 | Cross-event queries need another store | A single event outgrows one primary |
+| Payment order | Charge then claim, authorise then claim then capture | Authorise, claim, capture | D5, D7 | Two processor calls; authorisations expire | The processor cannot authorise separately |
+| Expiry | Timer per hold, lazy condition + sweeper | Lazy condition + sweeper | D10, F4 | The map shows an expired hold for a few seconds | Never: correctness does not wait for the sweeper |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Hold and claim | 40 fans per seat; exactly one may win |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | Waiting room | Demand 33 × the booking path's capacity |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | Admission rate R, per-fan limits at the gateway | Meter fans to what checkout can finish |
+| [Idempotency](/system-design/patterns/idempotency) | Payment calls, order creation | A retry must never charge twice |
+| [Saga and Distributed Transactions](/system-design/patterns/saga) | Authorise, claim, capture or void | The card processor cannot join our transaction |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | Hold expiry, payment recovery | Work that must happen later even after a crash |
+| [Caching](/system-design/patterns/caching) | Seat-map view, event pages | 75,000 reads/s off the primary |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Seat map built from the stream | A read model kept fresh from changes |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | The front rows, the hot event | A few rows take most of the writes |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A sneaker drop | Waiting room, idempotent payment, holds with expiry | A count, not seats: a pool of unit rows with `SKIP LOCKED`, or an atomic decrement |
+| Hotel booking | Holds, authorise and capture, expiry | A room type over a date range: one row per room per night |
+| Vaccine appointments | Slots as rows, conditional claims, waiting room on launch day | Eligibility checks; a slot frees on no-show |
+| Cinema seats | Seat map, row per seat, short holds | Small venues: no waiting room, map read from the primary |
+| Restaurant tables | Slot holds and expiry | Table combinations and walk-ins |
+
+## How real systems do it
+
+- **2022:** Ticketmaster's account of the Eras Tour on-sale: 3.5 billion total system requests, four times its previous peak; over 3.5 million pre-registered, about 1.5 million sent codes, and over 2 million tickets sold on 15 November. It slowed down some sales and pushed back others to stabilise the systems.
+- **2025:** Ticketmaster's Smart Queue page: fans wait in a virtual waiting room before the sale, get a queue position when it starts, and enter the sale at a rate meant to minimise checkout errors.
+- **Confluent customer story (read 2026):** Ticketmaster centralises data from its systems on Kafka; inventory goes into a stream that feeds a separate data store; over 500 million tickets are sold a year.
+- **Queue-it documentation (read 2026):** a visitor without a valid token gets an HTTP 302 to the waiting room and returns with a signed token; early arrivals wait in a pre-queue and are randomised when the sale starts; the outflow runs at a configured rate.
+- **2026:** Shopify moved flash-sale inventory reservations off Redis to one row per sellable unit with `SKIP LOCKED`, keeping reservations and the inventory ledger in one database so reserve and claim are one ACID step.
+- **Where this design differs:** Ticketmaster does not publish how its holds work, so the hold and claim here follow Shopify's published design and the waiting room follows Queue-it's documented one. Both answer the same contention and spike.
+
+## Failure modes & pitfalls
+
+- **Read, then write:** two fans own one seat; alert on any seat with two orders; one conditional update, row count checked.
+- **Hold in a cache, sale in the database:** a crash between them oversells or strands a seat; reconcile cache holds against sold rows; keep both in one database.
+- **Waiting room too generous:** `409`s and timeouts climb while the queue empties; watch hold success rate; set R from checkout's measured throughput.
+- **Charge before claim:** an expired hold means a refund and an angry fan; count refunds caused by expiry; authorise, claim, then capture.
+- **Sweeper down:** seats look held on the map long after expiry; watch the oldest expired hold; correctness holds because the condition treats them as free.
+- **Hot event on a shared shard:** other events slow down during an on-sale; watch per-event write latency; give big on-sales their own database.
+- **Tokens without binding or expiry:** shared or resold queue tokens; check one token per fan; bind and expire them.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify seats against general admission, hold length, scale of the biggest on-sale, payment; write F1 to F6 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 40 fans per seat, 500/s checkout, 67-minute queue, 75,000 map reads/s, 10 MB of data.
+3. **Minutes 10 to 15:** API and the seats table; say where strong consistency lives.
+4. **Minutes 15 to 25:** Steps 1 to 5: draw the race, fix it with one conditional update, add payment and expiry.
+5. **Minutes 25 to 35:** Steps 6 to 8: the waiting room, the seat map from a stream, tickets.
+6. **Minutes 35 to 45:** one deep dive: double-selling, the spike or the payment workflow; answer the "why" behind each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** a row per seat, a hold with an expiry, an idempotency key on payment.
+- **Senior:** the conditional update and why a cache lock is not enough, authorise then claim then capture, a waiting room sized to checkout.
+- **Staff:** hot rows against hot databases, fairness and bots, what degrades first, how the design changes for general admission.
+
+**Red flags:** locks held across a payment call; holds only in a cache; "autoscale it" as the answer to the spike; reading the seat map from the primary.
+
+## Further reading
+
+- [Taylor Swift | The Eras Tour Onsale Explained](https://business.ticketmaster.com/press-release/taylor-swift-the-eras-tour-onsale-explained/) (Ticketmaster, 2022)
+- [Smart Queue](https://business.ticketmaster.com/smart-queue/) (Ticketmaster, 2025)
+- [Ticketmaster customer story](https://www.confluent.io/customers/ticketmaster/) (Confluent)
+- [How Queue-it works](https://queue-it.com/developers/how-queue-it-works) (Queue-it documentation)
+- [Scaling inventory reservations](https://shopify.engineering/scaling-inventory-reservations) (Shopify Engineering, 2026)
+- Related pages: [Design a Hotel Booking Service](/system-design-case-studies/case-studies/hotel-booking) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Idempotency](/system-design/patterns/idempotency)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you make sure no seat is ever sold twice?" category="Concepts" level="Mid">
+  - Keep one row per seat and change it with one conditional update: only while it is available.
+  - The database applies writes to one row one after the other, so exactly one request changes it; the others see 0 rows and get `409`.
+  - Claim the seat and write the order in the same transaction, so a paid seat is always a sold seat.
+  </InterviewQuestion>
+  <InterviewQuestion question="A seat is held for about five minutes while the fan pays. How do you implement the hold and its expiry?" category="Architecture" level="Mid">
+  - Store `held_until` on the seat row; the hold condition treats an expired hold as available, so correctness never waits for a timer.
+  - A sweeper resets expired holds in batches every few seconds, so the seat map shows them again.
+  - Claim only where `held_until` is still in the future; an expired claim rolls back.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not hold seats with a Redis SET NX and an expiry?" category="Trade-offs" level="Senior">
+  - It gives a fast hold, but the sale is written in the database; the two cannot commit together.
+  - A crash between them either sells a seat that the cache still shows held, or strands a seat nobody can buy.
+  - Keep the hold in the same ACID database as the order; use the cache only for the read-only seat map.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two million fans arrive in the same minute. What do you do?" category="Scaling" level="Senior">
+  - Cut demand first: registration and access codes before the sale.
+  - Put a waiting room in front: shuffle early arrivals, admit at the rate checkout can finish, give each admitted fan a signed, expiring token.
+  - Close the queue once held plus sold reaches capacity; never let the crowd reach the hold path directly.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you call the payment service synchronously or through a queue?" category="Architecture" level="Senior">
+  - Synchronously for authorise: the fan is waiting, and the claim depends on the answer.
+  - Capture, ticket issue and emails can run off the stream: they are slow, retryable and nobody waits on them.
+  - Every call carries the idempotency key, so a retry in either path never charges twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="The hold expires while the fan is still paying. What happens?" category="Failure modes" level="Senior">
+  - Authorise first, then claim: the claim changes 0 rows because the hold is gone.
+  - Void the authorisation: no money moved, nothing to refund.
+  - Tell the fan the seat was released and let them pick again; never capture a payment without a claimed seat.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why serve the seat map from a cache when the hold must be exact?" category="Trade-offs" level="Mid">
+  - 75,000 map reads/s against 1,500 hold writes/s would put 50 × the load on the hottest rows.
+  - A map 1 to 2 s stale costs a fan a `409` and a second click; the hold check on the primary stays exact.
+  - Feed the cache from the database's change stream so it never drifts far.
+  </InterviewQuestion>
+  <InterviewQuestion question="The interviewer changes the requirement to general admission with no seat numbers. What changes?" category="Architecture" level="Senior">
+  - There is no seat to fight over, only a count, so rows per seat become a pool of unit rows or one counter.
+  - Hold units with `SELECT … FOR UPDATE SKIP LOCKED` from the pool, or an atomic decrement of the remaining count.
+  - The waiting room, idempotent payment and expiry stay the same.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Conditional updates (concurrency control) because 40 fans want each seat.
+  - A waiting room (back pressure, rate limiting) because the peak is far above checkout capacity.
+  - Idempotency keys and a saga of authorise, claim, capture because the card processor is outside our transaction.
+  - A materialised seat map from a change stream because reads outnumber writes 50 to 1.
+  </InterviewQuestion>
+</InterviewQuestions>
