@@ -1,0 +1,19 @@
+title: Parking garage system high-level architecture
+alt: >-
+  An architecture diagram in seven steps across six zones: drivers and garages, edge, capacity core, application
+  services, async pipeline and storage. Step 1: the gates send each plate read to a garage controller, the solid
+  accent node, which keeps the counts in memory. Step 2: the controller calls the sync service through a device
+  gateway for every entry and waits, drawn red because a broken link stops the gate; the sync service writes tickets
+  to the garage database. Step 3: the controller tells the gate to open and which bay fits the vehicle. Step 4: the
+  driver app reserves through the API gateway; the reservation service adds one to every 15-minute slot counter in one
+  transaction, and a no-show job releases unused slots. Step 5: the operator sets rates; the billing service prices and
+  charges the card processor with an idempotency key, and the controller takes cards at the exit. Step 6: the
+  controller syncs event batches up and configuration down instead of waiting; a standby replica and an archive job
+  writing monthly files to object storage are added. Step 7: the availability service serves free spaces to the app
+  from the replica, and the controller drives the signs.
+caption: >-
+  A parking garage system: gates decide on site, reservations take capacity per 15-minute slot in one transaction,
+  and one relational database serves the whole fleet.
+tags: [case-studies, parking-garage, architecture, offline, reservations]
+source: original
+created: 2026-11-17
