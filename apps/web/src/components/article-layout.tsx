@@ -11,6 +11,8 @@ export interface DocsLayoutProps {
   updated: string | null;
   /** Site path of the page. */
   pagePath?: string;
+  /** Optional inline status badge rendered beside the updated date. */
+  statusBadge?: React.ReactNode;
 }
 
 // Server component: the header and article arrive as plain HTML; only the table of contents, the relative
@@ -51,9 +53,10 @@ export function ArticleLayout({
           <FadeIn>
             <div className="mb-10 border-b border-hairline pb-8">
               <PageHeader title={title} lead={description} />
-              {docs.updated && (
+              {(docs.updated || docs.statusBadge) && (
                 <div className="mt-6">
-                  <UpdatedDate iso={docs.updated} />
+                  {docs.updated && <UpdatedDate iso={docs.updated} />}
+                  {docs.statusBadge}
                 </div>
               )}
             </div>

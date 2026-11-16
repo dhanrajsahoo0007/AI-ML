@@ -6,7 +6,7 @@ import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
-import { isCompleted, useCompletedPages } from "@/lib/completed.client";
+import { groupHrefs, isCompleted, sectionHrefs, useCompletedPages, useProgressStats } from "@/lib/completed.client";
 import type { NavSection, NavGroup, NavCategory } from "@/lib/nav-tree";
 
 interface ContentSidebarProps {
@@ -59,6 +59,8 @@ function SidebarSection({
   }, [isActive]);
 
   const SectionIcon = getIconComponent(section.icon);
+  const allHrefs = React.useMemo(() => sectionHrefs(section), [section]);
+  const stats = useProgressStats(allHrefs);
 
   return (
     <div>
@@ -75,6 +77,14 @@ function SidebarSection({
           <SectionIcon className={cn("size-4 shrink-0", isActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1">{section.label}</span>
+        {stats.completed > 0 && (
+          <span
+            className="shrink-0 font-sans text-xs font-medium tabular-nums text-muted-foreground"
+            data-testid={`sidebar-section-percent-${section.key}`}
+          >
+            {stats.percent}%
+          </span>
+        )}
         {!pinnedOpen && (
           <ChevronDown
             className={cn(
@@ -84,6 +94,33 @@ function SidebarSection({
           />
         )}
       </button>
+
+      {open && stats.completed > 0 && (
+        <div className="mt-2.5 mb-2 rounded-lg bg-paper px-2.5 py-2" data-testid={`sidebar-progress-${section.key}`}>
+          <div className="flex items-baseline justify-between gap-2 text-[11px] tabular-nums">
+            <span className="font-semibold text-ink">{stats.percent}% completed</span>
+            <span className="text-muted-foreground">
+              {stats.completed} / {stats.total} read
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label={`${section.label} progress`}
+            aria-valuenow={stats.percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-paper-2"
+          >
+            <div
+              className={cn(
+                "h-full rounded-full transition-[width] duration-300",
+                stats.percent === 100 ? "bg-success" : "bg-tint"
+              )}
+              style={{ width: `${stats.percent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {open && (
         <div className="mt-2">
@@ -155,6 +192,8 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
   }, [isGroupActive]);
 
   const GroupIcon = group.icon ? getIconComponent(group.icon) : null;
+  const leafHrefs = React.useMemo(() => groupHrefs(group), [group]);
+  const stats = useProgressStats(leafHrefs);
 
   if (!hasChildren) {
     return (
@@ -183,6 +222,14 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
           <GroupIcon className={cn("size-4 shrink-0", isGroupActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1 truncate text-sm font-semibold">{group.title}</span>
+        {stats.completed > 0 && (
+          <span
+            className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+            aria-label={`${stats.completed} of ${stats.total} read`}
+          >
+            {stats.completed}/{stats.total}
+          </span>
+        )}
         <ChevronDown
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
@@ -258,9 +305,10 @@ function SidebarCategory({
         </span>
         {read > 0 && (
           <span
-            className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+            className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
             aria-label={`${read} of ${category.items.length} read`}
           >
+            {read === category.items.length && <Check aria-hidden className="size-3 text-success" />}
             {read}/{category.items.length}
           </span>
         )}

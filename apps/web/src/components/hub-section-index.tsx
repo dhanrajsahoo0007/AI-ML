@@ -1,17 +1,22 @@
 import { SectionIndex } from "@/components/section-index";
+import { SectionProgressBanner } from "@/components/section-progress-banner.client";
 import { TopicCard } from "@/components/topic-card";
 import { docGroupSchema, type SectionDef } from "@/features/sections";
-import { articlesOf, hubsOf, sectionGroups, type DocItem } from "@/features/docs";
+import { articlesOf, docsKind, hubsOf, sectionGroups, type DocItem } from "@/features/docs";
+import { sectionLeafItems } from "@/lib/progress-stats";
 
 // Index page of a docs section: one card per section group (sections.yaml `groups`, in reading order) when the
 // section sets them, else one per hub group, else one per hub. Title, subtitle and breadcrumb label come from the
 // section's registry entry.
 export function HubSectionIndex({ section, items }: { section: SectionDef; items: DocItem[] }) {
   const hub = section.hub ?? { title: section.label, subtitle: "" };
+  const nav = docsKind.nav(section, items);
+  const leafItems = sectionLeafItems(nav);
+  const banner = <SectionProgressBanner sectionLabel={section.label} items={leafItems} />;
   const own = sectionGroups(section, items);
   if (own.length > 0) {
     return (
-      <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle}>
+      <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle} banner={banner}>
         {own.map((g, i) => (
           <TopicCard
             key={g.slug}
@@ -30,7 +35,7 @@ export function HubSectionIndex({ section, items }: { section: SectionDef; items
     );
   }
   return (
-    <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle}>
+    <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle} banner={banner}>
       {hubsOf(items).flatMap((h) => {
         const articles = articlesOf(items, h.slug);
         const childCount = articles.length;

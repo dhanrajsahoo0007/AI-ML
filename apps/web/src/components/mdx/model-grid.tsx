@@ -1,6 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { ModelCardDone } from "@/components/read-count";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
 import { slugify } from "@/lib/doc-headings";
 
@@ -65,6 +66,7 @@ export function ModelCard({
           {resolveIcon(icon)}
         </span>
         <span className="flex items-center gap-2">
+          <ModelCardDone href={href} />
           {status === "outline" && (
             <span className="rounded-full border border-hairline px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
               Outline

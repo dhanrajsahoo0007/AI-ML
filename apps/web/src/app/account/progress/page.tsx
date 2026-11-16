@@ -5,7 +5,10 @@ import { Container, PageHeader } from "@/components/ui/editorial";
 import { withPageSession } from "@/features/auth";
 import { listRatings, listStories } from "@/features/practice";
 import { listProgress } from "@/features/progress";
+import { SyncAccountProgress } from "@/features/progress/sync-account-progress.client";
 import { pageInfo } from "@/features/search";
+import { getHeaderNav } from "@/lib/nav-tree";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Progress & bookmarks" };
 
@@ -60,9 +63,92 @@ export default async function AccountProgressPage() {
     .sort(byNewest);
   const bookmarks = data.bookmarks.map((b) => ({ key: b.contentKey, at: b.createdAt })).sort(byNewest);
 
+  const completedKeys = completed.map((c) => c.key);
+  const bookmarkKeys = bookmarks.map((b) => b.key);
+
+  const headerNav = await getHeaderNav();
+  const tracks = headerNav
+    .filter((s) => s.kind === "docs" && !s.comingSoon)
+    .map((s) => {
+      const total = s.groups.reduce((n, g) => n + g.count, 0);
+      const prefix = `${s.key}/`;
+      const done = Math.min(
+        total,
+        completedKeys.filter((k) => k.startsWith(prefix) && k.indexOf("/", prefix.length) !== -1).length
+      );
+      const percent =
+        total === 0 || done === 0
+          ? 0
+          : done >= total
+            ? 100
+            : Math.min(99, Math.max(1, Math.round((done / total) * 100)));
+      return {
+        key: s.key,
+        label: s.label,
+        href: s.href,
+        tone: s.tone,
+        completed: done,
+        total,
+        percent,
+      };
+    })
+    .filter((t) => t.total > 0);
+
   return (
     <Container className="max-w-3xl space-y-8 py-14 sm:py-20">
+      <SyncAccountProgress completed={completedKeys} bookmarks={bookmarkKeys} />
       <PageHeader eyebrow="Account" title="Progress & bookmarks" />
+
+      {tracks.length > 0 && (
+        <section
+          aria-label="Progress by track"
+          data-testid="progress-by-section"
+          className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8"
+        >
+          <h2 className="font-display text-2xl tracking-tight">Progress by track</h2>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            {tracks.map((track) => (
+              <Link
+                key={track.key}
+                href={track.href}
+                data-tone={track.tone}
+                data-testid={`track-progress-${track.key}`}
+                className="group flex flex-col justify-between rounded-xl border border-hairline bg-paper-2/50 p-4 transition-colors hover:border-tint/60 hover:bg-paper-2"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-ink group-hover:text-primary">{track.label}</span>
+                  <span
+                    className="shrink-0 font-display text-xl tabular-nums text-ink"
+                    data-testid={`track-percent-${track.key}`}
+                  >
+                    {track.percent}%
+                  </span>
+                </div>
+                <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                  {track.completed} of {track.total} {track.total === 1 ? "topic" : "topics"} completed
+                </p>
+                <div
+                  role="progressbar"
+                  aria-label={`${track.label} progress`}
+                  aria-valuenow={track.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-paper"
+                >
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-[width] duration-300",
+                      track.percent === 100 ? "bg-success" : "bg-tint"
+                    )}
+                    style={{ width: `${track.percent}%` }}
+                  />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section aria-label="Bookmarks" className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8">
         <h2 className="font-display text-2xl tracking-tight">Bookmarks · {bookmarks.length}</h2>
         <div className="mt-4">

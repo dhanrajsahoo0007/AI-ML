@@ -77,6 +77,32 @@ test.describe("test-login provider is absent from production @core", () => {
   });
 });
 
+test.describe("per-tab page completion and percentage progress @core", () => {
+  test("marking a page complete updates X% progress for its tab while keeping other tabs at 0%", async ({ page }) => {
+    const target = "/ai-system-design/genai-system-design/anatomy-of-an-llm-application";
+
+    await page.goto(target);
+    const actions = page.getByTestId("progress-actions");
+    await expect(actions).toBeVisible();
+    await expect(page.getByTestId("article-section-percent")).toContainText("0%");
+
+    await actions.getByRole("button", { name: "Mark complete" }).click();
+    await expect(actions.getByRole("button", { name: "Completed" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("article-completed-badge")).toBeVisible();
+    await expect(page.getByTestId("article-section-percent")).not.toContainText("0% (0/");
+    await expect(page.getByTestId("sidebar-progress-ai-system-design")).toContainText("% completed");
+
+    // Section index for ai-system-design shows the X% banner and Continue link.
+    await page.goto("/ai-system-design");
+    await expect(page.getByTestId("section-progress-banner")).toBeVisible();
+    await expect(page.getByTestId("section-progress-percent")).toContainText("% completed");
+
+    // Another tab (genai-system-design) stays at 0% (no banner shown).
+    await page.goto("/genai-system-design");
+    await expect(page.getByTestId("section-progress-banner")).toHaveCount(0);
+  });
+});
+
 const profileButton = (page: Page) => page.locator('button[aria-label="Open profile menu"]:visible');
 
 async function profileName(page: Page): Promise<string> {
@@ -227,6 +253,12 @@ test.describe("sign-in with the database @core", () => {
     await expect(completed.locator(`a[href="${keyHref}"]`)).toHaveText(keyTitle);
     await expect(completed.locator(`a[href="${mergedHref}"]`)).toHaveText(mergedTitle);
     expect(await page.evaluate(() => localStorage.getItem("tts_progress_v1"))).toBeNull();
+    const cached = JSON.parse((await page.evaluate(() => localStorage.getItem("tts_progress_cache_v1"))) ?? "{}");
+    expect(Object.keys(cached.completed ?? {})).toEqual(expect.arrayContaining([key, merged]));
+    expect(Object.keys(cached.completed ?? {})).not.toContain(junk);
+
+    await page.goto("/account/progress");
+    await expect(page.getByTestId("progress-by-section")).toBeVisible();
 
     // And the first browser sees what the second one merged.
     const list = await (await first.request.get("/api/progress")).json();

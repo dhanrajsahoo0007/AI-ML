@@ -4,6 +4,7 @@ import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { ProfileMenu } from "@/features/account/profile-menu.client";
+import { CompletedProvider } from "@/features/progress/completed-provider.client";
 import { SiteFooter } from "@/components/site-footer";
 import { HydrationSlot } from "@/components/hydration-slot";
 import { LocalViewSwitch } from "@/components/local-view-switch.client";
@@ -81,19 +82,21 @@ export default async function RootLayout({
         </a>
         {/* Keys: an element handed to a client component as a prop arrives lazily and lands among the header's other
             children, which React treats as an unkeyed list member (a dev-only warning); a key settles it. */}
-        <SiteHeader
-          navTree={headerNav}
-          profileMenu={<ProfileMenu key="profile-menu" />}
-          profileMenuMobile={<ProfileMenu key="profile-menu-mobile" />}
-        />
-        <ContentProtection />
-        {/* `next dev` only: the paid/unpaid view switch. APP_ENV is inlined at build, so deployed builds drop it. */}
-        {process.env.APP_ENV === "local" && <LocalViewSwitch envDefault={process.env.LOCAL_VIEW_AS} />}
-        {/* HydrationSlot: these arrive as separate RSC rows that may land after hydration starts; see
-            components/hydration-slot.tsx (React #418). Not a Suspense boundary: that would turn notFound() 404s into 200s. */}
-        <main id="main" className="w-full flex-1">
-          <HydrationSlot>{children}</HydrationSlot>
-        </main>
+        <CompletedProvider>
+          <SiteHeader
+            navTree={headerNav}
+            profileMenu={<ProfileMenu key="profile-menu" />}
+            profileMenuMobile={<ProfileMenu key="profile-menu-mobile" />}
+          />
+          <ContentProtection />
+          {/* `next dev` only: the paid/unpaid view switch. APP_ENV is inlined at build, so deployed builds drop it. */}
+          {process.env.APP_ENV === "local" && <LocalViewSwitch envDefault={process.env.LOCAL_VIEW_AS} />}
+          {/* HydrationSlot: these arrive as separate RSC rows that may land after hydration starts; see
+              components/hydration-slot.tsx (React #418). Not a Suspense boundary: that would turn notFound() 404s into 200s. */}
+          <main id="main" className="w-full flex-1">
+            <HydrationSlot>{children}</HydrationSlot>
+          </main>
+        </CompletedProvider>
         <HydrationSlot>
           <SiteFooter />
           <Observability />
