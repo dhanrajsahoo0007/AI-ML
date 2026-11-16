@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { attend } from "@/components/diagrams/presets/llm-attention";
 import * as arch from "@/components/diagrams/presets/llm-architecture";
+import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
 
 // The LLM Foundations pages quote these numbers in prose; the presets compute them once. If a constant changes,
 // the page text must change with it.
@@ -48,5 +49,27 @@ describe("llm-architecture: base Transformer arithmetic", () => {
     expect(arch.LOGITS_PER_PASS).toBe(111_000);
     expect(arch.BASE.heads * arch.BASE.dK).toBe(arch.BASE.dModel);
     expect(arch.GPT3.ctx).toBe(2_048);
+  });
+});
+
+describe("llm-tokens: BPE on low, lower, newest", () => {
+  it("encodes unseen words with the learned merges", () => {
+    const byWord = Object.fromEntries(ENCODED.map((e) => [e.word, e]));
+    expect(byWord.lowest.tokens).toEqual(["lowe", "s", "t"]);
+    expect(byWord.lowest.ids).toEqual([10, 6, 7]);
+    expect(byWord.newer.tokens).toHaveLength(5);
+    expect(byWord.slowly.tokens).toEqual(["s", "low", "l", "y"]);
+    expect(byWord.slowly.ids.at(-1)).toBeUndefined();
+  });
+
+  it("WordPiece scores s + t highest, BPE's l + o at 0.50", () => {
+    const score = (a: string, b: string) => WORDPIECE_FIRST.find((p) => p.a === a && p.b === b)?.score;
+    expect(score("l", "o")).toBeCloseTo(0.5);
+    expect(score("s", "t")).toBeCloseTo(1);
+    expect(Math.max(...WORDPIECE_FIRST.map((p) => p.score))).toBeCloseTo(1);
+  });
+
+  it("UTF-8 byte counts for tea", () => {
+    expect(TEA.map((t) => t.byteCount)).toEqual([3, 3, 6, 9, 3, 4]);
   });
 });

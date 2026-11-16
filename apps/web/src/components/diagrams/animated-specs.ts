@@ -635,6 +635,7 @@ import s629 from "../../../assets/diagrams/animated/transformer/attention-cost-g
 import s630 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
 import s631 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
 import s632 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
+import s633 from "../../../assets/diagrams/animated/transformer/bpe-encode";
 import s634 from "../../../assets/diagrams/animated/transformer/bpe-merges";
 import s635 from "../../../assets/diagrams/animated/transformer/causal-mask";
 import s636 from "../../../assets/diagrams/animated/transformer/compute-estimate";
@@ -669,6 +670,7 @@ import s664 from "../../../assets/diagrams/animated/transformer/three-masks";
 import s665 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
 import s666 from "../../../assets/diagrams/animated/transformer/training-pipeline";
 import s667 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s668 from "../../../assets/diagrams/animated/transformer/utf8-bytes";
 import s669 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
@@ -1305,6 +1307,7 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/transformer/attention-worked-example": s630,
   "diagrams/animated/transformer/bert-input-embeddings": s631,
   "diagrams/animated/transformer/bert-pretrain-finetune": s632,
+  "diagrams/animated/transformer/bpe-encode": s633,
   "diagrams/animated/transformer/bpe-merges": s634,
   "diagrams/animated/transformer/causal-mask": s635,
   "diagrams/animated/transformer/compute-estimate": s636,
@@ -1339,5 +1342,6 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/transformer/tokenizer-pipeline": s665,
   "diagrams/animated/transformer/training-pipeline": s666,
   "diagrams/animated/transformer/training-vs-inference": s667,
+  "diagrams/animated/transformer/utf8-bytes": s668,
   "diagrams/animated/uber-eats/architecture": s669,
 };
