@@ -1,11 +1,27 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
 
-// Uber Eats architecture, built up one requirement at a time (see CASE-STUDY-FORMAT.md).
+// Uber Eats architecture, built up one requirement at a time (uber-eats case study, Steps 1 to 5 and Final
+// architecture).
+// Steps: 1 browse nearby restaurants (F1) · 2 place an order and pay (F2) · 3 restaurant accepts, everyone hears about
+// it (F3, F6) · 4 dispatch a courier (F4) · 5 live tracking and ETA (F5).
 //
 // Main paths (packets): browse = customer -> gateway -> search -> search index; order = customer ->
 // gateway -> order service -> payment + orders DB -> event bus -> notifier -> socket gateway ->
 // restaurant / customer; dispatch = bus -> dispatch <-> location; tracking = courier -> socket
 // gateway -> location -> geo index + bus.
+//
+// Working (from the page's estimates): 10M orders a day / 86,400 s = 115/s, x 5 at dinner = about 600/s; 1M couriers
+// online / one GPS fix every 4 s = 250K location writes/s, about 400 x the order rate, which is why the geo index is a
+// separate in-memory store and not the orders DB.
+//
+// Layout: 1200 x 790 (taller than the 1200 x 740 hero grid because this spec predates zoneFrame(); nodes and zones
+// keep their original places). Columns: Clients x 20, Edge x 212, Application services (top) and Ordering & dispatch
+// (bottom) x 405, Async pipeline x 768, Storage x 1012.
+// Style (restyled 2026-11-17): pastel blocks (fill "pastel") for services and apps, glyphs for stores and the bus, the
+// order service is the one accent (no fill). Node ids and positions are unchanged, because the question bank embeds
+// this spec with highlight={["order", "dispatch", "location", "bus"]}.
+// Colours: zones as in CASE-STUDY-FORMAT.md (Clients neutral, Edge blue, services teal, core green, async orange,
+// storage violet); the geo index is red because it is the one store that may lose data (it refills from GPS).
 const spec: DiagramSpec = {
   title: "Uber Eats high-level architecture",
   width: 1200,
@@ -26,9 +42,20 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 1012, y: 60, w: 172, h: 640 },
   ],
   nodes: [
-    { id: "customer", label: "Customer app", sub: "browse, order", icon: "phone", x: 105, y: 150, w: 150, h: 64 },
+    {
+      id: "customer",
+      fill: "pastel",
+      label: "Customer app",
+      sub: "browse, order",
+      icon: "phone",
+      x: 105,
+      y: 150,
+      w: 150,
+      h: 64,
+    },
     {
       id: "gateway",
+      fill: "pastel",
       label: "API gateway",
       sub: "auth, rate limit",
       icon: "gateway",
@@ -40,6 +67,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "search",
+      fill: "pastel",
       label: "Search service",
       sub: "nearby, open, cuisine",
       icon: "server",
@@ -51,6 +79,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "menu",
+      fill: "pastel",
       label: "Restaurant service",
       sub: "menus, hours, prices",
       icon: "media",
@@ -96,6 +125,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "payment",
+      fill: "pastel",
       label: "Payment service",
       sub: "Stripe / Adyen",
       icon: "card",
@@ -120,6 +150,7 @@ const spec: DiagramSpec = {
 
     {
       id: "restaurant",
+      fill: "pastel",
       label: "Restaurant app",
       sub: "kitchen tablet",
       icon: "phone",
@@ -131,6 +162,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "rtgw",
+      fill: "pastel",
       label: "Socket gateway",
       sub: "live WebSockets",
       icon: "load-balancer",
@@ -155,6 +187,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "notifier",
+      fill: "pastel",
       label: "Notifier",
       sub: "sockets + APNs / FCM",
       icon: "bell",
@@ -168,6 +201,7 @@ const spec: DiagramSpec = {
 
     {
       id: "courier",
+      fill: "pastel",
       label: "Courier app",
       sub: "GPS every 4 s",
       icon: "phone",
@@ -179,6 +213,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "dispatch",
+      fill: "pastel",
       label: "Dispatch service",
       sub: "match order to courier",
       icon: "workers",
@@ -191,6 +226,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "location",
+      fill: "pastel",
       label: "Location service",
       sub: "latest courier positions",
       icon: "presence",
@@ -215,6 +251,7 @@ const spec: DiagramSpec = {
 
     {
       id: "eta",
+      fill: "pastel",
       label: "ETA service",
       sub: "road graph + traffic",
       icon: "history",
@@ -252,9 +289,26 @@ const spec: DiagramSpec = {
       flow: true,
       packet: true,
       delay: 0.6,
-      labelAt: 0.3,
+      // Routed down the gap between Edge and the services (x 393) so it no longer crosses the zone title.
+      via: [
+        [393, 175],
+        [393, 400],
+      ],
+      labelAt: 0.45,
     },
-    { from: "order", to: "payment", tone: "teal", flow: true, packet: true, delay: 1.2 },
+    {
+      from: "order",
+      to: "payment",
+      tone: "teal",
+      flow: true,
+      packet: true,
+      delay: 1.2,
+      // Right of the "Ordering & dispatch" title (which ends near x 603), so the arrow does not cross it.
+      via: [
+        [650, 370],
+        [650, 298],
+      ],
+    },
     {
       from: "order",
       to: "ordersDb",
