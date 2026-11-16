@@ -1,96 +1,210 @@
 ---
 title: "Back Pressure and Load Shedding"
 description: "Protecting a system under overload: bounded queues, signalling producers to slow down, and dropping low-value work."
+icon: gauge
+updated: 2026-11-16
 ---
 
 Every system has a capacity limit. Back pressure and load shedding decide what happens when demand exceeds it: degrade on purpose, or collapse.
 
-## TL;DR
+- Interviewers ask about overload to see whether you bound every queue, say who gets turned away first, and know that autoscaling arrives too late.
+
+## Overview
 
 - **Back pressure** pushes the slowdown upstream so producers send less.
 - **Load shedding** rejects or drops some work to keep the rest healthy.
-- Use **bounded queues**; unbounded ones hide overload until memory runs out.
-- Shed by **priority** (keep paying users, health checks, writes of critical data).
-- Return fast errors (`429`, `503` with `Retry-After`) instead of slow timeouts.
+- Use **bounded queues**: an unbounded one hides overload until every request in it is too old to matter.
+- Shed by **priority** (checkout before browsing, health checks always) and keep it **fair** (one tenant cannot take the whole queue).
+- Return **fast errors** (`429` or `503` with `Retry-After`) instead of slow timeouts.
+- **Autoscaling is not enough:** it reacts in minutes; overload arrives in seconds.
 
-## The idea in plain English
+## Mental model
 
-A restaurant with a full kitchen stops seating new tables (back pressure) and turns away walk-ins (shedding) so the orders already in progress still come out hot.
+- A restaurant with a full kitchen stops seating new tables (back pressure) and turns away walk-ins (shedding).
+- That way the orders already in progress still come out hot.
+- A restaurant that seats everyone serves every table cold, which is the unbounded queue.
+- The host at the door is admission control: it decides at the door, where saying no costs nothing.
 
 ## Core concepts
 
-1. **Bounded queues.** A fixed size forces a decision when full: block, reject or drop.
-2. **Signalling.** TCP windows, HTTP `429`/`503`, reactive-streams demand, or consumer lag metrics.
-3. **Admission control.** Accept only what you can finish within the deadline.
-4. **Priority and fairness.** Classify traffic; shed the least important first; limit per tenant.
-5. **Autoscaling is not enough.** It reacts in minutes; overload happens in seconds.
-6. **Adaptive limits.** Concurrency limits that shrink as latency rises.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    P["Producers"] --> AC{"Admission control"}
-    AC -->|"accept"| Q[("Bounded queue")]
-    AC -->|"over limit: 429 / drop low priority"| P
-    Q --> W["Workers"]
-    W -. "queue depth, latency" .-> AC
-```
-
-## Deep dive
+- The running example is Brightpost's order service on sale day: **300 orders/s** arrive at 12:00 and the service finishes **250/s** (illustrative).
 
 ### Why unbounded queues fail
 
-When arrivals exceed service rate, the queue grows, latency grows with it, and by the time work is processed the client has given up. The system does useless work. A bounded queue plus fast rejection keeps latency predictable.
+- When arrivals exceed the service rate, the queue grows by the difference, every second, until arrivals drop.
+- The wait for a new arrival is the queue length divided by the service rate, so latency grows with the queue.
+- Once the wait passes the client's timeout, the service finishes only requests nobody is waiting for: **throughput** stays high and **goodput** (useful, timely work) falls to zero.
+- Retries from those timed-out clients add more arrivals, so the overload feeds itself.
+
+<AnimatedDiagram spec="animated/patterns/bp-queue-growth" caption="When arrivals beat the service rate, an unbounded queue only grows; a bound keeps the wait at 10 seconds and turns the surplus into fast rejections." />
+
+**How to read it:**
+
+- The red line is the unbounded queue: a straight climb of 50 orders a second.
+- The green line is the same service with the queue capped at 2,500: it fills in 50 seconds, then stays flat.
+
+**The numbers:**
+
+- Growth: 300 − 250 = 50 orders a second. After 1 minute 3,000 wait (12 s); after 10 minutes 30,000 wait (120 s).
+- With a 10 s checkout timeout, the queue passes 10 s of work (2,500 orders) 50 s after 12:00. From then on, every order served has been abandoned.
+- Bounded at 2,500: the wait stays at 10 s, 250 orders a second succeed, and 50 a second get an immediate `429`.
+
+<PremiumBreak />
+
+### Signalling upstream
+
+- **Inside a process:** a full bounded buffer blocks the producer; reactive streams pass demand ("send me 10 more") upstream.
+- **On the network:** TCP flow control shrinks the receive window; HTTP returns `429` or `503` with `Retry-After`.
+- **Between services:** consumer lag on a queue, or a concurrency limit that shrinks as latency rises (adaptive limits).
+- **On the client:** Google's adaptive throttling counts requests and accepts over two minutes and starts rejecting locally once requests reach twice the accepts (K = 2).
+
+### Priority queues and fairness
+
+- **Priority:** classify each request by how much its failure hurts, and shed from the bottom. Google's SRE book uses four levels, from CRITICAL_PLUS to SHEDDABLE.
+- Brightpost's order: payment for a held kettle first, then new checkouts, then order history and receipt emails, which can wait.
+- Never shed the load balancer's health check: a server that misses it is taken out of service, which shrinks capacity in the middle of the overload.
+- **Fairness:** give each tenant (a seller, an API client) a quota or its own queue, and serve queues in turn, so one tenant's bulk import cannot fill the queue that shoppers need.
+- Quotas can add up to more than capacity, because not every tenant peaks at once.
+
+## Architecture
+
+The order service, protected one layer at a time.
+
+<AnimatedDiagram spec="animated/patterns/bp-bounded" stepper caption="A bound turns overload into fast answers, priority decides who those answers go to, and a quota stops one tenant taking the whole queue." />
+
+<StepCards>
+  <StepCard n={1} title="No limit: the queue grows">
+    300 orders a second go straight into a queue that the order service drains at 250. The queue grows by 50 a second, and so does the wait, until the wait is longer than any shopper will stay.
+  </StepCard>
+  <StepCard n={2} title="A bound and a fast 429">
+    Admission control caps the queue at 2,500 orders, 10 seconds of work. The 50 a second over the cap get a 429 with Retry-After at once, so their clients can back off instead of waiting to time out.
+  </StepCard>
+  <StepCard n={3} title="Shed low priority first">
+    Receipt emails and order-history requests go to a sheddable queue, read only when checkout is idle. Under pressure they wait or are dropped, and checkout keeps the full 250 a second.
+  </StepCard>
+  <StepCard n={4} title="One tenant cannot fill it">
+    A seller's bulk import is one tenant with a quota of 5 % of the queue. However fast it sends, shoppers still find room.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
 
 ### Shedding strategies
 
-Drop newest (cheap, preserves in-progress work), drop oldest (when only fresh data matters, e.g. live metrics), or drop by priority. Combine with [circuit breakers](/system-design/patterns/circuit-breaker-and-retries) on callers.
+- **Drop newest** (reject at the door): cheap, and it keeps the work already in progress.
+- **Drop oldest:** where only fresh data matters, such as live metrics or location updates.
+- **Drop by priority:** sheddable classes first, critical last.
+- **Drop by age:** bound the time a request may sit in the queue, not only the queue length, and discard any request older than its caller's timeout.
+- **LIFO under overload:** serving the newest request first gives it a chance to finish inside its timeout; the oldest are probably dead already.
+
+### Reject cheaply and early
+
+- The cheapest place to drop traffic is before any work: at the load balancer, the gateway or the connection limit.
+- A rejection that costs as much as the request does not help. Keep the reject path free of database calls.
+- Cap retries: at most three attempts per request, and a retry budget of about 10 % of requests per client.
+
+### Planned spikes
+
+- For a known event such as the flash sale, put a **waiting room** in front: admit shoppers at the rate checkout can take and give the rest a place in line.
+- Combine with [circuit breakers](/system-design/patterns/circuit-breaker-and-retries) on callers and [rate limits](/system-design/patterns/rate-limiting) per client.
+
+### Worked example: 300 orders a second into 250
+
+Follow the four steps of the Architecture figure from 12:00.
+
+1. With no bound, the queue grows 50 a second; in 10 minutes it holds 30,000 orders.
+2. With a cap of 2,500, the queue fills in 50 s and stays there; 50 a second are rejected at once.
+3. Receipt emails (say 30 a second of the 300) go to the sheddable queue and wait until the sale settles.
+4. The seller import is held to 5 % of the queue: at most 125 of its 2,500 places.
+
+**The numbers:**
+
+- Unbounded: 50 × 600 s = 30,000 waiting; a new order waits 30,000 ÷ 250 = 120 s.
+- Bounded: the queue fills at 2,500 ÷ 50 = 50 s; the wait stays at 2,500 ÷ 250 = 10 s.
+- Goodput: unbounded falls to 0 after about 50 s (every order older than the 10 s timeout); bounded stays at 250 orders a second.
+- Shedding receipts: 30 a second moved out leaves 270 a second of checkouts competing for 250, so 20 a second are rejected instead of 50.
+- Seller quota: 0.05 × 2,500 = 125 places, so at least 2,375 places stay free for shoppers.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Block producers | No data loss | Pushes latency upstream |
-| Drop work | System stays responsive | Some data or requests lost |
-| Bigger queue | Absorbs short bursts | Longer latency, memory risk |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Block producers | No data loss | Pushes latency upstream | Inside one process, or a producer that can wait |
+| Reject at the door | System stays responsive | Some requests fail | Interactive traffic with a deadline |
+| Drop oldest | Fresh data wins | Old work lost | Live metrics, positions |
+| Bigger queue | Absorbs short bursts | Longer waits, memory risk | Bursts shorter than the timeout |
+| Priority classes | Critical work survives | Classification to maintain | Mixed traffic on one service |
 
-## Real-world examples
+## Production systems
 
-- Ingestion overload: [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging).
-- Consumer lag and partition limits: [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue).
-- Ticket on-sales with huge spikes (waiting rooms): [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster).
-- Token-limited model serving: [ChatGPT](/system-design-case-studies/case-studies/chatgpt).
-- Politeness limits per host: [Web Crawler](/system-design-case-studies/case-studies/web-crawler).
+- **AWS Builders' Library, "Using load shedding to avoid overload"**: work finished after the client has timed out is wasted; bound both queue size and time spent queued; the load balancer's ping is the most important request; drop excess traffic as early as possible.
+- **Google SRE book, "Handling overload"**: four criticality levels (CRITICAL_PLUS, CRITICAL, SHEDDABLE_PLUS, SHEDDABLE); per-customer quotas; client-side adaptive throttling with K = 2; at most three attempts per request and a 10 % per-client retry budget.
+- **Linux TCP**: flow control is back pressure in the kernel: a slow reader's receive window shrinks and the sender must wait.
+- **Used in our case studies:** [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Infinite buffers and retries without limits.
-- Treating all requests as equal priority.
-- Slow failure (long timeouts) instead of fast rejection.
-- Shedding the health check and causing restarts.
+- **Infinite buffers and unlimited retries.** Overload turns into memory exhaustion and a retry storm. Bound queues and retry budgets.
+- **Every request equal.** Browsing traffic starves checkout. Classify and shed by priority.
+- **Slow failure.** Long timeouts hold threads and connections. Reject fast with `429` or `503`.
+- **Shedding the health check.** The balancer removes healthy servers mid-overload. Always answer the health check.
+- **Bounding length but not age.** A short queue of stale requests is still wasted work. Drop requests older than the caller's deadline.
+- **One tenant fills the queue.** Everyone else times out. Quotas or a queue per tenant.
 
-## How to answer in an interview
+## Interview framework
 
-Name the bottleneck, bound the queue, say what gets rejected first and how callers learn about it, and mention a waiting room for planned spikes.
+1. Name the bottleneck and its capacity, and compare it with the peak arrival rate.
+2. Bound the queue in time (the client's deadline) and say what happens when it is full.
+3. Say what is rejected first (priority), and how one tenant is kept from crowding out the rest (fairness).
+4. Say how callers learn (`429` with `Retry-After`) and how retries are capped.
+5. For a planned spike, add a waiting room; for a slow one, autoscale behind the shedding.
 
-## Related patterns
+**What interviewers listen for:** the queue growth arithmetic, and a bound expressed as seconds of work.
 
-[Rate Limiting](/system-design/patterns/rate-limiting) · [Message Queues](/system-design/patterns/message-queues) · [Circuit Breaker and Retries](/system-design/patterns/circuit-breaker-and-retries)
+**Red flags:** "Kafka absorbs it", or "autoscaling handles the spike", with nothing in front for the first minutes.
 
 ## Further reading
 
 - [Using load shedding to avoid overload (AWS Builders' Library)](https://aws.amazon.com/builders-library/using-load-shedding-to-avoid-overload/)
 - [Handling overload (Google SRE Book)](https://sre.google/sre-book/handling-overload/)
+- [Addressing cascading failures (Google SRE Book)](https://sre.google/sre-book/addressing-cascading-failures/)
+- Related pages: [Rate Limiting](/system-design/patterns/rate-limiting) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation)
 
 <InterviewQuestions>
   <InterviewQuestion question="Back pressure vs load shedding?" category="Concepts" level="Mid">
-    Back pressure slows producers so work is not lost; load shedding drops or rejects work to protect capacity. Real systems use both, depending on whether the work can be delayed.
+    - Back pressure slows producers so work is not lost: a full buffer blocks, a `429` asks the caller to wait.
+    - Load shedding drops or rejects work to protect capacity for the rest.
+    - Real systems use both, depending on whether the work can be delayed.
   </InterviewQuestion>
-  <InterviewQuestion question="Why are unbounded queues dangerous?" category="Reliability" level="Mid">
-    They convert overload into growing latency and memory use, so work is processed after its deadline and the service eventually crashes.
+  <InterviewQuestion question="Why are unbounded queues dangerous?" category="Failure modes" level="Mid">
+    - They convert overload into growing latency and memory use.
+    - Work is processed after its deadline, so the service stays busy while doing nothing useful.
+    - Eventually memory runs out and the service crashes, taking the queued work with it.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you handle a sudden 100x traffic spike on a ticket sale?" category="Design" level="Senior">
-    Put a virtual waiting room in front, admit users at the rate the backend can handle, prioritise checkout over browsing, shed or cache read traffic, and return fast errors for the rest.
+  <InterviewQuestion question="How would you handle a sudden 100x traffic spike on a ticket sale?" category="Architecture" level="Senior">
+    - Put a virtual waiting room in front and admit users at the rate the backend can handle.
+    - Prioritise checkout over browsing, and serve browsing from caches.
+    - Return fast errors for what is shed, with Retry-After, so clients back off.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should an overloaded server return?" category="Concepts" level="Junior">
+    - A fast `429 Too Many Requests` or `503 Service Unavailable`, with a `Retry-After` header.
+    - Fast matters: a quick no frees the connection and tells the client to back off.
+    - A slow timeout holds resources on both sides and invites a retry storm.
+  </InterviewQuestion>
+  <InterviewQuestion question="300 orders a second arrive at a service that handles 250. What does the queue look like after 10 minutes?" category="Scaling" level="Senior">
+    - It grows by 50 a second: 30,000 orders after 600 s.
+    - A new order waits 30,000 ÷ 250 = 120 s, far past any checkout timeout, so goodput is near zero.
+    - Cap the queue at 10 s of work (2,500 orders) and reject the surplus at once: 250 a second succeed and the wait stays at 10 s.
+    - Then shed sheddable work and add capacity to close the gap.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can't autoscaling replace load shedding?" category="Trade-offs" level="Mid">
+    - New instances take minutes to start and warm up; overload builds in seconds.
+    - Scaling has limits: a database or a third party behind the service may not scale at all.
+    - Shed first to stay healthy, and let autoscaling catch up behind the shedding.
+  </InterviewQuestion>
+  <InterviewQuestion question="One tenant's bulk import fills the shared queue. How do you stop it?" category="Failure modes" level="Senior">
+    - Give each tenant a quota of queue places or a request rate, enforced at admission.
+    - Or keep a queue per tenant and serve them in turn, so one deep queue cannot starve the others.
+    - Put bulk work in a lower priority class that is shed first under pressure.
   </InterviewQuestion>
 </InterviewQuestions>
