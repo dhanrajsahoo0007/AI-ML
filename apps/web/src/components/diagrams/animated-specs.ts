@@ -635,39 +635,41 @@ import s629 from "../../../assets/diagrams/animated/transformer/attention-cost-g
 import s630 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
 import s631 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
 import s632 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
-import s633 from "../../../assets/diagrams/animated/transformer/bpe-merges";
-import s634 from "../../../assets/diagrams/animated/transformer/causal-mask";
-import s635 from "../../../assets/diagrams/animated/transformer/compute-estimate";
-import s636 from "../../../assets/diagrams/animated/transformer/context-extension";
-import s637 from "../../../assets/diagrams/animated/transformer/cross-attention";
-import s638 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
-import s639 from "../../../assets/diagrams/animated/transformer/feed-forward";
-import s640 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
-import s641 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
-import s642 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
-import s643 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
-import s644 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
-import s645 from "../../../assets/diagrams/animated/transformer/moe-capacity";
-import s646 from "../../../assets/diagrams/animated/transformer/moe-routing";
-import s647 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
-import s648 from "../../../assets/diagrams/animated/transformer/multi-head";
-import s649 from "../../../assets/diagrams/animated/transformer/output-head";
-import s650 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
-import s651 from "../../../assets/diagrams/animated/transformer/path-length";
-import s652 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
-import s653 from "../../../assets/diagrams/animated/transformer/pe-waves";
-import s654 from "../../../assets/diagrams/animated/transformer/position-injection";
-import s655 from "../../../assets/diagrams/animated/transformer/rope-rotation";
-import s656 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
-import s657 from "../../../assets/diagrams/animated/transformer/serving-stack";
-import s658 from "../../../assets/diagrams/animated/transformer/softmax-scale";
-import s659 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
-import s660 from "../../../assets/diagrams/animated/transformer/three-families";
-import s661 from "../../../assets/diagrams/animated/transformer/three-masks";
-import s662 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
-import s663 from "../../../assets/diagrams/animated/transformer/training-pipeline";
-import s664 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
-import s665 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s634 from "../../../assets/diagrams/animated/transformer/bpe-merges";
+import s635 from "../../../assets/diagrams/animated/transformer/causal-mask";
+import s636 from "../../../assets/diagrams/animated/transformer/compute-estimate";
+import s637 from "../../../assets/diagrams/animated/transformer/context-extension";
+import s638 from "../../../assets/diagrams/animated/transformer/cross-attention";
+import s639 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
+import s640 from "../../../assets/diagrams/animated/transformer/feed-forward";
+import s641 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
+import s642 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
+import s643 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
+import s644 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
+import s645 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
+import s646 from "../../../assets/diagrams/animated/transformer/moe-capacity";
+import s647 from "../../../assets/diagrams/animated/transformer/moe-routing";
+import s648 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
+import s649 from "../../../assets/diagrams/animated/transformer/multi-head";
+import s650 from "../../../assets/diagrams/animated/transformer/output-head";
+import s651 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
+import s652 from "../../../assets/diagrams/animated/transformer/path-length";
+import s653 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
+import s654 from "../../../assets/diagrams/animated/transformer/pe-waves";
+import s655 from "../../../assets/diagrams/animated/transformer/position-injection";
+import s656 from "../../../assets/diagrams/animated/transformer/rope-angle-range";
+import s657 from "../../../assets/diagrams/animated/transformer/rope-rotation";
+import s658 from "../../../assets/diagrams/animated/transformer/rope-worked-example";
+import s659 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
+import s660 from "../../../assets/diagrams/animated/transformer/serving-stack";
+import s661 from "../../../assets/diagrams/animated/transformer/softmax-scale";
+import s662 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
+import s663 from "../../../assets/diagrams/animated/transformer/three-families";
+import s664 from "../../../assets/diagrams/animated/transformer/three-masks";
+import s665 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
+import s666 from "../../../assets/diagrams/animated/transformer/training-pipeline";
+import s667 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s669 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/agents/a2a-discovery": s0,
@@ -1303,37 +1305,39 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/transformer/attention-worked-example": s630,
   "diagrams/animated/transformer/bert-input-embeddings": s631,
   "diagrams/animated/transformer/bert-pretrain-finetune": s632,
-  "diagrams/animated/transformer/bpe-merges": s633,
-  "diagrams/animated/transformer/causal-mask": s634,
-  "diagrams/animated/transformer/compute-estimate": s635,
-  "diagrams/animated/transformer/context-extension": s636,
-  "diagrams/animated/transformer/cross-attention": s637,
-  "diagrams/animated/transformer/decoder-only-block": s638,
-  "diagrams/animated/transformer/feed-forward": s639,
-  "diagrams/animated/transformer/flash-attention-io": s640,
-  "diagrams/animated/transformer/input-embedding-sum": s641,
-  "diagrams/animated/transformer/kv-cache-generation": s642,
-  "diagrams/animated/transformer/kv-cache-growth": s643,
-  "diagrams/animated/transformer/mha-gqa-mqa": s644,
-  "diagrams/animated/transformer/moe-capacity": s645,
-  "diagrams/animated/transformer/moe-routing": s646,
-  "diagrams/animated/transformer/moe-total-vs-active": s647,
-  "diagrams/animated/transformer/multi-head": s648,
-  "diagrams/animated/transformer/output-head": s649,
-  "diagrams/animated/transformer/parallelism-3d": s650,
-  "diagrams/animated/transformer/path-length": s651,
-  "diagrams/animated/transformer/pe-heatmap": s652,
-  "diagrams/animated/transformer/pe-waves": s653,
-  "diagrams/animated/transformer/position-injection": s654,
-  "diagrams/animated/transformer/rope-rotation": s655,
-  "diagrams/animated/transformer/scaled-dot-product": s656,
-  "diagrams/animated/transformer/serving-stack": s657,
-  "diagrams/animated/transformer/softmax-scale": s658,
-  "diagrams/animated/transformer/tensor-shapes": s659,
-  "diagrams/animated/transformer/three-families": s660,
-  "diagrams/animated/transformer/three-masks": s661,
-  "diagrams/animated/transformer/tokenizer-pipeline": s662,
-  "diagrams/animated/transformer/training-pipeline": s663,
-  "diagrams/animated/transformer/training-vs-inference": s664,
-  "diagrams/animated/uber-eats/architecture": s665,
+  "diagrams/animated/transformer/bpe-merges": s634,
+  "diagrams/animated/transformer/causal-mask": s635,
+  "diagrams/animated/transformer/compute-estimate": s636,
+  "diagrams/animated/transformer/context-extension": s637,
+  "diagrams/animated/transformer/cross-attention": s638,
+  "diagrams/animated/transformer/decoder-only-block": s639,
+  "diagrams/animated/transformer/feed-forward": s640,
+  "diagrams/animated/transformer/flash-attention-io": s641,
+  "diagrams/animated/transformer/input-embedding-sum": s642,
+  "diagrams/animated/transformer/kv-cache-generation": s643,
+  "diagrams/animated/transformer/kv-cache-growth": s644,
+  "diagrams/animated/transformer/mha-gqa-mqa": s645,
+  "diagrams/animated/transformer/moe-capacity": s646,
+  "diagrams/animated/transformer/moe-routing": s647,
+  "diagrams/animated/transformer/moe-total-vs-active": s648,
+  "diagrams/animated/transformer/multi-head": s649,
+  "diagrams/animated/transformer/output-head": s650,
+  "diagrams/animated/transformer/parallelism-3d": s651,
+  "diagrams/animated/transformer/path-length": s652,
+  "diagrams/animated/transformer/pe-heatmap": s653,
+  "diagrams/animated/transformer/pe-waves": s654,
+  "diagrams/animated/transformer/position-injection": s655,
+  "diagrams/animated/transformer/rope-angle-range": s656,
+  "diagrams/animated/transformer/rope-rotation": s657,
+  "diagrams/animated/transformer/rope-worked-example": s658,
+  "diagrams/animated/transformer/scaled-dot-product": s659,
+  "diagrams/animated/transformer/serving-stack": s660,
+  "diagrams/animated/transformer/softmax-scale": s661,
+  "diagrams/animated/transformer/tensor-shapes": s662,
+  "diagrams/animated/transformer/three-families": s663,
+  "diagrams/animated/transformer/three-masks": s664,
+  "diagrams/animated/transformer/tokenizer-pipeline": s665,
+  "diagrams/animated/transformer/training-pipeline": s666,
+  "diagrams/animated/transformer/training-vs-inference": s667,
+  "diagrams/animated/uber-eats/architecture": s669,
 };
