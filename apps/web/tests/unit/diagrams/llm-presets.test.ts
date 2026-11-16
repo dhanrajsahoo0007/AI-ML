@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { attend } from "@/components/diagrams/presets/llm-attention";
 import * as arch from "@/components/diagrams/presets/llm-architecture";
+import { BUDGET, FLASH, PAGED, WINDOW } from "@/components/diagrams/presets/llm-efficient";
 import { HEAD, LOSS, TABLES } from "@/components/diagrams/presets/llm-families";
 import { BALANCE, BATCH_CHOICE, CAPACITY_SWEEP, ROUTING, Z_LOSS } from "@/components/diagrams/presets/llm-moe";
 import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
@@ -119,5 +120,30 @@ describe("llm-moe: routing, balance and capacity", () => {
     expect(CAPACITY_SWEEP.map((c) => c.dropped.length)).toEqual([4, 1, 0, 0]);
     expect(Z_LOSS.z.toFixed(2)).toBe("4.79");
     expect(Math.round(Z_LOSS.zSharp)).toBe(251);
+  });
+});
+
+describe("llm-efficient: KV cache, FlashAttention, windows, pages", () => {
+  it("cache budget on a 640 GB node", () => {
+    expect(BUDGET.rows.map((r) => r.maxBatch)).toEqual([5, 46, 372]);
+    expect(BUDGET.rows.map((r) => r.fits)).toEqual([false, true, true]);
+    expect(BUDGET.rows.map((r) => r.stepMs.toFixed(1))).toEqual(["51.7", "14.1", "9.4"]);
+  });
+
+  it("FlashAttention HBM traffic for one head at 32,768 tokens", () => {
+    expect(FLASH.standardBytes).toBe(8_623_489_024);
+    expect(FLASH.flashBytes).toBe(4_311_744_512);
+    expect(FLASH.scoreBytes).toBe(2_147_483_648);
+    expect(FLASH.layerScoreBytes).toBe(137_438_953_472);
+    expect(FLASH.statsBytes).toBe(131_072);
+  });
+
+  it("sliding window and paged cache", () => {
+    expect(WINDOW.full).toBe(4_294_967_296);
+    expect(WINDOW.rolling).toBe(536_870_912);
+    expect(WINDOW.ratio).toBe(8);
+    expect(WINDOW.reach).toBe(131_072);
+    expect(PAGED.wasted).toBe(2_621_440);
+    expect(PAGED.worst).toBe(4_915_200);
   });
 });
