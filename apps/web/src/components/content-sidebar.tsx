@@ -77,7 +77,7 @@ function SidebarSection({
           <SectionIcon className={cn("size-4 shrink-0", isActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1">{section.label}</span>
-        {stats.completed > 0 && (
+        {stats.total > 0 && (
           <span
             className="shrink-0 font-sans text-xs font-medium tabular-nums text-muted-foreground"
             data-testid={`sidebar-section-percent-${section.key}`}
@@ -95,12 +95,12 @@ function SidebarSection({
         )}
       </button>
 
-      {open && stats.completed > 0 && (
+      {open && stats.total > 0 && (
         <div className="mt-2.5 mb-2 rounded-lg bg-paper px-2.5 py-2" data-testid={`sidebar-progress-${section.key}`}>
           <div className="flex items-baseline justify-between gap-2 text-[11px] tabular-nums">
             <span className="font-semibold text-ink">{stats.percent}% completed</span>
             <span className="text-muted-foreground">
-              {stats.completed} / {stats.total} read
+              {stats.completed} / {stats.total} done
             </span>
           </div>
           <div
@@ -222,7 +222,7 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
           <GroupIcon className={cn("size-4 shrink-0", isGroupActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1 truncate text-sm font-semibold">{group.title}</span>
-        {stats.completed > 0 && (
+        {stats.total > 0 && (
           <span
             className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
             aria-label={`${stats.completed} of ${stats.total} read`}
@@ -303,7 +303,7 @@ function SidebarCategory({
         >
           {category.title}
         </span>
-        {read > 0 && (
+        {category.items.length > 0 && (
           <span
             className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
             aria-label={`${read} of ${category.items.length} read`}

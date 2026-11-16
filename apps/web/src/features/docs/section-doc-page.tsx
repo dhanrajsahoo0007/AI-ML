@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
+import { SectionProgressBanner } from "@/components/section-progress-banner.client";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
 import { sectionLeafItems } from "@/lib/progress-stats";
@@ -52,9 +53,9 @@ export async function SectionDocPage({
   }
   crumbs.push({ label: doc.frontmatter.title ?? slugPath });
 
-  const leafItems = !item.isHub ? sectionLeafItems(docsKind.nav(def, items)) : [];
+  const leafItems = sectionLeafItems(docsKind.nav(def, items));
   const sectionHrefs = leafItems.map((i) => i.href);
-  const currentIdx = leafItems.findIndex((i) => i.href === item.href);
+  const currentIdx = !item.isHub ? leafItems.findIndex((i) => i.href === item.href) : -1;
   const prev =
     currentIdx > 0 ? { title: leafItems[currentIdx - 1].title, href: leafItems[currentIdx - 1].href } : undefined;
   const next =
@@ -70,7 +71,14 @@ export async function SectionDocPage({
         headings: doc.headings,
         updated: await getUpdatedDate(doc.filePath, doc.frontmatter.updated),
         pagePath: `/${section}/${slugPath}`,
-        statusBadge: !preview && !item.isHub ? <ArticleCompletedBadge contentKey={item.href.slice(1)} /> : undefined,
+        statusBadge:
+          !preview && !item.isHub ? (
+            <ArticleCompletedBadge
+              contentKey={item.href.slice(1)}
+              sectionLabel={def.label}
+              sectionHrefs={sectionHrefs}
+            />
+          ) : undefined,
       }
     : undefined;
 
@@ -103,6 +111,7 @@ export async function SectionDocPage({
           ) : undefined
         }
       >
+        {item.isHub && <SectionProgressBanner sectionLabel={def.label} items={leafItems} />}
         {doc.body}
         {!preview && <TopicQuestions href={item.href} locked={(q) => premiumAnswers.has(q.category)} />}
       </ArticleLayout>

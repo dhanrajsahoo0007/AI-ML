@@ -6,8 +6,8 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useProgressStats, type ProgressNavItem } from "@/lib/completed.client";
 import { cn } from "@/lib/utils";
 
-// Per-tab (per-section) progress summary shown on a section's landing page once the learner has completed at
-// least one topic in that section. Hidden at 0 completed so initial server renders have zero layout shift.
+// Per-tab (per-section) progress summary shown on a section's landing page and hub pages. Always visible
+// when the section has topics (0% through 100%) so learners immediately see their track progress.
 export function SectionProgressBanner({
   sectionLabel,
   items,
@@ -18,7 +18,7 @@ export function SectionProgressBanner({
   const hrefs = useMemo(() => items.map((i) => i.href), [items]);
   const stats = useProgressStats(hrefs);
 
-  if (stats.completed === 0 || stats.total === 0) return null;
+  if (stats.total === 0) return null;
 
   const nextItem = stats.nextHref ? items.find((i) => i.href === stats.nextHref) : undefined;
 
@@ -34,7 +34,7 @@ export function SectionProgressBanner({
               {stats.percent}% completed
             </span>
             <span className="text-sm tabular-nums text-muted-foreground" data-testid="section-progress-count">
-              · {stats.completed} of {stats.total} {stats.total === 1 ? "topic" : "topics"} read
+              · {stats.completed} of {stats.total} {stats.total === 1 ? "topic" : "topics"} done
             </span>
           </p>
         </div>
@@ -45,7 +45,9 @@ export function SectionProgressBanner({
             data-testid="section-progress-continue"
             className="inline-flex items-center gap-2 rounded-full border border-hairline bg-paper-2 px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-tint hover:text-ink"
           >
-            <span className="max-w-[18rem] truncate">Continue: {nextItem.title}</span>
+            <span className="max-w-[18rem] truncate">
+              {stats.completed === 0 ? "Start" : "Continue"}: {nextItem.title}
+            </span>
             <ArrowRight aria-hidden className="size-4 shrink-0 text-tint" />
           </Link>
         ) : (
