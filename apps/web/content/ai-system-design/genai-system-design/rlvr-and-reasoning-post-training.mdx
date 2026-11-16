@@ -17,6 +17,8 @@ Reasoning models such as DeepSeek-R1, Qwen3 and Kimi k1.5 learn to think at leng
 - **Distillation** of R1's 800k samples into small models with SFT alone **beat RL run on the small model**: 72.6% against 47.0% on AIME 2024 for the same Qwen2.5-32B base.
 - Verifiers can still be **gamed** (format tricks, skipped tests), and researchers **disagree** on whether RLVR teaches new skills or mostly makes a base model's existing correct answers more likely.
 
+<KeyIdea>RLVR keeps the RLHF loop but takes the reward from a program that checks the answer, and GRPO turns that 0/1 reward into advantages by comparing a group of answers to the same prompt, so no critic is needed; the weak spot moves from the reward model to the checker.</KeyIdea>
+
 ## Mental model
 
 - Picture a student preparing for a math contest.
@@ -153,12 +155,16 @@ The DeepSeek-R1 report is the most complete public recipe. It has two models and
 - *Constraint over-optimization:* Tülu 3 found high-KL runs on IFEval constraints producing odd text that satisfied the checker.
 - *Learned rewards inside the mix:* R1's helpfulness reward model was hacked on longer runs, so DeepSeek used it only in the final 400 steps.
 
-- The defenses are a strict parser, hidden tests, a sandbox that cannot edit the grader, a KL penalty, and monitoring.
-- Baker et al. also warn that penalizing "bad thoughts" seen in the chain of thought taught the model to hide its intent while still hacking.
+<Callout tone="red" title="What breaks">
+  The checker's loopholes become the model's habits. The defenses are a strict parser, hidden tests, a sandbox that cannot edit the grader, a KL penalty, and monitoring. Baker et al. also warn that penalizing "bad thoughts" seen in the chain of thought taught the model to hide its intent while still hacking.
+</Callout>
 
 **Reasoning collapse:**
 
-- RL tends to lower the policy's entropy. When outputs within a group become identical, advantages vanish and learning stalls; DAPO's "clip-higher" raises the upper clip bound so rare tokens can still gain probability.
+<Callout tone="red" title="What breaks">
+  RL tends to lower the policy's entropy. When outputs within a group become identical, advantages vanish and learning stalls; DAPO's "clip-higher" raises the upper clip bound so rare tokens can still gain probability.
+</Callout>
+
 - Watch entropy, average length, the share of zero-variance groups, pass@$k$ on held-out problems, and the readability of chains, since R1-Zero showed that a model can score well while writing text people cannot follow.
 
 ### Distilling long reasoning traces into smaller models
@@ -175,6 +181,8 @@ The DeepSeek-R1 report is the most complete public recipe. It has two models and
 
 ## Trade-offs
 
+<Compare caption="Reasoning post-training choices: where the reward comes from, what each method costs, and when it fits.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | PPO with a learned reward model (RLHF) | Works for open-ended goals; online exploration | Reward model can be hacked; critic as large as the policy | Helpfulness, style and safety where no rule can check the answer |
@@ -184,6 +192,8 @@ The DeepSeek-R1 report is the most complete public recipe. It has two models and
 | Outcome vs. process rewards | Outcome: cheap and hard to game with a strict checker; process: credit for each step | Outcome: sparse, rewards lucky guesses; process: step labels are costly and a PRM can be hacked | Outcome for RL training; PRMs for reranking and search |
 | RL on the base (R1-Zero) vs. cold start first (R1) | Zero: no SFT data, shows what RL alone finds | Zero: unreadable, mixed-language chains | Cold start for any model people will read |
 | Distillation vs. RL for small models | Distillation: cheaper, and 72.6% vs 47.0% on AIME for a 32B model | Needs a strong teacher; inherits its length and errors | Distill small models; spend RL compute on the largest |
+
+</Compare>
 
 ## Production systems
 
