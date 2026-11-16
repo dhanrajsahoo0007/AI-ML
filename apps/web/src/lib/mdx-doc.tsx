@@ -65,6 +65,7 @@ import {
   PatternUses,
   LearningPath,
 } from "@/components/teach";
+import { InterviewPrompt } from "@/components/case-studies/interview-prompt";
 import {
   LatencyLadder,
   EstimateCalculator,
@@ -205,6 +206,7 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       Numbers,
       PatternUses,
       LearningPath,
+      InterviewPrompt,
       // Interactive teaching widgets (plan §5.2): server wrappers that validate props, then lazy islands.
       LatencyLadder,
       EstimateCalculator,
