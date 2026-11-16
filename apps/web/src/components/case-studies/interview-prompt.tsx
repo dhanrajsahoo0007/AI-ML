@@ -17,7 +17,7 @@ import { getCompany, getQuestions } from "@/lib/question-bank";
 //     outOfScope={["Resale", "Dynamic pricing"]}
 //   />
 //
-// `bankId` names a question in content/question-bank/*.yaml; its `companies` show as "Reported at" chips. Company
+// `bankId` names a question in content/question-bank/*.yaml; the companies tagged on it show as "Reported at" chips. Company
 // names come only from the bank, never from the page. Server component: the bank is read at build time.
 
 const schema = z
