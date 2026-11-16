@@ -18,6 +18,8 @@ Almost every LLM is trained to guess one token ahead.
 - At inference the extra heads can be **thrown away**, or used as a **built-in draft model** for speculative decoding: **3.0× faster** on code for Meta's 7B model, **1.8× tokens per second** for DeepSeek-V3 with an **85–90%** acceptance rate for the second token.
 - MTP costs **extra parameters, extra logits memory and some training time**, and it pays off mainly at **scale and on structured text such as code**.
 
+<KeyIdea>MTP trains every position on several future tokens instead of one, which shapes richer representations in large models and leaves extra heads that can be thrown away or used as a built-in draft model for speculative decoding.</KeyIdea>
+
 ## Mental model
 
 - Picture a chess student who, after every move, writes down only the opponent's next reply.
@@ -106,8 +108,11 @@ The two published designs differ in one choice: whether each extra prediction ca
 ### Sequential vs. independent MTP head designs
 
 - Independent heads guess every future token from the same vector.
-- If head 2 must predict "noon" without knowing whether head 1 said "Friday" or "Monday", it can only hedge.
-- That makes the drafts less consistent with each other as $n$ grows.
+
+<Callout tone="red" title="What breaks">
+  Independent heads cannot see each other's guesses. If head 2 must predict "noon" without knowing whether head 1 said "Friday" or "Monday", it can only hedge. That makes the drafts less consistent with each other as $n$ grows.
+</Callout>
+
 - DeepSeek's sequential modules fix this by feeding in the real token $t + 1$ during training, at the cost of running the modules one after another.
 - In practice DeepSeek-V3 uses only one module ($D = 1$), so the chain is one link long.
 
@@ -125,7 +130,12 @@ $$
 4{,}096 \times 128{,}000 \times 4 \text{ bytes} \approx 2.1 \text{ GB}
 $$
 
-- per sequence, before gradients. Four heads at once would need about 8.4 GB.
+- per sequence, before gradients.
+
+<Callout tone="red" title="What breaks">
+  Materializing every head at once. Four heads at once would need about 8.4 GB of logits per sequence, before gradients.
+</Callout>
+
 - Gloeckle et al. avoid this by running the forward and backward pass of each head in turn, accumulating gradients at the trunk, which lowers peak memory from $O(nV + d)$ to $O(V + d)$ without slowing training down.
 - Their measured training time was 1.07× to 1.22× the baseline for $n = 4$, largest for the smallest model, and they attribute it to their sharding setup rather than to MTP itself.
 
@@ -151,6 +161,8 @@ $$
 
 ## Trade-offs
 
+<Compare caption="Next-token only, two MTP designs and two outside drafters: what each costs and when it fits.">
+
 | Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
 | Next-token only | Simplest; no extra memory or parameters | No built-in drafter; one signal per position | Small models; tight training budgets |
@@ -158,6 +170,8 @@ $$
 | Sequential modules (DeepSeek) | Keeps the causal chain; strong second-token acceptance | Extra parameters; modules run one after another | Frontier pre-training; deployed MTP drafting |
 | Post-hoc heads (Medusa, EAGLE) | Works on any existing model; no re-pre-training | Separate training stage; drafts not shaped by pre-training | Speeding up a model you cannot retrain |
 | Separate draft model | Draft can be tuned independently | Second model to train, store and schedule | Model families with a small sibling |
+
+</Compare>
 
 ## Production systems
 
