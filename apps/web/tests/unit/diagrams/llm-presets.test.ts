@@ -6,6 +6,7 @@ import { BUDGET, FLASH, PAGED, WINDOW } from "@/components/diagrams/presets/llm-
 import { HEAD, LOSS, TABLES } from "@/components/diagrams/presets/llm-families";
 import { BALANCE, BATCH_CHOICE, CAPACITY_SWEEP, ROUTING, Z_LOSS } from "@/components/diagrams/presets/llm-moe";
 import { BUDGET as SCALE_BUDGET, OPTIMAL, TEN_X, ZERO, bubble } from "@/components/diagrams/presets/llm-scaling";
+import { ANSWER_PHASES, ROUND_MINUTES } from "@/components/diagrams/presets/llm-roadmap";
 import { ENCODED, TEA, WORDPIECE_FIRST } from "@/components/diagrams/presets/llm-tokens";
 
 // The LLM Foundations pages quote these numbers in prose; the presets compute them once. If a constant changes,
@@ -179,5 +180,12 @@ describe("llm-anatomy: one Brightpost request through every layer", () => {
     expect(Math.round(TOTALS.usd * 1e7)).toBe(349_425);
     expect(ANATOMY_BUDGET.model.ms).toBe(7_500);
     expect(ANATOMY_BUDGET.observe.usd).toBeCloseTo(0.0004425, 7);
+  });
+});
+
+describe("llm-roadmap: the 45-minute answer", () => {
+  it("phases and minutes the page quotes", () => {
+    expect(ANSWER_PHASES.map((p) => p.minutes)).toEqual([5, 5, 20, 10, 5]);
+    expect(ROUND_MINUTES).toBe(45);
   });
 });

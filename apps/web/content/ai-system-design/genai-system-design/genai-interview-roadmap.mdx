@@ -10,9 +10,9 @@ GenAI interviews test the same small set of ideas from different angles: how a m
 ## Overview
 
 - **Four roles, one core.** AI engineers, ML engineers, research engineers and forward-deployed engineers all get asked about tokens, context windows, retrieval, evaluation, latency and cost. The roles differ in how deep each round goes, not in which topics exist.
-- **The hub has an order.** Start with the [map of the whole stack](/ai-system-design/genai-system-design/anatomy-of-an-llm-application), then [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture), then the building blocks ([RAG & Knowledge](/ai-system-design/genai-system-design/rag-fundamentals) and [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures)), then the groups that run a system in production ([Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability), [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety)). The rest is depth for your role.
+- **The hub has an order.** Start with the [map of the whole stack](/ai-system-design/genai-system-design/anatomy-of-an-llm-application), then [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture), then RAG and agents, then the groups that run a system in production; [Architecture](#architecture) draws it. The rest is depth for your role.
 - **Practice beats reading.** Each page ends with interview questions, and the [question bank](/interviews) files more by topic. Answer them aloud, then compare with the written answer.
-- **One running example.** This page follows one design prompt through every section: "Design an assistant that answers customer questions from our help-centre articles." It is the most common shape of GenAI design question, and it touches almost every group in the hub.
+- **One running example.** This page follows one design prompt through every section: "Design an assistant that answers customer questions from our help-centre articles." It is a common shape of GenAI design question, and it touches almost every group in the hub.
 
 <KeyIdea>Study the hub in dependency order (the map, then foundations, then RAG and agents, then evaluation, serving and safety), and practise every topic as an answer spoken aloud, because every role and round asks the same core from a different angle.</KeyIdea>
 
@@ -23,7 +23,6 @@ Think of the hub as a driving licence course rather than a library.
 - **Theory before the road.** You learn what the pedals do (tokens, attention, decoding) before you drive in traffic. Skipping it works until a question such as why long prompts get slower.
 - **Manoeuvres are the building blocks.** Parking, roundabouts and motorway merges map to retrieval, tool calling and prompting. Each one is practised on its own, then combined.
 - **The test is a route you have not seen.** The examiner does not ask you to recite the manual. They give you a route (a design prompt) and watch how you handle it: checking mirrors (clarifying requirements), signalling (saying your plan out loud) and recovering from a mistake (a failure mode the interviewer raises).
-- **Different licences, same core.** A lorry licence and a car licence share the theory test. The four roles share the core; the specialist rounds are the extra lessons.
 
 ## Core concepts
 
@@ -75,12 +74,21 @@ Whatever the role, these come up in almost every loop. Each links to the page th
 
 ## Architecture
 
-The study plan has the same shape as an LLM system: lower layers first, because the upper ones assume them. The hub's groups fall into four tiers.
+The study plan has the same shape as an LLM system: lower layers first, because the upper ones assume them. The figure shows the order and the few prerequisites that cut across it.
 
-1. **Orientation: [Start Here](/ai-system-design/genai-system-design/anatomy-of-an-llm-application).** The map of every layer. Read it first and return to it after each group; it tells you where the new topic sits.
-2. **Foundations: [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture).** Transformer mechanics, then training and decoding. Every later group refers back here: the KV cache in serving is the attention keys and values; chunk sizes in RAG are counted in tokens.
+<AnimatedDiagram
+  spec="animated/llm/roadmap-study-path"
+  caption="Tiers set the order, arrows set the exceptions: one tier 4 page (LLM Evaluation Fundamentals) comes before a tier 3 page (RAG Evaluation), and attention in tier 2 is what the serving engine caches."
+/>
+
+**How to read it:** rows are tiers, read top to bottom; each tile is one of the hub's groups, named as in the sidebar. The chips are pages from the prerequisites table below, and each arrow starts at the page to read first. Most arrows stay in a tier or point down; the one pointing up says to read the evaluation basics before you finish the RAG group.
+
+The hub's groups fall into four tiers.
+
+1. **Orientation: [Start Here](/ai-system-design/genai-system-design/anatomy-of-an-llm-application).** The map of every layer. Read it first and return to it after each group.
+2. **Foundations: [LLM Foundations](/ai-system-design/genai-system-design/transformer-architecture).** Transformer mechanics, then training and decoding. Later groups refer back here: the KV cache in serving holds attention's keys and values; RAG chunk sizes are counted in tokens.
 3. **Building blocks: [RAG & Knowledge](/ai-system-design/genai-system-design/rag-fundamentals) and [AI Agents & Engineering](/ai-system-design/genai-system-design/agent-architectures).** The two ways a product gives a model more than its weights: retrieved data and tools. RAG comes first because agentic RAG, memory and context engineering build on it. [Fine-Tuning & Adaptation](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning) sits beside them, as the third way to change behaviour.
-4. **Running it: [Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) and [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety).** These turn a demo into a product. Evaluation comes first in this tier: you cannot judge a serving or safety change without a way to measure quality.
+4. **Running it: [Evaluation](/ai-system-design/genai-system-design/llm-evaluation-fundamentals), [Inference & Serving](/ai-system-design/genai-system-design/llm-serving-inference), [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) and [Safety, Security & Governance](/ai-system-design/genai-system-design/guardrails-and-safety).** These turn a demo into a product. Evaluation comes first: you cannot judge a serving or safety change without a way to measure quality.
 
 [Multimodal & Voice](/ai-system-design/genai-system-design/multimodal-and-voice-ai) is a branch you take only if the role needs it; it assumes the foundations and serving tiers.
 
@@ -103,7 +111,7 @@ For the help-centre assistant, the tiers map onto the answer: tier 2 explains wh
 
 All times below are **illustrative**: they assume you read the page, redraw its main figure from memory and answer its interview questions aloud. Adjust them to what you already know.
 
-**One week: the core.** If the interview is days away, read these in order. They cover every topic in the list above at the depth a first-round loop expects, and finish with one full case study as a rehearsal.
+**One week: the core.** If the interview is days away, read these in order: every topic above at first-round depth, then one case study as a rehearsal.
 
 <LearningPath
   title="One week: the core (illustrative times)"
@@ -152,7 +160,7 @@ The hub's pages share one shape, so one routine works for all of them.
 
 ### Mapping topics to the question bank
 
-The [interview question bank](/interviews) files questions by category and subsection. After each group, open the matching subsections and answer five questions you have not seen.
+After each group, open its subsections in the [question bank](/interviews) and answer five questions you have not seen.
 
 | Hub group | Question bank subsections |
 | --- | --- |
@@ -199,7 +207,7 @@ A good order is support agent, answer engine, chat service, then gateway: each a
 ## Failure modes & pitfalls
 
 - **Reading without recall.** Ten pages read is not ten topics known. If you cannot redraw the figure or answer the questions aloud, you have not learned the page yet.
-- **Starting with agents.** Agents are the newest topic and the most fun, but an agent answer falls apart when the interviewer asks how retrieval or evaluation works underneath it.
+- **Starting with agents.** Agents are the newest topic, but an agent answer falls apart when the interviewer asks how retrieval or evaluation works underneath.
 - **Architecture without numbers.** Boxes and arrows with no token counts, latency budget or cost per request read as a junior answer. Every design page in the hub has the arithmetic; practise it.
 - **Evaluation as the last slide.** Saying "and then we would evaluate it" in the final minute signals you have not shipped. Name the eval set and the metric when you name the component.
 - **Memorising one company's loop.** Formats change and differ between teams. Prepare for round types, then confirm your loop with the recruiter.
@@ -211,11 +219,20 @@ A good order is support agent, answer engine, chat service, then gateway: each a
 
 ## Interview framework
 
-Most GenAI design rounds reward the same structure. Here it is applied to the help-centre assistant, with an **illustrative** budget for a 45-minute round.
+Most GenAI design rounds reward the same structure. Here it is applied to the help-centre assistant, with an **illustrative** budget for a 45-minute round; the timeline shows where the minutes go.
 
-1. **Clarify (about 5 minutes).** Who asks, how many questions a day, which languages, how fresh the articles must be, what a wrong answer costs, and the latency target. Write the numbers down.
-2. **Baseline (about 5 minutes).** The simplest system that could work: retrieve the top articles, put them in a prompt, generate an answer with citations. Say why you start there and not with an agent or fine-tuning.
-3. **Deep dive (about 20 minutes).** Chunking and embeddings, hybrid search and re-ranking, the prompt and its context budget, [model choice](/ai-system-design/genai-system-design/choosing-a-model), and the hand-off to a person when retrieval finds nothing. Go deepest where the interviewer leans in.
+<AnimatedDiagram
+  spec="animated/llm/roadmap-answer-timeline"
+  caption="Almost half the round is the deep dive, so the first ten minutes exist to earn it: numbers first, then the simplest system that could work (illustrative minutes)."
+/>
+
+**How to read it:** the strip is the round, each segment as long as its minutes; the rows say what to cover. The interviewer steers the deep dive, so go deepest where they lean in. You can follow only if the requirements and the baseline are already on the board.
+
+**The numbers:** 5 + 5 + 20 + 10 + 5 = 45 minutes; the deep dive is 20 ÷ 45 = 44 % of the round.
+
+1. **Clarify (about 5 minutes).** Who asks, questions a day, languages, how fresh the articles must be, what a wrong answer costs, and the latency target. Write the numbers down.
+2. **Baseline (about 5 minutes).** Retrieve the top articles, put them in a prompt, answer with citations. Say why you start there and not with an agent or fine-tuning.
+3. **Deep dive (about 20 minutes).** Chunking and embeddings, hybrid search and re-ranking, the prompt and its context budget, [model choice](/ai-system-design/genai-system-design/choosing-a-model), and the hand-off to a person when retrieval finds nothing.
 4. **Evaluate and operate (about 10 minutes).** A golden set of real questions, retrieval and answer metrics, an LLM judge checked against people, then latency, cost per request, caching, guardrails and monitoring.
 5. **Wrap up (about 5 minutes).** Restate the design in three sentences, name the biggest risk and what you would build next.
 
