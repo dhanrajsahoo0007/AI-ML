@@ -78,11 +78,6 @@ A production prompt management pipeline separates authoring and evaluation from 
   </StepCard>
 </StepCards>
 
-Two parts of the serving path sit outside the figure:
-
-- **Local SDK caching at runtime:** Application workers fetch labelled bundles into memory and serve the cached copy while it refreshes in the background, rendering slots locally with zero external network hops per request. Ship a fallback copy in the image so a cold start works when the registry is down.
-- **Observability join:** Every LLM trace logs `prompt_name`, `prompt_version`, and `prompt_hash` alongside token usage and outcome signals. That join is how step 5 knew the extra hand-offs came from v13.
-
 One version as the registry stores it. This is an illustrative record; Langfuse, LangSmith and PromptLayer name the fields differently:
 
 ```json
@@ -102,6 +97,53 @@ One version as the registry stores it. This is an illustrative record; Langfuse,
 ```
 
 The model snapshot and tool schemas are part of the record because the prompt was tested with them. Roll back the prompt alone and it may meet a tool schema it was never tested with ([Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) shows that failure).
+
+### How a worker gets its prompt
+
+The release figure ends at a label move; this one follows a single canary chat to show how that move reaches a running worker without the registry ever sitting on the request path.
+
+<AnimatedDiagram
+  spec="animated/agents/prompt-runtime-resolve"
+  stepper
+  minWidth={660}
+  caption="On a cache hit the worker makes no network call; the rollback reaches it on the next background refresh, about one 60 s TTL later, and a cold start with the registry down still gets v12 from the fallback copy."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A chat asks for the canary prompt">
+    A refund chat for order 4471 falls in the canary arm. The worker asks its SDK for `brightpost-support` at the
+    `canary` label, not for a version number.
+  </StepCard>
+  <StepCard n={2} title="Cache hit: v13 from memory">
+    The cache holds v13, so the SDK answers with no network call. The worker fills the variables locally, sends the
+    prompt to the model and logs the version and hash on the trace.
+  </StepCard>
+  <StepCard n={3} title="Stale after 60 s: serve it, refresh behind">
+    Once the copy is older than the TTL, the SDK still returns it at once and fetches the label again in the
+    background. No chat waits for the registry.
+  </StepCard>
+  <StepCard n={4} title="The rollback moves the label">
+    The canary gate fails and `canary` is pointed back at v12. Nothing is deployed, and this worker still holds v13
+    until its next refresh.
+  </StepCard>
+  <StepCard n={5} title="The next refresh brings v12">
+    The background refresh returns v12, and the chat after it gets v12. Every worker follows within one TTL.
+  </StepCard>
+  <StepCard n={6} title="Cold start, registry down: the fallback">
+    A new worker has an empty cache and the fetch fails. The SDK serves the v12 copy shipped in the image, so chats
+    keep running on the last known-good version.
+  </StepCard>
+</StepCards>
+
+**The numbers:** with the cache, a worker calls the registry at most 3,600 / 60 = 60 times an hour, whatever its traffic. Fetching once per chat at 2 chats a second (illustrative) would be 2 × 3,600 = 7,200 calls an hour, each adding about 39 ms, Langfuse's measured mean for an uncached fetch. A moved label reaches a worker in at most 60 s + 0.5 s (the wait for its next chat) + 0.04 s ≈ 61 s, one refresh interval.
+
+<Callout tone="red" title="What breaks">
+  A worker that starts while the registry is down has nothing in its cache. Without a fallback, every chat on it fails
+  until the registry returns. Ship the last known-good version in the image (Langfuse's SDKs take it as a `fallback`
+  argument) and update it on every promotion, or an old fallback quietly brings back a bug a later version fixed.
+</Callout>
+
+Step 2 is also where the observability join starts: every LLM trace logs `prompt_name`, `prompt_version`, and `prompt_hash` alongside token usage and outcome signals. That join is how the canary gate knew the extra hand-offs came from v13.
 
 ## Technical mechanics
 

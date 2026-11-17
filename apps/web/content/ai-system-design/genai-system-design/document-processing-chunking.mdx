@@ -133,6 +133,13 @@ Size trades precision against context.
   caption="Parsing and chunking are the first two stages of ingestion; everything after them inherits their mistakes."
 />
 
+**How to read it:**
+
+- **Highlighted path:** Traces the offline lane from the help centre through parse, chunk and embed into the vector index; the online lane below only reads what this lane wrote.
+- **Parse and chunk:** Turn HTML into clean text and cut it into 400-token chunks, so a dropped table or a split sentence here reaches the index unchanged.
+
+**The numbers:** `1,200 articles × 3 chunks = 3,600 chunks`, each embedded as 1,536 numbers and stored as one of the index's 3,600 vectors.
+
 - Give every chunk a stable id derived from the document id and its position or content hash, so re-ingesting an unchanged article updates nothing and a changed one replaces only its own chunks (see [Index Freshness](/ai-system-design/genai-system-design/index-freshness-and-updates)).
 
 ## Technical mechanics

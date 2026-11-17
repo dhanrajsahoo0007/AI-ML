@@ -4,14 +4,15 @@
 export interface TemplatePage {
   name: string;
   url: string;
-  /** The page has build-time Mermaid diagrams (the visual check also snapshots the first one). */
+  /** The page has diagrams, Mermaid or <AnimatedDiagram> (the visual check also snapshots the first one). */
   diagram?: boolean;
 }
 
 export const TEMPLATE_PAGES: TemplatePage[] = [
   { name: "home", url: "/" },
   { name: "hub", url: "/system-design" },
-  // A Mermaid-heavy article (three build-time diagrams). The Transformer pages moved to <AnimatedDiagram> specs.
+  // A diagram-heavy article. Its last Mermaid diagram became an <AnimatedDiagram> on 2026-11-17, so the
+  // diagram snapshot is now of its first <AnimatedDiagram>.
   { name: "article-diagrams", url: "/ai-system-design/genai-system-design/prompt-engineering-types", diagram: true },
   { name: "interview-subsection", url: "/interviews/rag/rag-fundamentals" },
   { name: "pricing", url: "/pricing" },
