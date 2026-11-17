@@ -68,26 +68,32 @@ export const CONTEXT = (() => {
 export const OUTPUT = { reply: 120, toolCall: 30, followUpNewTokens: 300 } as const;
 
 /**
- * Cost of one customer message by turn shape, on the mid-size model.
- *   no tool:   2,700 cached + 2,300 new + 120 out                      = 0.00027 + 0.0046 + 0.0012 = 0.00607
- *   one tool:  first call 0.00027 + 0.0046 + 30 out (0.0003)           = 0.00517
- *              follow-up: 5,000 cached + 300 new + 120 out              = 0.0005 + 0.0006 + 0.0012 = 0.0023 → 0.00747
- *   two tools: 0.00517 + tool follow-up (5,300 cached + 300 new + 30 out = 0.00143) + 0.0023 = 0.0089
- *   average:   0.5 × 0.00607 + 0.35 × 0.00747 + 0.15 × 0.0089 ≈ 0.0070
+ * Cost of one customer message by turn shape, on the mid-size model. A follow-up call reads the first call's prompt from
+ * the cache, and pays a cache-write premium (0.25 × the input price) on the tokens newly cached.
+ *   no tool:   2,700 cached + 2,300 new + 120 out                         = 0.00027 + 0.0046 + 0.0012 = 0.00607
+ *   one tool:  first call 0.00027 + 0.0046 + 30 out (0.0003)              = 0.00517
+ *              follow-up: 5,000 cached + 300 new + 120 out                 = 0.0005 + 0.0006 + 0.0012 = 0.0023
+ *              cache write: 2,300 × 0.25 × 2.00 per million                = 0.00115 → 0.00862
+ *   two tools: 0.00517 + tool follow-up (5,300 cached + 300 new + 30 out = 0.00143)
+ *              + reply follow-up (5,600 cached + 300 new + 120 out = 0.00236) + writes 2,600 × 0.50 / M (0.0013) = 0.0103
+ *   average:   0.5 × 0.00607 + 0.35 × 0.00862 + 0.15 × 0.0103 ≈ 0.0076
  */
 export const COST = (() => {
   const m = PRICES.mid;
   const s = PRICES.small;
+  const writePremium = 0.25 * m.input;
   const first = (out: number) =>
     usd(CONTEXT.stable, m.cached) + usd(CONTEXT.averageChanging, m.input) + usd(out, m.output);
   const followUp = (cached: number, out: number) =>
     usd(cached, m.cached) + usd(OUTPUT.followUpNewTokens, m.input) + usd(out, m.output);
   const noTool = first(OUTPUT.reply);
-  const oneTool = first(OUTPUT.toolCall) + followUp(CONTEXT.averageTotal, OUTPUT.reply);
+  const oneTool =
+    first(OUTPUT.toolCall) + followUp(CONTEXT.averageTotal, OUTPUT.reply) + usd(CONTEXT.averageChanging, writePremium);
   const twoTools =
     first(OUTPUT.toolCall) +
     followUp(CONTEXT.averageTotal + OUTPUT.followUpNewTokens, OUTPUT.toolCall) +
-    followUp(CONTEXT.averageTotal, OUTPUT.reply);
+    followUp(CONTEXT.averageTotal + 2 * OUTPUT.followUpNewTokens, OUTPUT.reply) +
+    usd(CONTEXT.averageChanging + OUTPUT.followUpNewTokens, writePremium);
   const sh = VOLUME.shapes;
   const agentPerMessage = sh.none * noTool + sh.one * oneTool + sh.two * twoTools;
   const router = usd(600, s.input) + usd(50, s.output); // 0.000085
@@ -96,7 +102,9 @@ export const COST = (() => {
   const retrieval = 0.5 * 0.0005; // half of messages; 0.0005 a query, illustrative
   const smallPerMessage = router + badActor + supervisor + retrieval;
   const handoffSummary = 0.32 * 0.006; // 0.32 hand-offs a conversation × one mid-size call
-  const perConversation = VOLUME.messagesPerConversation * (agentPerMessage + smallPerMessage) + handoffSummary;
+  const conversationJudge = 0.0008; // small model over the whole conversation, illustrative ≈ 7,000 tokens
+  const perConversation =
+    VOLUME.messagesPerConversation * (agentPerMessage + smallPerMessage) + handoffSummary + conversationJudge;
   const noCacheNoTool = usd(CONTEXT.averageTotal, m.input) + usd(OUTPUT.reply, m.output); // 0.0112
   return {
     noTool,
@@ -107,8 +115,8 @@ export const COST = (() => {
     supervisor,
     smallPerMessage,
     handoffSummary,
-    perConversation, // ≈ 0.033
-    perDay: perConversation * VOLUME.conversationsPerDay, // ≈ 1,640
+    perConversation, // ≈ 0.036
+    perDay: perConversation * VOLUME.conversationsPerDay, // ≈ 1,800
     noCacheNoTool,
     cacheSaving: 1 - noTool / noCacheNoTool, // ≈ 46%
   };
@@ -138,7 +146,7 @@ export const LATENCY_MS = (() => {
   const oneTool = preModel + toolCall + orderApi + firstToken + reply + supervisor; // 3,475
   const kettle = preModel + toolCall + orderApi + toolCall + policy + firstToken + reply + supervisor; // 4,450
   const revise = 700;
-  const p95 = kettle + revise + 2 * firstToken; // 5,950
+  const p95 = kettle + revise + 3 * firstToken; // first token doubled on each of 3 calls: 6,350
   return {
     msPerToken,
     firstToken,
