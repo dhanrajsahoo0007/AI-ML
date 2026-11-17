@@ -307,7 +307,7 @@ describe("system-design case studies: interview-grade format", () => {
 describe("GenAI System Design case studies: interview-grade format", () => {
   const dir = path.join(process.cwd(), "content", "genai-system-design", "case-studies");
   const specDir = path.join(process.cwd(), "assets", "diagrams", "animated");
-  const DONE: string[] = ["customer-support-agent", "voice-agent-call-centre"];
+  const DONE: string[] = ["customer-support-agent", "voice-agent-call-centre", "ai-answer-engine"];
   const pages = DONE.map((slug) => ({
     f: `${slug}.mdx`,
     text: fs.readFileSync(path.join(dir, `${slug}.mdx`), "utf8"),

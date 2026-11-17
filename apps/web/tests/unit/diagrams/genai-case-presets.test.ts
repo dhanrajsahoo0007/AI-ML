@@ -105,3 +105,17 @@ describe("gcase-voice: the voice agent's numbers", () => {
     expect(TURN_DETECTORS[0].points[1].cutoffs).toBe(0.045);
   });
 });
+
+describe("gcase-answer: the answer engine's numbers", () => {
+  it("keeps the traffic, targets and daily cost of the design sheet", async () => {
+    const { TRAFFIC, TARGETS, DAILY } = await import("@/components/diagrams/presets/gcase-answer");
+    expect(TRAFFIC.perDay).toBe(10_000_000);
+    expect(Math.round(TRAFFIC.quickPerDay)).toBe(8_000_000);
+    expect(TARGETS.ownP50Ms).toBe(1_500);
+    expect(TARGETS.apiP95Ms).toBe(3_200);
+    expect(TARGETS.usdPerQuestion).toBe(0.03);
+    expect(Math.round(DAILY.total / 100) * 100).toBe(241_700);
+    expect(DAILY.perQuestion).toBeCloseTo(0.024, 3);
+    expect(DAILY.perQuestion).toBeLessThanOrEqual(TARGETS.usdPerQuestion);
+  });
+});

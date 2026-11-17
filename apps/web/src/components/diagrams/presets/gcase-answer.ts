@@ -19,7 +19,10 @@ const rss = (xs: readonly number[]) => Math.sqrt(sum(xs.map((x) => x * x)));
 function phi(z: number) {
   const t = 1 / (1 + 0.3275911 * (Math.abs(z) / Math.SQRT2));
   const y =
-    1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-(z * z) / 2);
   return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
 function phiInv(p: number) {
@@ -52,10 +55,16 @@ export function mixtureQuantile(parts: readonly { weight: number; p50: number; s
   }
   return (lo + hi) / 2;
 }
-export const mixtureP95 = (parts: readonly { weight: number; p50: number; spread: number }[]) => mixtureQuantile(parts, 0.95);
+export const mixtureP95 = (parts: readonly { weight: number; p50: number; spread: number }[]) =>
+  mixtureQuantile(parts, 0.95);
 
 /** Quantile q of T = the first call, or (if it is not back by hedgeAt) the earlier of it and a hedge sent then. */
-export function hedgedQuantile(a: { p50: number; p95: number }, b: { p50: number; p95: number }, hedgeAt: number, q: number) {
+export function hedgedQuantile(
+  a: { p50: number; p95: number },
+  b: { p50: number; p95: number },
+  hedgeAt: number,
+  q: number
+) {
   const sa = (a.p95 - a.p50) / Z95;
   const sb = (b.p95 - b.p50) / Z95;
   const survive = (t: number) => (1 - phi((t - a.p50) / sa)) * (t <= hedgeAt ? 1 : 1 - phi((t - hedgeAt - b.p50) / sb));
@@ -255,9 +264,36 @@ export const VERIFIER = (() => {
 /** One research run by tier (sheet §15.3). Caps bind on the large tier. */
 export const RESEARCH = (() => {
   const tiers = {
-    S: { label: "Comparison", subagents: 2, calls: 5, report: 800, spans: 12_000, tokenCap: 150_000, usdCap: 0.5, share: 0.5 },
-    M: { label: "Multi-part", subagents: 4, calls: 8, report: 1_500, spans: 20_000, tokenCap: 600_000, usdCap: 1.0, share: 0.35 },
-    L: { label: "Report", subagents: 6, calls: 10, report: 3_000, spans: 30_000, tokenCap: 1_200_000, usdCap: 2.0, share: 0.15 },
+    S: {
+      label: "Comparison",
+      subagents: 2,
+      calls: 5,
+      report: 800,
+      spans: 12_000,
+      tokenCap: 150_000,
+      usdCap: 0.5,
+      share: 0.5,
+    },
+    M: {
+      label: "Multi-part",
+      subagents: 4,
+      calls: 8,
+      report: 1_500,
+      spans: 20_000,
+      tokenCap: 600_000,
+      usdCap: 1.0,
+      share: 0.35,
+    },
+    L: {
+      label: "Report",
+      subagents: 6,
+      calls: 10,
+      report: 3_000,
+      spans: 30_000,
+      tokenCap: 1_200_000,
+      usdCap: 2.0,
+      share: 0.15,
+    },
   } as const;
   const base = 2_000;
   const growth = 3_300; // 3,000 of results + 300 of own output per call
@@ -275,7 +311,8 @@ export const RESEARCH = (() => {
     const newTok = base + (calls - 1) * growth;
     const cachedTok = inTok - newTok;
     const outTok = calls * 300;
-    const sub = m * (usd(newTok, PRICES.mid.cacheWrite) + usd(cachedTok, PRICES.mid.cached) + usd(outTok, PRICES.mid.output));
+    const sub =
+      m * (usd(newTok, PRICES.mid.cacheWrite) + usd(cachedTok, PRICES.mid.cached) + usd(outTok, PRICES.mid.output));
     const lead = m * (usd(planIn + synthIn, PRICES.mid.input) + usd(planOut + t.report, PRICES.mid.output));
     const repair = m * (usd(repairIn, PRICES.small.input) + usd(t.report, PRICES.small.output));
     const searches = t.subagents * calls;
@@ -311,7 +348,9 @@ export const RESEARCH = (() => {
   const doubled = { S: run(tiers.S, 2), M: run(tiers.M, 2), L: run(tiers.L, 2) };
   // Lever: the M tier with small-model subagents (cache write 0.125, read 0.01, output 0.50).
   const mSmallSub =
-    usd(2_000 + 7 * 3_300, PRICES.small.cacheWrite) + usd(subIn(8) - (2_000 + 7 * 3_300), PRICES.small.cached) + usd(8 * 300, PRICES.small.output); // ≈ 0.0052
+    usd(2_000 + 7 * 3_300, PRICES.small.cacheWrite) +
+    usd(subIn(8) - (2_000 + 7 * 3_300), PRICES.small.cached) +
+    usd(8 * 300, PRICES.small.output); // ≈ 0.0052
   const mSmallSubagents = M.total - tiers.M.subagents * (M.sub - mSmallSub); // ≈ 0.20
   const runShare = TRAFFIC.mix.researchDirect + VERIFIER.followOnResearchShare; // ≈ 1.39% of questions
   return {
@@ -358,7 +397,8 @@ export const QUICK_COST = (() => {
   const nonApi = planner + fetches + answer + grader;
   const total = nonApi + api; // ≈ 0.00625
   // Multi-hop: 2 round calls (100 tokens of notes and next queries each) + the final answer; API on each round.
-  const roundCall = usd(CONTEXT.stable, PRICES.mid.cached) + usd(CONTEXT.changing, PRICES.mid.input) + usd(100, PRICES.mid.output); // 0.00693
+  const roundCall =
+    usd(CONTEXT.stable, PRICES.mid.cached) + usd(CONTEXT.changing, PRICES.mid.input) + usd(100, PRICES.mid.output); // 0.00693
   // Only the first round may call the API (25% of multi-hop questions, 1 call); later rounds use the own index.
   const multiHopApiCalls = RETRIEVAL.apiCalls; // 0.25
   const multiHopNonApi = planner + 2 * roundCall + (mid + r * restartMid) + fetches + grader;
@@ -506,11 +546,26 @@ export const GPU_FLEET = (() => {
   const managedPerDay =
     usd(30 * 60 + 60 * 200, PRICES.managedRerankPerMillion) *
     (TRAFFIC.quickPerDay + TRAFFIC.multiHopPerDay * 3 + RESEARCH.runsPerDay * RESEARCH.avgSearches);
-  const crossGpusPerDay = Math.ceil((crossTok / PRICES.smallEncoderTokensPerSecond) * PRICES.gpuHeadroom) * 24 * PRICES.gpuHour;
+  const crossGpusPerDay =
+    Math.ceil((crossTok / PRICES.smallEncoderTokensPerSecond) * PRICES.gpuHeadroom) * 24 * PRICES.gpuHour;
   // The 7B checker on every sentence instead of the uncertain 20% band.
   const sevenBAllGpus = Math.ceil((verifyTok / PRICES.sevenBTokensPerSecond) * PRICES.gpuHeadroom); // ≈ 161
   const cascadeSavingPerDay = (sevenBAllGpus - sevenBGpus) * 24 * PRICES.gpuHour; // ≈ 7,700
-  return { ranks, sentences, crossTok, verifyTok, smallTok, sevenBTok, smallGpus, sevenBGpus, perDay, managedPerDay, crossGpusPerDay, sevenBAllGpus, cascadeSavingPerDay };
+  return {
+    ranks,
+    sentences,
+    crossTok,
+    verifyTok,
+    smallTok,
+    sevenBTok,
+    smallGpus,
+    sevenBGpus,
+    perDay,
+    managedPerDay,
+    crossGpusPerDay,
+    sevenBAllGpus,
+    cascadeSavingPerDay,
+  };
 })();
 
 /** Answer platform, team and evaluation (the lines the v1 "all-in" left out; illustrative). */
@@ -544,11 +599,23 @@ export const DAILY = (() => {
   const apiOnlyHopNonApi = QUICK_COST.multiHopNonApi - QUICK_COST.fetches + 9 * PRICES.liveFetch;
   const researchNonApi = RESEARCH.avgCost - RESEARCH.avgApiCalls * PRICES.searchPerCall;
   const apiOnlyFixed =
-    t.quickPerDay * apiOnlyQuickNonApi + t.multiHopPerDay * apiOnlyHopNonApi + RESEARCH.runsPerDay * researchNonApi + cache + shared;
+    t.quickPerDay * apiOnlyQuickNonApi +
+    t.multiHopPerDay * apiOnlyHopNonApi +
+    RESEARCH.runsPerDay * researchNonApi +
+    cache +
+    shared;
   const ownFixed =
-    t.quickPerDay * QUICK_COST.nonApi + t.multiHopPerDay * QUICK_COST.multiHopNonApi + RESEARCH.runsPerDay * researchNonApi + cache + shared + INDEX.fixedPerDay;
+    t.quickPerDay * QUICK_COST.nonApi +
+    t.multiHopPerDay * QUICK_COST.multiHopNonApi +
+    RESEARCH.runsPerDay * researchNonApi +
+    cache +
+    shared +
+    INDEX.fixedPerDay;
   const apiOnlyCalls = t.quickPerDay * 3 + t.multiHopPerDay * 9 + RESEARCH.runsPerDay * RESEARCH.avgSearches;
-  const ownCalls = t.quickPerDay * RETRIEVAL.apiCalls + t.multiHopPerDay * QUICK_COST.multiHopApiCalls + RESEARCH.runsPerDay * RESEARCH.avgApiCalls;
+  const ownCalls =
+    t.quickPerDay * RETRIEVAL.apiCalls +
+    t.multiHopPerDay * QUICK_COST.multiHopApiCalls +
+    RESEARCH.runsPerDay * RESEARCH.avgApiCalls;
   const apiOnlyAt = (perCall: number) => apiOnlyFixed + apiOnlyCalls * perCall;
   const ownAt = (perCall: number) => ownFixed + ownCalls * perCall;
   const breakevenPerCall = (ownFixed - apiOnlyFixed) / (apiOnlyCalls - ownCalls);
@@ -625,7 +692,14 @@ export const LATENCY = (() => {
   // Own index: 3 queries × 100 shards each, per-shard deadline 60 ms with a hedge at 40 ms, + 20 ms merge.
   const own = [...head, stage("index", RETRIEVAL.shardDeadlineMs + 20, 10), ...rank, ...write];
   // API path: one API call on the critical path (single draw), then the slowest of 3 fetches under a 500 ms deadline.
-  const api = [...head, stage("api", 513, 808 - 513), stage("fetch", fetchP50, 500 - fetchP50), stage("parse", 30, 20), ...rank, ...write];
+  const api = [
+    ...head,
+    stage("api", 513, 808 - 513),
+    stage("fetch", fetchP50, 500 - fetchP50),
+    stage("parse", 30, 20),
+    ...rank,
+    ...write,
+  ];
   const p50 = (s: readonly { ms: number }[]) => sum(s.map((x) => x.ms));
   const spread = (s: readonly { spread: number }[]) => rss(s.map((x) => x.spread));
   const upper = (s: readonly { ms: number; spread: number }[]) => p50(s) + sum(s.map((x) => x.spread));
@@ -640,8 +714,12 @@ export const LATENCY = (() => {
   // Correlated tails (R2-2): stages that share our model provider and GPU fleet slow together at peak.
   const internal = new Set(["planner", "cross", "firstToken", "sentence", "verify"]);
   const partialSpread = (s: readonly { id: string; spread: number }[]) =>
-    Math.sqrt(sum(s.filter((x) => internal.has(x.id)).map((x) => x.spread)) ** 2 + sum(s.filter((x) => !internal.has(x.id)).map((x) => x.spread ** 2)));
-  const allSlow = (s: readonly { ms: number; spread: number }[]) => dropMix(p50(s), sum(s.map((x) => x.spread)), VERIFIER.firstSentenceDropped);
+    Math.sqrt(
+      sum(s.filter((x) => internal.has(x.id)).map((x) => x.spread)) ** 2 +
+        sum(s.filter((x) => !internal.has(x.id)).map((x) => x.spread ** 2))
+    );
+  const allSlow = (s: readonly { ms: number; spread: number }[]) =>
+    dropMix(p50(s), sum(s.map((x) => x.spread)), VERIFIER.firstSentenceDropped);
   const ownP50 = p50(own); // ≈ 1,352
   const apiP50 = p50(api); // ≈ 2,215
   const ownP95 = withDrop(own);
@@ -712,7 +790,11 @@ export const LATENCY = (() => {
     apiRaceP50,
     apiRaceP95, // both vendors raced
     apiRaceSavingP95: 808 - apiRaceP95,
-    apiPartialP95Raced: dropMix(apiP50 - (513 - apiRaceP50), Math.sqrt(partialSpread(api) ** 2 - 295 ** 2 + (apiRaceP95 - apiRaceP50) ** 2), VERIFIER.firstSentenceDropped),
+    apiPartialP95Raced: dropMix(
+      apiP50 - (513 - apiRaceP50),
+      Math.sqrt(partialSpread(api) ** 2 - 295 ** 2 + (apiRaceP95 - apiRaceP50) ** 2),
+      VERIFIER.firstSentenceDropped
+    ),
     quickMixedP95: mixtureP95(mix),
     sourcesOwn,
     sourcesApi,
@@ -735,7 +817,8 @@ export const LATENCY = (() => {
     hopP50: mixtureQuantile(hopParts, 0.5),
     hopP95: mixtureP95(hopParts),
     fullAnswerOwn: firstTokenOwn + (CONTEXT.outputTokens / decode) * 1_000 + 60, // 4,790 before restarts
-    fullAnswerOwnMean: firstTokenOwn + (CONTEXT.outputTokens / decode) * 1_000 + 60 + VERIFIER.expectedRestarts * restartMs, // ≈ 5,077
+    fullAnswerOwnMean:
+      firstTokenOwn + (CONTEXT.outputTokens / decode) * 1_000 + 60 + VERIFIER.expectedRestarts * restartMs, // ≈ 5,077
     cacheHit: { edge: 30, lookup: 10, send: 10, p50: 50 },
     plannerDeadlineMs: 400,
     fetchDeadlineMs: 500,
@@ -855,8 +938,10 @@ export const CAPACITY = (() => {
     inputTokensPerMinute: (quickIn + hopIn + resIn) * 60,
     outputTokensPerSecond: outTok,
     quickStreams:
-      quickS *
-      ((1 - RETRIEVAL.apiRoutedShare) * LATENCY.firstTokenOwn + RETRIEVAL.apiRoutedShare * LATENCY.firstTokenApi + (CONTEXT.outputTokens / LATENCY.decode) * 1_000) /
+      (quickS *
+        ((1 - RETRIEVAL.apiRoutedShare) * LATENCY.firstTokenOwn +
+          RETRIEVAL.apiRoutedShare * LATENCY.firstTokenApi +
+          (CONTEXT.outputTokens / LATENCY.decode) * 1_000)) /
       1_000,
     researchRuns: resS * (RESEARCH.avgMs / 1_000),
     tracesGBPerDay: (TRAFFIC.perDay * 6_000) / 1e9, // 60
@@ -928,8 +1013,23 @@ export const SENSITIVITY = (() => {
     const runs = TRAFFIC.perDay * (TRAFFIC.mix.researchDirect + v.followOn);
     const research = runs * RESEARCH.avgCost;
     // GPUs, platform and index held fixed (the fleet grows a little with research; ignored here).
-    const total = TRAFFIC.quickPerDay * quick + TRAFFIC.multiHopPerDay * hop + research + DAILY.cache + DAILY.gpu + DAILY.platform + DAILY.index;
-    return { ...v, quick, runs, research, total, perQuestion: total / TRAFFIC.perDay, apiP95: LATENCY.apiP95At(v.drop) };
+    const total =
+      TRAFFIC.quickPerDay * quick +
+      TRAFFIC.multiHopPerDay * hop +
+      research +
+      DAILY.cache +
+      DAILY.gpu +
+      DAILY.platform +
+      DAILY.index;
+    return {
+      ...v,
+      quick,
+      runs,
+      research,
+      total,
+      perQuestion: total / TRAFFIC.perDay,
+      apiP95: LATENCY.apiP95At(v.drop),
+    };
   };
   return {
     base: scenario(VERIFIER.unsupported, VERIFIER.offerAcceptance),
