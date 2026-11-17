@@ -51,31 +51,20 @@ Prompt engineering questions test whether you know the main techniques by name, 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    START["New task"] --> Q1{"Clear, single-step task?"}
-    Q1 -->|"Yes"| ZS["Zero-shot with a precise format"]
-    Q1 -->|"No"| Q2{"Needs a specific style or label set?"}
-    Q2 -->|"Yes"| FS["Few-shot examples"]
-    Q2 -->|"No"| Q3{"Multi-step reasoning?"}
-    Q3 -->|"Yes"| COT["Chain-of-thought<br/>(+ self-consistency if accuracy-critical)"]
-    Q3 -->|"No"| Q4{"Needs external facts or actions?"}
-    Q4 -->|"Yes"| REACT["ReAct with tools or RAG"]:::accent
-    Q4 -->|"No"| CHAIN["Prompt chaining<br/>with structured outputs"]
-    ZS --> EVAL["Evaluate on a labeled set"]
-    FS --> EVAL
-    COT --> EVAL
-    REACT --> EVAL
-    CHAIN --> EVAL
-```
+Before you reach for a clever technique, walk this tree: it picks the cheapest one that fits the task.
 
-How to choose in practice:
+<AnimatedDiagram
+  spec="animated/agents/prompt-technique-tree"
+  minWidth={620}
+  caption="Ask the questions in order and stop at the first Yes: each step down costs more tokens or calls. Whichever technique you land on, the labeled evaluation set decides whether it worked."
+/>
 
-1. Start with the cheapest technique, zero-shot, and a small labeled evaluation set.
-2. Add examples if the format or labels are inconsistent.
-3. Add reasoning if multi-step questions fail.
-4. Add tools or retrieval if answers need facts the model does not have.
-5. Split into a chain if one prompt is doing too many jobs. Re-measure after every change.
+**How to read it:**
+
+- Start at "New task" with the cheapest technique, zero-shot, and a small labeled evaluation set. Each question you answer No to moves you one step down, to a technique that costs more.
+- Add examples if the format or labels are inconsistent. Add reasoning if multi-step questions fail.
+- Add tools or retrieval (the highlighted ReAct branch) if answers need facts the model does not have. Split into a chain if one prompt is doing too many jobs.
+- Every branch ends in the same lime box: re-measure on the evaluation set after every change.
 
 ## Technical mechanics
 
