@@ -1,0 +1,392 @@
+---
+title: "GenAI Design Principles"
+description: "Seventeen rules behind every GenAI system design on this site, each with the page that teaches it and the designs that use it."
+icon: compass
+updated: 2026-11-17
+---
+
+Every GenAI design on this site is built from the same small set of rules. This page names them once, so each case study can say which rule forced which box.
+
+- Interviewers listen for these rules by name: "I enforce the refund limit in code, not in the prompt" is a principle, and it is what separates a design from a list of components.
+
+## Overview
+
+- A **principle** here is a rule that holds across systems: it says what to do and why, not which product to buy.
+- There are seventeen, P1 to P17, in five groups: shape the system, ground and constrain, context, latency and cost, act safely, and keep it right over time.
+- Each block below gives the rule, why it holds, one figure from the page that teaches it, and the case studies that apply it.
+- Every case study ends with a "Principles and patterns used" table that links back to these anchors, and every architecture step names the principle it applies.
+- The classic system design patterns (caching, idempotency, back pressure) live on their own pages; a principle here often points at one of them.
+
+<KeyIdea>
+  A GenAI design is a model call surrounded by rules written in code. The principles say which rules, and in which order to add them.
+</KeyIdea>
+
+## The principles at a glance
+
+| # | Principle | The rule in one line | You need it when |
+| --- | --- | --- | --- |
+| P1 | [Start with the simplest design that passes the evals](#p1-start-with-the-simplest-design-that-passes-the-evals) | Workflow before agent, one agent before many | Someone proposes a multi-agent system first |
+| P2 | [Ground before you generate](#p2-ground-before-you-generate) | Retrieve the evidence, answer only from it | The answer must be true and current |
+| P3 | [Route by difficulty](#p3-route-by-difficulty) | Cheap path for easy inputs | Most inputs are easy and cost matters |
+| P4 | [Cascade from cheap to expensive](#p4-cascade-from-cheap-to-expensive) | Rules, small models, a large model, then people | Volume is high and mistakes are costly |
+| P5 | [Budget latency per stage](#p5-budget-latency-per-stage) | A number per stage, stream, manage p95 | A person is waiting, on screen or on the phone |
+| P6 | [Count and cap in tokens](#p6-count-and-cap-in-tokens) | Quotas and capacity in tokens and GPU time | Requests vary 100 times in size |
+| P7 | [Cache at every layer and keep the prefix stable](#p7-cache-at-every-layer-and-keep-the-prefix-stable) | Stable parts first so caches hit | Every request repeats a long prefix |
+| P8 | [Manage context deliberately](#p8-manage-context-deliberately) | Decide what enters the window | Conversations or tasks run long |
+| P9 | [Constrain the output](#p9-constrain-the-output) | Schemas fix shape, validators check content | Code reads the model's output |
+| P10 | [Enforce rules in code, not in the prompt](#p10-enforce-rules-in-code-not-in-the-prompt) | Limits live in services the model calls | The system moves money or data |
+| P11 | [Run as the user](#p11-run-as-the-user) | Every read and action with the user's permissions | Users may see different data |
+| P12 | [Bound the blast radius of actions](#p12-bound-the-blast-radius-of-actions) | Read and write tiers, sandboxes, confirmation | The agent can change things |
+| P13 | [Treat retrieved content as untrusted](#p13-treat-retrieved-content-as-untrusted) | Content is data, never commands | The model reads anything a stranger wrote |
+| P14 | [Carry provenance](#p14-carry-provenance) | Every claim points to its source | Answers must be checked or audited |
+| P15 | [Keep a human escape hatch and close the loop](#p15-keep-a-human-escape-hatch-and-close-the-loop) | Hand over with context; corrections become data | The model will be wrong some of the time |
+| P16 | [Evaluate continuously and degrade gracefully](#p16-evaluate-continuously-and-degrade-gracefully) | Test before release, watch after, fail safe | Always |
+| P17 | [Keep sensitive data inside a boundary](#p17-keep-sensitive-data-inside-a-boundary) | Redact, keep in region, log with care | Personal, payment or health data flows through |
+
+## Shape the system
+
+### P1 · Start with the simplest design that passes the evals
+
+- **The rule:** begin with one model call, then a fixed workflow; move to an agent only when an eval shows the workflow fails, and to several agents only when one cannot hold the task.
+- **Why it holds:** every step of autonomy multiplies the paths you must test; a workflow's path is the same for every input, so it is cheaper, faster and easier to debug.
+- **The test:** if you can draw the steps before the request arrives, it is a workflow.
+
+The same task drawn both ways shows what you give up and what you gain.
+
+<AnimatedDiagram spec="animated/agents/workflow-vs-agent" caption="In a workflow your code fixes the order of the steps; in an agent the model picks them, one turn at a time." />
+
+**How to read it:**
+
+- Left: the code calls the four tools in a fixed order; the same message always takes the same path, which is what makes it testable.
+- Right: the model chooses which tool to call next and when to stop; that flexibility is worth paying for only when the steps cannot be known in advance.
+- In an interview, say which side each part of your design sits on, and why.
+
+- **Taught in:** [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) · [Chain / Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P3 · Route by difficulty
+
+- **The rule:** classify the input first and send easy inputs to a small, fast model; pay for the large model only on the inputs that need it.
+- **Why it holds:** in most products a large share of inputs are easy, and a model a tenth the price answers them as well; the router is cheap next to the saving.
+- **The catch:** the saving holds only while the router sends hard inputs up; measure its mistakes on a labelled set.
+
+A router in front of two models changes the day's bill more than any prompt change.
+
+<AnimatedDiagram spec="animated/serving/route-by-difficulty" stepper caption="Sending the easy 70 % to a model a tenth the price cuts the day's bill by more than half, as long as the hard 30 % still reach the large model." />
+
+**How to read it:**
+
+- Step 1: 200,000 requests a day split 70 % easy and 30 % hard; step 2 prices one request on each model (illustrative prices).
+- Step 3 compares the day's cost with and without the router.
+- The router itself can be a small classifier or a rule; its error rate on hard inputs is the number that decides whether the saving is real.
+
+- **Taught in:** [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) · [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent)
+
+### P4 · Cascade from cheap to expensive
+
+- **The rule:** let rules and small models decide the clear cases, a large model the uncertain band, and people the rest.
+- **Why it holds:** cost per decision rises by orders of magnitude at each tier, so each tier should see only what the tier below could not settle.
+- **The design work:** two thresholds per tier, set from measured precision and recall, and a queue for the cases no tier is sure about.
+
+A moderation pipeline is the clearest cascade: two cheap checks and a person only for the unsure.
+
+<AnimatedDiagram spec="animated/safety/mod-pipeline" stepper caption="Every message is scored before and after the model; clear cases never reach a person, and the unsure ones that do become labels that tune the thresholds." />
+
+**How to read it:**
+
+- The input check blocks clear violations with no model call at all; everything else goes to the model.
+- The output check sends clean drafts out, unsafe drafts to a refusal and borderline drafts to a review queue.
+- The people in the queue see only the uncertain band, and their decisions flow back as training labels (P15).
+
+- **Taught in:** [Content Moderation & Red-Teaming](/ai-system-design/genai-system-design/content-moderation-red-teaming) · [Cost and Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent)
+
+## Ground and constrain
+
+### P2 · Ground before you generate
+
+- **The rule:** retrieve the evidence first and let the model answer only from it; when the evidence is too weak, say "I don't know" instead of guessing.
+- **Why it holds:** a model's own memory is months old and cannot be cited; retrieved text is current, attributable and can be checked claim by claim.
+- **Two gates:** an evidence check before generation (is the best passage good enough?) and a claim check after it (does every claim have a passage behind it?).
+
+Grounding is a gate before the model and a check after it, not one retrieval call.
+
+<AnimatedDiagram spec="animated/rag/halluc-grounded-flow" stepper caption="No evidence means no answer, and no claim leaves without a passage behind it." />
+
+**How to read it:**
+
+- The retriever fetches the top passages; the evidence check abstains when the best score is under the threshold.
+- The model drafts an answer that cites passages, and a second check compares each claim with them.
+- An unsupported claim sends the draft back or removes the claim, so the customer never sees a guess.
+
+- **Taught in:** [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P9 · Constrain the output
+
+- **The rule:** give the model a schema and, where the provider supports it, constrained decoding; then validate the content with rules the schema cannot express, and retry with the error.
+- **Why it holds:** constrained decoding guarantees the shape of the output, not its truth; a field can be valid JSON and still name the wrong order.
+- **Cap the loop:** a fixed number of repair attempts, then a fallback or a person.
+
+A validator's error message is the best retry prompt you can write.
+
+<AnimatedDiagram spec="animated/agents/validate-and-repair" stepper caption="The validator's message is the retry prompt, the rule check asks a system the schema cannot see, and a cap ends the loop." />
+
+**How to read it:**
+
+- The service sends the message and the schema; the first attempt fails the schema check on one field.
+- The error goes back with the draft, and the second attempt passes the schema; a rule check then asks the order system whether the values are true.
+- After the cap, the service stops retrying and hands the case on.
+
+- **Taught in:** [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation) · [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P14 · Carry provenance
+
+- **The rule:** every claim, extracted field, action and graph edge carries a pointer to where it came from: a passage id, a page and box, a tool call, a prompt version.
+- **Why it holds:** without provenance nobody can check an answer, cite it, replay a decision or remove a source that turns out to be wrong.
+- **Keep references, not copies:** the record stores ids and hashes, so it can be kept for years without holding personal data.
+
+An audit record that replays a decision needs six facts, and none of them is the customer's raw text.
+
+<AnimatedDiagram spec="animated/safety/audit-record" stepper caption="Six facts are enough to replay a decision; the record keeps references and hashes, not the customer's words." />
+
+**How to read it:**
+
+- Who, what and when identify the action; which model and which prompt version identify the decision-maker.
+- The decision says what the policy answered and why; the evidence is stored by reference.
+- Each record links to the one before it, so a deleted or edited record is visible.
+
+- **Taught in:** [Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging) · [Data Versioning & Lineage](/ai-system-design/genai-system-design/data-versioning-lineage)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+## Context, latency and cost
+
+### P5 · Budget latency per stage
+
+- **The rule:** write down a number for every stage of the request, make them add up to the target, and design to the p95, not the mean.
+- **Why it holds:** a target with no per-stage budget cannot be defended or debugged; the stage that blows the budget is invisible in an average.
+- **The levers:** stream so the person sees or hears something early, overlap stages instead of running them in turn, and move the slowest stage closer.
+
+Streaming does not finish the answer sooner; it ends the blank screen sooner.
+
+<AnimatedDiagram spec="animated/serving/stream-timeline" caption="Streaming does not make the answer finish sooner; it makes the screen stop being blank 1,100 ms sooner." />
+
+**How to read it:**
+
+- Top: inside the engine, queueing and prefill take 400 ms, then decoding writes 250 tokens until 1,500 ms.
+- Bottom: without streaming the screen is blank for 1,500 ms; with streaming the first words appear at 400 ms.
+- The budget is per stage: prefill grows with the prompt, decode with the answer, so each has its own lever.
+
+- **Taught in:** [Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) · [Latency & Token Usage Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P6 · Count and cap in tokens
+
+- **The rule:** measure quotas, budgets and capacity in tokens and GPU time; a request count hides a 100-fold difference in cost.
+- **Why it holds:** cost and GPU load scale with tokens in and out, and output is known only after the response, so a budget must reserve, then settle.
+- **Two meters:** requests per minute protect against floods; tokens per minute protect against a few enormous prompts.
+
+Five long prompts barely move a request meter and break a token meter.
+
+<AnimatedDiagram spec="animated/serving/ratelimit-two-buckets" stepper caption="Five extra requests move the request meter by under 1 % and the token meter by 43 %; limits are illustrative." />
+
+**How to read it:**
+
+- Step 1: a normal peak minute sits under both limits.
+- Step 2: five 150,000-token prompts add 0.7 % to requests and push tokens past the limit.
+- Step 3: only the token bucket catches them, which is why gateways and budgets count tokens.
+
+- **Taught in:** [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling) · [Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P7 · Cache at every layer and keep the prefix stable
+
+- **The rule:** order the prompt from most stable to least stable so the provider's prefix cache hits; cache tool results and parsed documents too; treat a semantic cache (reusing an answer for a similar question) as a correctness risk, scoped per tenant and audited.
+- **Why it holds:** a prefix cache matches from the first token and stops at the first difference, so one timestamp at the top of the prompt turns every hit into a miss.
+- **The trade:** cached input is billed at a fraction of the normal price, but only for the exact prefix.
+
+One date in the first line of the prompt is enough to miss the cache on every request.
+
+<AnimatedDiagram spec="animated/serving/pcache-prefix" stepper caption="Matching runs from the first token and stops at the first difference, so the part that changes belongs at the end." />
+
+**How to read it:**
+
+- Step 1: the first request writes instructions and tools to the cache; step 2: the next request reads them and pays full price only for the new part.
+- Step 3: an edit near the top invalidates everything after it.
+- Design rule: instructions, then tools and policy, then retrieved text and history, then the new message.
+
+- **Taught in:** [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P8 · Manage context deliberately
+
+- **The rule:** decide what enters the window on every turn: fixed instructions, the tools this stage needs, the evidence that fits a budget, a summary of old turns, and nothing else.
+- **Why it holds:** quality falls as the window fills with stale history and tool output, and cost and latency rise with every token.
+- **The tools:** a token budget per block, compaction at a threshold, tools loaded per stage, and sub-tasks in their own window.
+
+History and tool results grow every turn; the fixed parts barely move.
+
+<AnimatedDiagram spec="animated/rag/ctx-budget" stepper caption="The fixed parts barely move; history and tool results grow every turn until compaction resets them." />
+
+**How to read it:**
+
+- Each bar is one turn on a 32,000-token window; instructions, tools, memory and retrieved chunks stay the same size.
+- History grows 300 tokens a turn and tool results 1,200, until turn 14 crosses the 80 % line and compaction runs.
+- Without compaction the window overflows a few turns later.
+
+- **Taught in:** [Context Engineering](/ai-system-design/genai-system-design/context-engineering) · [Context Compaction, Resets & External State](/ai-system-design/genai-system-design/context-compaction-resets-and-state)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+## Act safely
+
+### P10 · Enforce rules in code, not in the prompt
+
+- **The rule:** the model may ask for an action; a service written in code decides whether it happens, checking ownership, limits and history.
+- **Why it holds:** a prompt is advice the model can be talked out of; a policy check in code cannot be argued with, and it is the same for every request.
+- **Every write:** an idempotency key, a log line with the model's stated reason and the policy's decision, and a per-customer rate limit.
+
+The model can be talked into asking for anything; the policy service decides what is paid.
+
+<AnimatedDiagram spec="animated/rag/support-agent-refund-guard" stepper caption="The model can be talked into asking for anything; the policy service, keyed and written in code, decides what is paid." />
+
+**How to read it:**
+
+- A refund within policy goes through; a retry with the same key returns the first result instead of paying twice.
+- A refund over the limit comes back as "needs approval" and goes to a person.
+- An instruction typed into the chat may change what the model asks for, never what the policy allows.
+
+- **Taught in:** [Guardrails and Safety](/ai-system-design/genai-system-design/guardrails-and-safety) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P11 · Run as the user
+
+- **The rule:** every retrieval and every tool call runs with the end user's identity and permissions, passed by the platform, never chosen by the model and never the agent's own service account.
+- **Why it holds:** a filter applied after the model has read a document cannot take back what it read; the permission check has to happen inside the search and inside the tool.
+- **The sign:** a tool signature with no customer id the model can fill in; the platform adds it.
+
+The filter comes from the user's groups and runs inside the search.
+
+<AnimatedDiagram spec="animated/rag/acl-filtering" stepper caption="The filter comes from the user's groups and runs inside the search; checking the answer afterwards cannot take back what the model has read." />
+
+**How to read it:**
+
+- The app asks the identity provider for the user's groups and passes them as a filter to the retriever.
+- A customer's search returns only public articles; a support agent's search may return the internal runbook.
+- The model never sees a passage the user could not open themselves.
+
+- **Taught in:** [Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy) · [Access Control & RBAC](/ai-system-design/genai-system-design/access-control-rbac)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P12 · Bound the blast radius of actions
+
+- **The rule:** split tools into reads and writes, give each the narrowest credential, run code in a sandbox, and confirm anything that cannot be undone.
+- **Why it holds:** an agent will sooner or later call the wrong tool with the wrong arguments; the design decides whether that costs a log line or a customer's money.
+- **The ladder:** read freely, write within a limit, write above it with a person's approval, never write outside the tool list.
+
+Each layer puts more code that is not the host between the agent and the host.
+
+<AnimatedDiagram spec="animated/agents/sandbox-layers" stepper caption="Each step adds a wall between the agent and the host; none of them stops an allowed connection from carrying data out, so every layer still needs an egress allow-list." />
+
+**How to read it:**
+
+- A container shares the host's kernel; one kernel bug reaches the host.
+- A user-space kernel and then a micro-VM add walls the agent's commands must cross.
+- The same idea applies to tools: a refund tool with a limit, an approval step above it, and no tool at all for actions the agent must never take.
+
+- **Taught in:** [Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P13 · Treat retrieved content as untrusted
+
+- **The rule:** web pages, emails, documents, transcripts and tool output are data; nothing in them may raise a permission or change a limit.
+- **Why it holds:** in indirect injection the attacker never speaks to the assistant; the attack arrives inside content the assistant reads to do its job.
+- **The controls:** P10 and P11 make an injected instruction powerless; mark untrusted text in the prompt and never let it pick a tool's target.
+
+The attacker in indirect injection plants text and waits.
+
+<AnimatedDiagram spec="animated/rag/inject-direct-vs-indirect" stepper caption="In indirect injection the attacker never speaks to the assistant; the attack rides in on content it reads." />
+
+**How to read it:**
+
+- Step 1, direct: the attacker types the instruction into the chat.
+- Step 2, indirect: an honest customer asks a question, and the instruction is hidden in a page or email the assistant reads to answer it.
+- Both end at the same tool, which is why the tool, not the prompt, must refuse.
+
+- **Taught in:** [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P17 · Keep sensitive data inside a boundary
+
+- **The rule:** detect and replace personal and payment data before it reaches a model or a log, keep data in the region and on the models you are allowed to use, and store only what you may keep.
+- **Why it holds:** a log or trace store is the easiest place to leak data from, and a model provider is another company; what never crosses the boundary cannot leak from the other side.
+- **The pattern:** placeholders in, real values restored on the way out, from a map that lives for one request.
+
+The model and the logs only ever see placeholders.
+
+<AnimatedDiagram spec="animated/safety/pii-redaction-path" stepper caption="The model and the logs only ever see placeholders; the real values wait in a map that lives for one request." />
+
+**How to read it:**
+
+- A detector finds the email and card number and swaps them for placeholders.
+- The model and the trace store see only the placeholders; the reply gets the real values back at the end.
+- On a phone line the same rule means pausing the recording while a caller reads out a card number.
+
+- **Taught in:** [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling) · [Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+## Keep it right over time
+
+### P15 · Keep a human escape hatch and close the loop
+
+- **The rule:** every flow has a way to a person, triggered by the user, by a rule or by low confidence, with a summary so the person starts where the system stopped; every correction becomes a test case or a training example.
+- **Why it holds:** the model will be wrong on some inputs forever; the escape hatch caps the damage and the loop turns each failure into a test that stops it coming back.
+- **Measure it:** escalation rate and reason per intent, and how many new test cases a week come from production.
+
+Each stage of the loop hands the next something concrete.
+
+<AnimatedDiagram spec="animated/eval/improve-flywheel" stepper caption="Traces become named failures, then test cases, then a candidate, then evidence; nothing reaches every user without an offline and a live check." />
+
+**How to read it:**
+
+- Production logs every request; people read a sample and name the failures.
+- The failures become new test cases, a change targets the biggest one, and offline evaluation then a canary decide whether it ships.
+- Escalations and human corrections are the richest source of new cases.
+
+- **Taught in:** [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) · [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+### P16 · Evaluate continuously and degrade gracefully
+
+- **The rule:** run a gold set, repeated trials and simulated users before every release; watch online metrics after it; when a dependency fails, fall back, shed load or refuse safely instead of guessing.
+- **Why it holds:** an agent that passes a task 70 % of the time passes it four times in a row only 24 % of the time; one run per test case hides that.
+- **Degrade in order:** decide in advance what switches off first (a slower model, no actions, a person) so an outage is a smaller product, not a wrong one.
+
+Passing once is not the same as passing every time.
+
+<AnimatedDiagram spec="animated/agents/pass-k" caption="Same agent, 70 % per run: four tries almost always pass once (0.992), but four in a row pass only 24 % of the time." />
+
+**How to read it:**
+
+- Left, pass@k: the chance that at least one of k runs passes, which climbs towards 1.
+- Right, pass^k: the chance that all k runs pass, which falls as 0.7 to the power k.
+- A customer meets the agent many times, so pass^k is the number that predicts their experience.
+
+- **Taught in:** [Online / Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Agent Reliability & Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery)
+- **Used in:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre)
+
+## Using the principles in an interview
+
+1. **Name the rule when you add the box:** "a policy service, because rules belong in code (P10)".
+2. **Use them to say no:** "not multi-agent yet; one agent passes the evals (P1)".
+3. **Tie each to a number:** P5 to the latency budget, P6 and P7 to the cost per request, P16 to the release gate.
+4. **Close with the loop:** every design ends with how it learns from its mistakes (P15) and how it fails safely (P16).
+
+**Red flags:** rules that live only in the prompt, a design with no way to a person, latency given as one number with no stages, and quotas counted in requests.
+
+## Further reading
+
+- [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) (Anthropic, 2024): workflows before agents.
+- [Building a Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html) (Chip Huyen, 2024): the order in which a GenAI platform grows.
+- Related pages: [GenAI Interview Roadmap](/ai-system-design/genai-system-design/genai-interview-roadmap) · [Anatomy of an LLM Application](/ai-system-design/genai-system-design/anatomy-of-an-llm-application)
