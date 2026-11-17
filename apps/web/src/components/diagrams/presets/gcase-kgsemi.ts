@@ -72,6 +72,31 @@ export function wilson(p: number, n: number) {
   return { low: centre - half, high: centre + half, half };
 }
 
+/** ln Γ(x), Lanczos (g = 7, n = 9), for x > 0.5. */
+function lgamma(x: number): number {
+  const c = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+    12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  const y = x - 1;
+  let a = c[0];
+  const t = y + 7.5;
+  for (let i = 1; i < 9; i++) a += c[i] / (y + i);
+  return 0.5 * Math.log(2 * Math.PI) + (y + 0.5) * Math.log(t) - t + Math.log(a);
+}
+const lnChoose = (n: number, k: number) => lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1);
+/**
+ * One-sided Fisher exact p, P(X ≥ a): a of n1 exposed units are "bad", b of n2 unexposed are. Used only to show why a
+ * test design matters (review items R2-4, R2-8); no p-value is shown to engineers.
+ */
+function fisherGreater(a: number, n1: number, b: number, n2: number) {
+  const N = n1 + n2;
+  const K = a + b;
+  let p = 0;
+  for (let x = a; x <= Math.min(n1, K); x++) p += Math.exp(lnChoose(K, x) + lnChoose(N - K, n1 - x) - lnChoose(N, n1));
+  return p;
+}
+
 /** Prices: illustrative on-site GPU hour and (for the rejected hosted option only) list prices as of November 2026. */
 export const KS_PRICES = {
   gpuHour: PRICES.gpuHour, // 2.5 USD, illustrative: the site's all-in rate (capital ≈ 1.07 + power, space, support)
@@ -169,56 +194,85 @@ export const TRACES = (() => {
   };
 })();
 
-/** The knowledge graph over a 2-year hot window (sheet §5, §7); equipment, knowledge and cases are kept forever. */
+/**
+ * The knowledge graph (sheet §5, §7; review item R2-1). Retention is per kind, set by what a 5-year as-of replay needs:
+ * EXECUTION (`Run` nodes and their edges, sort insertions, inspections) is kept 2 years in the graph; older execution is
+ * read from the columnar store, which keeps 5 years. EVENTS (state changes, holds, SPC, maintenance, qualification,
+ * part installs), LOTS and WAFERS (genealogy), recipe bodies and material lots are kept 5 years, so the timing,
+ * genealogy and "what else changed" features exist for every replay case. Equipment, knowledge and cases are kept.
+ * VERSIONS: nothing is overwritten. A correction (a work order's times edited, a mapping fixed, a backdated record)
+ * writes a new version with `recorded_at`; the old version gets `superseded_at`. Valid time is `valid_from` /
+ * `valid_to`. An as-of query at transaction time T reads versions with recorded_at ≤ T < superseded_at.
+ */
 export const GRAPH = (() => {
-  const days = TRACES.hotDays; // 730
+  const execDays = TRACES.hotDays; // 730: execution in the graph
+  const keepDays = 1_826; // 5 years: events, genealogy, recipe bodies, material lots (the replay horizon)
+  const correctionRate = 0.05; // share of event records that get one corrected version (illustrative; measured)
+  const v = 1 + correctionRate; // versions per event record
   const nodes = {
-    run: FAB.runsPerDay * days, // 30.72M lot-step executions (kept in the graph: review item 13, sheet §10.3)
-    wafer: FAB.wafersPerDay * days, // 0.96M
-    sortInsertion: FAB.wafersPerDay * 1.1 * days, // one per test insertion; 10% retested: 1.056M (review item 39)
-    inspection: FAB.wafersPerDay * 12 * 0.25 * days, // 12 inspected layers, 25% of wafers sampled: 2.88M
-    lot: FAB.lotsPerDay * 1.2 * days, // + 20% child lots from splits: 46,080
-    fdcHold: 200 * days, // hold-level FDC faults only, ≈ 0.5% of runs (alarms stay in FDC; review item 44): 146,000
-    spcViolation: 400 * days, // 292,000
-    stateChange: FAB.processChambers * 6 * days, // E10 state transitions, ≈ 6 a chamber a day (review item 9): 8.76M
-    maintenance: FAB.processChambers * 3 * 24, // PM 2 + unscheduled 1 a chamber a month: 144,000
-    qualification: FAB.processChambers * 2 * 24, // post-PM qualification runs (monitor wafers): 96,000
-    partInstall: FAB.processChambers * 1 * 24, // 48,000
-    recipeBody: 6_000 * 5, // (tool, chamber, PPID, body hash as downloaded) versions in the window: 30,000
-    materialLot: 300 * days, // resist bottles, slurry drums, gas cylinders: 219,000
-    equipment: FAB.tools + FAB.processChambers, // 3,100 (review item 41)
-    testSide: 60 + 20 + 100, // probe cards, testers, test-program versions (review item 10): 180
+    run: FAB.runsPerDay * execDays, // 30.72M lot-step executions (2 years)
+    sortInsertion: FAB.wafersPerDay * 1.1 * execDays, // 1.056M (2 years; 5 years in the columnar store)
+    inspection: FAB.wafersPerDay * 12 * 0.25 * execDays, // 2.88M (2 years; 5 years in the columnar store)
+    wafer: FAB.wafersPerDay * keepDays, // 2.40M (5 years)
+    lot: FAB.lotsPerDay * 1.2 * keepDays, // 115,262 (5 years)
+    fdcHold: 200 * keepDays * v, // 383,460
+    spcViolation: 400 * keepDays * v, // 766,920
+    stateChange: FAB.processChambers * 6 * keepDays * v, // 23.0M
+    maintenance: FAB.processChambers * 3 * 60 * v, // 378,000 (60 months)
+    qualification: FAB.processChambers * 2 * 60 * v, // 252,000
+    partInstall: FAB.processChambers * 1 * 60 * v, // 126,000
+    recipeBody: 6_000 * 12, // 72,000 over 5 years
+    materialLot: 300 * keepDays, // 547,800
+    equipment: FAB.tools + FAB.processChambers, // 3,100
+    testSide: 60 + 20 + 100, // probe cards, testers, test-program versions
     reticle: 3_000,
     stepDefAndRoute: 2_400 + 120,
     product: 40,
-    knowledge: 1_500 + 20_000 + 12, // failure mechanisms + FMEA rows + signatures
-    excursionCase: 300, // confirmed historical excursions (5 years)
+    knowledge: 1_500 + 20_000 + 12, // failure mechanisms + FMEA rows + signatures (versioned on approval)
+    excursionCase: 300,
   };
-  const nodeCount = sum(Object.values(nodes)); // ≈ 45.4M
+  const nodeCount = sum(Object.values(nodes)); // ≈ 62.7M
   const edgesPerRun = 4 + 2.5 + 0.2; // IN_LOT, AT_STEP, ON_TOOL, USED_RECIPE_BODY + VISITED × 2.5 + USED_MATERIAL × 0.2
+  const events =
+    nodes.fdcHold +
+    nodes.spcViolation +
+    nodes.stateChange +
+    nodes.maintenance +
+    nodes.qualification +
+    nodes.partInstall;
   const edges = {
     run: nodes.run * edgesPerRun, // 205.8M
     waferInLot: nodes.wafer,
     sort: nodes.sortInsertion,
     inspection: nodes.inspection,
-    eventOnEquipment:
-      nodes.fdcHold +
-      nodes.spcViolation +
-      nodes.stateChange +
-      nodes.maintenance +
-      nodes.qualification +
-      nodes.partInstall,
+    eventOnEquipment: events, // ≈ 24.9M
     holdOnWafer: nodes.fdcHold,
-    qualifiedFor: FAB.qualifiedCells, // QUALIFIED_FOR chamber → step: 16,000
+    qualifiedFor: FAB.qualifiedCells, // 16,000
     knowledge: 100_000,
   };
-  const edgeCount = sum(Object.values(edges)); // ≈ 220.5M
+  const edgeCount = sum(Object.values(edges)); // ≈ 237.6M
   const bytesPerNode = 200; // with properties and indexes (estimate)
-  const bytesPerEdge = 120; // with bitemporal properties valid_from, valid_to, ingested_at (review item 8)
-  const storeBytes = nodeCount * bytesPerNode + edgeCount * bytesPerEdge; // ≈ 35.5 GB
-  const waferChamberEdges = FAB.waferChamberTracesPerDay * days; // 537.6M if wafer-level visits were edges
-  const samplesPerDayOverEdges = TRACES.samplesPerDay / edgeCount; // ≈ 802×
-  return { days, nodes, nodeCount, edges, edgeCount, storeBytes, waferChamberEdges, samplesPerDayOverEdges };
+  const bytesPerEdge = 120; // with valid_from, valid_to, recorded_at, superseded_at
+  const storeBytes = nodeCount * bytesPerNode + edgeCount * bytesPerEdge; // ≈ 41.1 GB: still in memory on 128 GB
+  // A full 5-year graph (execution too) for comparison: runs × 2.5 more → ≈ 46M more Run nodes and ≈ 309M more edges.
+  const fullFiveYearBytes =
+    storeBytes + FAB.runsPerDay * (keepDays - execDays) * (bytesPerNode + edgesPerRun * bytesPerEdge); // ≈ 87.4 GB
+  const waferChamberEdges = FAB.waferChamberTracesPerDay * execDays; // 537.6M if wafer-level visits were edges
+  const samplesPerDayOverEdges = TRACES.samplesPerDay / edgeCount; // ≈ 744×
+  return {
+    execDays,
+    keepDays,
+    correctionRate,
+    nodes,
+    nodeCount,
+    events,
+    edges,
+    edgeCount,
+    storeBytes,
+    fullFiveYearBytes,
+    waferChamberEdges,
+    samplesPerDayOverEdges,
+  };
 })();
 
 /** The columnar store (sheet §7): wafer-level execution, indicators, metrology, e-test; kept for the replay horizon. */
@@ -232,6 +286,9 @@ export const COLUMNAR = (() => {
   const metrologyPerDay = FAB.wafersPerDay * 40 * 0.25 * 13; // 40 metrology steps, 25% sampled, 13 sites: 171,000
   const etestPerDay = FAB.wafersPerDay * 0.5 * 5 * 200; // half the wafers, 5 sites, 200 parameters: 657,500
   const apcPerDay = FAB.waferChamberTracesPerDay * 0.3 * 3; // 30% of steps under run-to-run control, 3 knobs: 663,000
+  // 5-year values for replays (review item R2-14): metrology ≈ 0.31B, e-test ≈ 1.20B, APC ≈ 1.21B ≈ 2.7B values;
+  // FDC indicators per wafer are kept 2 years, then aggregated to daily means per chamber and step.
+  const fiveYearOtherValues = (metrologyPerDay + etestPerDay + apcPerDay) * replayDays; // ≈ 2.72B
   return {
     replayDays,
     waferStepRows,
@@ -241,6 +298,7 @@ export const COLUMNAR = (() => {
     metrologyPerDay,
     etestPerDay,
     apcPerDay,
+    fiveYearOtherValues,
   };
 })();
 
@@ -316,7 +374,8 @@ export const STATS = (() => {
   const bSignature = bWafers * affectedRate; // 200
   const otherWafers = cohortWafers - bWafers; // 1,750
   const otherSignature = otherWafers * background; // 70
-  // The 10 named lots (all ran on ETCH04): 62 wafers on B (50 with the signature), 188 elsewhere (8).
+  // The 10 named lots (all ran on ETCH04; passed step 412 on days 3–10, sorted on days 32–39): 62 wafers on B (50
+  // with the signature), 188 elsewhere (8).
   const named = { lots: 10, bWafers: 62, bSig: 50, otherWafers: 188, otherSig: 8 };
   const namedSigShare = (named.bSig + named.otherSig) / (named.lots * FAB.lotSize); // 58 / 250 = 0.232
   // Discovery = 10 named + 20 random other lots (10 ETCH04, 10 ETCH05); held-out = the other 50 lots (20 ETCH04).
@@ -352,6 +411,17 @@ export const STATS = (() => {
   const heldOutB = rate(heldOut.bSig, heldOut.bWafers); // 80% [72.1, 86.1]
   const heldOutSister = rate(heldOut.sisterSig, heldOut.sisterWafers); // 4.0% [2.4, 6.5]
   const riskDifference = heldOutB.p - heldOutSister.p; // 0.76
+  // Lot-cluster adjustment (review item R2-6): design effect 1 + (m − 1) × ICC with an ILLUSTRATIVE intra-lot
+  // correlation of 0.1; m = 6.25 B wafers a lot, 18.75 sister wafers a lot. The page prints these intervals, labelled
+  // as cluster-adjusted; the product computes a lot bootstrap at run time.
+  const icc = 0.1;
+  const deB = 1 + (FAB.lotSize / 4 - 1) * icc; // 1.525
+  const deSister = 1 + (FAB.lotSize * 0.75 - 1) * icc; // 2.775
+  const heldOutBCluster = wilson(heldOut.bSig / heldOut.bWafers, heldOut.bWafers / deB); // n_eff 82: ≈ 70.1–87.2% (sister ≈ 1.8–8.8%)
+  const heldOutSisterCluster = wilson(heldOut.sisterSig / heldOut.sisterWafers, heldOut.sisterWafers / deSister);
+  // Slot alias (review item R2-7): the cluster tool assigns chambers by slot from a varying start slot; chamber B
+  // overlaps slot class 2 mod 4 with Jaccard 0.31 (illustrative), so the within-lot test is stratified by slot class.
+  const slotClassJaccard = 0.31;
   const etch04LotsWithBSignature = { heldOut: 20, of: 20 }; // every held-out ETCH04 lot has signature wafers on B
   // Before and after the change on chamber B (the same window length): the change-point.
   const before = rate(10, bWafers); // 4.0% [2.2, 7.2]
@@ -359,9 +429,19 @@ export const STATS = (() => {
   // Candidate family (review items 10, 11): chamber-at-step cells that ran cohort wafers (560 steps × ≈ 6 chambers)
   // + chamber at any step (1,200 chambers touched) + recipe bodies 300 + material lots 200 + maintenance windows 500 +
   // test side (probe cards, testers, programs) 90 + reticles 150.
-  const tests = FAB.processSteps * 6 + 1_200 + 300 + 200 + 500 + 90 + 150; // 5,800
+  // Two families (review item R2-5). Within-lot kinds vary inside a lot: chamber at step (560 × ≈ 6), chamber at any
+  // step (1,200), recipe bodies (300), maintenance and state windows (500): 5,360. Lot-level kinds take one value per
+  // lot: material lots (200), test side (90), reticles (150): 440. E-test and metrology are evidence (continuous
+  // summaries), not candidates; slot and batch position are stratification covariates (review item R2-7).
+  const withinLot = FAB.processSteps * 6 + 1_200 + 300 + 500; // 5,360
+  const lotLevel = 200 + 90 + 150; // 440
+  const tests = withinLot + lotLevel; // 5,800
   const alpha = 0.05;
-  const chanceHits = tests * alpha; // 290 "significant" by chance at p < 0.05 each
+  const alphaWithin = 0.04; // α split across the two families (family-wise ≤ 0.05)
+  const alphaLot = 0.01;
+  const chanceHits = tests * alpha; // 290 at p < 0.05 each, both families
+  const chanceHitsWithin = withinLot * alpha; // 268
+  const chanceHitsLot = lotLevel * alpha; // 22
   const bonferroni = alpha / tests; // 8.6e-6
   const byFactor = Math.log(tests) + 0.5772; // 9.24: Benjamini–Yekutieli's cost under arbitrary dependence
   // Max-T (Westfall–Young): permute the signature labels within each lot 10,000 times; each candidate's adjusted p is
@@ -373,6 +453,17 @@ export const STATS = (() => {
   const permutationWordOps = tests * wordsPerCandidate * permutations; // 696M AND-popcounts (≈ 0.5 s on a few cores)
   const preRegistered = 3; // top hypotheses carried to the held-out lots
   const confirmAlpha = alpha / preRegistered; // 0.0167
+  // Early case (review item R2-8): confirmation needs held-out lots giving ≥ 80% power at the discovered effect; below
+  // that the hypothesis is "unconfirmed, k more lots expected by day d". For this effect power is not the problem:
+  const earlyOneLot = fisherGreater(5, 6, 1, 19); // 1 ETCH04 lot: 5 of 6 B wafers vs 1 of 19 sister: ≈ 6.5e-4
+  const earlyTwoLots = fisherGreater(10, 12, 2, 38); // 2 lots: ≈ 3.9e-7
+  // For a 10-point effect (14% vs 4%) at α 0.0167 one-sided and 80% power, normal approximation with equal groups and
+  // the lot design effect: (2.128 + 0.842)² × (0.14 × 0.86 + 0.04 × 0.96) ÷ 0.10² ≈ 140 B wafers × 1.525 ≈ 214 B
+  // wafers ≈ 34 ETCH04 lots (an overestimate: sister wafers are 3× more numerous).
+  const zA = 2.128;
+  const zB = 0.8416;
+  const tenPointWafers = ((zA + zB) ** 2 * (0.14 * 0.86 + 0.04 * 0.96)) / 0.01; // ≈ 139.9
+
   // Lot-level candidates (one value per lot: resist lot, wet-bench batch) cannot vary within a lot; they form a second
   // family tested by permuting lot labels within process-day strata.
   const wet07 = { etch04Lots: 28, etch05Lots: 12 }; // WET07 (batch wet bench, step 414) processed 40 lots
@@ -381,7 +472,19 @@ export const STATS = (() => {
   const otherWetBadLotShare = lotBad(40, etch04Lots - wet07.etch04Lots); // 0.30
   // Within the WET07 lots, the signature sits on the B wafers (80%) and not on the A, C, D wafers (4%) that went through
   // the same bath: WET07 is "checked and not supported".
-  const pr552 = { lots: 48, sigRateNonB: background, otherLotsSigRateNonB: background }; // 4.0% vs 4.0%: no effect
+  // Unconditional lot-level test (what a naive second family would do): 28 / 40 vs 12 / 40 bad lots, one-sided
+  // Fisher p ≈ 3.5e-4: WET07 would be flagged (review item R2-4). The procedure is ordered: the within-lot family runs
+  // first; lot-level candidates are then tested on the RESIDUAL wafers, those not explained by confirmed within-lot
+  // hypotheses (here, the non-B wafers), permuted by lot within process days.
+  const wet07Unconditional = fisherGreater(wet07.etch04Lots, 40, etch04Lots - wet07.etch04Lots, 40);
+  const nonBPerEtch04Lot = FAB.lotSize - FAB.lotSize / 4; // 18.75
+  const wet07Residual = {
+    wafers: wet07.etch04Lots * nonBPerEtch04Lot + wet07.etch05Lots * FAB.lotSize, // 525 + 300 = 825
+    otherWafers: (etch04Lots - wet07.etch04Lots) * nonBPerEtch04Lot + (40 - wet07.etch05Lots) * FAB.lotSize, // 925
+    rate: background, // 33 / 825 = 4.0%
+    otherRate: background, // 37 / 925 = 4.0%
+  };
+  const pr552 = { lots: 48, etch04Lots: 24, sigRateNonB: background, otherLotsSigRateNonB: background }; // 4% vs 4%
   // Intra-tool path (review item 12): ETCH04 is a cluster tool; a wafer etched in chamber B always strips in chamber 2.
   const stripPathJaccard = 1.0; // identical wafer sets: reported as one cluster "ETCH04 path B → strip 2"
   // Test side first (review item 10): 6 probe cards; the largest card share of signature wafers is 22% against its
@@ -393,7 +496,8 @@ export const STATS = (() => {
   const traceShiftPct = 6.1; // DC bias in the main etch step, chamber-B wafers after vs before the swap
   // WIP at risk (review item 21): wafer passes through ETCH04-B (all its steps) in the 29 days not yet sorted.
   const wipAtRiskPasses = FAB.wafersPerChamberPerDay * Math.floor(FAB.sortLagDays); // 368 × 29 ≈ 10,678
-  // Value of a day of faster containment (illustrative): 368 wafers a day × 80% affected × 15% of die lost × 6,000 USD.
+  // Value of a day of faster containment (illustrative, review item R2-9): 368 wafer PASSES a day through chamber B
+  // across its ≈ 8 steps, IF every step on B is affected like step 412 × 80% × 15% of die lost × 6,000 USD.
   const dieLossOnAffected = 0.15;
   const waferValue = 6_000; // USD, illustrative, mature node (review item 53)
   const dayOfContainment = FAB.wafersPerChamberPerDay * affectedRate * dieLossOnAffected * waferValue; // ≈ 265,000
@@ -419,8 +523,14 @@ export const STATS = (() => {
     etch04LotsWithBSignature,
     before,
     after,
+    withinLot,
+    lotLevel,
     tests,
+    alphaWithin,
+    alphaLot,
     chanceHits,
+    chanceHitsWithin,
+    chanceHitsLot,
     bonferroni,
     byFactor,
     permutations,
@@ -429,10 +539,21 @@ export const STATS = (() => {
     permutationWordOps,
     preRegistered,
     confirmAlpha,
+    earlyOneLot,
+    earlyTwoLots,
+    tenPointWafers,
     wet07,
     wet07BadLotShare,
     otherWetBadLotShare,
+    wet07Unconditional,
+    wet07Residual,
     pr552,
+    icc,
+    deB,
+    deSister,
+    heldOutBCluster,
+    heldOutSisterCluster,
+    slotClassJaccard,
     stripPathJaccard,
     probeCard,
     traceShiftPct,
@@ -504,12 +625,12 @@ export const QUERY_GUARDS = {
   timeWindowRequiredLabels: ["Run", "FdcHold", "SpcViolation", "StateChange", "Inspection"],
 } as const;
 
-/** Latency per request type, p50 and gated p95 (ms; all stage numbers are estimates; sheet §12). */
-export const LATENCY = (() => {
+/** Latency per request type for a reasoning budget per call, p50 and gated p95 (ms; estimates; sheet §12). */
+function buildLatency(reasoning: number) {
   const decode = 100; // tokens a second per stream (F45, estimate)
   const decodeP95 = 70;
   const gen = (id: string, tokens: number) => stage(id, (tokens / decode) * 1_000, (tokens / decodeP95) * 1_000, true);
-  const think = (id: string, tokens: number = REASONING.low) => gen(`${id} reasoning (${tokens} tokens)`, tokens);
+  const think = (id: string, tokens: number = reasoning) => gen(`${id} reasoning (${tokens} tokens)`, tokens);
   const edge = stage("edge", 50, 100); // TLS, SSO token, scope role, audit record
   const routeAndMatch = par("route ‖ template match", [
     { p50: 20, p95: 40 },
@@ -564,16 +685,30 @@ export const LATENCY = (() => {
     stage("timeout", 5_000, 5_050),
     render,
   ]);
+  const timedOutGenerated = path([
+    edge,
+    routeAndMatch,
+    ...generateStages,
+    link,
+    validate,
+    explain,
+    stage("timeout", 5_000, 5_050),
+    render,
+  ]);
   const u = USERS;
   const t = u.templateShare;
+  // Timeouts (0.5% of lookups, review item R2-13): 0.3% on encoder templates, 0.2% on generated queries.
+  const toT = 0.003;
+  const toG = u.timeoutShare - toT;
   const lookupParts = [
-    { weight: t * u.encoderSlotShare * (1 - u.crossStoreShare) - u.timeoutShare, path: tEncGraph },
+    { weight: t * u.encoderSlotShare * (1 - u.crossStoreShare) - toT, path: tEncGraph },
     { weight: t * u.encoderSlotShare * u.crossStoreShare, path: tEncCross },
     { weight: t * (1 - u.encoderSlotShare) * (1 - u.crossStoreShare), path: tLlmGraph },
     { weight: t * (1 - u.encoderSlotShare) * u.crossStoreShare, path: tLlmCross },
-    { weight: (1 - t) * (1 - u.repairShare), path: generated },
+    { weight: (1 - t) * (1 - u.repairShare) - toG, path: generated },
     { weight: (1 - t) * u.repairShare, path: repaired },
-    { weight: u.timeoutShare, path: timedOut },
+    { weight: toT, path: timedOut },
+    { weight: toG, path: timedOutGenerated },
   ];
   const lookupResult = mixDist(lookupParts);
   const templateParts = lookupParts.slice(0, 4);
@@ -657,21 +792,21 @@ export const LATENCY = (() => {
   const hypotheses = mixPlan([...planYms, ...middle], [...planText, ...middle]);
   const hypothesesText = path([...planText, ...middle]);
   const firstHypothesisText = mixPlan(
-    [...planYms, ...middle, ...firstText(REASONING.low)],
-    [...planText, ...middle, ...firstText(REASONING.low)]
+    [...planYms, ...middle, ...firstText(reasoning)],
+    [...planText, ...middle, ...firstText(reasoning)]
   );
   const explanation = mixPlan(
-    [...planYms, ...middle, ...writer(REASONING.low)],
-    [...planText, ...middle, ...writer(REASONING.low)]
+    [...planYms, ...middle, ...writer(reasoning)],
+    [...planText, ...middle, ...writer(reasoning)]
   );
-  const explanationText = path([...planText, ...middle, ...writer(REASONING.low)]);
+  const explanationText = path([...planText, ...middle, ...writer(reasoning)]);
   const writerMediumExplanation = mixPlan(
     [...planYms, ...middle, ...writer(REASONING.medium)],
     [...planText, ...middle, ...writer(REASONING.medium)]
   );
   // Breakpoint (p50, free-text route, the slower one): the explanation holds 15,000 ms while the visible + reasoning
   // tokens of planner and writer (60 + 80 + 540 + 80 = 760) decode at ≥ this speed.
-  const decodedTokens = CONTEXT.planner.out + REASONING.low + CONTEXT.writerOut + REASONING.low; // 760
+  const decodedTokens = CONTEXT.planner.out + reasoning + CONTEXT.writerOut + reasoning; // 760
   const fixedText = explanationText.p50 - (decodedTokens / decode) * 1_000;
   const decodeBreakpointExplanation = (decodedTokens * 1_000) / (15_000 - fixedText);
   return {
@@ -684,6 +819,7 @@ export const LATENCY = (() => {
     generated,
     repaired,
     timedOut,
+    timedOutGenerated,
     lookupResult,
     templateResult,
     generatedResult,
@@ -700,11 +836,11 @@ export const LATENCY = (() => {
     decodeBreakpointExplanation,
     stages: { generatedStages, documentStages, planText, middle },
   };
-})();
+}
+export const LATENCY = buildLatency(REASONING.low);
 
-/** Targets (sheet §4 N5) and whether the budget meets them, at p50 and the gated p95. */
-export const TARGETS = (() => {
-  const L = LATENCY;
+/** Targets (sheet §4 N5) and whether a latency budget meets them, at p50 and the gated p95. */
+function targetRows(L: ReturnType<typeof buildLatency>) {
   const row = (id: string, label: string, d: Dist, targetP50: number, targetP95: number) => ({
     id,
     label,
@@ -718,12 +854,38 @@ export const TARGETS = (() => {
     row("lookup", "Lookup: result table, all routes mixed", L.lookupResult, 1_500, 5_000),
     row("lookupTemplate", "Lookup, template routes", L.templateResult, 1_000, 3_000),
     row("lookupGenerated", "Lookup, generated query (incl. one repair)", L.generatedResult, 4_000, 7_000),
+    row("lookupRepaired", "Lookup, repaired query (named in the UI)", L.repaired, 7_000, 9_500),
+    row("lookupTimedOut", 'Lookup, timed out ("query too broad")', L.timedOutGenerated, 8_500, 10_000),
     row("document", "Document question: first verified sentence", L.documentFirst, 2_000, 4_000),
     row("plan", "Investigation: plan shown (YMS and free text mixed)", L.plan, 2_000, 4_000),
-    row("planText", "Investigation: plan shown, free-text route", L.planTextOnly, 2_500, 4_000),
+    row("planText", "Investigation: plan shown, free-text route", L.planTextOnly, 2_000, 4_000),
     row("hypotheses", "Investigation: ranked hypotheses with evidence", L.hypotheses, 8_000, 15_000),
+    row("hypothesesText", "Investigation: ranked hypotheses, free-text route", L.hypothesesText, 8_000, 15_000),
     row("explanation", "Investigation: explanation complete", L.explanation, 15_000, 25_000),
+    row("explanationText", "Investigation: explanation complete, free-text route", L.explanationText, 15_000, 25_000),
   ];
+}
+export const TARGETS = targetRows(LATENCY);
+
+/**
+ * Reasoning-token breakpoints (review item R2-2): for each target row, the smallest budget per call (tokens) at which
+ * the row stops meeting its target, with every other stage unchanged. 80 is budgeted, not measured; when the
+ * measurement comes back, this table says which targets survive it.
+ */
+export const REASONING_BREAKPOINTS = (() => {
+  const ids = TARGETS.map((r) => r.id);
+  const fails = (r: number, id: string) => !targetRows(buildLatency(r)).find((x) => x.id === id)!.meets;
+  return ids.map((id) => {
+    let lo = 0;
+    let hi = 2_000;
+    if (!fails(hi, id)) return { id, tokens: Infinity };
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (fails(mid, id)) hi = mid;
+      else lo = mid;
+    }
+    return { id, tokens: hi };
+  });
 })();
 
 /** Model-server demand (reasoning tokens included) and the GPU fleet (sheet §5; review items 2, 24). */
@@ -755,6 +917,7 @@ export const FLEET = (() => {
     lookup:
       u.templateShare * (1 - u.encoderSlotShare) * ms(250, c.slotFill.out + r) +
       (1 - u.templateShare) * ms(400, c.generate.out + r) +
+      (1 - u.templateShare) * u.repairShare * ms(400, c.repair.out + r) +
       ms(300, c.summary.out + r),
     document: ms(500, c.document.out + r),
   };
@@ -858,6 +1021,12 @@ export const EVAL = (() => {
   const warmUp = 30; // the first 30 cases only train (rolling origin: each case is scored by a ranker fitted on cases
   // closed before its detection date, with knowledge edges approved before that date)
   const gated = cases - warmUp; // 270
+  // Replay fidelity (review item R2-1): cases detected in the last 2 years (≈ 120) replay exactly (graph execution,
+  // events, knowledge and per-wafer FDC indicators as of then); the older 150 scored cases replay with execution read
+  // from the columnar store and the sensor feature from daily aggregated indicators. Both classes are reported.
+  const exactCases = USERS.excursionsConfirmedPerYear * (GRAPH.execDays / 365); // 120
+  const approxCases = gated - exactCases; // 150
+  const hit3Exact = wilson(0.7, exactCases); // ± ≈ 8.0
   const hit3 = { target: 0.7, ci: wilson(0.7, gated) }; // ± ≈ 5.4
   const hit1 = { target: 0.45, ci: wilson(0.45, gated) }; // ± ≈ 5.9
   const coverageTarget = 0.9; // share of confirmed causes whose candidate kind the system tests at all
@@ -880,6 +1049,9 @@ export const EVAL = (() => {
     cases,
     warmUp,
     gated,
+    exactCases,
+    approxCases,
+    hit3Exact,
     hit3,
     hit1,
     coverageTarget,
