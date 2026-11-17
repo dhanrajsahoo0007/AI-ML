@@ -723,101 +723,101 @@ import s717 from "../../../assets/diagrams/animated/rag/similarity-measures";
 import s718 from "../../../assets/diagrams/animated/rag/similarity-topk";
 import s719 from "../../../assets/diagrams/animated/rag/single-shot-vs-agentic";
 import s720 from "../../../assets/diagrams/animated/rag/structured-vs-unstructured-router";
-import s721 from "../../../assets/diagrams/animated/rag/support-agent-architecture";
-import s722 from "../../../assets/diagrams/animated/rag/support-agent-refund-guard";
-import s723 from "../../../assets/diagrams/animated/rag/support-agent-rollout";
-import s724 from "../../../assets/diagrams/animated/rag/tenant-isolation";
-import s725 from "../../../assets/diagrams/animated/rag/text-to-sql-flow";
-import s726 from "../../../assets/diagrams/animated/rag/three-levers";
-import s727 from "../../../assets/diagrams/animated/rag/vector-truncation";
-import s728 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
-import s729 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
-import s730 from "../../../assets/diagrams/animated/rate-limiter/architecture";
-import s731 from "../../../assets/diagrams/animated/rate-limiter/fail-open";
-import s732 from "../../../assets/diagrams/animated/rate-limiter/layers";
-import s733 from "../../../assets/diagrams/animated/rate-limiter/sliding-estimate";
-import s734 from "../../../assets/diagrams/animated/s3/architecture";
-import s735 from "../../../assets/diagrams/animated/s3/erasure-vs-replication";
-import s736 from "../../../assets/diagrams/animated/s3/key-ranges";
-import s737 from "../../../assets/diagrams/animated/s3/multipart";
-import s738 from "../../../assets/diagrams/animated/s3/put-path";
-import s739 from "../../../assets/diagrams/animated/safety/audit-pipeline";
-import s740 from "../../../assets/diagrams/animated/safety/audit-record";
-import s741 from "../../../assets/diagrams/animated/safety/audit-regulation-map";
-import s742 from "../../../assets/diagrams/animated/safety/bias-counterfactual";
-import s743 from "../../../assets/diagrams/animated/safety/bias-group-rates";
-import s744 from "../../../assets/diagrams/animated/safety/bias-sources";
-import s745 from "../../../assets/diagrams/animated/safety/halluc-action-ladder";
-import s746 from "../../../assets/diagrams/animated/safety/halluc-claim-check";
-import s747 from "../../../assets/diagrams/animated/safety/halluc-detect-methods";
-import s748 from "../../../assets/diagrams/animated/safety/mod-pipeline";
-import s749 from "../../../assets/diagrams/animated/safety/mod-redteam-loop";
-import s750 from "../../../assets/diagrams/animated/safety/mod-threshold";
-import s751 from "../../../assets/diagrams/animated/safety/outval-pipeline";
-import s752 from "../../../assets/diagrams/animated/safety/outval-repair-loop";
-import s753 from "../../../assets/diagrams/animated/safety/outval-streaming";
-import s754 from "../../../assets/diagrams/animated/safety/pii-redaction-path";
-import s755 from "../../../assets/diagrams/animated/safety/pii-where-data-rests";
-import s756 from "../../../assets/diagrams/animated/safety/rai-principle-to-control";
-import s757 from "../../../assets/diagrams/animated/safety/rai-risk-tiering";
-import s758 from "../../../assets/diagrams/animated/safety/rai-spec-vs-intent";
-import s759 from "../../../assets/diagrams/animated/safety/rbac-authz-path";
-import s760 from "../../../assets/diagrams/animated/safety/rbac-confused-deputy";
-import s761 from "../../../assets/diagrams/animated/safety/rbac-model";
-import s762 from "../../../assets/diagrams/animated/serving/batch-cost";
-import s763 from "../../../assets/diagrams/animated/serving/batch-two-paths";
-import s764 from "../../../assets/diagrams/animated/serving/batch-vs-realtime-timeline";
-import s765 from "../../../assets/diagrams/animated/serving/canary-gates";
-import s766 from "../../../assets/diagrams/animated/serving/capacity-break-even";
-import s767 from "../../../assets/diagrams/animated/serving/capacity-funnel";
-import s768 from "../../../assets/diagrams/animated/serving/capacity-peak-vs-average";
-import s769 from "../../../assets/diagrams/animated/serving/cold-start-timeline";
-import s770 from "../../../assets/diagrams/animated/serving/continuous-batching";
-import s771 from "../../../assets/diagrams/animated/serving/cost-levers-ladder";
-import s772 from "../../../assets/diagrams/animated/serving/cost-per-task";
-import s773 from "../../../assets/diagrams/animated/serving/cost-request-path";
-import s774 from "../../../assets/diagrams/animated/serving/deploy-gpu-pod";
-import s775 from "../../../assets/diagrams/animated/serving/deploy-image-and-weights";
-import s776 from "../../../assets/diagrams/animated/serving/deploy-readiness";
-import s777 from "../../../assets/diagrams/animated/serving/edge-cloud-split";
-import s778 from "../../../assets/diagrams/animated/serving/engine-anatomy";
-import s779 from "../../../assets/diagrams/animated/serving/gateway-architecture";
-import s780 from "../../../assets/diagrams/animated/serving/gateway-budgets";
-import s781 from "../../../assets/diagrams/animated/serving/gateway-fallback";
-import s782 from "../../../assets/diagrams/animated/serving/gateway-overhead";
-import s783 from "../../../assets/diagrams/animated/serving/gpu-bin-packing";
-import s784 from "../../../assets/diagrams/animated/serving/gpu-bound-levers";
-import s785 from "../../../assets/diagrams/animated/serving/gpu-prefill-vs-decode";
-import s786 from "../../../assets/diagrams/animated/serving/gpu-priority-queue";
-import s787 from "../../../assets/diagrams/animated/serving/gpu-roofline";
-import s788 from "../../../assets/diagrams/animated/serving/gpu-sharing-modes";
-import s789 from "../../../assets/diagrams/animated/serving/latency-budget";
-import s790 from "../../../assets/diagrams/animated/serving/lb-least-tokens";
-import s791 from "../../../assets/diagrams/animated/serving/lb-prefix-routing";
-import s792 from "../../../assets/diagrams/animated/serving/longctx-kivi-axes";
-import s793 from "../../../assets/diagrams/animated/serving/longctx-kv-quant-memory";
-import s794 from "../../../assets/diagrams/animated/serving/longctx-ring-attention";
-import s795 from "../../../assets/diagrams/animated/serving/paged-kv-cache";
-import s796 from "../../../assets/diagrams/animated/serving/pcache-prefix";
-import s797 from "../../../assets/diagrams/animated/serving/pcache-read-write";
-import s798 from "../../../assets/diagrams/animated/serving/pcache-savings";
-import s799 from "../../../assets/diagrams/animated/serving/pcache-three-caches";
-import s800 from "../../../assets/diagrams/animated/serving/quant-memory";
-import s801 from "../../../assets/diagrams/animated/serving/quant-number-line";
-import s802 from "../../../assets/diagrams/animated/serving/quant-ptq-vs-qat";
-import s803 from "../../../assets/diagrams/animated/serving/ratelimit-backoff";
-import s804 from "../../../assets/diagrams/animated/serving/ratelimit-shed-order";
-import s805 from "../../../assets/diagrams/animated/serving/ratelimit-two-buckets";
-import s806 from "../../../assets/diagrams/animated/serving/region-failover-headroom";
-import s807 from "../../../assets/diagrams/animated/serving/release-bundle";
-import s808 from "../../../assets/diagrams/animated/serving/request-path";
-import s809 from "../../../assets/diagrams/animated/serving/route-by-difficulty";
-import s810 from "../../../assets/diagrams/animated/serving/route-circuit-breaker";
-import s811 from "../../../assets/diagrams/animated/serving/specdec-draft-verify";
-import s812 from "../../../assets/diagrams/animated/serving/specdec-speedup";
-import s813 from "../../../assets/diagrams/animated/serving/stream-cancel";
-import s814 from "../../../assets/diagrams/animated/serving/stream-path";
-import s815 from "../../../assets/diagrams/animated/serving/stream-timeline";
+import s721 from "../../../assets/diagrams/animated/rag/tenant-isolation";
+import s722 from "../../../assets/diagrams/animated/rag/text-to-sql-flow";
+import s723 from "../../../assets/diagrams/animated/rag/three-levers";
+import s724 from "../../../assets/diagrams/animated/rag/vector-truncation";
+import s725 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
+import s726 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
+import s727 from "../../../assets/diagrams/animated/rate-limiter/architecture";
+import s728 from "../../../assets/diagrams/animated/rate-limiter/fail-open";
+import s729 from "../../../assets/diagrams/animated/rate-limiter/layers";
+import s730 from "../../../assets/diagrams/animated/rate-limiter/sliding-estimate";
+import s731 from "../../../assets/diagrams/animated/s3/architecture";
+import s732 from "../../../assets/diagrams/animated/s3/erasure-vs-replication";
+import s733 from "../../../assets/diagrams/animated/s3/key-ranges";
+import s734 from "../../../assets/diagrams/animated/s3/multipart";
+import s735 from "../../../assets/diagrams/animated/s3/put-path";
+import s736 from "../../../assets/diagrams/animated/safety/audit-pipeline";
+import s737 from "../../../assets/diagrams/animated/safety/audit-record";
+import s738 from "../../../assets/diagrams/animated/safety/audit-regulation-map";
+import s739 from "../../../assets/diagrams/animated/safety/bias-counterfactual";
+import s740 from "../../../assets/diagrams/animated/safety/bias-group-rates";
+import s741 from "../../../assets/diagrams/animated/safety/bias-sources";
+import s742 from "../../../assets/diagrams/animated/safety/halluc-action-ladder";
+import s743 from "../../../assets/diagrams/animated/safety/halluc-claim-check";
+import s744 from "../../../assets/diagrams/animated/safety/halluc-detect-methods";
+import s745 from "../../../assets/diagrams/animated/safety/mod-pipeline";
+import s746 from "../../../assets/diagrams/animated/safety/mod-redteam-loop";
+import s747 from "../../../assets/diagrams/animated/safety/mod-threshold";
+import s748 from "../../../assets/diagrams/animated/safety/outval-pipeline";
+import s749 from "../../../assets/diagrams/animated/safety/outval-repair-loop";
+import s750 from "../../../assets/diagrams/animated/safety/outval-streaming";
+import s751 from "../../../assets/diagrams/animated/safety/pii-redaction-path";
+import s752 from "../../../assets/diagrams/animated/safety/pii-where-data-rests";
+import s753 from "../../../assets/diagrams/animated/safety/rai-principle-to-control";
+import s754 from "../../../assets/diagrams/animated/safety/rai-risk-tiering";
+import s755 from "../../../assets/diagrams/animated/safety/rai-spec-vs-intent";
+import s756 from "../../../assets/diagrams/animated/safety/rbac-authz-path";
+import s757 from "../../../assets/diagrams/animated/safety/rbac-confused-deputy";
+import s758 from "../../../assets/diagrams/animated/safety/rbac-model";
+import s759 from "../../../assets/diagrams/animated/serving/batch-cost";
+import s760 from "../../../assets/diagrams/animated/serving/batch-two-paths";
+import s761 from "../../../assets/diagrams/animated/serving/batch-vs-realtime-timeline";
+import s762 from "../../../assets/diagrams/animated/serving/canary-gates";
+import s763 from "../../../assets/diagrams/animated/serving/capacity-break-even";
+import s764 from "../../../assets/diagrams/animated/serving/capacity-funnel";
+import s765 from "../../../assets/diagrams/animated/serving/capacity-peak-vs-average";
+import s766 from "../../../assets/diagrams/animated/serving/cold-start-timeline";
+import s767 from "../../../assets/diagrams/animated/serving/continuous-batching";
+import s768 from "../../../assets/diagrams/animated/serving/cost-levers-ladder";
+import s769 from "../../../assets/diagrams/animated/serving/cost-per-task";
+import s770 from "../../../assets/diagrams/animated/serving/cost-request-path";
+import s771 from "../../../assets/diagrams/animated/serving/deploy-gpu-pod";
+import s772 from "../../../assets/diagrams/animated/serving/deploy-image-and-weights";
+import s773 from "../../../assets/diagrams/animated/serving/deploy-readiness";
+import s774 from "../../../assets/diagrams/animated/serving/edge-cloud-split";
+import s775 from "../../../assets/diagrams/animated/serving/engine-anatomy";
+import s776 from "../../../assets/diagrams/animated/serving/gateway-architecture";
+import s777 from "../../../assets/diagrams/animated/serving/gateway-budgets";
+import s778 from "../../../assets/diagrams/animated/serving/gateway-fallback";
+import s779 from "../../../assets/diagrams/animated/serving/gateway-overhead";
+import s780 from "../../../assets/diagrams/animated/serving/gpu-bin-packing";
+import s781 from "../../../assets/diagrams/animated/serving/gpu-bound-levers";
+import s782 from "../../../assets/diagrams/animated/serving/gpu-prefill-vs-decode";
+import s783 from "../../../assets/diagrams/animated/serving/gpu-priority-queue";
+import s784 from "../../../assets/diagrams/animated/serving/gpu-roofline";
+import s785 from "../../../assets/diagrams/animated/serving/gpu-sharing-modes";
+import s786 from "../../../assets/diagrams/animated/serving/latency-budget";
+import s787 from "../../../assets/diagrams/animated/serving/lb-least-tokens";
+import s788 from "../../../assets/diagrams/animated/serving/lb-prefix-routing";
+import s789 from "../../../assets/diagrams/animated/serving/longctx-kivi-axes";
+import s790 from "../../../assets/diagrams/animated/serving/longctx-kv-quant-memory";
+import s791 from "../../../assets/diagrams/animated/serving/longctx-ring-attention";
+import s792 from "../../../assets/diagrams/animated/serving/paged-kv-cache";
+import s793 from "../../../assets/diagrams/animated/serving/pcache-prefix";
+import s794 from "../../../assets/diagrams/animated/serving/pcache-read-write";
+import s795 from "../../../assets/diagrams/animated/serving/pcache-savings";
+import s796 from "../../../assets/diagrams/animated/serving/pcache-three-caches";
+import s797 from "../../../assets/diagrams/animated/serving/quant-memory";
+import s798 from "../../../assets/diagrams/animated/serving/quant-number-line";
+import s799 from "../../../assets/diagrams/animated/serving/quant-ptq-vs-qat";
+import s800 from "../../../assets/diagrams/animated/serving/ratelimit-backoff";
+import s801 from "../../../assets/diagrams/animated/serving/ratelimit-shed-order";
+import s802 from "../../../assets/diagrams/animated/serving/ratelimit-two-buckets";
+import s803 from "../../../assets/diagrams/animated/serving/region-failover-headroom";
+import s804 from "../../../assets/diagrams/animated/serving/release-bundle";
+import s805 from "../../../assets/diagrams/animated/serving/request-path";
+import s806 from "../../../assets/diagrams/animated/serving/route-by-difficulty";
+import s807 from "../../../assets/diagrams/animated/serving/route-circuit-breaker";
+import s808 from "../../../assets/diagrams/animated/serving/specdec-draft-verify";
+import s809 from "../../../assets/diagrams/animated/serving/specdec-speedup";
+import s810 from "../../../assets/diagrams/animated/serving/stream-cancel";
+import s811 from "../../../assets/diagrams/animated/serving/stream-path";
+import s812 from "../../../assets/diagrams/animated/serving/stream-timeline";
+import s813 from "../../../assets/diagrams/animated/support-agent/architecture";
+import s814 from "../../../assets/diagrams/animated/support-agent/refund-guard";
+import s815 from "../../../assets/diagrams/animated/support-agent/rollout";
 import s816 from "../../../assets/diagrams/animated/ticketmaster/architecture";
 import s817 from "../../../assets/diagrams/animated/ticketmaster/double-sell";
 import s818 from "../../../assets/diagrams/animated/ticketmaster/hold-pay-confirm";
@@ -1649,101 +1649,101 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/rag/similarity-topk": s718,
   "diagrams/animated/rag/single-shot-vs-agentic": s719,
   "diagrams/animated/rag/structured-vs-unstructured-router": s720,
-  "diagrams/animated/rag/support-agent-architecture": s721,
-  "diagrams/animated/rag/support-agent-refund-guard": s722,
-  "diagrams/animated/rag/support-agent-rollout": s723,
-  "diagrams/animated/rag/tenant-isolation": s724,
-  "diagrams/animated/rag/text-to-sql-flow": s725,
-  "diagrams/animated/rag/three-levers": s726,
-  "diagrams/animated/rag/vector-truncation": s727,
-  "diagrams/animated/rag/vector-vs-graph": s728,
-  "diagrams/animated/rag/vectordb-write-read": s729,
-  "diagrams/animated/rate-limiter/architecture": s730,
-  "diagrams/animated/rate-limiter/fail-open": s731,
-  "diagrams/animated/rate-limiter/layers": s732,
-  "diagrams/animated/rate-limiter/sliding-estimate": s733,
-  "diagrams/animated/s3/architecture": s734,
-  "diagrams/animated/s3/erasure-vs-replication": s735,
-  "diagrams/animated/s3/key-ranges": s736,
-  "diagrams/animated/s3/multipart": s737,
-  "diagrams/animated/s3/put-path": s738,
-  "diagrams/animated/safety/audit-pipeline": s739,
-  "diagrams/animated/safety/audit-record": s740,
-  "diagrams/animated/safety/audit-regulation-map": s741,
-  "diagrams/animated/safety/bias-counterfactual": s742,
-  "diagrams/animated/safety/bias-group-rates": s743,
-  "diagrams/animated/safety/bias-sources": s744,
-  "diagrams/animated/safety/halluc-action-ladder": s745,
-  "diagrams/animated/safety/halluc-claim-check": s746,
-  "diagrams/animated/safety/halluc-detect-methods": s747,
-  "diagrams/animated/safety/mod-pipeline": s748,
-  "diagrams/animated/safety/mod-redteam-loop": s749,
-  "diagrams/animated/safety/mod-threshold": s750,
-  "diagrams/animated/safety/outval-pipeline": s751,
-  "diagrams/animated/safety/outval-repair-loop": s752,
-  "diagrams/animated/safety/outval-streaming": s753,
-  "diagrams/animated/safety/pii-redaction-path": s754,
-  "diagrams/animated/safety/pii-where-data-rests": s755,
-  "diagrams/animated/safety/rai-principle-to-control": s756,
-  "diagrams/animated/safety/rai-risk-tiering": s757,
-  "diagrams/animated/safety/rai-spec-vs-intent": s758,
-  "diagrams/animated/safety/rbac-authz-path": s759,
-  "diagrams/animated/safety/rbac-confused-deputy": s760,
-  "diagrams/animated/safety/rbac-model": s761,
-  "diagrams/animated/serving/batch-cost": s762,
-  "diagrams/animated/serving/batch-two-paths": s763,
-  "diagrams/animated/serving/batch-vs-realtime-timeline": s764,
-  "diagrams/animated/serving/canary-gates": s765,
-  "diagrams/animated/serving/capacity-break-even": s766,
-  "diagrams/animated/serving/capacity-funnel": s767,
-  "diagrams/animated/serving/capacity-peak-vs-average": s768,
-  "diagrams/animated/serving/cold-start-timeline": s769,
-  "diagrams/animated/serving/continuous-batching": s770,
-  "diagrams/animated/serving/cost-levers-ladder": s771,
-  "diagrams/animated/serving/cost-per-task": s772,
-  "diagrams/animated/serving/cost-request-path": s773,
-  "diagrams/animated/serving/deploy-gpu-pod": s774,
-  "diagrams/animated/serving/deploy-image-and-weights": s775,
-  "diagrams/animated/serving/deploy-readiness": s776,
-  "diagrams/animated/serving/edge-cloud-split": s777,
-  "diagrams/animated/serving/engine-anatomy": s778,
-  "diagrams/animated/serving/gateway-architecture": s779,
-  "diagrams/animated/serving/gateway-budgets": s780,
-  "diagrams/animated/serving/gateway-fallback": s781,
-  "diagrams/animated/serving/gateway-overhead": s782,
-  "diagrams/animated/serving/gpu-bin-packing": s783,
-  "diagrams/animated/serving/gpu-bound-levers": s784,
-  "diagrams/animated/serving/gpu-prefill-vs-decode": s785,
-  "diagrams/animated/serving/gpu-priority-queue": s786,
-  "diagrams/animated/serving/gpu-roofline": s787,
-  "diagrams/animated/serving/gpu-sharing-modes": s788,
-  "diagrams/animated/serving/latency-budget": s789,
-  "diagrams/animated/serving/lb-least-tokens": s790,
-  "diagrams/animated/serving/lb-prefix-routing": s791,
-  "diagrams/animated/serving/longctx-kivi-axes": s792,
-  "diagrams/animated/serving/longctx-kv-quant-memory": s793,
-  "diagrams/animated/serving/longctx-ring-attention": s794,
-  "diagrams/animated/serving/paged-kv-cache": s795,
-  "diagrams/animated/serving/pcache-prefix": s796,
-  "diagrams/animated/serving/pcache-read-write": s797,
-  "diagrams/animated/serving/pcache-savings": s798,
-  "diagrams/animated/serving/pcache-three-caches": s799,
-  "diagrams/animated/serving/quant-memory": s800,
-  "diagrams/animated/serving/quant-number-line": s801,
-  "diagrams/animated/serving/quant-ptq-vs-qat": s802,
-  "diagrams/animated/serving/ratelimit-backoff": s803,
-  "diagrams/animated/serving/ratelimit-shed-order": s804,
-  "diagrams/animated/serving/ratelimit-two-buckets": s805,
-  "diagrams/animated/serving/region-failover-headroom": s806,
-  "diagrams/animated/serving/release-bundle": s807,
-  "diagrams/animated/serving/request-path": s808,
-  "diagrams/animated/serving/route-by-difficulty": s809,
-  "diagrams/animated/serving/route-circuit-breaker": s810,
-  "diagrams/animated/serving/specdec-draft-verify": s811,
-  "diagrams/animated/serving/specdec-speedup": s812,
-  "diagrams/animated/serving/stream-cancel": s813,
-  "diagrams/animated/serving/stream-path": s814,
-  "diagrams/animated/serving/stream-timeline": s815,
+  "diagrams/animated/rag/tenant-isolation": s721,
+  "diagrams/animated/rag/text-to-sql-flow": s722,
+  "diagrams/animated/rag/three-levers": s723,
+  "diagrams/animated/rag/vector-truncation": s724,
+  "diagrams/animated/rag/vector-vs-graph": s725,
+  "diagrams/animated/rag/vectordb-write-read": s726,
+  "diagrams/animated/rate-limiter/architecture": s727,
+  "diagrams/animated/rate-limiter/fail-open": s728,
+  "diagrams/animated/rate-limiter/layers": s729,
+  "diagrams/animated/rate-limiter/sliding-estimate": s730,
+  "diagrams/animated/s3/architecture": s731,
+  "diagrams/animated/s3/erasure-vs-replication": s732,
+  "diagrams/animated/s3/key-ranges": s733,
+  "diagrams/animated/s3/multipart": s734,
+  "diagrams/animated/s3/put-path": s735,
+  "diagrams/animated/safety/audit-pipeline": s736,
+  "diagrams/animated/safety/audit-record": s737,
+  "diagrams/animated/safety/audit-regulation-map": s738,
+  "diagrams/animated/safety/bias-counterfactual": s739,
+  "diagrams/animated/safety/bias-group-rates": s740,
+  "diagrams/animated/safety/bias-sources": s741,
+  "diagrams/animated/safety/halluc-action-ladder": s742,
+  "diagrams/animated/safety/halluc-claim-check": s743,
+  "diagrams/animated/safety/halluc-detect-methods": s744,
+  "diagrams/animated/safety/mod-pipeline": s745,
+  "diagrams/animated/safety/mod-redteam-loop": s746,
+  "diagrams/animated/safety/mod-threshold": s747,
+  "diagrams/animated/safety/outval-pipeline": s748,
+  "diagrams/animated/safety/outval-repair-loop": s749,
+  "diagrams/animated/safety/outval-streaming": s750,
+  "diagrams/animated/safety/pii-redaction-path": s751,
+  "diagrams/animated/safety/pii-where-data-rests": s752,
+  "diagrams/animated/safety/rai-principle-to-control": s753,
+  "diagrams/animated/safety/rai-risk-tiering": s754,
+  "diagrams/animated/safety/rai-spec-vs-intent": s755,
+  "diagrams/animated/safety/rbac-authz-path": s756,
+  "diagrams/animated/safety/rbac-confused-deputy": s757,
+  "diagrams/animated/safety/rbac-model": s758,
+  "diagrams/animated/serving/batch-cost": s759,
+  "diagrams/animated/serving/batch-two-paths": s760,
+  "diagrams/animated/serving/batch-vs-realtime-timeline": s761,
+  "diagrams/animated/serving/canary-gates": s762,
+  "diagrams/animated/serving/capacity-break-even": s763,
+  "diagrams/animated/serving/capacity-funnel": s764,
+  "diagrams/animated/serving/capacity-peak-vs-average": s765,
+  "diagrams/animated/serving/cold-start-timeline": s766,
+  "diagrams/animated/serving/continuous-batching": s767,
+  "diagrams/animated/serving/cost-levers-ladder": s768,
+  "diagrams/animated/serving/cost-per-task": s769,
+  "diagrams/animated/serving/cost-request-path": s770,
+  "diagrams/animated/serving/deploy-gpu-pod": s771,
+  "diagrams/animated/serving/deploy-image-and-weights": s772,
+  "diagrams/animated/serving/deploy-readiness": s773,
+  "diagrams/animated/serving/edge-cloud-split": s774,
+  "diagrams/animated/serving/engine-anatomy": s775,
+  "diagrams/animated/serving/gateway-architecture": s776,
+  "diagrams/animated/serving/gateway-budgets": s777,
+  "diagrams/animated/serving/gateway-fallback": s778,
+  "diagrams/animated/serving/gateway-overhead": s779,
+  "diagrams/animated/serving/gpu-bin-packing": s780,
+  "diagrams/animated/serving/gpu-bound-levers": s781,
+  "diagrams/animated/serving/gpu-prefill-vs-decode": s782,
+  "diagrams/animated/serving/gpu-priority-queue": s783,
+  "diagrams/animated/serving/gpu-roofline": s784,
+  "diagrams/animated/serving/gpu-sharing-modes": s785,
+  "diagrams/animated/serving/latency-budget": s786,
+  "diagrams/animated/serving/lb-least-tokens": s787,
+  "diagrams/animated/serving/lb-prefix-routing": s788,
+  "diagrams/animated/serving/longctx-kivi-axes": s789,
+  "diagrams/animated/serving/longctx-kv-quant-memory": s790,
+  "diagrams/animated/serving/longctx-ring-attention": s791,
+  "diagrams/animated/serving/paged-kv-cache": s792,
+  "diagrams/animated/serving/pcache-prefix": s793,
+  "diagrams/animated/serving/pcache-read-write": s794,
+  "diagrams/animated/serving/pcache-savings": s795,
+  "diagrams/animated/serving/pcache-three-caches": s796,
+  "diagrams/animated/serving/quant-memory": s797,
+  "diagrams/animated/serving/quant-number-line": s798,
+  "diagrams/animated/serving/quant-ptq-vs-qat": s799,
+  "diagrams/animated/serving/ratelimit-backoff": s800,
+  "diagrams/animated/serving/ratelimit-shed-order": s801,
+  "diagrams/animated/serving/ratelimit-two-buckets": s802,
+  "diagrams/animated/serving/region-failover-headroom": s803,
+  "diagrams/animated/serving/release-bundle": s804,
+  "diagrams/animated/serving/request-path": s805,
+  "diagrams/animated/serving/route-by-difficulty": s806,
+  "diagrams/animated/serving/route-circuit-breaker": s807,
+  "diagrams/animated/serving/specdec-draft-verify": s808,
+  "diagrams/animated/serving/specdec-speedup": s809,
+  "diagrams/animated/serving/stream-cancel": s810,
+  "diagrams/animated/serving/stream-path": s811,
+  "diagrams/animated/serving/stream-timeline": s812,
+  "diagrams/animated/support-agent/architecture": s813,
+  "diagrams/animated/support-agent/refund-guard": s814,
+  "diagrams/animated/support-agent/rollout": s815,
   "diagrams/animated/ticketmaster/architecture": s816,
   "diagrams/animated/ticketmaster/double-sell": s817,
   "diagrams/animated/ticketmaster/hold-pay-confirm": s818,
