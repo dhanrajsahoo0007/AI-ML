@@ -119,3 +119,12 @@ describe("gcase-answer: the answer engine's numbers", () => {
     expect(DAILY.perQuestion).toBeLessThanOrEqual(TARGETS.usdPerQuestion);
   });
 });
+
+describe("gcase-docextract: the document extraction pipeline's numbers", () => {
+  it("keeps the straight-through targets of the design sheet", async () => {
+    const { N2, STEADY, LAUNCH } = await import("@/components/diagrams/presets/gcase-docextract");
+    expect(N2).toEqual({ launch: 0.4, steady: 0.6 });
+    expect(STEADY).toBeDefined();
+    expect(LAUNCH).toBeDefined();
+  });
+});

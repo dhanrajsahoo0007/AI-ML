@@ -12,10 +12,11 @@ import { PROD_TONE, curve, n } from "@/components/diagrams/presets/production";
 //   PO and dates 2 at 0.997 → 330 labels, 0.99 expected, ≤ 3 → ≥ 99.09%; kind, parties and invoice number 5 at 0.998
 //   → 826 labels, 1.65 expected, ≤ 5 → ≥ 99.39%. Each whisker spans up to a point of accuracy: one family's band
 //   cannot convict the scorer alone.
-//   Right: the pooled band. The scorer predicts ≈ 0.3% wrong (CALIBRATION.bandPredictedError) → λ = 1,817 × 0.003 ≈
-//   5.45 errors a quarter (CALIBRATION.expected); the alarm fires at ≥ CALIBRATION.alarmAt = 11, a false alarm
-//   CALIBRATION.falseAlarm ≈ 2.4% of quarters; a band 3× worse (λ ≈ 16.4) trips it CALIBRATION.detectTriple ≈ 93% of
-//   the time. Curves are Poisson probabilities (poissonPmf), computed, not sketched.
+//   Right: the pooled band. A calibrated scorer expects the three groups' errors together: 3.30 + 0.99 + 1.65 ≈ 5.9 a
+//   quarter (CALIBRATION.expected, ≈ 0.33% of the band); the alarm fires at the smallest k with P(X ≥ k) ≤ 2.5%, ≥
+//   CALIBRATION.alarmAt = 12, a false alarm CALIBRATION.falseAlarm ≈ 1.9% of quarters; a band 3× worse (λ ≈ 17.8)
+//   trips it CALIBRATION.detectTriple ≈ 94% of the time. Curves are Poisson probabilities (poissonPmf), computed, not
+//   sketched.
 // Steps: 1 reliability at each family threshold with the interval a calibrated scorer stays inside · 2 the pooled band
 // alarm.
 // Layout (880 wide): two curve() plots from presets/production.ts, 420 × 300 at x 10 and x 450 from y 52, two heading
@@ -114,6 +115,9 @@ const alarm = curve("band", RIGHT_X, PLOT.y, {
   step: 2,
 });
 
+/** Axes, ticks and labels appear without a NEW ring; the series lines carry it. */
+const quietAxes = (sh: LayoutShape): LayoutShape => (/-s\d+$/.test(sh.id) ? sh : { ...sh, quiet: true });
+
 const spec: LayoutSpec = {
   kind: "layout",
   title: "Calibration checked where it decides: wide intervals per family, so the alarm pools the threshold band",
@@ -136,7 +140,7 @@ const spec: LayoutSpec = {
       ...text("h-left-2", LEFT_X, 28, PLOT.w, "dashed: calibrated · whisker: where a calibrated scorer lands", 1),
       quiet: true,
     },
-    ...reliability,
+    ...reliability.map(quietAxes),
     text("h-right", RIGHT_X, 8, PLOT.w, "Pooled: one alarm on the whole band", 2),
     {
       ...text("h-right-2", RIGHT_X, 28, 200, `calibrated, λ ≈ ${lambda.toFixed(1)}`, 2),
@@ -148,7 +152,7 @@ const spec: LayoutSpec = {
       tone: GENAI_TONE.failure,
       quiet: true,
     },
-    ...alarm,
+    ...alarm.map(quietAxes),
     text(
       "foot-1",
       10,
@@ -157,14 +161,17 @@ const spec: LayoutSpec = {
       `False alarm ${pct(CALIBRATION.falseAlarm)} of quarters; a band 3× worse than predicted trips it ${pct(CALIBRATION.detectTriple, 0)} of the time.`,
       2
     ),
-    text(
-      "foot-2",
-      10,
-      FOOT_Y + 22,
-      860,
-      `Labels: a random 2% of auto-approved invoices (≈ ${n(Math.round(CALIBRATION.randomSlice))} a month) and band samples, weighted by 1 ÷ selection probability.`,
-      2
-    ),
+    {
+      ...text(
+        "foot-2",
+        10,
+        FOOT_Y + 22,
+        860,
+        `Labels: a random 2% of auto-approved invoices (≈ ${n(Math.round(CALIBRATION.randomSlice))} a month) and band samples, weighted by 1 ÷ selection probability.`,
+        2
+      ),
+      quiet: true,
+    },
   ],
 };
 

@@ -463,14 +463,17 @@ Harbourline Packaging's scanned invoice INV-20417 on route B, at p50; the toner 
 ### Build or buy
 
 - **Choice:** build the control plane (rules against our ERP, calibration on our labels, review, posting once); buy the reading (OCR and the second reader are already bought).
+- **Why:** the rules, calibration, review and posting depend on Brightpost's own ERP, suppliers and labels, which no product owns (G2, G8); reading pages is a commodity worth buying.
 - **Why not a managed generative extractor as the whole answer:** Azure Content Understanding (≈ 0.0084 USD a page in Microsoft's illustrative example) or Bedrock Data Automation (≈ 0.087 USD an invoice at 37 fields) still need our control plane. Either is a valid primary reader if it passes our gates; its confidence becomes one scorer input.
 - **Why not an AP-automation product:** it brings its own control plane, so it is a real alternative. It wins below ≈ 0.72 USD an invoice (our engineering, models and infrastructure minus 0.5 FTE of integration) if it passes our gold set, audit and UK processing.
 
 ### Workflow, posting and timing
 
-- **Workflow:** a durable workflow engine resumes after crashes and queues bursts (G12). Why not a queue and stateless workers: partial progress is lost.
-- **Posting:** outbox + business key + the ERP's hard duplicate check + acknowledgement + daily reconciliation (G2, F6). The ERP compares the reference as posted (in SAP with vendor, currency and document date), so only our folded key catches `INV-2O417`; why not read-before-retry: an asynchronous ERP can say "not found" for a document it will post later.
-- **Timing:** real time in production. Batch would save ≈ 120 USD a month, but the first-party Batch API keeps data 29 days, is not eligible for zero data retention (ZDR) and can take 24 hours (N5); the Bedrock profile's batch terms are checked separately.
+- **Choice:** a durable workflow engine per document; posting through an outbox with a business key, the ERP's duplicate check, an acknowledgement and daily reconciliation; real time in production.
+- **Why:** the workflow resumes after crashes and queues bursts (G12).
+- **Why not a queue and stateless workers:** partial progress is lost on a crash.
+- **Why this posting path:** outbox + business key + the ERP's hard duplicate check + acknowledgement + daily reconciliation (G2, F6). The ERP compares the reference as posted (in SAP with vendor, currency and document date), so only our folded key catches `INV-2O417`; why not read-before-retry: an asynchronous ERP can say "not found" for a document it will post later.
+- **Why not Batch:** it would save ≈ 120 USD a month, but the first-party Batch API keeps data 29 days, is not eligible for zero data retention (ZDR) and can take 24 hours (N5); the Bedrock profile's batch terms are checked separately.
 
 ## Model, prompt and context design
 
@@ -736,7 +739,6 @@ The figure's variant of INV-20417, where a clerk approved a flagged field; the t
 | Confidence | Self-report; vendor score; calibrated scorer | Scorer on agreement, IoU, rules, OCR and vendor scores; unselected labels; retrains gated offline | G1, G2 | ≈ 71 h a month of audits and samples; 4.2% of auto-approved invoices held for labels | Never: an uncalibrated threshold is a guess |
 | Risk unit | Invoices; money | Both: N1 by count; the money rule per value band (route-average escape × loss ≤ 0.36 USD); caps | G2 | 3.6% of invoices reviewed by caps; a higher c on 16% of A and B | Loss per escape is measured, not assumed |
 | Review | Whole document; flagged fields | Fields beside the highlighted source; 6 + 4 clerks at ≤ 85% | G3, G4 | ≈ 13,800 USD a month of rostered slack | Arrival becomes smooth enough for a smaller flex team |
-| Timing | Real time; Batch | Real time; Batch for offline replays | N5, N3 | ≈ 120 USD a month | A batch option without retention appears, or volume × 100 |
 | Improving | Fine-tune; hints | Hints and templates first; a fine-tune test at 6 months | G4 | Some accuracy on rare suppliers | The test passes (≥ 20% fewer shared errors and flags) |
 | Posting | Direct call; read-before-retry; outbox + key + ERP check + acknowledgement + reconciliation | The last | G2, F6 | A poller, a window, a daily job | The ERP offers idempotency keys |
 

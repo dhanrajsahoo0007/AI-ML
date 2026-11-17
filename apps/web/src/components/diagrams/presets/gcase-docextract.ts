@@ -8,8 +8,8 @@
 // is ILLUSTRATIVE unless a comment names a source. Prices are list prices as of November 2026 (read 17 November 2026):
 //   - small model (Claude Haiku 5.5 class) 0.10 input / 0.01 cache read / 0.125 cache write / 0.50 output USD per million
 //     tokens; mid-size (Claude Sonnet 5.5 class) 2.00 / 0.10 / 2.50 / 10.00; Batch −50% (F36). These are first-party
-//     API prices; UK processing runs through a cloud partner's London endpoint, whose regional prices are not verified
-//     here (F67), so the model lines are an estimate;
+//     API prices; the model runs through Bedrock London's EU cross-Region profile (Haiku 5.5 and Sonnet 5.5 are not
+//     served in-Region in London, F73), whose prices are not verified here (F67), so the model lines are an estimate;
 //   - OCR: Azure Read, UK South, 1.50 USD per 1,000 pages, 0.60 above 1M (F68);
 //   - second method: Amazon Textract AnalyzeExpense, EU (London), 0.01 USD a page, 0.008 above 1M (F69). It runs its own
 //     OCR, so the two methods do not share an OCR layer (review item 1);
@@ -564,20 +564,39 @@ export const FALLBACK = solve({
 
 /**
  * Labels not chosen by the scorer: the uniform audit, a random 2% of auto-approved invoices, and threshold-band samples
- * (10% of auto-approved critical fields within 0.004 of their threshold, ≈ 2% of accepted fields). The scorer predicts
- * ≈ 0.3% wrong in the band; the alarm fires at the smallest k with P(X ≥ k) ≤ 5% under the prediction.
+ * (10% of auto-approved critical fields within 0.004 of their threshold, ≈ 2% of accepted fields). The ≈ 1,817 band
+ * labels a quarter split by field count over the three threshold groups (amounts 4 fields at 0.995; PO and dates 2 at
+ * 0.997; kind, parties and invoice number 5 at 0.998); a calibrated scorer expects labels × (1 − threshold) errors in
+ * each: 3.30 + 0.99 + 1.65 ≈ 5.9 a quarter in the band. The alarm fires at the smallest k with P(X ≥ k) ≤ 2.5% under
+ * that prediction (the same one-sided 97.5% as each group's interval): k = 12, a false alarm 1.9% of quarters, and a
+ * band 3× worse trips it 94% of the time.
  */
 export const CALIBRATION = (() => {
   const autoPerMonth = VOLUME.invoices * STEADY.stpPre;
   const randomSlice = 0.02 * autoPerMonth;
   const bandLabelsQuarter = autoPerMonth * CRITICAL * 0.02 * 0.1 * 3;
-  const bandPredictedError = 0.003;
-  const expected = bandLabelsQuarter * bandPredictedError;
+  const thresholds = { amounts: 0.995, kind: 0.998, parties: 0.998, po: 0.997, invoiceNumber: 0.998, dates: 0.997 };
+  const quantile = (lambda: number, q: number) => {
+    let k = 0;
+    while (poissonCdf(k, lambda) < q) k++;
+    return k;
+  };
+  const bands = [
+    { label: "amounts", threshold: thresholds.amounts, fields: 4 },
+    { label: "PO, dates", threshold: thresholds.po, fields: 2 },
+    { label: "kind, parties, number", threshold: thresholds.kind, fields: 5 },
+  ].map((g) => {
+    const labels = (bandLabelsQuarter * g.fields) / CRITICAL;
+    const expected = labels * (1 - g.threshold);
+    const high = quantile(expected, 0.975);
+    return { ...g, labels, expected, highErrors: high, accLow: 1 - high / labels };
+  });
+  const expected = sum(bands.map((b) => b.expected));
+  const bandPredictedError = expected / bandLabelsQuarter; // ≈ 0.33%
   let alarmAt = 1;
-  while (1 - poissonCdf(alarmAt - 1, expected) > 0.05) alarmAt++;
+  while (1 - poissonCdf(alarmAt - 1, expected) > 0.025) alarmAt++;
   const falseAlarm = 1 - poissonCdf(alarmAt - 1, expected);
   const detectTriple = 1 - poissonCdf(alarmAt - 1, 3 * expected);
-  const thresholds = { amounts: 0.995, kind: 0.998, parties: 0.998, po: 0.997, invoiceNumber: 0.998, dates: 0.997 };
   return {
     autoPerMonth,
     randomSlice,
@@ -588,6 +607,7 @@ export const CALIBRATION = (() => {
     falseAlarm,
     detectTriple,
     thresholds,
+    bands,
   };
 })();
 
@@ -701,6 +721,10 @@ export const REVIEW = (() => {
     stpPointsPerClerk,
     clerkMonthUsd: VOLUME.workingDays * 8 * PRICES.clerkPerHour,
     todayHours,
+    // Canary audits (sheet §13): 1,000 boosted blind re-keys per canary, one canary a month, at the audit rate:
+    // 1,000 × 90 s ≈ 25 h a month. Owned by the AP-ops owner (0.5 FTE, in COST.engineeringMonthly), not the clerks, so
+    // they are outside totalHours and the roster.
+    apOps: { canaryAuditsPerMonth: 1_000, canaryAuditHours: (1_000 * t.audit) / 3_600 },
   };
 })();
 
@@ -903,11 +927,14 @@ export const GATES = (() => {
     }
     return p;
   };
-  // Canary power: route B invoices with a dispute ≈ 20.8%; 800 B invoices → ≈ 166 disputes; a 30% rise is a z of
-  // 0.3 × √166 ≈ 3.9, detected (one-sided 5%) with P ≈ Φ(3.9 − 1.645).
+  // Canary power: route B invoices with a dispute ≈ 20.8%; 800 B invoices → ≈ 166 disputes a fortnight. The baseline
+  // is the canary suppliers' own previous fortnight (also ≈ 166, itself noisy), not a known rate, so a 30% rise is a
+  // two-sample z of 0.3 × 166 ÷ √(1.3 × 166 + 166) = 0.3 × √166 ÷ √2.3 ≈ 2.55, detected (one-sided 5%) with
+  // P ≈ Φ(2.55 − 1.645) ≈ 82% (≈ 99% against a known baseline).
   const canaryInvoices = VOLUME.invoices * 0.1 * 0.5;
   const canaryDisputes = canaryInvoices * SCENARIOS.steady.mix.B * STEADY.B.tieBreakRate;
-  const canaryPower30 = phi(0.3 * Math.sqrt(canaryDisputes) - Z95);
+  const canaryPower30 = phi((0.3 * canaryDisputes) / Math.sqrt(2.3 * canaryDisputes) - Z95);
+  const canaryPower30KnownBaseline = phi(0.3 * Math.sqrt(canaryDisputes) - Z95);
   // Canary audits: 1,000 at the steady escape; stop at k ≥ 3; P(stop) when escapes double.
   const lam = 1_000 * STEADY.escape;
   const canaryAuditFalseStop = 1 - poissonCdf(2, lam);
@@ -916,6 +943,7 @@ export const GATES = (() => {
     canaryInvoices,
     canaryDisputes,
     canaryPower30,
+    canaryPower30KnownBaseline,
     canaryAuditFalseStop,
     canaryAuditPowerDouble,
     credit: { creditNotes: 60, statements: 30, bound: poissonUpper95(0) / 90 },
@@ -1086,27 +1114,9 @@ export const INVOICE_FIELDS = (() => {
  * PO and dates 2 at 0.997; kind, parties and invoice number 5 at 0.998). If the scorer is calibrated, the errors in a
  * group are ≈ Poisson(labels × (1 − threshold)); `accLow` is the observed accuracy at the 97.5% count, the bottom of
  * the interval a calibrated scorer stays inside (the top is 100%: zero errors is likely). The intervals are wide (up
- * to a point of accuracy), which is why the alarm pools the band: ≥ CALIBRATION.alarmAt errors of ≈ 5.45 expected.
+ * to a point of accuracy), which is why the alarm pools the band: ≥ CALIBRATION.alarmAt errors of ≈ 5.9 expected.
  */
-export const CALIBRATION_BANDS = (() => {
-  const t = CALIBRATION.thresholds;
-  const groups = [
-    { label: "amounts", threshold: t.amounts, fields: 4 },
-    { label: "PO, dates", threshold: t.po, fields: 2 },
-    { label: "kind, parties, number", threshold: t.kind, fields: 5 },
-  ];
-  const quantile = (lambda: number, q: number) => {
-    let k = 0;
-    while (poissonCdf(k, lambda) < q) k++;
-    return k;
-  };
-  return groups.map((g) => {
-    const labels = (CALIBRATION.bandLabelsQuarter * g.fields) / CRITICAL;
-    const expected = labels * (1 - g.threshold);
-    const high = quantile(expected, 0.975);
-    return { ...g, labels, expected, highErrors: high, accLow: 1 - high / labels };
-  });
-})();
+export const CALIBRATION_BANDS = CALIBRATION.bands;
 
 /** P(X = k) for X ~ Poisson(λ), for the band-alarm figure. */
 export function poissonPmf(k: number, lambda: number) {

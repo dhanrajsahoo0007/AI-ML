@@ -14,7 +14,8 @@ import { PROD_TONE, meter, meterSize, n } from "@/components/diagrams/presets/pr
 //   Month (steady) REVIEW.steady.totalHours ≈ 709 h of work ≈ 21,300 USD at 30 USD an hour; the roster is 6 permanent
 //   + 4 flex for the 5 month-end days = 6 × 21 × 8 + 4 × 5 × 8 = 1,168 paid hours ≈ 35,040 USD a month.
 //   One STP point ≈ 5.6 h of work; a permanent clerk carries 21 × 5.1 = 107 h, so savings come in steps of ≈ 19 points
-//   (≈ 5,040 USD a month).
+//   (≈ 5,040 USD a month). Canary audits (REVIEW.apOps.canaryAuditHours ≈ 25 h a month) belong to the AP-ops owner, so
+//   the last footer line names them outside the roster.
 // Steps: 1 steady state, the two day types against their capacity lines · 2 launch · 3 the month and the roster.
 // Layout (880 wide): meter() from presets/production.ts per day type, 700 wide on one scale (0–65 h), stacked by
 // reason; the limit line is the team's capacity at 85%; a colour key above; three footer lines.
@@ -202,16 +203,22 @@ const spec: LayoutSpec = {
       FOOT_Y,
       `Month: ≈ ${n(Math.round(s.totalHours))} h of work ≈ ${n(Math.round(s.demandUsd / 100) * 100)} USD; roster ${s.permanent} permanent + ${s.flex} flex for ${VOLUME.monthEndDays} days = ${n(s.paidHours)} paid h ≈ ${n(s.monthlyUsd)} USD.`
     ),
-    text(
-      "foot-2",
-      FOOT_Y + 22,
-      `One STP point ≈ ${h1(REVIEW.stpPointHours)} h of work, but money moves in steps of one clerk: ≈ ${Math.round(REVIEW.stpPointsPerClerk)} points ≈ ${n(REVIEW.clerkMonthUsd)} USD a month.`
-    ),
-    text(
-      "foot-3",
-      FOOT_Y + 44,
-      "Exceptions wait on buyers, not on extraction; review times are illustrative and measured in the review app."
-    ),
+    {
+      ...text(
+        "foot-2",
+        FOOT_Y + 22,
+        `One STP point ≈ ${h1(REVIEW.stpPointHours)} h of work, but money moves in steps of one clerk: ≈ ${Math.round(REVIEW.stpPointsPerClerk)} points ≈ ${n(REVIEW.clerkMonthUsd)} USD a month.`
+      ),
+      quiet: true,
+    },
+    {
+      ...text(
+        "foot-3",
+        FOOT_Y + 44,
+        `Not on the roster: canary audits, ≈ ${Math.round(REVIEW.apOps.canaryAuditHours)} h a month, done by the AP-ops owner. Review times are illustrative.`
+      ),
+      quiet: true,
+    },
   ],
 };
 
