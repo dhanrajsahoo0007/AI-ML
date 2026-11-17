@@ -254,11 +254,6 @@ Sizing 8.4 × 10²² FLOPs takes four lines: 26.5B parameters, 529B tokens, 2.43
     - Using about 6 floating-point operations per parameter per token, it is 6 times 7e9 times 2e12, or about 8.4e22 operations.
     - At an effective 400 teraflops per GPU that is about 58,000 GPU-hours, or about 2.4 days on a thousand GPUs, plus overhead for failures and restarts.
   </InterviewQuestion>
-  <InterviewQuestion question="Explain data, tensor and pipeline parallelism." category="Architecture" level="Senior">
-    - Data parallelism gives each GPU a model copy and different data, then averages gradients; ZeRO or FSDP shard the optimizer states, gradients and weights so copies do not each hold everything.
-    - Tensor parallelism splits individual weight matrices across GPUs, which needs fast interconnects so it usually stays inside a server.
-    - Pipeline parallelism puts different layers on different GPUs and streams micro-batches through, at the cost of idle bubbles. Large runs combine all three.
-  </InterviewQuestion>
   <InterviewQuestion question="Where does GPU memory go when training a model with Adam?" category="Scaling" level="Senior">
     - With mixed precision, weights and gradients take about 2 bytes per parameter each, and Adam keeps fp32 master weights plus two moment estimates at about 12 bytes per parameter, so roughly 16 bytes per parameter before activations.
     - Activations add memory proportional to batch size, sequence length and depth, which gradient checkpointing reduces by recomputing them.
