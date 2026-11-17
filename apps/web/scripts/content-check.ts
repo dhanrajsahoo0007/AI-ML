@@ -49,12 +49,15 @@ const BANNED_GENAI_HEADINGS = new Set([
 ]);
 
 /**
- * Pages held to the v2 heading set: all of ai-system-design, and the System Design pattern pages (not the rest of
- * system-design, where fundamentals keep "Common pitfalls").
+ * Pages held to the v2 heading set: all of ai-system-design, the System Design pattern pages (not the rest of
+ * system-design, where fundamentals keep "Common pitfalls"), and every GenAI System Design page converted to the
+ * case-study format (it carries `updated:`; plan SYSTEM-DESIGN/plans/genai-design-plan.md §4). The pages still in the
+ * old template keep their headings until their wave converts them.
  */
-const usesV2Headings = (sectionKey: string, file: string) =>
+const usesV2Headings = (sectionKey: string, file: string, text: string) =>
   sectionKey === "ai-system-design" ||
-  (sectionKey === "system-design" && file.split(path.sep).join("/").includes("/system-design/patterns/"));
+  (sectionKey === "system-design" && file.split(path.sep).join("/").includes("/system-design/patterns/")) ||
+  (sectionKey === "genai-system-design" && /^updated:/m.test(text) && !/^status:\s*outline/m.test(text));
 
 const ROOT = process.cwd();
 const APP_DIR = path.join(ROOT, "src", "app");
@@ -261,7 +264,7 @@ async function main() {
         if (NO_EM_DASH.has(section.key) && l.includes("\u2014")) {
           report(item.file, "em dash; use a comma, a colon or a full stop", "error", i + 1);
         }
-        if (!inCodeFence && usesV2Headings(section.key, item.file) && l.startsWith("## ")) {
+        if (!inCodeFence && usesV2Headings(section.key, item.file, text) && l.startsWith("## ")) {
           const h2 = l.slice(3).trim();
           if (BANNED_GENAI_HEADINGS.has(h2)) {
             report(

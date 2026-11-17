@@ -124,7 +124,7 @@ Use these zones (dotted borders) and tones so every case study reads the same:
 
 Steps: list them in the spec's `steps` (`title`, `covers`). Give each node `step` (the step that introduces it; default 1); an edge defaults to the later step of its two nodes. An early shortcut that a later step replaces gets `until` (for example the chat server writing straight to the store `until: 4`, before the message bus arrives in step 5); `until` edges never show in the full diagram. Keep every node in the same position in every step so readers watch one picture fill in. Eight steps at most.
 
-Icons: use the drawn glyphs in `src/components/diagrams/glyphs.tsx` (48 names, listed with what each one draws in `COMPONENTS.md`; the common ones are `database`, `cache`, `queue`, `blob`, `cdn`, `load-balancer`, `phone`, `server`, `workers`, `users`, `gateway`, `dns`, `lock`, `log`, `search`, `coordinator` and `ring`). Data stores and logs use `variant: "glyph"` (big drawing, label below); services use cards. A name without a glyph falls back to a lucide icon. Sketch new diagrams first with the Excalidraw libraries in `design/excalidraw-libraries/`.
+Icons: use the drawn glyphs in `src/components/diagrams/glyphs.tsx` (88 names, listed with what each one draws in `COMPONENTS.md`; the common ones are `database`, `cache`, `queue`, `blob`, `cdn`, `load-balancer`, `phone`, `server`, `workers`, `users`, `gateway`, `dns`, `lock`, `log`, `search`, `coordinator` and `ring`). Data stores and logs use `variant: "glyph"` (big drawing, label below); services use cards. A name without a glyph falls back to a lucide icon. Sketch new diagrams first with the Excalidraw libraries in `design/excalidraw-libraries/`.
 
 Edges: `flow` + `packet` with increasing `delay` for the main request path; `dashed` for secondary calls; route around boxes with `via` lanes in the gaps between zones.
 
@@ -195,3 +195,88 @@ Links to the relevant /cloud/aws/* pages.
 Keep the blank lines after `<CloudOnly>` and before `</CloudOnly>`; MDX needs them to parse the markdown inside.
 Questions about the AWS choices go in the normal `<InterviewQuestions>` block with `category="Cloud"`; they are not
 wrapped in `<CloudOnly>`.
+
+## GenAI System Design case studies
+
+Pages in `genai-system-design/case-studies/` follow the same format, extended for GenAI (plan:
+`SYSTEM-DESIGN/plans/genai-design-plan.md` §4). `customer-support-agent.mdx` (converted) and
+`voice-agent-call-centre.mdx` (written from an outline) are the reference implementations. The fourth `describe` in
+`tests/unit/doc-headings.test.ts` enforces it on every page in its `DONE` list, and content-check bans the retired
+headings on every page here that carries `updated:`.
+
+**Frontmatter:** `title` (no "Case Study:" prefix), `description` (≤ 160 characters, the same text as the hub card),
+`icon`, `logo`, optional `modelledOn` (≤ 3 logo ids), `updated`.
+
+### Sections, in order
+
+The H2 titles are exact. Points only: bullets, numbered steps and tables. Prose only as the intro, a one-sentence
+lead-in before a figure or code block, and the 2–3 sentences inside a `<StepCard>` or `<Callout>`. No bullet longer
+than two sentences; no prose line over 200 characters.
+
+| # | H2 | What goes in it |
+|---|---|---|
+| | (intro) | 1–2 sentences: what is designed and what makes it hard. One bullet: "Interviewers use this question to see whether…" |
+| 1 | `The interview question` | `<InterviewPrompt>`: `prompt`, `level`, `minutes`, `bankId` where a bank prompt exists, `tests` (2–5), `clarify` (2–8), `outOfScope` |
+| 2 | `Overview` | 5–6 bullets, `<Numbers>` with the 3–4 figures that drive the design, one `<KeyIdea>` |
+| 3 | `Functional requirements` | `<RequirementsTable kind="functional">` F1…, one "Out of scope" bullet |
+| 4 | `Non-functional requirements` | `<RequirementsTable kind="non-functional">` N1…, every target a number; always a quality, a latency (time to first token or per turn), a cost-per-request and a safety target |
+| 5 | `Estimates and decision drivers` | `<EstimateTable>` with token and cost arithmetic; then the drivers table G1–G12 (below) |
+| 6 | `API design` | Calls table, one `http` block (the streaming endpoint where there is one), tool or function schemas if the system acts, idempotency and error rules |
+| 7 | `Data model` | Store-choice table (data, store type, why with driver ids, partition key, consistency, rejected alternative), one schema block per store, access patterns. A vector index, a graph, a cache and a trace store count as stores |
+| 8 | `Building the architecture, step by step` | 5–8 `### Step n: <title> (<req ids>)`, from the baseline "one model call", one capability per step. Each: the hero at `step={n}`, **Adds**, **Flow** (numbered), **Why this and not that** (naming the principle it applies), **The gap**. `<PremiumBreak />` after Step 1 |
+| 9 | `Final architecture` | The hero with `stepper`; `Group \| Components \| Responsibility` table; numbered walk-through of the main request |
+| 10 | `Component choices and why` | ≥ 6 `###` blocks, one per building block (each model, retrieval stack, vector store, orchestration style, cache, gateway, guardrail, queue, each database): `- **Choice:**`, `- **Why:**` with G/N/F ids, one `- **Why not <alternative>:**` per rejected option |
+| 11 | `Model, prompt and context design` | Context-window layout table (block, tokens, stable or changing, cached or not); model per stage with why; structured output and tool list; one context-layout figure |
+| 12 | `Latency and cost budget` | Per-stage latency waterfall figure with the arithmetic; cost per request worked out; a levers table (lever, saves, costs you) |
+| 13 | `Evaluation and release gates` | Offline set (size, source), metrics with targets, judge calibration, online metrics, rollout stages, the gate that blocks a release; one figure |
+| 14 | `Safety and guardrails` | Threat table: threat, where it enters, control, enforced in code or in the prompt |
+| 15 | `Deep dives` | The 2 hardest problems not covered above, one `###` each with its own figure, then `### Worked example: …` with computed numbers |
+| 16 | `Design decisions and why` | `Decision \| Options considered \| Choice \| Decided by \| What we give up \| Revisit when`, 7–10 rows |
+| 17 | `Principles and patterns used` | `### GenAI principles`: `Principle \| Where in this design \| Why it is needed here`, ≥ 5 rows, each linking `/genai-system-design/case-studies/design-principles#<anchor>` and one concept page. `### System design patterns`: the same columns, linking `/system-design/patterns/<slug>` |
+| 18 | `Same design, other systems` | `If the interviewer asks for… \| What stays the same \| What changes`, 3–5 rows |
+| 19 | `How real systems do it` | 4–6 sourced facts, each with its year; one bullet on where this design differs and why that is fine |
+| 20 | `Failure modes & pitfalls` | 5–7 bullets: what breaks, how you notice, the fix |
+| 21 | `Interview framework` | Minute-by-minute plan for 45 minutes; `**What interviewers listen for:**` by level (Mid, Senior, Staff); `**Red flags:**` |
+| 22 | `Further reading` | Primary sources, then a `Related pages:` line |
+| | `<InterviewQuestions>` | 10–12 questions (below) |
+
+Length guide: 650–850 lines. Sections 11–14 are a table plus one figure each, not essays.
+
+### Decision drivers G1–G12
+
+`| # | Driver | For this system | What it forces |`, all twelve rows in this order. A driver that does not matter says
+"Not a driver here" and one reason. Every design decision and component choice cites driver ids.
+
+| # | Driver | The question it answers |
+|---|---|---|
+| G1 | Quality bar and its metric | What does "good" mean, measured how, at what target? |
+| G2 | Cost of a wrong answer | Annoying, expensive, harmful or illegal? |
+| G3 | Latency target | Time to first token, per turn or end to end, at p95 |
+| G4 | Cost per request | The budget per answer, ticket, call or document |
+| G5 | Traffic shape | Requests per second, peak against average, sessions and turns |
+| G6 | Knowledge source and freshness | Where the facts come from and how stale they may be |
+| G7 | Context size | Tokens in the window per request, and what fills them |
+| G8 | Determinism and auditability | Must the same input give the same output, and be explained later? |
+| G9 | Data sensitivity and tenancy | Personal data, regulated data, one tenant or many |
+| G10 | Autonomy level | Answers only, drafts for a person, or actions on its own |
+| G11 | Modalities and interface | Text, voice, images, documents; chat, phone, API |
+| G12 | Availability and degradation | The target, and what is switched off first under stress |
+
+### Figures and principles
+
+- At least 7 `<AnimatedDiagram>` embeds: one hero stepper (`animated/<folder>/architecture`, 1200 × 740, zones from
+  `genaiZones()` in `src/components/diagrams/presets/genai-case.ts`), at least one sequence and one latency waterfall
+  (`waterfall` from `presets/production.ts`). No Mermaid. Reuse existing figures by id before drawing new ones.
+- One spec folder per system (`support-agent`, `voice-agent`, `answer-engine`, …); page constants in
+  `presets/gcase-<slug>.ts`, pinned in `tests/unit/diagrams/genai-case-presets.test.ts`.
+- Role tones from `GENAI_TONE`; sequence lanes from `SEQUENCE_LANE` (section tones only).
+- Principles are defined once in `src/lib/genai-principles.ts`; its test checks that the catalog's `caseStudies` and
+  each page's `### GenAI principles` table agree.
+
+### Interview questions
+
+- 10–12 per page, at least 4 Senior and 2 Junior, categories spread across Concepts, Architecture, Scaling,
+  Trade-offs, Failure modes, Evaluation and Cost. Build them from real interviewer probes, not the page's headings.
+- Every answer is 3–5 bullets: the first answers the question; one uses a number from the page; one names the
+  trade-off and what is given up; one says how it fails or how you would verify it. Senior questions carry
+  `followUps` (1–2). No figure inside an answer.
