@@ -1,20 +1,23 @@
 // Constants and arithmetic for the "Design an Enterprise AI Assistant" case study (/genai-system-design/case-studies/
-// conversational-assistant-design; design sheet SYSTEM-DESIGN/plans/genai-design/design/conversational-assistant-design.md,
-// dossier research/conversational-assistant-design.md). Specs in assets/diagrams/animated/enterprise-assistant/ import
-// from here, so the page, the figures and the tests share one set of numbers.
+// conversational-assistant-design; design sheet SYSTEM-DESIGN/plans/genai-design/design/conversational-assistant-design.md
+// v3, dossier research/conversational-assistant-design.md, review review/conversational-assistant-design-design.md).
+// Specs in assets/diagrams/animated/enterprise-assistant/ import from here, so the page, the figures and the tests share
+// one set of numbers.
 //
 // Running example: Brightpost (presets/agents.ts, rag.ts, gcase-support.ts), here as an EMPLOYER: an assistant for its
-// own staff (support, warehouse, finance and the rest), over about 10 million documents across nine connectors. It is
-// SINGLE-TENANT: one company, one deployment (the sheet says what changes if it were sold to many companies).
+// own staff over about 10 million documents across its systems (6.0M indexed, Slack's 4.0M threads searched live).
+// It is SINGLE-TENANT (one company, one deployment).
 //
 // Every headcount, volume, mix, rate, lag and unit cost below is ILLUSTRATIVE unless a comment names a source.
-// Model prices are list prices as of November 2026 (Claude pricing docs, read 17 November 2026, dossier F63): mid-size
-// (Claude Sonnet 5.5 class) 2.00 input / 0.10 cache read / 2.50 5-minute cache write / 4.00 1-hour cache write / 10.00
-// output USD per million tokens; small (Claude Haiku 5.5 class, prompts ≤ 100K) 0.10 / 0.01 / 0.125 / 0.20 / 0.50.
-// Minimum cacheable prefix 512 tokens on both (dossier F62). Seat prices: Microsoft 365 Copilot 30 USD a user a month
-// (Microsoft, dossier F12); Gemini Enterprise 30 and Gemini Business 21 (press, dossier F97).
-// Parallel stages are budgeted as the slowest of n draws; p95 per path is a root-sum-square of stage spreads
-// (p95 − p50), which assumes stage tails are independent; the stage-sum upper bound is given where it matters.
+// Model prices are list prices as of November 2026 (Claude pricing docs, dossier F63): mid-size (Claude Sonnet 5.5
+// class) 2.00 input / 0.10 cache read / 2.50 5-minute write / 4.00 1-hour write / 10.00 output USD per million tokens;
+// small (Claude Haiku 5.5 class) 0.10 / 0.01 / 0.125 / 0.20 / 0.50. Tool use adds a 286-token system prompt (F64).
+// Source rate limits: SharePoint per-app per-tenant 2,500 resource units (RU) a minute and 2,400,000 a day for 1,001–5,000
+// licences; delta with a token 1 RU, multi-item 2, permission operations 5 (dossier F101). Atlassian Tier 2 Enterprise
+// 150,000 + 30 a user points an hour (F104). Zendesk-class Enterprise 700 requests a minute (F105). GitHub Enterprise Cloud
+// app installation 15,000 requests an hour (F106). Slack Real-time Search: "10+" a minute a team (400+ for larger
+// teams), 10 a minute a user (F103).
+// p95 per path is a root-sum-square of stage spreads (independent tails); stage-sum bounds are given where they matter.
 
 import { BRIGHTPOST } from "./agents";
 import { FUNNEL } from "./gcase-support";
@@ -24,7 +27,7 @@ const usd = (tokens: number, perMillion: number) => (tokens * perMillion) / 1_00
 const sum = (xs: readonly number[]) => xs.reduce((s, x) => s + x, 0);
 const rss = (xs: readonly number[]) => Math.sqrt(sum(xs.map((x) => x * x)));
 
-/** Standard normal CDF (Abramowitz and Stegun 7.1.26, error < 1.5e-7) and its inverse by bisection. */
+/** Standard normal CDF (Abramowitz and Stegun 7.1.26) and its inverse by bisection. */
 function phi(z: number) {
   const t = 1 / (1 + 0.3275911 * (Math.abs(z) / Math.SQRT2));
   const y =
@@ -50,223 +53,344 @@ const Z95 = phiInv(0.95); // 1.645
 function maxOfN(p50: number, p95: number, n: number, q: number) {
   return p50 + phiInv(q ** (1 / n)) * ((p95 - p50) / Z95);
 }
+/** P(one normal draw with this p50 and p95 exceeds t). */
+const tailAbove = (p50: number, p95: number, t: number) => 1 - phi((t - p50) / ((p95 - p50) / Z95));
 
 /** 95% normal-approximation margin, in points, for a rate p measured on n cases. */
 const margin95 = (p: number, n: number) => 1.96 * Math.sqrt((p * (1 - p)) / n) * 100;
 
 // ── Prices ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** USD per million tokens, as of November 2026 (dossier F63); infrastructure unit costs are illustrative. */
 export const PRICES = {
   mid: { input: 2.0, cached: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 4.0, output: 10.0 },
   small: { input: 0.1, cached: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2, output: 0.5 },
+  toolSystemPrompt: 286, // tokens added whenever tools are present (F64)
   minCacheablePrefix: 512,
   gpuHour: 2.5, // illustrative
-  searchNodeHour: 1.2, // 64 GB memory node, illustrative
-  engineerYear: 400_000, // fully loaded, illustrative (same figure as the answer-engine page)
-  seatPrice: 30, // Microsoft 365 Copilot list, and Gemini Enterprise (press); USD a user a month
-  seatPriceBusiness: 21, // Gemini Business (press); Microsoft 365 Copilot Business list
+  searchNodeHour: 1.2, // 64 GB node, illustrative
+  engineerYear: 400_000, // fully loaded, illustrative
+  seatList: 30, // Microsoft 365 Copilot (F12); Gemini Enterprise (press, F97)
+  seatDiscount: 0.15, // illustrative enterprise discount at thousands of seats (dossier C10)
+  businessTierSeatCap: 300, // Copilot Business 21 USD is capped at 300 seats (F107): not an option for Brightpost
+  meteredPerCredit: 0.01, // Copilot Chat agents: from 0.01 USD a message credit; grounded answers 2 credits (F108)
 } as const;
 
 // ── The company and its use ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Brightpost as an employer (illustrative). 5,000 staff; everyone gets a seat.
- *   400 support + 3,000 warehouse + 150 finance + 550 engineering and product + 900 other = 5,000.
- *   Daily active 60% → 3,000; 6 turns each (Glean reports "five queries per day" per employee, vendor, dossier F11)
- *   → 18,000 turns a day, averaged over all seven days (the warehouses work weekends).
- *   70% of turns fall in 10 office hours: 12,600 ÷ 36,000 s = 0.35 a second; peak 3× ≈ 1.05 turns a second.
- *   A conversation averages 3 turns → 6,000 conversations a day. Per seat a month: 18,000 × 30 ÷ 5,000 = 108 turns.
+ * Demand by department (illustrative). Office staff work 22 days a month; the warehouses 30.
+ *   Support 400 × 90% × 12 = 4,320 turns a working day; warehouse 3,000 × 40% × 3 = 3,600; finance 150 × 80% × 8 = 960;
+ *   engineering 550 × 70% × 6 = 2,310; other 900 × 60% × 6 = 3,240 → 14,430 on a weekday.
+ *   A month: 95,040 + 108,000 + 21,120 + 50,820 + 71,280 = 346,260 turns → 69.3 a seat.
+ *   Peak: office turns 10,830 × 70% in 10 hours = 0.2106 a second + warehouse 3,600 over 24 hours = 0.0417 → × 3 = 0.757.
+ *   (Glean reports about five queries a day per employee, vendor, F11: a knowledge-worker average.)
  */
 export const COMPANY = (() => {
   const departments = [
-    { id: "support", label: "Support", staff: 400 },
-    { id: "warehouse", label: "Warehouse", staff: 3_000 },
-    { id: "finance", label: "Finance", staff: 150 },
-    { id: "engineering", label: "Engineering and product", staff: 550 },
-    { id: "other", label: "Other (HR, marketing, buying, ops)", staff: 900 },
+    { id: "support", label: "Support", staff: 400, active: 0.9, turns: 12, days: 22, knowledge: true },
+    { id: "warehouse", label: "Warehouse", staff: 3_000, active: 0.4, turns: 3, days: 30, knowledge: false },
+    { id: "finance", label: "Finance", staff: 150, active: 0.8, turns: 8, days: 22, knowledge: true },
+    {
+      id: "engineering",
+      label: "Engineering and product",
+      staff: 550,
+      active: 0.7,
+      turns: 6,
+      days: 22,
+      knowledge: true,
+    },
+    {
+      id: "other",
+      label: "Other (HR, buying, marketing, ops)",
+      staff: 900,
+      active: 0.6,
+      turns: 6,
+      days: 22,
+      knowledge: true,
+    },
   ] as const;
+  const perDay = (d: (typeof departments)[number]) => d.staff * d.active * d.turns;
   const staff = sum(departments.map((d) => d.staff)); // 5,000
-  const seats = staff;
-  const dailyActiveShare = 0.6;
-  const dailyActive = seats * dailyActiveShare; // 3,000
-  const turnsPerActiveUser = 6;
-  const turnsPerDay = dailyActive * turnsPerActiveUser; // 18,000
-  const officeShare = 0.7;
+  const knowledgeWorkers = sum(departments.filter((d) => d.knowledge).map((d) => d.staff)); // 2,000
+  const weekdayTurns = sum(departments.map(perDay)); // 14,430
+  const turnsPerMonth = sum(departments.map((d) => perDay(d) * d.days)); // 346,260
+  const warehouse = departments[1];
+  const warehouseTurnsPerDay = perDay(warehouse); // 3,600
+  const officeTurnsPerDay = weekdayTurns - warehouseTurnsPerDay; // 10,830
+  const officeShareInHours = 0.7;
   const officeHours = 10;
-  const officePerSecond = (turnsPerDay * officeShare) / (officeHours * 3_600); // 0.35
   const peakFactor = 3;
-  const peakPerSecond = officePerSecond * peakFactor; // 1.05
+  const peakPerSecond =
+    peakFactor * ((officeTurnsPerDay * officeShareInHours) / (officeHours * 3_600) + warehouseTurnsPerDay / 86_400); // 0.757
   const turnsPerConversation = 3;
-  const daysPerMonth = 30;
   return {
     name: BRIGHTPOST.shop,
     departments,
     staff,
-    seats,
-    dailyActiveShare,
-    dailyActive,
-    turnsPerActiveUser,
-    turnsPerDay,
-    officeShare,
-    officePerSecond,
+    seats: staff,
+    knowledgeWorkers,
+    weekdayTurns,
+    warehouseTurnsPerDay,
+    officeTurnsPerDay,
+    warehouseTurnsPerMonth: warehouseTurnsPerDay * warehouse.days, // 108,000
+    turnsPerMonth,
+    turnsPerSeatMonth: turnsPerMonth / staff, // 69.3
     peakFactor,
     peakPerSecond,
     turnsPerConversation,
-    conversationsPerDay: turnsPerDay / turnsPerConversation, // 6,000
-    daysPerMonth,
-    turnsPerMonth: turnsPerDay * daysPerMonth, // 540,000
-    turnsPerSeatMonth: (turnsPerDay * daysPerMonth) / seats, // 108
+    conversationsPerMonth: turnsPerMonth / turnsPerConversation, // 115,420
   };
 })();
 
 // ── Corpus and index ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Chunks per document with Brightpost's chunker (rag.ts CORPUS: 400-token chunks, 50 overlap, stride 350), ≥ 1. */
-const chunksFor = (tokens: number) =>
-  Math.max(1, Math.ceil((tokens - CORPUS.overlapTokens) / CORPUS.stride));
+const chunksFor = (tokens: number) => Math.max(1, Math.ceil((tokens - CORPUS.overlapTokens) / CORPUS.stride));
 
 /**
- * Indexed sources (illustrative counts). Email and Slack direct messages are NOT indexed: they are searched live as the
- * user (federated, late-bound). Business records (WMS stock, ERP purchase orders, HR leave) are not documents: they are
- * read live through tools.
- *   Helpdesk: the support page's 16,000 hand-offs a day (gcase-support FUNNEL) × 120 days kept in the index = 1.92M.
- *   SharePoint 2.4M × 9 + Confluence 0.3M × 5 + Jira 0.9M × 2 + Slack 4.0M × 1 + helpdesk 1.92M × 3 + GitHub 0.48M × 3
- *   = 21.6 + 1.5 + 1.8 + 4.0 + 5.76 + 1.44 = 36.1M chunks; 10.0M documents; 11.4B tokens of text.
+ * Sources. Slack (4.0M threads) and Outlook mail are FEDERATED: searched live as the user, never copied (Slack's 2025 API
+ * terms point AI apps at its Real-time Search API, F102, F103). Business records (WMS, ERP, HR) are read live by tools.
+ * Indexed: SharePoint 2.4M × 9 + Confluence 0.3M × 5 + Jira 0.9M × 2 + helpdesk 1.92M × 3 + GitHub 0.48M × 3 chunks
+ *   = 21.6 + 1.5 + 1.8 + 5.76 + 1.44 = 32.1M chunks over 6.0M documents; 10.2B tokens.
+ * Helpdesk: only HANDED-OFF cases (the support page's 16,000 a day × 120 days = 1.92M); cases the support agent
+ * resolved stay in its own store.
  */
 export const SOURCES = (() => {
   const helpdeskDays = 120;
-  const list = [
-    { id: "sharepoint", label: "SharePoint and OneDrive files", docs: 2_400_000, tokens: 3_000, sensitive: false },
-    { id: "confluence", label: "Confluence pages", docs: 300_000, tokens: 1_500, sensitive: false },
-    { id: "jira", label: "Jira issues", docs: 900_000, tokens: 600, sensitive: false },
-    { id: "slack", label: "Slack threads (channels, not DMs)", docs: 4_000_000, tokens: 300, sensitive: false },
+  const indexed = [
+    { id: "sharepoint", label: "SharePoint and OneDrive files", docs: 2_400_000, tokens: 3_000 },
+    { id: "confluence", label: "Confluence pages", docs: 300_000, tokens: 1_500 },
+    { id: "jira", label: "Jira issues", docs: 900_000, tokens: 600 },
     {
       id: "helpdesk",
-      label: "Helpdesk cases (last 120 days)",
+      label: "Helpdesk cases (handed off, 120 days)",
       docs: FUNNEL.handedOff * helpdeskDays,
       tokens: 800,
-      sensitive: true,
     },
-    { id: "github", label: "GitHub READMEs, docs, issues", docs: 480_000, tokens: 1_000, sensitive: false },
+    { id: "github", label: "GitHub READMEs, docs, issues", docs: 480_000, tokens: 1_000 },
   ].map((s) => ({ ...s, chunksPerDoc: chunksFor(s.tokens), chunks: s.docs * chunksFor(s.tokens) }));
-  const docs = sum(list.map((s) => s.docs)); // 10,000,000
-  const chunks = sum(list.map((s) => s.chunks)); // 36,100,000
-  const textTokens = sum(list.map((s) => s.docs * s.tokens)); // 11.406B
+  const federated = [
+    { id: "slack", label: "Slack channels and DMs", docs: 4_000_000 },
+    { id: "mail", label: "Outlook mail and calendar", docs: 0 }, // per-user mailboxes, not counted
+  ] as const;
+  const docs = sum(indexed.map((s) => s.docs)); // 6,000,000
+  const chunks = sum(indexed.map((s) => s.chunks)); // 32,100,000
+  const textTokens = sum(indexed.map((s) => s.docs * s.tokens)); // 10.206B
   return {
-    list,
+    indexed,
+    federated,
     helpdeskDays,
     docs,
+    allDocs: docs + federated[0].docs, // 10,000,000
     chunks,
     textTokens,
-    avgChunksPerDoc: chunks / docs, // 3.61
+    avgChunksPerDoc: chunks / docs, // 5.35
     sharepointChunksPerDoc: chunksFor(3_000), // 9
-    federated: ["Outlook mail and calendar", "Slack direct messages"],
-    liveRecords: ["Warehouse management (WMS)", "ERP (purchase orders, invoices)", "HR (leave, policies)"],
+    encryptedShareOfFiles: 0.02, // label-encrypted files: not indexed and not available to the assistant (v3)
   };
 })();
 
 /**
- * Index sizing. 1,024-dim embeddings stored INT8 (1,024 B) in memory, rescored from float on SSD; HNSW M = 16 →
- * 2 × 16 × 4 B = 128 B of links per vector; metadata (ACL principals, acl_version, source, label, dates) ≈ 200 B.
- *   Vectors 36.1M × 1,024 B = 36.97 GB (float32 would be 147.9 GB); links 4.62 GB; metadata 7.22 GB;
- *   BM25 postings ≈ 30% of 11.4B tokens × 4 B = 13.69 GB → ≈ 62.5 GB in memory per replica.
- *   4 shards (≈ 15.6 GB each) × 2 replicas in two zones = 8 nodes of 64 GB.
- *   Exact scan when a filter leaves ≤ 50,000 chunks: 50,000 × 1,024 B = 51 MB, ≈ 5 ms at 10 GB/s (illustrative).
+ * Index sizing. 1,024-dim INT8 vectors in memory (1,024 B), float32 on SSD for rescoring; HNSW M = 16 → 128 B of links;
+ * metadata ≈ 200 B (≈ 20 principal ids × 8 B + 40 B of fields; documents with more principals keep an overflow list).
+ *   Vectors 32.1M × 1,024 = 32.87 GB; links 4.11; metadata 6.42; postings 30% of 10.2B tokens × 4 B = 12.25 → 55.65 GB a
+ *   replica in memory; float32 copy 131.5 GB on SSD. 4 shards × 2 replicas (two zones) = 8 nodes of 64 GB.
+ *   Initial embedding: 32.1M × 400 = 12.84B tokens at 50,000 a second a GPU = 71.3 GPU-hours ≈ 1.5 days on 2 GPUs.
  */
 export const INDEX = (() => {
   const dims = 1_024;
-  const vectorBytes = dims; // INT8
-  const linkBytes = 2 * 16 * 4; // 128
-  const metadataBytes = 200;
-  const vectorsGB = (SOURCES.chunks * vectorBytes) / 1e9; // 36.97
-  const float32GB = (SOURCES.chunks * dims * 4) / 1e9; // 147.9
-  const linksGB = (SOURCES.chunks * linkBytes) / 1e9; // 4.62
-  const metadataGB = (SOURCES.chunks * metadataBytes) / 1e9; // 7.22
-  const postingsGB = (SOURCES.textTokens * 4 * 0.3) / 1e9; // 13.69
-  const memoryGB = vectorsGB + linksGB + metadataGB + postingsGB; // 62.5
-  const shards = 4;
-  const replicas = 2;
-  const exactScanBelowChunks = 50_000;
+  const vectorsGB = (SOURCES.chunks * dims) / 1e9;
+  const linksGB = (SOURCES.chunks * 128) / 1e9;
+  const metadataGB = (SOURCES.chunks * 200) / 1e9;
+  const postingsGB = (SOURCES.textTokens * 4 * 0.3) / 1e9;
+  const memoryGB = vectorsGB + linksGB + metadataGB + postingsGB;
+  const embedTokens = SOURCES.chunks * CORPUS.chunkTokens;
+  const embedGpuHours = embedTokens / 50_000 / 3_600;
   return {
     dims,
-    vectorBytes,
-    linkBytes,
-    metadataBytes,
-    vectorsGB,
-    float32GB,
-    linksGB,
-    metadataGB,
-    postingsGB,
-    memoryGB,
-    shards,
-    replicas,
-    nodes: shards * replicas, // 8
-    perShardGB: memoryGB / shards, // 15.6
-    exactScanBelowChunks,
-    exactScanMB: (exactScanBelowChunks * vectorBytes) / 1e6, // 51.2
-    exactScanMs: 5,
+    vectorsGB, // 32.87
+    float32GB: (SOURCES.chunks * dims * 4) / 1e9, // 131.5 (on SSD)
+    linksGB, // 4.11
+    metadataGB, // 6.42
+    postingsGB, // 12.25
+    memoryGB, // 55.65
+    shards: 4,
+    replicas: 2,
+    nodes: 8,
+    perShardGB: memoryGB / 4, // 13.9
+    exactScanBelowChunks: 50_000,
+    exactScanMs: 5, // 51 MB at 10 GB/s
+    embedTokens, // 12.84B
+    embedGpuHours, // 71.3
+    embedDaysOn2Gpus: embedGpuHours / 2 / 24, // 1.49
+    partialUpdatesPerSecond: 5_000, // the engine requirement: in-place attribute updates, no vector re-index
   };
 })();
 
 // ── Identity and permissions ─────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Principals and permission changes (illustrative). Chunks carry principal ids (Entra users and groups, Slack channel
- * ids, Confluence and Jira groups), never expanded user lists; a user's principal set is resolved per request.
- *   Average user: 120 principals (p99 1,500, managers and admins).
- *   Document ACL changes: 20,000 a day × 3.61 chunks = 72,200 chunk patches; container (folder, site, space) changes:
- *   300 a day × 2,000 documents × 3.61 = 2,166,000 → 2.24M metadata-only patches a day ≈ 26 a second; no re-embedding.
- *   Largest container: one SharePoint site of 50,000 files × 9 chunks = 450,000 patches at 5,000 a second = 90 s.
- *   Membership changes: 2,000 a day → 2,000 principal-store rows. Flattened to users instead, one joiner to a group that
- *   reads 200,000 documents would rewrite 200,000 × 3.61 = 722,000 chunks.
+ * ACL changes (illustrative). Chunks carry principal ids; memberships live in the principal store.
+ *   Document ACL changes 20,000 a day (SharePoint 15,000, Atlassian 3,000, helpdesk 1,500, GitHub 500) × 5.35 chunks
+ *   = 107,000 patches. Container changes 300 a day (SharePoint 200) × 2,000 documents × 5.35 = 3.21M patches.
+ *   Inherited ACLs are DERIVED in the ACL store from the container's ACL: one source call per container change, not one
+ *   per item. Largest site: 50,000 files × 9 chunks = 450,000 patches at 5,000 a second = 90 s.
+ *   Deletes and DLP tombstones: 6,000 a day, on the same topic as revocations.
  */
 export const PRINCIPALS = (() => {
-  const perUserAvg = 120;
-  const perUserP99 = 1_500;
   const docAclChangesPerDay = 20_000;
   const containerChangesPerDay = 300;
   const docsPerContainer = 2_000;
-  const docPatches = docAclChangesPerDay * SOURCES.avgChunksPerDoc; // 72,200
-  const containerPatches = containerChangesPerDay * docsPerContainer * SOURCES.avgChunksPerDoc; // 2,166,000
-  const patchesPerDay = docPatches + containerPatches; // 2,238,200
-  const patchRatePerSecond = 5_000;
-  const largestSiteFiles = 50_000;
-  const largestSitePatches = largestSiteFiles * SOURCES.sharepointChunksPerDoc; // 450,000
-  const groupDocs = 200_000;
+  const docPatches = docAclChangesPerDay * SOURCES.avgChunksPerDoc;
+  const containerPatches = containerChangesPerDay * docsPerContainer * SOURCES.avgChunksPerDoc;
+  const largestSitePatches = 50_000 * SOURCES.sharepointChunksPerDoc;
   return {
-    perUserAvg,
-    perUserP99,
+    perUserAvg: 120,
+    perUserP99: 1_500,
     docAclChangesPerDay,
     containerChangesPerDay,
-    docsPerContainer,
-    docPatches,
-    containerPatches,
-    patchesPerDay,
-    patchesPerSecondAvg: patchesPerDay / 86_400, // 25.9
-    patchRatePerSecond,
-    largestSiteFiles,
-    largestSitePatches,
-    largestSiteSeconds: largestSitePatches / patchRatePerSecond, // 90
+    docPatches, // 107,000
+    containerPatches, // 3,210,000
+    patchesPerDay: docPatches + containerPatches, // 3,317,000
+    patchesPerSecondAvg: (docPatches + containerPatches) / 86_400, // 38.4
+    largestSitePatches, // 450,000
+    largestSiteSeconds: largestSitePatches / INDEX.partialUpdatesPerSecond, // 90
+    deletesPerDay: 6_000,
     membershipChangesPerDay: 2_000,
-    flattenedRewriteChunks: groupDocs * SOURCES.avgChunksPerDoc, // 722,000
+    flattenedRewriteChunks: 200_000 * SOURCES.avgChunksPerDoc, // 1.07M rewrites for one joiner if users were on chunks
   };
 })();
 
 /**
- * Permission propagation (the centre of the design). Seconds.
- *   Event path, p50: source notification 30 (illustrative, inside Microsoft Graph's "less than 1 minute" average for
- *   driveItem, dossier F38; its stated maximum is 6 hours) + queue 1 + fetch the effective permissions 2 + map to
- *   principals 0.1 + patch index and ACL store 1 + index refresh 1 = 35.1 s.
- *   The document is marked DIRTY 1 s after the event arrives; dirty documents are checked live at answer time, so the
- *   window after the event lands is ≈ 1 s, and the rest of the lag is the source's own notification delay.
- *   Bound for a single item: a permissions-only delta poll every 10 minutes per site or drive (3,000 → 5 calls a
- *   second) + processing 5.1 s → 605 s ≈ 10 min. Container change: + subtree job ≤ 90 s → ≤ 11.6 min.
- *   Membership: Entra group changes polled by delta every 5 min (Graph lists user and group notification latency as
- *   "Unknown", dossier F38) → ≤ 5 min; Slack member_left_channel events (best effort, retried to 5 min, dossier F41) +
- *   a 10-minute reconcile. Offboarding: the account is disabled in the IdP; the gateway refuses the next turn.
- *   Live-checked (late-bound) at answer time: helpdesk cases, documents labelled Confidential or above, dirty
- *   documents; email and Slack DMs are federated and never copied, so their lag is the source's.
+ * Per-connector rate-limit budgets (calls or units a day) and the bound each gives (v3).
+ *
+ * Pre-emptive live checks: at most 4 a sensitive answer (the 4 highest-ranked sensitive candidates in the personal
+ * ranker's top 20): 2,814 sensitive answers a weekday × 4 = 11,256 checks, split SharePoint 35%, helpdesk 55%,
+ * Atlassian 10% (illustrative).
+ *
+ * SharePoint and OneDrive (one Graph app; 2,400,000 RU a day, 2,500 a minute, F101). 3,000 sites + 5,000 OneDrives =
+ * 8,000 drives with webhook subscriptions (whether app-only subscriptions work on OneDrives under Sites.Selected is a
+ * spike; if not, OneDrives fall back to the hourly poll, already budgeted).
+ *   Event deltas (1 RU): 24,000 content + 15,000 ACL + 200 container + label changes = 39,200.
+ *   Permission fetches (5 RU): (15,000 + 200) × 5 = 76,000 (inherited ACLs derived in the ACL store).
+ *   Downloads (1 RU): 24,000 (deletes ride on the content deltas).
+ *   P1 poll: 300 drives every 10 min: 43,200. P2 poll: 7,700 drives hourly: 184,800.
+ *   Site-group membership (SharePoint groups that hold users directly): one REST call a site expanding its groups,
+ *   ≈ 4 RU (illustrative: REST has no fixed cost and usually costs more than Graph): P1 300 sites every 10 min + the
+ *   other 2,700 hourly = 43,200 + 64,800 = 108,000 calls × 4 = 432,000 RU.
+ *   Live checks: 11,256 × 35% = 3,940 × 5 = 19,698. Drift audit: 5,000 × 5 = 25,000.
+ *   Planned ≈ 843,900 RU = 35% of the day; reserve 650,000 (27%) for a 410 re-enumeration of every drive:
+ *   2.4M ÷ 200 a page × 2 RU + 5% uniquely permissioned × 5 RU = 24,000 + 600,000 = 624,000 (≈ 7 h at 1,500 RU a minute).
+ *   Backfill (same 5%): 2.4M downloads + 24,000 + 600,000 = 3.02M RU ≈ 1.3 days at the daily cap.
+ * Atlassian (Tier 2 Enterprise 150,000 + 30 × 2,300 licensed users (2,000 office + 300 warehouse shift leads) = 219,000
+ * points an hour, F104; 1 point a request + 2 per identity or permission object):
+ *   Hourly permission reconcile: 400 space sets + 300 project schemes × (1 + 2 × 20 entries) = 28,700.
+ *   Hourly group and role reconcile: 150 Confluence-local groups × (1 + 2 × 40 members) = 12,150; 300 projects × 3 roles ×
+ *   (1 + 2 × 15 members) = 27,900. Groups synced from Entra by SCIM ride the Entra path instead.
+ *   Events and fetches ≈ 15,000 points a day (≈ 625 an hour); live checks 1,126 a day × 3 points (≈ 340 an hour at peak).
+ *   ≈ 69,700 points an hour = 32% of the quota. Backfill 300,000 × 5 + 900,000 × 2 = 3.3M points ≈ 18.8 h at 80%.
+ * Helpdesk (700 requests a minute, F105): live checks 11,256 × 55% = 6,191 a weekday; ≈ 0.3 a second at peak.
+ * GitHub (15,000 an hour, F106): teams provisioned from Entra (EMU) ride the Entra path; webhooks + hourly reconcile of
+ *   500 repositories' collaborators = 500 an hour.
+ * Slack (federated, F103): ≈ 25% of answers search Slack; a per-user 5-minute cache of Slack results inside a conversation
+ *   (illustrative 15% hit rate) → peak mean 0.757 × 65% × 25% × 85% × 60 ≈ 6.3 calls a minute against a documented team
+ *   floor of "10+"; by Poisson ≈ 5.5% of peak minutes exceed 10 (≈ 13% without the cache).
+ */
+export const CONNECTORS = (() => {
+  const answersPerWeekday = COMPANY.weekdayTurns * 0.65; // 9,380
+  const sensitiveAnswers = answersPerWeekday * 0.3; // 2,814
+  const preemptiveCap = 4;
+  const liveChecks = sensitiveAnswers * preemptiveCap; // 11,256
+  const share = { sharepoint: 0.35, helpdesk: 0.55, atlassian: 0.1 } as const;
+  const spBudgetDay = 2_400_000;
+  const uniqueShare = 0.05; // one value for backfill and re-enumeration
+  const siteGroupCalls = 300 * 144 + 2_700 * 24; // 108,000
+  const sp = {
+    eventDeltas: 24_000 + 15_000 + 200,
+    permissionFetches: (15_000 + 200) * 5,
+    downloads: 24_000,
+    p1Poll: 300 * 144,
+    p2Poll: 7_700 * 24,
+    siteGroups: siteGroupCalls * 4,
+    liveChecks: Math.round(liveChecks * share.sharepoint) * 5,
+    driftAudit: 5_000 * 5,
+  };
+  const spPlanned = sum(Object.values(sp)); // ≈ 843,900
+  const spReserve = 650_000;
+  const reenumerate = (2_400_000 / 200) * 2 + 2_400_000 * uniqueShare * 5; // 624,000
+  const spBackfill = 2_400_000 + (2_400_000 / 200) * 2 + 2_400_000 * uniqueShare * 5; // 3,024,000
+  const atlassianUsers = COMPANY.knowledgeWorkers + 300;
+  const atlassianHourly = 150_000 + 30 * atlassianUsers; // 219,000
+  const at = {
+    permissionReconcile: (400 + 300) * (1 + 2 * 20), // 28,700
+    localGroups: 150 * (1 + 2 * 40), // 12,150
+    projectRoles: 300 * 3 * (1 + 2 * 15), // 27,900
+    eventsAndFetches: 15_000 / 24, // 625
+    liveChecksPeakHour: 340,
+  };
+  const atlassianPerHour = sum(Object.values(at)); // ≈ 69,715
+  const atlassianBackfill = 300_000 * (2 + 3) + 900_000 * 2; // 3,300,000
+  const slackCacheHit = 0.15;
+  const slackLambda = COMPANY.peakPerSecond * 0.65 * 0.25 * (1 - slackCacheHit) * 60; // ≈ 6.27
+  const slackLambdaNoCache = COMPANY.peakPerSecond * 0.65 * 0.25 * 60; // ≈ 7.38
+  const poissonAbove = (lambda: number, k: number) => {
+    let p = Math.exp(-lambda);
+    let cdf = p;
+    for (let i = 1; i <= k; i++) {
+      p = (p * lambda) / i;
+      cdf += p;
+    }
+    return 1 - cdf;
+  };
+  return {
+    answersPerWeekday,
+    sensitiveAnswers,
+    preemptiveCap,
+    liveChecks,
+    share,
+    sharepoint: {
+      budgetDay: spBudgetDay,
+      budgetMinute: 2_500,
+      drives: 8_000,
+      siteGroupCalls,
+      lines: sp,
+      planned: spPlanned,
+      plannedShare: spPlanned / spBudgetDay, // ≈ 0.35
+      reserve: spReserve,
+      reserveShare: spReserve / spBudgetDay, // 0.27
+      reenumerate,
+      reenumerateHours: reenumerate / 1_500 / 60, // 6.9
+      backfill: spBackfill,
+      backfillDays: spBackfill / spBudgetDay, // 1.26
+      v1PollShareAt8000: ((8_000 / 600) * 86_400 * 2) / spBudgetDay, // 0.96
+    },
+    atlassian: {
+      users: atlassianUsers,
+      hourly: atlassianHourly,
+      lines: at,
+      perHour: atlassianPerHour,
+      share: atlassianPerHour / atlassianHourly, // ≈ 0.32
+      backfill: atlassianBackfill,
+      backfillHours: atlassianBackfill / (0.8 * atlassianHourly), // 18.8
+    },
+    helpdesk: { perMinute: 700, liveChecksPerWeekday: Math.round(liveChecks * share.helpdesk) }, // 6,191
+    github: { perHour: 15_000, reconcilePerHour: 500 },
+    slack: {
+      teamFloorPerMinute: 10,
+      userPerMinute: 10,
+      cacheHit: slackCacheHit,
+      peakPerMinute: slackLambda,
+      peakPerMinuteNoCache: slackLambdaNoCache,
+      overflowMinutes: poissonAbove(slackLambda, 10), // ≈ 0.04
+      overflowMinutesNoCache: poissonAbove(slackLambdaNoCache, 10), // ≈ 0.13
+    },
+  };
+})();
+
+/**
+ * Staleness bound per path, in minutes ("bound" = guaranteed by a poll or reconcile; "throttled" = one missed cycle;
+ * a connector past "dropOut" leaves the results). Event path p50 (SharePoint document ACL): 30 + 1 + 2 + 0.1 + 1 + 1 =
+ * 35.1 s; the document is dirty (live-checked) 1 s after the event.
  */
 export const PROPAGATION = (() => {
   const event = [
@@ -278,76 +402,128 @@ export const PROPAGATION = (() => {
     { id: "refresh", label: "Index refresh", s: 1 },
   ] as const;
   const eventP50 = sum(event.map((e) => e.s)); // 35.1
-  const processing = eventP50 - event[0].s; // 5.1
-  const pollMinutes = 10;
-  const pollSites = 3_000;
-  const singleItemBoundS = pollMinutes * 60 + processing; // 605.1
-  const containerBoundS = singleItemBoundS + PRINCIPALS.largestSiteSeconds; // 695.1
+  const p = (eventP50 - 30) / 60; // 0.085 min of processing
+  const perSource = [
+    { id: "sp-doc-p1", label: "SharePoint document ACL, P1 sites (300)", bound: 10 + p, throttled: 20, dropOut: 30 },
+    {
+      id: "sp-doc-p2",
+      label: "SharePoint and OneDrive document ACL, other (7,700)",
+      bound: 60 + p,
+      throttled: 120,
+      dropOut: 150,
+    },
+    {
+      id: "sp-groups-p1",
+      label: "SharePoint site-group membership, P1 sites",
+      bound: 10 + p,
+      throttled: 20,
+      dropOut: 30,
+    },
+    {
+      id: "sp-groups-p2",
+      label: "SharePoint site-group membership, other sites",
+      bound: 60 + p,
+      throttled: 120,
+      dropOut: 150,
+    },
+    {
+      id: "entra",
+      label: "Entra groups (incl. groups SCIM-synced to Atlassian, GitHub EMU teams)",
+      bound: 5,
+      throttled: 10,
+      dropOut: 30,
+    },
+    { id: "atlassian-acl", label: "Confluence and Jira permissions", bound: 60, throttled: 120, dropOut: 150 },
+    {
+      id: "atlassian-groups",
+      label: "Confluence-local groups, Jira project roles",
+      bound: 60,
+      throttled: 120,
+      dropOut: 150,
+    },
+    { id: "github", label: "GitHub collaborators", bound: 60, throttled: 120, dropOut: 150 },
+    {
+      id: "live",
+      label: "Live-checked: helpdesk, Confidential, restricted pages, issue security, dirty",
+      bound: 0,
+      throttled: 0,
+      dropOut: 0,
+    },
+    { id: "federated", label: "Federated: Slack, mail", bound: 0, throttled: 0, dropOut: 0 },
+  ] as const;
   return {
     event,
     eventP50,
-    processing,
     dirtyAfterS: 1,
-    pollMinutes,
-    pollSites,
-    pollCallsPerSecond: pollSites / (pollMinutes * 60), // 5
-    singleItemBoundS,
-    singleItemBoundMin: singleItemBoundS / 60, // 10.1
-    containerBoundMin: containerBoundS / 60, // 11.6
-    membershipPollMinutes: 5,
-    slackReconcileMinutes: 10,
-    targetP50S: 60,
-    targetMaxMin: 15,
-    graphNotifyMaxHours: 6, // Microsoft's stated maximum for driveItem notifications (dossier F38)
+    perSource,
+    membershipEntraP50Min: 2.5, // uniform over the 5-minute Entra delta poll
+    disableBoundMin: 5, // account status via the same poll; Microsoft resources also enforce CAE (≤ 15 min, F109)
+    containerExtraS: PRINCIPALS.largestSiteSeconds, // + 90 s of index patches
+    graphNotifyMaxHours: 6,
+  };
+})();
+
+/**
+ * Content freshness. Changed chunks a day: SharePoint 24,000 × 9 + Confluence 1,500 × 5 + Jira 6,000 × 2 + helpdesk
+ * (16,000 new + 16,000 updated) × 3 + GitHub 2,000 × 3 = 216,000 + 7,500 + 12,000 + 96,000 + 6,000 = 337,500 →
+ * 135M tokens = 0.75 GPU-hours. Event path p50: notify 30 + fetch 2 + parse 1 + embed batch wait 5 + embed 1 + index 1
+ * = 40 s; bound = the content poll (P1 10 min, else 60 min).
+ */
+export const CONTENT = (() => {
+  const changedChunks = 24_000 * 9 + 1_500 * 5 + 6_000 * 2 + 32_000 * 3 + 2_000 * 3; // 337,500
+  const path = [30, 2, 1, 5, 1, 1];
+  return {
+    changedChunks,
+    tokens: changedChunks * CORPUS.chunkTokens, // 135M
+    gpuHours: (changedChunks * CORPUS.chunkTokens) / 50_000 / 3_600, // 0.75
+    eventP50S: sum(path), // 40
+    boundMin: 60,
   };
 })();
 
 // ── Retrieval ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Hybrid retrieval with the permission filter inside both searches, then a personal ranker and a cross-encoder.
- *   100 BM25 + 100 ANN = 200 → 160 unique → personal ranker (gradient-boosted: RRF rank, BM25, vector score, recency,
- *   30-day views, author in the asker's team or frequent collaborators, department affinity, source prior) → 50 →
- *   cross-encoder → 8 chunks (≤ 3 per document).
- *   Cross-encoder input 50 × (400 + 30) = 21,500 tokens at 200,000 tokens a second a GPU = 107.5 ms → a 120 ms stage.
+ * 100 BM25 + 100 ANN (both filtered) → 160 unique → personal ranker → 50 → cross-encoder → 8 (≤ 3 a document).
+ * Cross-encoder 50 × 430 = 21,500 tokens at 200,000 a second (illustrative GPU class) = 107.5 ms → 120 ms stage.
+ * Live checks start when the personal ranker finishes, on sensitive candidates in its top 20 (≤ 8 a turn); the answer
+ * waits only for the checks on the chosen 8 (≈ 3 sensitive). Deadline 500 ms from the start.
  */
 export const RETRIEVAL = (() => {
-  const funnel = [
-    { id: "retrieved", label: "Retrieved (BM25 + ANN, filtered)", chunks: 200 },
-    { id: "unique", label: "Unique", chunks: 160 },
-    { id: "personal", label: "Personal ranker", chunks: 50 },
-    { id: "cross", label: "Cross-encoder", chunks: 8 },
-  ] as const;
-  const rerankTokens = 50 * (CORPUS.chunkTokens + 30); // 21,500
-  const encoderTokensPerSecond = 200_000;
+  const live = { p50: 120, p95: 400, deadline: 500, chosen: 3 };
+  const pDrop = tailAbove(live.p50, live.p95, live.deadline); // 0.0128 a call
   return {
-    funnel,
-    rerankTokens,
-    encoderTokensPerSecond,
-    rerankComputeMs: (rerankTokens / encoderTokensPerSecond) * 1_000, // 107.5
+    funnel: [
+      { id: "retrieved", label: "Retrieved (BM25 + ANN, filtered)", chunks: 200 },
+      { id: "unique", label: "Unique", chunks: 160 },
+      { id: "personal", label: "Personal ranker", chunks: 50 },
+      { id: "cross", label: "Cross-encoder", chunks: 8 },
+    ] as const,
+    rerankTokens: 50 * (CORPUS.chunkTokens + 30), // 21,500
     chunksInPrompt: 8,
-    maxPerDocument: 3,
     chunkTokens: CORPUS.chunkTokens,
     headerTokens: 40,
-    federatedShareOfAnswers: 0.08, // the router predicts a mailbox or DM question
-    sensitiveShareOfAnswers: 0.3, // ≥ 1 chunk from a live-checked source in the top 8
-    sensitiveDocsWhenPresent: 3,
+    sensitiveShareOfAnswers: 0.3,
+    federatedShareOfAnswers: 0.3, // Slack ≈ 25%, mail ≈ 8%, some both
+    live,
+    pDropPerCall: pDrop,
+    pDropAnswer: 1 - (1 - pDrop) ** live.chosen, // 0.038
+    preemptiveCap: 4, // pre-emptive live checks a sensitive answer
+    maxLiveChecksPerTurn: 8, // including dirty documents
+    reenumDropAnswer: 1 - (1 - pDrop) ** 4, // ≈ 5.0%: degraded mode while a drive re-enumerates (capped at 4)
   };
 })();
 
 // ── Tools and context ────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Tool catalogue: 106 tools over nine systems, ≈ 600 tokens a definition (illustrative; Anthropic's example is 58 tools
- * ≈ 55K tokens, ≈ 950 a tool, dossier F50).
- *   All loaded: 106 × 600 = 63,600 + core 2,000 + instructions 1,200 = 66,800-token prefix.
- *   Bundle (the router picks one connector's tools): average 106 ÷ 9 = 11.8 tools × 600 = 7,067 → prefix 10,267.
- *   Tool search (agent path): instructions 1,200 + core 2,000 + the search tool 500 = 3,700; each search loads 3 tools
- *   × 600 = 1,800 tokens inline; 2 searches a task → 7,300 tokens of tool context vs 66,800 (89% fewer).
- *   Anthropic's example: ≈ 77K → ≈ 8.7K before any work (≈ 89%; stated "85%"), ONE example setup (dossier F51).
- *   Loading everything is cheap in dollars once cached (66,800 × 0.10 per million = 0.0067 USD a call) but degrades tool
- *   choice past 30–50 tools (vendor guidance, dossier F52), and per-user tool lists would change the cached prefix
- *   (tools come first in the cache order, dossier F61).
+ * 106 tools over nine systems, ≈ 600 tokens a definition (illustrative; Anthropic's example ≈ 950, F50).
+ *   Stable prefix = instructions 1,200 + tool system prompt 286 + core tools 2,000 = 3,486.
+ *   All loaded: 3,486 + 63,600 = 67,086. One bundle: 3,486 + 106 ÷ 9 × 600 (7,067) = 10,553.
+ *   Tool search (agent): 3,486 + search tool 500 = 3,986; + 1,800 a search → 7,586 for a two-search task (89% fewer).
+ *   Bundles are built per ENTITLEMENT CLASS (support 7 connectors, warehouse 5, finance 7, engineering 6, other 6 = 31
+ *   variants), never per user, so prefixes stay shared and a user never sees a tool outside their class; the gateway
+ *   refuses the rest (an AP clerk can see a controller's ERP tool and be refused).
  */
 export const TOOLS = (() => {
   const connectors = [
@@ -363,71 +539,54 @@ export const TOOLS = (() => {
   ] as const;
   const count = sum(connectors.map((c) => c.tools)); // 106
   const tokensPerTool = 600;
-  const instructions = 1_200;
-  const core = 2_000; // search_knowledge, fetch_document, remember / forget, my_profile (4 × 500)
-  const searchTool = 500;
+  const stable = 1_200 + PRICES.toolSystemPrompt + 2_000; // 3,486
+  const bundleTokens = Math.round((count / connectors.length) * tokensPerTool); // 7,067
+  const allLoaded = stable + count * tokensPerTool; // 67,086
+  const bundlePrefix = stable + bundleTokens; // 10,553
+  const searchPrefix = stable + 500; // 3,986
   const loadedPerSearch = 3 * tokensPerTool; // 1,800
-  const allLoaded = instructions + core + count * tokensPerTool; // 66,800
-  const bundleTools = count / connectors.length; // 11.78
-  const bundlePrefix = instructions + core + Math.round(bundleTools * tokensPerTool); // 10,267
-  const searchPrefix = instructions + core + searchTool; // 3,700
-  const searchTask = searchPrefix + 2 * loadedPerSearch; // 7,300
+  const searchTask = searchPrefix + 2 * loadedPerSearch; // 7,586
+  const variants = 7 + 5 + 7 + 6 + 6; // 31
   return {
     connectors,
     count,
     tokensPerTool,
-    instructions,
-    core,
-    searchTool,
-    loadedPerSearch,
+    stable,
+    bundleTokens,
     allLoaded,
-    bundleTools,
     bundlePrefix,
     searchPrefix,
+    loadedPerSearch,
     searchTask,
-    searchSaving: 1 - searchTask / allLoaded, // 0.891
-    bundleSaving: 1 - bundlePrefix / allLoaded, // 0.846
-    allLoadedCachedUsd: usd(allLoaded, PRICES.mid.cached), // 0.00668
-    accuracyDegradesAbove: "30–50 tools",
-    anthropicExample: { tools: 58, defsTokens: 55_000, before: 77_000, after: 8_700, stated: 0.85 },
-    codeExecutionExample: { before: 150_000, after: 2_000, stated: 0.987 }, // one example, scenario not named (dossier F55)
+    searchSaving: 1 - searchTask / allLoaded, // 0.887
+    variants,
+    allLoadedCachedUsd: usd(allLoaded, PRICES.mid.cached), // 0.0067
+    anthropicExample: { tools: 58, defsTokens: 55_000, before: 77_000, after: 8_700, stated: 0.85 }, // one example (F51)
+    codeExecutionExample: { before: 150_000, after: 2_000, stated: 0.987 }, // one unnamed example (F55)
   };
 })();
 
-/**
- * The answer call's context (knowledge turn). 3,200 stable tokens (instructions + core tools) are cached; the rest
- * changes every turn. 1,200 + 2,000 + 200 + 600 + 70 + 8 × 40 + 8 × 400 = 7,590 tokens; output 250.
- */
+/** The answer call's context: 3,486 stable + 4,390 changing = 7,876 tokens; output 250. */
 export const CONTEXT = (() => {
   const blocks = [
-    { id: "instructions", label: "Instructions and citation rules", tokens: TOOLS.instructions, stable: true },
-    { id: "core-tools", label: "Core tool definitions", tokens: TOOLS.core, stable: true },
+    { id: "instructions", label: "Instructions and citation rules", tokens: 1_200, stable: true },
+    { id: "tool-prompt", label: "Tool-use system prompt", tokens: PRICES.toolSystemPrompt, stable: true },
+    { id: "core-tools", label: "Core tool definitions", tokens: 2_000, stable: true },
     { id: "memory", label: "Memory (≤ 5 items)", tokens: 200, stable: false },
     { id: "conversation", label: "Summary + last 2 turns", tokens: 600, stable: false },
     { id: "question", label: "Question and router notes", tokens: 70, stable: false },
-    {
-      id: "headers",
-      label: "8 source headers",
-      tokens: RETRIEVAL.chunksInPrompt * RETRIEVAL.headerTokens,
-      stable: false,
-    },
-    {
-      id: "chunks",
-      label: "8 permitted chunks",
-      tokens: RETRIEVAL.chunksInPrompt * RETRIEVAL.chunkTokens,
-      stable: false,
-    },
+    { id: "headers", label: "8 source headers", tokens: 8 * 40, stable: false },
+    { id: "chunks", label: "8 permitted chunks", tokens: 8 * CORPUS.chunkTokens, stable: false },
   ] as const;
-  const total = sum(blocks.map((b) => b.tokens)); // 7,590
-  const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 3,200
-  const turnState = 200 + 600 + 70; // memory + conversation + question = 870, shared by every model path
+  const total = sum(blocks.map((b) => b.tokens)); // 7,876
+  const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 3,486
   return {
     blocks,
     total,
     stable,
     changing: total - stable, // 4,390
-    turnState,
-    evidence: RETRIEVAL.chunksInPrompt * (RETRIEVAL.chunkTokens + RETRIEVAL.headerTokens), // 3,520
+    turnState: 200 + 600 + 70, // 870
+    evidence: 8 * (CORPUS.chunkTokens + 40), // 3,520
     answerOut: 250,
     toolCallOut: 60,
     writeArgsOut: 120,
@@ -438,9 +597,11 @@ export const CONTEXT = (() => {
 
 // ── Cost per turn ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The agent task: six model calls, two tool searches, three tool calls (illustrative). */
+/**
+ * Agent: six calls. Call i reads its prefix from the cache, writes its NEW tokens (the previous call's output and the
+ * tool result, never cached before) at the 5-minute write price, and pays its output.
+ */
 export const AGENT = (() => {
-  // Output of each call, and what comes back before the next call (a tool search loads 1,800 tokens of definitions).
   const steps = [
     { kind: "search", out: 40, result: TOOLS.loadedPerSearch },
     { kind: "tool", out: 60, result: CONTEXT.toolResult },
@@ -449,44 +610,32 @@ export const AGENT = (() => {
     { kind: "tool", out: 60, result: CONTEXT.toolResult },
     { kind: "answer", out: 300, result: 0 },
   ] as const;
-  // Call i reads everything before it from the cache, writes its new tokens to the cache, and pays its output.
-  let context = TOOLS.searchPrefix; // 3,700 cached
-  let fresh: number = CONTEXT.turnState; // 870 new tokens on the first call
+  let cached = TOOLS.searchPrefix; // 3,986
+  let fresh: number = CONTEXT.turnState; // 870
   const calls = steps.map((s) => {
-    const cost =
-      usd(context, PRICES.mid.cached) + usd(fresh, PRICES.mid.cacheWrite5m) + usd(s.out, PRICES.mid.output);
-    const row = { kind: s.kind, cachedIn: context, newIn: fresh, out: s.out, cost };
-    context += fresh + s.out;
-    fresh = s.result;
+    const cost = usd(cached, PRICES.mid.cached) + usd(fresh, PRICES.mid.cacheWrite5m) + usd(s.out, PRICES.mid.output);
+    const row = { kind: s.kind, cachedIn: cached, newIn: fresh, out: s.out, cost };
+    cached += fresh;
+    fresh = s.out + s.result; // review item 32: output tokens are new input next call
     return row;
   });
-  const cost = sum(calls.map((c) => c.cost)); // ≈ 0.0268
   return {
     steps,
     calls,
-    cost,
-    finalContext: context, // 11,130
-    toolSearches: steps.filter((s) => s.kind === "search").length, // 2
-    toolCalls: steps.filter((s) => s.kind === "tool").length, // 3
+    cost: sum(calls.map((c) => c.cost)), // ≈ 0.0276
+    toolSearches: 2,
+    toolCalls: 3,
     caps: { calls: 10, contextTokens: 60_000, usd: 0.15, seconds: 60 },
   };
 })();
 
 /**
- * Cost of each turn type, USD.
- *   Router (small): 800 cached + 300 in + 40 out = 0.000008 + 0.00003 + 0.00002 = 0.000058.
- *   Answer (mid): 3,200 × 0.10 + 4,390 × 2.00 + 250 × 10.00, per million = 0.00032 + 0.00878 + 0.0025 = 0.0116.
- *   Grounding check (small, after the answer): (300 + 3,520 + 250) × 0.10 + 40 × 0.50 = 0.000407 + 0.00002 = 0.000427.
- *   Lookup: call 1 = 10,267 × 0.10 + 870 × 2.50 (written: call 2 reads it) + 60 × 10 = 0.00380;
- *           call 2 = 11,197 × 0.10 + 800 × 2.00 + 200 × 10 = 0.00472 → 0.00852.
- *   Write, to the confirmation card: 10,267 × 0.10 + 870 × 2.00 + 120 × 10 = 0.00397; executing is code, the reply a
- *   template.
- *   Agent: 0.0268 (AGENT) + grounding check.
- *   Other (small model: chit-chat, help, "forget that"): 1,500 × 0.10 + 150 × 0.50 = 0.000225.
- *   Memory extraction (small, once a conversation): 2,000 × 0.10 + 60 × 0.50 = 0.00023 ÷ 3 turns = 0.0000767 a turn.
- *   Mix: answer 65%, lookup 15%, write 8%, agent 5%, other 7%.
- *   Blended = 0.000058 + 0.0000767 + 0.65 × 0.012027 + 0.15 × 0.00852 + 0.08 × 0.00397 + 0.05 × 0.027233 + 0.07 ×
- *   0.000225 ≈ 0.0109 USD a turn.
+ * Per turn type, USD.
+ *   Router 800 × 0.01 + 300 × 0.10 + 40 × 0.50 per million = 0.000058.
+ *   Answer 3,486 × 0.10 + 4,390 × 2.00 + 250 × 10.00 = 0.000349 + 0.00878 + 0.0025 = 0.01163; + check 0.000427.
+ *   Lookup: call 1 10,553 × 0.10 + 870 × 2.50 + 60 × 10 = 0.00383; call 2 11,423 × 0.10 + (60 + 800) × 2.00 + 200 × 10
+ *   = 0.00486 → 0.00869.
+ *   Write: 10,553 × 0.10 + 870 × 2.00 + 120 × 10 = 0.00400. Agent 0.0276 + check 0.000427 = 0.0280. Other 0.000225. Memory 0.000077 a turn.
  */
 export const COST = (() => {
   const router = usd(800, PRICES.small.cached) + usd(300, PRICES.small.input) + usd(40, PRICES.small.output);
@@ -501,26 +650,18 @@ export const COST = (() => {
     usd(CONTEXT.turnState, PRICES.mid.cacheWrite5m) +
     usd(CONTEXT.toolCallOut, PRICES.mid.output);
   const lookupCall2 =
-    usd(TOOLS.bundlePrefix + CONTEXT.turnState + CONTEXT.toolCallOut, PRICES.mid.cached) +
-    usd(CONTEXT.toolResult, PRICES.mid.input) +
+    usd(TOOLS.bundlePrefix + CONTEXT.turnState, PRICES.mid.cached) +
+    usd(CONTEXT.toolCallOut + CONTEXT.toolResult, PRICES.mid.input) +
     usd(CONTEXT.lookupReplyOut, PRICES.mid.output);
   const lookup = lookupCall1 + lookupCall2;
   const write =
     usd(TOOLS.bundlePrefix, PRICES.mid.cached) +
     usd(CONTEXT.turnState, PRICES.mid.input) +
     usd(CONTEXT.writeArgsOut, PRICES.mid.output);
-  const agent = AGENT.cost;
   const other = usd(1_500, PRICES.small.input) + usd(150, PRICES.small.output);
-  const memoryPerConversation = usd(2_000, PRICES.small.input) + usd(60, PRICES.small.output);
-  const memoryPerTurn = memoryPerConversation / COMPANY.turnsPerConversation;
+  const memoryPerTurn = (usd(2_000, PRICES.small.input) + usd(60, PRICES.small.output)) / COMPANY.turnsPerConversation;
   const mix = { answer: 0.65, lookup: 0.15, write: 0.08, agent: 0.05, other: 0.07 } as const;
-  const byType = {
-    answer: answer + groundingCheck,
-    lookup,
-    write,
-    agent: agent + groundingCheck,
-    other,
-  };
+  const byType = { answer: answer + groundingCheck, lookup, write, agent: AGENT.cost + groundingCheck, other };
   const blended =
     router +
     memoryPerTurn +
@@ -528,15 +669,12 @@ export const COST = (() => {
     mix.lookup * byType.lookup +
     mix.write * byType.write +
     mix.agent * byType.agent +
-    mix.other * byType.other; // ≈ 0.0109
-  // Prefix cache writes, upper bound: 9 bundle prefixes + the answer and agent prefixes, each rewritten once an hour
-  // on the 1-hour TTL: 24 × (9 × 10,267 + 3,200 + 3,700) × 4.00 per million ≈ 9.5 USD a day.
-  const prefixWritesPerDay =
-    24 * usd(9 * TOOLS.bundlePrefix + CONTEXT.stable + TOOLS.searchPrefix, PRICES.mid.cacheWrite1h);
-  const perDay = COMPANY.turnsPerDay * blended + prefixWritesPerDay; // ≈ 206
-  // Without bundles, loading all 106 tools on lookup and write turns: + (66,800 − 10,267) cached tokens a call.
-  const allToolsExtraPerTurn =
-    (2 * mix.lookup + mix.write) * usd(TOOLS.allLoaded - TOOLS.bundlePrefix, PRICES.mid.cached);
+    mix.other * byType.other;
+  // Prefix writes, upper bound: 31 bundle variants + the answer and agent prefixes, each rewritten once an hour (1-hour
+  // TTL) on 30 days: 24 × (31 × 10,553 + 3,486 + 3,986) × 4.00 per million × 30.
+  const prefixWritesPerMonth =
+    24 * 30 * usd(TOOLS.variants * TOOLS.bundlePrefix + CONTEXT.stable + TOOLS.searchPrefix, PRICES.mid.cacheWrite1h);
+  const perMonth = COMPANY.turnsPerMonth * blended + prefixWritesPerMonth;
   return {
     router,
     answer,
@@ -545,98 +683,89 @@ export const COST = (() => {
     lookupCall2,
     lookup,
     write,
-    agent,
     other,
-    memoryPerConversation,
     memoryPerTurn,
     mix,
     byType,
-    blended,
-    prefixWritesPerDay,
-    perDay,
-    perMonth: perDay * COMPANY.daysPerMonth, // ≈ 6,190
-    perSeatMonth: (perDay * COMPANY.daysPerMonth) / COMPANY.seats, // ≈ 1.24
-    allToolsExtraPerTurn, // ≈ 0.0021 a turn on average
-    doubledPrices: 2 * blended, // ≈ 0.022 a turn if model prices double
+    blended, // ≈ 0.0110
+    prefixWritesPerMonth, // ≈ 964
+    perMonth, // ≈ 4,800
+    perSeatMonth: perMonth / COMPANY.seats, // ≈ 0.96
+    uncachedAnswer: usd(CONTEXT.total, PRICES.mid.input) + usd(CONTEXT.answerOut, PRICES.mid.output),
+    midRouter: usd(800, PRICES.mid.cached) + usd(300, PRICES.mid.input) + usd(40, PRICES.mid.output),
+    allToolsExtraPerTurn: (2 * mix.lookup + mix.write) * usd(TOOLS.allLoaded - TOOLS.bundlePrefix, PRICES.mid.cached),
   };
 })();
 
 /**
- * Infrastructure, team and the all-in cost (illustrative).
- *   Search: 8 nodes × 1.20 × 24 = 230.4 USD a day. GPUs: 2 (one per zone: embedder, cross-encoder, injection classifier)
- *   × 2.50 × 24 = 120. Connectors 6 workers × 0.40 × 24 = 57.6; PostgreSQL (ACL store, principals, memory, audit) 40;
- *   Redis 15; ClickHouse traces 30; object storage 1.5; evaluation and canaries 10 → 504.5 USD a day.
- *   GPU load check: re-embedding ≈ 330,000 changed chunks × 400 = 132M tokens a day at 50,000 a second = 0.73 GPU-hours;
- *   reranking at peak 1.05 turns × 65% answers ≈ 0.68 a second × 21,500 = 14,700 tokens a second = 0.07 of a GPU.
- *   Two GPUs are for availability, not load.
- *   Team: 5 engineers × 400,000 = 2.0M USD a year = 166,667 a month.
- *   All-in a month: model 6,190 + infra 15,135 + team 166,667 ≈ 188,000 → ≈ 37.6 USD a seat; ≈ 0.35 USD a turn.
+ * Infrastructure (illustrative): search 8 × 1.20 × 24 = 230.4 a day; GPUs 2 × 2.50 × 24 = 120; connector workers 57.6;
+ * PostgreSQL (ACL store, principals, outbox, memory, audit) 40; Redis 15; ClickHouse 30; objects 1.5; eval 10
+ * → 504.5 a day, 15,135 a month.
+ * Team to BUILD: 9 engineers (connectors and identity 3, platform and permissions 2, evaluation and quality 2, security
+ * and SRE 2) × 400,000 ÷ 12 = 300,000 a month.
  */
 export const PLATFORM = (() => {
-  const lines = [
-    { id: "search", label: "Search cluster (8 nodes)", perDay: INDEX.nodes * PRICES.searchNodeHour * 24 },
-    { id: "gpus", label: "GPUs (2, one per zone)", perDay: 2 * PRICES.gpuHour * 24 },
-    { id: "connectors", label: "Connector workers (6)", perDay: 6 * 0.4 * 24 },
-    { id: "postgres", label: "PostgreSQL: ACLs, principals, memory, audit", perDay: 40 },
-    { id: "redis", label: "Redis: principal and token caches", perDay: 15 },
-    { id: "traces", label: "ClickHouse traces", perDay: 30 },
-    { id: "objects", label: "Object storage (originals)", perDay: 1.5 },
-    { id: "eval", label: "Evaluation and canaries", perDay: 10 },
-  ] as const;
-  const infraPerDay = sum(lines.map((l) => l.perDay)); // 504.5
-  const infraPerMonth = infraPerDay * COMPANY.daysPerMonth; // 15,135
-  const engineers = 5;
-  const teamPerMonth = (engineers * PRICES.engineerYear) / 12; // 166,667
-  const modelPerMonth = COST.perMonth;
-  const allInPerMonth = modelPerMonth + infraPerMonth + teamPerMonth; // ≈ 187,990
-  const reembedTokensPerDay = 330_000 * CORPUS.chunkTokens; // 132M
+  const infraPerDay = 230.4 + 120 + 57.6 + 40 + 15 + 30 + 1.5 + 10; // 504.5
+  const infraPerMonth = infraPerDay * 30; // 15,135
+  const engineers = 9;
+  const teamPerMonth = (engineers * PRICES.engineerYear) / 12; // 300,000
+  const allInPerMonth = COST.perMonth + infraPerMonth + teamPerMonth;
   return {
-    lines,
     infraPerDay,
     infraPerMonth,
     engineers,
     teamPerMonth,
-    modelPerMonth,
-    allInPerMonth,
-    perSeatMonth: allInPerMonth / COMPANY.seats, // ≈ 37.6
-    perTurn: allInPerMonth / COMPANY.turnsPerMonth, // ≈ 0.348
-    modelShare: modelPerMonth / allInPerMonth, // ≈ 3.3%
-    teamShare: teamPerMonth / allInPerMonth, // ≈ 88.7%
-    reembedTokensPerDay,
-    reembedGpuHours: reembedTokensPerDay / 50_000 / 3_600, // 0.73
+    allInPerMonth, // ≈ 319,900
+    perSeatMonth: allInPerMonth / COMPANY.seats, // ≈ 64.0
+    perTurn: allInPerMonth / COMPANY.turnsPerMonth, // ≈ 0.92
+    modelShare: COST.perMonth / allInPerMonth, // ≈ 1.5%
+    teamShare: teamPerMonth / allInPerMonth, // ≈ 94%
   };
 })();
 
 /**
- * Build or buy. Buying a seat product at 30 USD still needs 2 engineers for custom connectors (WMS, helpdesk), actions
- * and evaluation (66,667 a month, illustrative).
- *   Buy at 5,000 seats: 150,000 + 66,667 = 216,667 a month; build ≈ 188,000 → build ≈ 28,700 a month cheaper.
- *   Breakeven seats: build fixed (team + infra) 181,802 + 1.24 a seat = buy 66,667 + 30 a seat → ≈ 4,000 seats; if
- *   buying needed no engineers, ≈ 6,320.
- *   Breakeven seat price at 5,000 seats: (188,000 − 66,667) ÷ 5,000 ≈ 24.3 USD; at the 21 USD business tier, buy wins.
+ * Build or buy (one decision; the page designs the system as BUILT). Illustrative inputs; seat prices F12, F97, F107, F108.
+ *   Build: 9 engineers + infra + model ≈ 319,900 a month (≈ 64 USD a seat).
+ *   Buy (mixed): 2,000 knowledge-worker seats at 30 − 15% = 25.5 → 51,000; 3,000 warehouse staff on the free chat
+ *   (assumes their Microsoft 365 licence includes it) with metered agents: 108,000 turns × 2–30 credits × 0.01 =
+ *   2,160–32,400 (mid, 16 credits: 17,280); 5 engineers for Brightpost's own tools, identity, evaluation and the vendor
+ *   tests (166,667); their infrastructure (broker, MCP servers, audit, eval runs) 3,500 → ≈ 238,400 (≈ 48 USD a seat).
+ *   Build costs ≈ 81,500 a month more; it breaks even with ≈ 6.6 engineers, or above ≈ 5,200 seated knowledge workers.
+ *   Copilot Business at 21 USD is capped at 300 seats, so it is not an option here.
  */
 export const BUILD_BUY = (() => {
-  const integrationEngineers = 2;
-  const buyFixed = (integrationEngineers * PRICES.engineerYear) / 12; // 66,667
-  const buildFixed = PLATFORM.teamPerMonth + PLATFORM.infraPerMonth; // 181,802
-  const buildPerSeat = COST.perSeatMonth; // ≈ 1.24
-  const buy = (seats: number, price: number = PRICES.seatPrice) => buyFixed + seats * price;
-  const build = (seats: number) => buildFixed + seats * buildPerSeat;
-  const seats = COMPANY.seats;
+  const seatPrice = PRICES.seatList * (1 - PRICES.seatDiscount); // 25.5
+  const seats = COMPANY.knowledgeWorkers * seatPrice; // 51,000
+  const meteredLow = COMPANY.warehouseTurnsPerMonth * 2 * PRICES.meteredPerCredit; // 2,160
+  const meteredHigh = COMPANY.warehouseTurnsPerMonth * 30 * PRICES.meteredPerCredit; // 32,400
+  const meteredMid = COMPANY.warehouseTurnsPerMonth * 16 * PRICES.meteredPerCredit; // 17,280
+  const buyEngineers = 5;
+  const buyTeam = (buyEngineers * PRICES.engineerYear) / 12; // 166,667
+  const buyInfra = 3_500;
+  const buy = seats + meteredMid + buyTeam + buyInfra; // ≈ 238,447
+  const build = PLATFORM.allInPerMonth;
+  const buildAtTeam = (engineers: number) =>
+    COST.perMonth + PLATFORM.infraPerMonth + (engineers * PRICES.engineerYear) / 12;
   return {
-    integrationEngineers,
-    buyFixed,
-    buildFixed,
-    buildPerSeat,
+    seatPrice,
+    seats,
+    meteredLow,
+    meteredHigh,
+    meteredMid,
+    buyEngineers,
+    buyTeam,
+    buyInfra,
     buy,
+    buyPerSeat: buy / COMPANY.seats, // ≈ 47.7
+    buyLow: seats + meteredLow + buyTeam + buyInfra, // ≈ 223,300
+    buyHigh: seats + meteredHigh + buyTeam + buyInfra, // ≈ 253,600
     build,
-    buyAt5000: buy(seats), // 216,667
-    buildAt5000: build(seats), // ≈ 188,000
-    buildSaves: buy(seats) - build(seats), // ≈ 28,700
-    breakevenSeats: (buildFixed - buyFixed) / (PRICES.seatPrice - buildPerSeat), // ≈ 4,000
-    breakevenSeatsNoIntegration: buildFixed / (PRICES.seatPrice - buildPerSeat), // ≈ 6,320
-    breakevenPrice: (build(seats) - buyFixed) / seats, // ≈ 24.3
-    buyAtBusinessTier: buy(seats, PRICES.seatPriceBusiness), // 171,667
+    buildMinusBuy: build - buy, // ≈ 81,500
+    buildAtTeam,
+    breakevenEngineers: ((buy - COST.perMonth - PLATFORM.infraPerMonth) * 12) / PRICES.engineerYear, // ≈ 6.6
+    breakevenKnowledgeSeats:
+      (PLATFORM.teamPerMonth + PLATFORM.infraPerMonth - buyTeam - buyInfra - meteredMid) /
+      (seatPrice - COST.perSeatMonth), // ≈ 5,200
   };
 })();
 
@@ -649,64 +778,67 @@ const path = (stages: readonly Stage[]) => {
 };
 
 /**
- * Latency per request type, ms (illustrative stage times; p95 by root-sum-square of spreads).
- *   Answer, first token: edge and principals 20 + router 300 + embed 15 + filtered hybrid search 40 + ACL-store
- *   re-check 5 + personal ranker 10 + cross-encoder 120 + context 10 + first token 600 = 1,120; p95 ≈ 1,774 (stage-sum bound 2,195).
- *   Sources are shown at 510 ms. Sensitive path: + the slowest of 3 live checks (one check p50 120 / p95 400; slowest
- *   of 3 p50 ≈ 260; p95 capped by the 400 ms deadline, a late document is dropped) → 1,380 / ≈ 2,049 (stage-sum bound 2,595: the target relies on tails not all coinciding).
- *   Federated path (mailbox or DMs searched live, p50 500 / p95 1,200, in parallel with the index) → 1,580 / ≈ 2,536 (stage-sum bound 3,295).
- *   Complete answer: + 250 tokens at 80 a second (3,125 ms, spread 781) → 4,245 / ≈ 5,264 (plain);
- *   sensitive 4,504 / ≈ 5,533; federated 4,705 / ≈ 5,940.
- *   Lookup: 20 + 300 + 600 + 60 tokens 750 + token broker 5 + tool 300 + first token 500 = 2,475 first token; + 200
- *   tokens 2,500 → 4,975 complete; p95 ≈ 3,707 and ≈ 6,357 (first-token stage-sum bound 5,033). Status "Checking the
- *   ERP" at 320 ms.
- *   Write to card: 20 + 300 + 600 + 120 tokens 1,500 + validate 30 = 2,450 (p95 ≈ 3,201); execute after confirm 5 + 400 + 10 = 415 (p95 ≈ 1,515).
- *   Agent: 20 + 300 + 6 × 600 + 560 tokens 7,000 + 3 tools × 300 + 2 searches × 30 = 11,880 (p95 ≈ 14,658).
+ * Latency per request type, ms (stage times illustrative; p95 = p50 + root-sum-square of spreads).
+ *   Answer: edge 20 + router 300 + embed 15 + filtered search 40 + ACL-store re-check 5 + personal ranker 10 +
+ *   cross-encoder 120 + on-use injection screen 25 + context 10 + first token 600 = 1,145.
+ *   Sensitive: the answer waits for live checks on the chosen ≈ 3 sensitive documents, started 120 ms earlier (with the
+ *   cross-encoder): slowest of 3 ≈ 260 → a residual wait of ≈ 140 (p95 residual ≈ 361); 3.8% of these answers lose a
+ *   document to the 500 ms deadline.
+ *   Federated (Slack or mail live, 30% of answers): live search 500 (spread 700) replaces the index's 40 on the critical
+ *   path, + mail body fetch slowest of 3 (one 150 / 400) ≈ 275.
  */
 export const LATENCY = (() => {
-  const edge: Stage = { id: "edge", label: "Edge, auth, principals", p50: 20, spread: 150 };
-  const router: Stage = { id: "router", label: "Router (small)", p50: 300, spread: 200 };
-  const embed: Stage = { id: "embed", label: "Embed query", p50: 15, spread: 10 };
-  const search: Stage = { id: "search", label: "Filtered hybrid search", p50: 40, spread: 60 };
-  const recheck: Stage = { id: "recheck", label: "ACL-store re-check", p50: 5, spread: 5 };
-  const personal: Stage = { id: "personal", label: "Personal ranker", p50: 10, spread: 5 };
-  const cross: Stage = { id: "cross", label: "Cross-encoder (50 → 8)", p50: 120, spread: 40 };
-  const assemble: Stage = { id: "assemble", label: "Context assembly", p50: 10, spread: 5 };
-  const firstToken: Stage = { id: "ttft", label: "Answer model first token", p50: 600, spread: 600 };
-  const tokensPerSecond = 80;
-  const decode = (tokens: number): Stage => ({
-    id: `decode-${tokens}`,
-    label: `${tokens} tokens at ${tokensPerSecond}/s`,
-    p50: (tokens / tokensPerSecond) * 1_000,
-    spread: (tokens / tokensPerSecond) * 1_000 * 0.25,
-  });
+  const st = (id: string, label: string, p50: number, spread: number): Stage => ({ id, label, p50, spread });
+  const edge = st("edge", "Edge, auth, principals", 20, 150);
+  const router = st("router", "Router (small)", 300, 200);
+  const embed = st("embed", "Embed query", 15, 10);
+  const search = st("search", "Filtered hybrid search", 40, 60);
+  const recheck = st("recheck", "ACL-store re-check", 5, 5);
+  const personal = st("personal", "Personal ranker", 10, 5);
+  const cross = st("cross", "Cross-encoder (50 → 8)", 120, 40);
+  const screen = st("screen", "Injection screen on use", 25, 10);
+  const assemble = st("assemble", "Context assembly", 10, 5);
+  const firstToken = st("ttft", "Answer model first token", 600, 600);
+  const tps = 80;
+  const decode = (tokens: number) =>
+    st(`decode-${tokens}`, `${tokens} tokens`, (tokens / tps) * 1_000, (tokens / tps) * 1_000 * 0.25);
 
-  // Live (late-bound) permission check: one call p50 120 / p95 400 ms, 3 documents in parallel, 400 ms deadline.
-  const liveOne = { p50: 120, p95: 400 };
-  const liveDeadline = 400;
-  const liveP50 = maxOfN(liveOne.p50, liveOne.p95, RETRIEVAL.sensitiveDocsWhenPresent, 0.5); // ≈ 260
-  const liveP95Uncapped = maxOfN(liveOne.p50, liveOne.p95, RETRIEVAL.sensitiveDocsWhenPresent, 0.95); // ≈ 481
-  const live: Stage = {
-    id: "live",
-    label: "Live check, slowest of 3",
-    p50: liveP50,
-    spread: Math.min(liveP95Uncapped, liveDeadline) - liveP50,
-  };
-  // Federated mailbox search replaces the index's 40 ms on the critical path.
-  const federated: Stage = { id: "federated", label: "Mailbox search (live)", p50: 500, spread: 700 };
+  const live = RETRIEVAL.live;
+  const liveSlowestP50 = maxOfN(live.p50, live.p95, live.chosen, 0.5); // ≈ 259.5
+  const liveSlowestP95 = Math.min(maxOfN(live.p50, live.p95, live.chosen, 0.95), live.deadline); // ≈ 481
+  const liveWait = st(
+    "live",
+    "Live checks (residual wait)",
+    liveSlowestP50 - cross.p50,
+    liveSlowestP95 - liveSlowestP50
+  );
+  const bodyP50 = maxOfN(150, 400, 3, 0.5);
+  const bodyP95 = maxOfN(150, 400, 3, 0.95);
+  const federatedSearch = st("federated", "Slack or mail search (live)", 500, 700);
+  const bodyFetch = st("body", "Mail bodies, slowest of 3", bodyP50, bodyP95 - bodyP50);
 
-  const answerHead = [edge, router, embed, search, recheck, personal, cross];
-  const answer = path([...answerHead, assemble, firstToken]);
-  const answerSensitive = path([...answerHead, live, assemble, firstToken]);
-  const answerFederated = path([edge, router, embed, federated, recheck, personal, cross, assemble, firstToken]);
-  const sourcesAt = sum(answerHead.map((s) => s.p50)); // 510
+  const answer = path([edge, router, embed, search, recheck, personal, cross, screen, assemble, firstToken]);
+  const answerSensitive = path([
+    edge,
+    router,
+    embed,
+    search,
+    recheck,
+    personal,
+    cross,
+    liveWait,
+    screen,
+    assemble,
+    firstToken,
+  ]);
+  const fedHead = [edge, router, embed, federatedSearch, bodyFetch, recheck, personal, cross];
+  const answerFederated = path([...fedHead, screen, assemble, firstToken]);
+  const answerFederatedSensitive = path([...fedHead, liveWait, screen, assemble, firstToken]);
   const out250 = decode(CONTEXT.answerOut);
-  const answerDone = path([...answer.stages, out250]);
-  const answerSensitiveDone = path([...answerSensitive.stages, out250]);
-  const answerFederatedDone = path([...answerFederated.stages, out250]);
+  const done = (p: ReturnType<typeof path>) => path([...p.stages, out250]);
 
-  const broker: Stage = { id: "broker", label: "Token broker (cached)", p50: 5, spread: 20 };
-  const toolCall: Stage = { id: "tool", label: "Tool API call", p50: 300, spread: 900 };
+  const broker = st("broker", "Token broker (cached)", 5, 20);
+  const toolCall = st("tool", "Tool API call", 300, 900);
   const lookup = path([
     edge,
     router,
@@ -714,7 +846,7 @@ export const LATENCY = (() => {
     decode(CONTEXT.toolCallOut),
     broker,
     toolCall,
-    { id: "ttft2", label: "Second call first token", p50: 500, spread: 500 },
+    st("ttft2", "Second first token", 500, 500),
   ]);
   const lookupDone = path([...lookup.stages, decode(CONTEXT.lookupReplyOut)]);
   const writeCard = path([
@@ -722,12 +854,13 @@ export const LATENCY = (() => {
     router,
     firstToken,
     decode(CONTEXT.writeArgsOut),
-    { id: "validate", label: "Schema, entitlement, policy", p50: 30, spread: 20 },
+    st("validate", "Schema, entitlement, audience, policy", 30, 20),
   ]);
   const writeExecute = path([
+    edge,
     broker,
-    { id: "execute", label: "Write API call", p50: 400, spread: 1_100 },
-    { id: "template", label: "Template reply", p50: 10, spread: 5 },
+    st("execute", "Write API call", 400, 1_100),
+    st("template", "Template reply", 10, 5),
   ]);
   const agentOut = sum(AGENT.steps.map((s) => s.out)); // 560
   const agent = path([
@@ -735,59 +868,58 @@ export const LATENCY = (() => {
     router,
     ...AGENT.steps.map((_, i) => ({ ...firstToken, id: `ttft-${i}` })),
     decode(agentOut),
-    ...Array.from({ length: AGENT.toolCalls }, (_, i) => ({ ...toolCall, id: `tool-${i}` })),
-    ...Array.from({ length: AGENT.toolSearches }, (_, i) => ({
-      id: `search-${i}`,
-      label: "Tool search",
-      p50: 30,
-      spread: 20,
-    })),
+    ...[0, 1, 2].map((i) => ({ ...toolCall, id: `tool-${i}` })),
+    ...[0, 1].map((i) => st(`tsearch-${i}`, "Tool search", 30, 20)),
   ]);
   const targets = {
-    answerFirstToken: { p50: 1_500, p95: 2_500 },
-    federatedFirstToken: { p50: 2_000, p95: 3_000 },
+    answer: { p50: 1_500, p95: 2_500 },
+    federated: { p50: 2_200, p95: 3_500 },
     answerDone: { p50: 5_000, p95: 7_000 },
-    lookupFirstToken: { p50: 3_000, p95: 5_000 },
+    federatedDone: { p50: 5_500, p95: 7_500 },
+    lookup: { p50: 3_000, p95: 5_000 },
     lookupDone: { p50: 6_000, p95: 9_000 },
     writeCard: { p50: 3_000, p95: 5_000 },
     writeExecute: { p50: 1_000, p95: 2_000 },
-    agentDone: { p50: 15_000, p95: 30_000 },
-    statusEvent: { p50: 500 },
+    agent: { p50: 15_000, p95: 30_000 },
   } as const;
+  // Sensitivity: a 600 ms router (+300) on the sensitive path.
+  const slowRouterSensitiveP50 = answerSensitive.p50 + 300;
   return {
-    stages: { edge, router, embed, search, recheck, personal, cross, assemble, firstToken, live, federated },
-    tokensPerSecond,
-    liveOne,
-    liveDeadline,
-    liveP50,
-    liveP95Uncapped,
-    sourcesAt,
+    tps,
+    liveSlowestP50,
+    liveSlowestP95,
+    bodyP50,
+    bodyP95,
+    sourcesAt: edge.p50 + router.p50 + embed.p50 + search.p50 + recheck.p50 + personal.p50 + cross.p50, // 510
     statusAt: edge.p50 + router.p50, // 320
     answer,
     answerSensitive,
     answerFederated,
-    answerDone,
-    answerSensitiveDone,
-    answerFederatedDone,
+    answerFederatedSensitive,
+    answerDone: done(answer),
+    answerSensitiveDone: done(answerSensitive),
+    answerFederatedDone: done(answerFederated),
+    answerFederatedSensitiveDone: done(answerFederatedSensitive),
     lookup,
     lookupDone,
     writeCard,
     writeExecute,
     agent,
     targets,
+    headroom: {
+      answer: targets.answer.p50 - answer.p50, // 355
+      sensitive: targets.answer.p50 - answerSensitive.p50, // ≈ 215
+      federated: targets.federated.p50 - answerFederated.p50,
+    },
+    slowRouterSensitiveP50, // ≈ 1,585: misses 1,500 unless retrieval starts in parallel with the router
   };
 })();
 
-/**
- * Model throughput at peak: 1.05 turns a second. Input tokens a turn (mix-weighted): router 1,100 + answer 7,590 +
- * check 4,070; lookup 11,137 + 11,997 = 23,134; write 11,137; agent Σ of six contexts 47,180 + check; other 1,500
- * → ≈ 15,700 a turn → ≈ 990,000 input tokens a minute at peak (most of it cache reads). No reserved throughput needed.
- */
+/** Model throughput at peak (0.757 turns a second). */
 export const CAPACITY = (() => {
   const agentIn = sum(AGENT.calls.map((c) => c.cachedIn + c.newIn));
-  const check = 300 + CONTEXT.evidence + CONTEXT.answerOut; // 4,070
-  const lookupIn =
-    TOOLS.bundlePrefix + CONTEXT.turnState + (TOOLS.bundlePrefix + CONTEXT.turnState + CONTEXT.toolCallOut + CONTEXT.toolResult);
+  const check = 300 + CONTEXT.evidence + CONTEXT.answerOut;
+  const lookupIn = 2 * (TOOLS.bundlePrefix + CONTEXT.turnState) + CONTEXT.toolCallOut + CONTEXT.toolResult;
   const writeIn = TOOLS.bundlePrefix + CONTEXT.turnState;
   const m = COST.mix;
   const perTurn =
@@ -808,115 +940,93 @@ export const CAPACITY = (() => {
 
 // ── Actions ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Read and write tiers. The tier is a property of the tool, set in code; the model cannot change it. */
+/** Tiers by EFFECT and AUDIENCE. Anything that can reach an outsider is T3 (not a tool) whatever its name. */
 export const TIERS = [
   {
     id: "T0",
     label: "Read",
-    examples: "search, open a document, stock for a SKU, PO status, my leave balance",
-    rule: "Runs as the user, no confirmation",
+    audience: "self",
+    examples: "search, open a document, stock for a SKU, PO status, leave balance",
+    rule: "As the user; no card",
   },
   {
     id: "T1",
     label: "Draft or own item",
-    examples: "draft a Slack message or email, create a Jira issue in my project, add a comment",
-    rule: "One-tap card; undo for 10 minutes",
+    audience: "self",
+    examples: "draft a message, create a Jira issue in an internal project, add an internal case note",
+    rule: "Card; withdraw the assistant's own item within 10 min (notifications already sent stay)",
   },
   {
     id: "T2",
-    label: "Visible to others",
-    examples: "send an internal message, change a case status, request leave, reassign an issue",
-    rule: "Card shows the exact payload; extra consent (write scope) on first use; internal recipients only",
+    label: "Visible to named colleagues",
+    audience: "named internal users or internal-only channels",
+    examples: "send an internal message, move a case to an internal-only status, request leave",
+    rule: "Card with exact payload, audience and source label; write scope on first use; audience and configured automations checked at execution",
   },
   {
     id: "T3",
     label: "Never from the assistant",
-    examples: "payments, refunds, payroll, sharing or permission changes, deletes, bulk edits, external email",
-    rule: "Not offered; the assistant links to the system's own screen",
+    audience: "anyone outside, or irreversible",
+    examples:
+      "public case replies, case statuses that notify the requester, transitions in projects with outbound automation, external email, Slack Connect or guest channels, JSM portal comments, payments, refunds, sharing changes, deletes, bulk edits",
+    rule: "Not a tool; link to the system's own screen",
   },
 ] as const;
 
-// ── Memory ───────────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** Memory the user can see and correct (illustrative limits). */
 export const MEMORY = {
   maxItemsPerUser: 50,
   injectedItems: 5,
   injectedTokens: 200,
   unusedExpiryDays: 180,
-  deleteTakesEffect: "the next turn",
   purgeFromBackupsDays: 30,
 } as const;
 
 // ── Evaluation ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Evaluation sets and their statistics.
- *   Gold set 1,000 (support 300, warehouse 200, finance 200, general 300) at 85% correct: ± 2.2 points; a department
- *   slice of 200: ± 4.9.
- *   Permission suite: 12 personas × 400 probes = 4,800, against 600 planted canary documents; 0 leaks → ≤ 3 ÷ 4,800 =
- *   0.0625% per probe at 95% (rule of three).
- *   Injection suite: 500 cases; 0 followed → ≤ 0.6%.
- *   Action simulator: 150 scenarios × 4 runs, pass^4 (all four succeed); at 97% a run, 0.97^4 = 88.5%.
- *   Revocation canary: 50 revocations a night across sources; the lag distribution is measured, not assumed.
- */
 export const EVAL = (() => {
-  const gold = 1_000;
+  const gold = 1_200; // support 300, warehouse 300 (100 in Polish and Romanian), finance 200, general 400
   const goldTarget = 0.85;
-  const slice = 200;
-  const personas = 12;
-  const probesPerPersona = 400;
-  const probes = personas * probesPerPersona; // 4,800
-  const injection = 500;
-  const scenarios = 150;
-  const runs = 4;
+  const probes = 14 * 400; // 14 personas (incl. "email reused by a new hire", "Slack not linked to SSO")
+  const scenarios = 400;
   const perRun = 0.97;
   return {
     gold,
-    goldSlices: { support: 300, warehouse: 200, finance: 200, general: 300 },
-    goldTarget,
-    goldMargin: margin95(goldTarget, gold), // 2.2
-    sliceMargin: margin95(goldTarget, slice), // 4.9
-    groundedTarget: 0.95,
-    personas,
-    probesPerPersona,
-    probes,
-    canaryDocs: 600,
-    leakBound: 3 / probes, // 0.000625
-    injection,
-    injectionBound: 3 / injection, // 0.006
+    goldMargin: margin95(goldTarget, gold), // 2.0
+    sliceMargin: margin95(goldTarget, 200), // 4.9
+    probes, // 5,600
+    leakBoundPerProbe: 3 / probes, // 0.054% per probe of these personas
+    injection: 700, // 7 egress families × 100 (case reply, Jira portal, guest channel, mail list, unfurl, insider,
+    // a write that triggers an outbound automation)
+    injectionBound: 3 / 700, // 0.43%
     scenarios,
-    runs,
-    perRun,
-    passHat4: perRun ** runs, // 0.885
-    passHat4Target: 0.85,
-    revocationCanariesPerNight: 50,
-    prodJudgeSample: 0.02,
+    passHat4: perRun ** 4, // 0.885
+    passHat4Margin: margin95(perRun ** 4, scenarios), // 3.1 (150 scenarios gave ± 5.1)
+    driftPairsPerDay: 10_000,
+    driftTarget: 0.0001, // over a rolling 7 days (70,000 pairs: zero mismatches bounds it at 3 ÷ 70,000 = 0.0043%)
+    driftWeekBound: 3 / 70_000,
+    canaryEveryMinWorkingHours: 15,
+    canariesPerDay: 40 * 4 + 50, // 40 a working day for each of 4 indexed sources + 50 at night = 210
+    filteredRecallTarget: 0.95, // recall@100 vs exact scan, per persona
   };
 })();
 
-/** Audit and trace volume: 18,000 turns × 8 KB = 144 MB a day; ≈ 52.6 GB a year. */
 export const AUDIT = {
   bytesPerTurn: 8_000,
-  perDayMB: (COMPANY.turnsPerDay * 8_000) / 1e6, // 144
-  perYearGB: (COMPANY.turnsPerDay * 8_000 * 365) / 1e9, // 52.6
-  retentionDays: 365,
+  perMonthGB: (COMPANY.turnsPerMonth * 8_000) / 1e9, // 2.77
+  idsRetentionDays: 365,
+  questionTextRetentionDays: 30,
 } as const;
 
 /**
- * Oversharing before launch (illustrative): 6% of SharePoint files carry an organisation-wide link (144,000); 3% of
- * those are labelled Confidential or match sensitive patterns (salary, bank details, customer data) = 4,320, held out
- * of the index until their owners fix the sharing. Rule: the assistant may be stricter than the source, never looser.
+ * Oversharing, continuously: an org-wide link is the set of people who REDEEMED it (SharePoint search shows the file
+ * only to them, F110); never "everyone". Widening shares on Confidential or pattern-matched files are held at once.
  */
 export const OVERSHARING = (() => {
-  const files = SOURCES.list[0].docs; // 2,400,000
-  const orgWideShare = 0.06;
-  const sensitiveShare = 0.03;
-  const orgWide = files * orgWideShare; // 144,000
-  return { orgWideShare, sensitiveShare, orgWide, heldOut: orgWide * sensitiveShare }; // 4,320
+  const files = SOURCES.indexed[0].docs;
+  const orgWide = files * 0.06; // 144,000 files with an org-wide link
+  return { orgWide, heldConfidential: orgWide * 0.03 }; // 4,320 held even for redeemers until the owner reviews
 })();
 
-/** The worked examples every figure shares. */
 export const EXAMPLES = {
   support: {
     who: "Priya, support team lead",
@@ -932,8 +1042,8 @@ export const EXAMPLES = {
   finance: { who: "Aisha, accounts payable", lookup: "What's the status of PO 88213?" },
   leak: {
     doc: "FY27 pay bands (HR)",
-    mistake: "shared with an organisation-wide link",
-    asker: "a warehouse shift lead asks about team-leader pay",
+    mistake: "an org-wide link, redeemed by three HR partners",
+    asker: "Tom asks about team-leader pay",
   },
-  injection: "an external supplier email with hidden text asking the assistant to put recent finance figures in a link",
+  injection: "a supplier email asking the assistant to reply on case 4471 with the approver's name and recent refunds",
 } as const;
