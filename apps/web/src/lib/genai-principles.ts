@@ -39,11 +39,7 @@ const ROWS: PrincipleRow[] = [
     name: "Start with the simplest design that passes the evals",
     line: "A fixed workflow before an agent, one agent before many; add autonomy only when an eval shows the simpler design fails.",
     teach: concept("agent-architectures", "chain-flow-orchestration"),
-    caseStudies: [
-      `${CASE}/customer-support-agent`,
-      `${CASE}/voice-agent-call-centre`,
-      `${CASE}/conversational-assistant-design`,
-    ],
+    caseStudies: [`${CASE}/customer-support-agent`, `${CASE}/voice-agent-call-centre`],
   },
   {
     id: "P2",
@@ -173,22 +169,14 @@ const ROWS: PrincipleRow[] = [
     name: "Carry provenance",
     line: "Every claim, field, action and edge points back to its source, so it can be checked, cited and audited.",
     teach: concept("compliance-audit-logging", "data-versioning-lineage"),
-    caseStudies: [
-      `${CASE}/ai-answer-engine`,
-      `${CASE}/document-extraction-pipeline`,
-      `${CASE}/conversational-assistant-design`,
-    ],
+    caseStudies: [`${CASE}/ai-answer-engine`, `${CASE}/document-extraction-pipeline`],
   },
   {
     id: "P15",
     name: "Keep a human escape hatch and close the loop",
     line: "Escalation, review and appeals with the context handed over; every correction becomes eval and training data.",
     teach: concept("human-in-the-loop-and-approvals", "continuous-improvement-pipeline"),
-    caseStudies: [
-      `${CASE}/customer-support-agent`,
-      `${CASE}/voice-agent-call-centre`,
-      `${CASE}/conversational-assistant-design`,
-    ],
+    caseStudies: [`${CASE}/customer-support-agent`, `${CASE}/voice-agent-call-centre`],
   },
   {
     id: "P16",
@@ -207,7 +195,7 @@ const ROWS: PrincipleRow[] = [
     name: "Keep sensitive data inside a boundary",
     line: "Redact, de-identify or keep data in its region and on approved models; log only what you may keep.",
     teach: concept("data-privacy-pii-handling", "compliance-audit-logging"),
-    caseStudies: [`${CASE}/voice-agent-call-centre`, `${CASE}/conversational-assistant-design`],
+    caseStudies: [`${CASE}/voice-agent-call-centre`],
   },
 ];
 

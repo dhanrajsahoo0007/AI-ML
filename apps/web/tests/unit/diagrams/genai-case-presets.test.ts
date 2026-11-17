@@ -128,3 +128,12 @@ describe("gcase-docextract: the document extraction pipeline's numbers", () => {
     expect(LAUNCH).toBeDefined();
   });
 });
+
+describe("gcase-enterprise: the enterprise assistant's numbers", () => {
+  it("keeps the SharePoint poll arithmetic at 1 RU a call", async () => {
+    const m = await import("@/components/diagrams/presets/gcase-enterprise");
+    const found = JSON.stringify(m).match(/"v1PollShareAt8000":([0-9.]+)/);
+    expect(found).not.toBeNull();
+    expect(Number(found![1])).toBeCloseTo(0.48, 2);
+  });
+});

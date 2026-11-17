@@ -362,7 +362,7 @@ export const CONNECTORS = (() => {
       reenumerateHours: reenumerate / 1_500 / 60, // 6.9
       backfill: spBackfill,
       backfillDays: spBackfill / spBudgetDay, // 1.26
-      v1PollShareAt8000: ((8_000 / 600) * 86_400 * 2) / spBudgetDay, // 0.96
+      v1PollShareAt8000: ((8_000 / 600) * 86_400 * 1) / spBudgetDay, // 1 RU a call: 0.48
     },
     atlassian: {
       users: atlassianUsers,
