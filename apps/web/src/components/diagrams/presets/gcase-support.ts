@@ -223,3 +223,22 @@ export const FUNNEL = (() => {
     closedRate: noHandoff / conversations, // 0.68
   };
 })();
+
+/**
+ * Release gates and rollout (design sheet §13; thresholds illustrative):
+ *   retrieval: recall@5 ≥ 90% on 300 labelled queries, measured with and without the reranker;
+ *   refunds: pass^4 ≥ 90% on 150 refund scenarios, each run 4 times (end state: ledger and reply agree);
+ *   rollout per intent: shadow for 2 weeks → assist (staff approve drafts; gate: 90% sent unedited) → autonomous;
+ *   every release canaries at 5% of 50,000 conversations = 2,500 a day.
+ */
+export const GATES = {
+  recallAt5: 0.9,
+  retrievalQueries: 300,
+  passHat4: 0.9,
+  refundScenarios: 150,
+  runsPerScenario: 4,
+  shadowWeeks: 2,
+  assistUnedited: 0.9,
+  canaryShare: 0.05,
+  canaryPerDay: 0.05 * VOLUME.conversationsPerDay, // 2,500
+} as const;

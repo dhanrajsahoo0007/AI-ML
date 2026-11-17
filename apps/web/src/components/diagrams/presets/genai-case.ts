@@ -20,7 +20,7 @@ export const GENAI_ZONE_TITLES = {
   core: "Orchestration",
   services: "Models and tools",
   async: "Offline pipelines",
-  storage: "Knowledge and state",
+  storage: "Data and state",
 } as const satisfies Record<ZoneId, string>;
 
 /**

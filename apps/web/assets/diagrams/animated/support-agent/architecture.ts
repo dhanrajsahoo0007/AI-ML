@@ -1,240 +1,226 @@
-import type { DiagramSpec, LayoutTone } from "@/components/diagrams/types";
-import { CORPUS, TOP_K, fmt } from "@/components/diagrams/presets/rag";
+import type { DiagramNode, DiagramSpec } from "@/components/diagrams/types";
+import { GENAI_TONE, HERO, genaiZones } from "@/components/diagrams/presets/genai-case";
+import { REFUNDS, RETRIEVAL } from "@/components/diagrams/presets/gcase-support";
+import { fmt } from "@/components/diagrams/presets/rag";
 
-// Brightpost's customer support agent (genai-system-design/case-studies/customer-support-agent), built one
-// requirement at a time. Case-study figure: zones and tones follow the "Architecture diagram groups" table in
-// content/system-design/CASE-STUDY-FORMAT.md, not the RAG legend.
+// Brightpost's customer support agent (genai-system-design/case-studies/customer-support-agent), the hero. Built one
+// requirement at a time, exactly as the design sheet §8 lists it (SYSTEM-DESIGN/plans/genai-design/design/
+// customer-support-agent.md):
+//   1 One model call (F1): customer → chat gateway → orchestrator → LLM gateway → agent model.
+//   2 Ground answers in the help centre (F1): retriever and reranker (top 40 of 3,600 chunks), help index, help-centre
+//     sync.
+//   3 Route each message to a procedure (F2): intent router.
+//   4 Verify, then read orders as the customer (F3): order tools, the shop's external orders and payments APIs (the
+//     "Orders and payments" node of the sheet, labelled "Shop APIs" so it fits its card).
+//   5 Refunds through a policy service (F4): policy service (auto up to £30), refund ledger, refund workflow, risk
+//     signals; the policy pays once along the bottom.
+//   6 Check actions and words (F1, F4): checks (bad-actor gate on writes, supervisor on replies).
+//   7 Hand over with a summary; one case across channels (F5, F6): helpdesk, support staff, case store.
+//   8 Measure resolution and learn (F7): trace store, simulator and evals, outcomes and content gaps.
+// Numbers: RETRIEVAL.candidates = 40, RETRIEVAL.chunks = 3,600 (CORPUS.chunks), REFUNDS.autoLimit = £30
+// (BRIGHTPOST.approvalLimit), all from presets/gcase-support.ts.
 //
-// Seven steps, each naming the requirement it meets (F1–F6 on the page): 1 answer from the help centre (F1) · 2 keep
-// the help index fresh (F1) · 3 look up the customer's own orders (F2) · 4 refunds behind a policy check (F3) ·
-// 5 escalate to a person with a summary (F4) · 6 one ticket across turns and channels (F5) · 7 grade every
-// resolution (F6). Nodes never move between steps.
-//
-// Grid: five columns at x 90 | 265 | 440 | 615 | 790 (175 apart, cards 150 wide) and four rows at y 100 | 225 |
-// 350 | 475.
-//
-//            c1               c2             c3                c4               c5
-//   r1       Customer         LLM            ·                 Refund policy    Payments API
-//   r2       Chat gateway     ·              Support agent*    Account tools    Order API
-//   r3       Helpdesk         Ticket store   Help index        Retriever        ·
-//   r4       ·                Eval and QA    Ingestion         ·                Help centre CMS
-//
-// The escalation runs left under the gateway and drops down x 176, between the zones, into the side of the helpdesk, clear of the zone titles; the
-// helpdesk's reply and the eval's reads of the ticket store are told in the text, not drawn, so no edge cuts a zone
-// title. Labels only on long edges (the 25-unit gaps between columns are too short). Every edge is a straight line or a diagonal through an empty cell, so nothing crosses: the gateway reaches the
-// agent through the empty c2-r2 cell; the escalation runs diagonally from the agent down-left to the helpdesk; the
-// CMS feeds ingestion through the empty c4-r4 cell.
-//
-// Refund limit (illustrative): the policy approves refunds up to £50 on the customer's own order; larger ones go to
-// a person.
+// Layout (1200 × 740, genaiZones() from presets/genai-case.ts, the case-study grid):
+//   Clients x 105: customer 250 (the main line), support staff 380, shop APIs (orders and payments, external) 605.
+//   Edge x 297: chat gateway 250, LLM gateway 495.
+//   Orchestration: intent router (490, 135), checks (660, 135), orchestrator (575, 250) 320 wide, the accent.
+//   Models, tools and policy: two columns x 490 | 660, rows 380 | 495 | 605:
+//            x 490          x 660
+//     380    Helpdesk       Retriever
+//     495    Agent model    Risk signals
+//     605    Order tools    Policy service
+//   Offline x 879: simulator 132, outcomes 200 (both 50 tall), help-centre sync 320, refund workflow 455.
+//   Data and state x 1098 (glyphs): trace store 135, case store 250, help index 380, refund ledger 605.
+// Routing (every long edge checked against the boxes and zone tabs it passes):
+//   - The services zone tab spans x 419–625 at y 318–342, so the orchestrator reaches services only through the
+//     window right of it: a short shoulder to (660, 300), then down into the retriever.
+//   - The orchestrator reaches the LLM gateway through the corridor between the zones (y 300, above the services
+//     tab), then down x 297; the gateway feeds the model level at y 495. The model, in the middle row, reaches every
+//     tool it asks for: order tools below, helpdesk above, the policy service on the diagonal through the empty
+//     middle. (The orchestrator runs each tool call and adds the verified customer id; the page says so.)
+//   - Traces go over the top: up between the router and the checks (x 575), along y 88 under the zone tabs, down into
+//     the top of the trace store. The case store sits level with the orchestrator (y 250), between the offline nodes.
+//   - The payment runs along the bottom (y 705, under every zone) into the foot of the shop APIs.
+//   - One crossing is left on purpose: the staff ↔ helpdesk link (dashed, y 380) crosses the LLM gateway's vertical
+//     at x 297. Every other placement of the six services nodes loses an edge instead (see NOTES.md).
+// Colours: GENAI_TONE roles. Customer and staff orange (user), the agent model green, router and retriever lime
+// (ranking), checks, policy, risk, simulator and outcomes lime (check), order tools, helpdesk and the refund workflow
+// teal (tool), help-centre sync blue (data), stores violet glyphs; gateways and the orchestrator neutral.
 
-/** The zone table from CASE-STUDY-FORMAT.md, by group. */
-const ZONE_TONE = {
-  clients: "neutral",
-  edge: "blue",
-  core: "green",
-  services: "teal",
-  async: "orange",
-  storage: "violet",
-} as const satisfies Record<string, LayoutTone>;
-
-const X = [90, 265, 440, 615, 790] as const;
-const Y = [100, 225, 350, 475] as const;
+const C = { clients: 105, edge: 297, left: 490, right: 660, async: 879, store: 1098 } as const;
+const ROW = { core1: 135, core2: 250, s1: 380, s2: 495, s3: 605 } as const;
 const W = 150;
+const AW = 190;
 
-/** A zone around columns c0..c1 (0-based), from top `y` to bottom `b`. */
-const zone = (id: string, title: string, tone: LayoutTone, c0: number, c1: number, y: number, b: number) => ({
+const card = (
+  id: string,
+  label: string,
+  sub: string,
+  icon: string,
+  x: number,
+  y: number,
+  step: number,
+  extra: Partial<DiagramNode> = {}
+): DiagramNode => ({ id, label, sub, icon, x, y, w: W, step, fill: "pastel", ...extra });
+
+const store = (id: string, label: string, sub: string, icon: string, y: number, step: number): DiagramNode => ({
   id,
-  title,
-  tone,
-  x: X[c0] - 82,
+  label,
+  sub,
+  icon,
+  tone: GENAI_TONE.store,
+  variant: "glyph",
+  x: C.store,
   y,
-  w: X[c1] - X[c0] + 164,
-  h: b - y,
+  step,
 });
 
 const spec: DiagramSpec = {
-  title: "Customer support agent: answers, account tools and refunds behind a policy, with a way out to people",
-  width: 880,
-  height: 540,
+  title: "Customer support agent: procedures, grounded answers, a policy service in code and a way to people",
+  width: HERO.width,
+  height: HERO.height,
   steps: [
-    { title: "Answer from the help centre", covers: "F1" },
-    { title: "Keep the help index fresh", covers: "F1" },
-    { title: "Look up the customer's own orders", covers: "F2" },
-    { title: "Refunds go through a policy check", covers: "F3" },
-    { title: "Escalate to a person with a summary", covers: "F4" },
-    { title: "One ticket across turns and channels", covers: "F5" },
-    { title: "Grade every resolution", covers: "F6" },
+    { title: "One model call", covers: "F1" },
+    { title: "Ground answers in the help centre", covers: "F1" },
+    { title: "Route each message to a procedure", covers: "F2" },
+    { title: "Verify, then read orders as the customer", covers: "F3" },
+    { title: "Refunds through a policy service", covers: "F4" },
+    { title: "Check actions and words", covers: "F1, F4" },
+    { title: "Hand over with a summary; one case across channels", covers: "F5, F6" },
+    { title: "Measure resolution and learn", covers: "F7" },
   ],
-  zones: [
-    zone("clients", "Clients", ZONE_TONE.clients, 0, 0, 40, 145),
-    zone("edge", "Edge", ZONE_TONE.edge, 0, 0, 165, 270),
-    zone("team", "Support team", "neutral", 0, 0, 290, 420),
-    zone("core", "Core request path", ZONE_TONE.core, 1, 2, 40, 270),
-    zone("services", "Application services", ZONE_TONE.services, 3, 3, 40, 420),
-    zone("storage", "Storage", ZONE_TONE.storage, 1, 2, 290, 420),
-    zone("async", "Async pipeline", ZONE_TONE.async, 1, 2, 440, 525),
-    zone("company", "Brightpost systems", "neutral", 4, 4, 40, 525),
-  ],
+  zones: genaiZones({ services: "Models, tools and policy" }),
   nodes: [
-    // Step 1: a cited answer from the help centre.
-    { id: "customer", label: "Customer", sub: "web chat, email", icon: "users", x: X[0], y: Y[0], w: W },
+    // Clients
+    card("customer", "Customer", "chat, email", "users", C.clients, ROW.core2, 1, { tone: GENAI_TONE.user }),
+    card("staff", "Support staff", "approve, take over", "users", C.clients, ROW.s1, 7, { tone: GENAI_TONE.user }),
+    card("orders", "Shop APIs", "orders, payments", "card", C.clients, ROW.s3, 4),
+
+    // Edge and gateway
+    card("chatgw", "Chat gateway", "verify, limits, SSE", "gateway", C.edge, ROW.core2, 1),
+    card("llmgw", "LLM gateway", "budgets, fallback", "proxy", C.edge, ROW.s2, 1),
+
+    // Orchestration
+    card("router", "Intent router", "small model", "router", C.left, ROW.core1, 3, { tone: GENAI_TONE.rank }),
+    card("checks", "Checks", "gate, supervisor", "shield", C.right, ROW.core1, 6, { tone: GENAI_TONE.check }),
     {
-      id: "gateway",
-      label: "Chat gateway",
-      sub: "sign-in, limits",
-      icon: "gateway",
-      tone: ZONE_TONE.edge,
-      x: X[0],
-      y: Y[1],
-      w: W,
-    },
-    {
-      id: "agent",
-      label: "Support agent",
-      sub: "plans, calls",
+      id: "orch",
+      label: "Orchestrator",
+      sub: "procedures, case lease, runs tools",
       icon: "coordinator",
-      tone: ZONE_TONE.core,
       accent: true,
-      x: X[2],
-      y: Y[1],
-      w: W,
-    },
-    { id: "llm", label: "LLM", sub: "writes, cites", icon: "model", tone: ZONE_TONE.core, x: X[1], y: Y[0], w: W },
-    {
-      id: "retriever",
-      label: "Retriever",
-      sub: `top ${TOP_K} chunks`,
-      icon: "search",
-      tone: ZONE_TONE.services,
-      x: X[3],
-      y: Y[2],
-      w: W,
-    },
-    {
-      id: "index",
-      label: "Help index",
-      sub: `${fmt(CORPUS.chunks)} chunks`,
-      icon: "vector-index",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      x: X[2],
-      y: Y[2],
+      x: 575,
+      y: ROW.core2,
+      w: 320,
+      step: 1,
     },
 
-    // Step 2: ingestion keeps the index fresh.
-    {
-      id: "ingest",
-      label: "Ingestion",
-      sub: "chunk, embed",
-      icon: "pipeline",
-      tone: ZONE_TONE.async,
-      step: 2,
-      x: X[2],
-      y: Y[3],
-      w: W,
-    },
-    {
-      id: "cms",
-      label: "Help centre",
-      sub: `${fmt(CORPUS.articles)} articles`,
-      icon: "folder",
-      step: 2,
-      x: X[4],
-      y: Y[3],
-      w: W,
-    },
+    // Models, tools and policy
+    card("helpdesk", "Helpdesk", "staff queue", "ticket", C.left, ROW.s1, 7, { tone: GENAI_TONE.tool }),
+    card("model", "Agent model", "mid-size, tool use", "model", C.left, ROW.s2, 1, { tone: GENAI_TONE.model }),
+    card("tools", "Order tools", "own orders only", "tool", C.left, ROW.s3, 4, { tone: GENAI_TONE.tool }),
+    card("retriever", "Retriever", `top ${RETRIEVAL.candidates}, rerank`, "reranker", C.right, ROW.s1, 2, {
+      tone: GENAI_TONE.rank,
+    }),
+    card("risk", "Risk signals", "fraud score", "radar", C.right, ROW.s2, 5, { tone: GENAI_TONE.check }),
+    card("policy", "Policy service", `auto up to £${REFUNDS.autoLimit}`, "policy", C.right, ROW.s3, 5, {
+      tone: GENAI_TONE.check,
+    }),
 
-    // Step 3: read-only account tools.
-    {
-      id: "tools",
-      label: "Account tools",
-      sub: "own orders only",
-      icon: "api",
-      tone: ZONE_TONE.services,
-      step: 3,
-      x: X[3],
-      y: Y[1],
-      w: W,
-    },
-    { id: "orders", label: "Order API", sub: "status, tracking", icon: "bag", step: 3, x: X[4], y: Y[1], w: W },
+    // Offline pipelines
+    card("sim", "Simulator and evals", "pass^4 gates", "sandbox", C.async, 132, 8, {
+      w: AW,
+      h: 50,
+      tone: GENAI_TONE.check,
+    }),
+    card("outcomes", "Outcomes", "resolution, content gaps", "chart", C.async, 200, 8, {
+      w: AW,
+      h: 50,
+      tone: GENAI_TONE.check,
+    }),
+    card("sync", "Help-centre sync", "re-index on edit", "pipeline", C.async, 320, 2, {
+      w: AW,
+      tone: GENAI_TONE.data,
+    }),
+    card("workflow", "Refund workflow", "approvals, retries", "timer", C.async, 455, 5, {
+      w: AW,
+      tone: GENAI_TONE.tool,
+    }),
 
-    // Step 4: money moves only through the policy.
-    {
-      id: "policy",
-      label: "Refund policy",
-      sub: "auto up to £50",
-      icon: "policy",
-      tone: ZONE_TONE.services,
-      step: 4,
-      x: X[3],
-      y: Y[0],
-      w: W,
-    },
-    { id: "payments", label: "Payments API", sub: "refunds", icon: "card", step: 4, x: X[4], y: Y[0], w: W },
-
-    // Step 5: the way out to people.
-    { id: "helpdesk", label: "Helpdesk", sub: "human agents", icon: "ticket", step: 5, x: X[0], y: Y[2], w: W },
-
-    // Step 6: one ticket for the whole conversation.
-    {
-      id: "tickets",
-      label: "Ticket store",
-      sub: "turns, actions",
-      icon: "database",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      step: 6,
-      x: X[1],
-      y: Y[2],
-    },
-
-    // Step 7: grading.
-    {
-      id: "eval",
-      label: "Eval and QA",
-      sub: "samples tickets",
-      icon: "meter",
-      tone: ZONE_TONE.async,
-      step: 7,
-      x: X[1],
-      y: Y[3],
-      w: W,
-    },
+    // Data and state
+    store("traces", "Trace store", "every turn", "trace", 135, 8),
+    store("cases", "Case store", "case state, lease", "database", ROW.core2, 7),
+    store("index", "Help index", `${fmt(RETRIEVAL.chunks)} chunks`, "vector-index", ROW.s1, 2),
+    store("ledger", "Refund ledger", "one row per attempt", "ledger", ROW.s3, 5),
   ],
   edges: [
-    // A how-to question, packet by packet.
-    { from: "customer", to: "gateway", bidirectional: true, packet: true },
-    { from: "gateway", to: "agent", bidirectional: true, packet: true, delay: 0.6 },
-    { from: "agent", to: "retriever", bidirectional: true, packet: true, delay: 1.2 },
-    { from: "index", to: "retriever", packet: true, delay: 1.2 },
-    { from: "agent", to: "llm", label: "prompt", bidirectional: true, packet: true, delay: 1.8 },
-
-    // Freshness.
-    { from: "cms", to: "ingest", label: "edited articles", packet: true },
-    { from: "ingest", to: "index", packet: true, delay: 0.6 },
-
-    // Tools: reads, then refunds through the policy.
-    { from: "agent", to: "tools", bidirectional: true },
-    { from: "tools", to: "orders", bidirectional: true },
-    { from: "tools", to: "policy", label: "refunds", bidirectional: true },
-    { from: "policy", to: "payments" },
-
-    // Escalation.
+    // Step 1: the main line, packet by packet.
+    { from: "customer", to: "chatgw", flow: true, packet: true, bidirectional: true },
+    { from: "chatgw", to: "orch", flow: true, packet: true, delay: 0.6 },
     {
-      from: "agent",
-      to: "helpdesk",
-      label: "summary",
-      dashed: true,
+      from: "orch",
+      to: "llmgw",
+      label: "prompt",
+      flow: true,
+      packet: true,
+      delay: 1.2,
       labelAt: 0.35,
       via: [
-        [176, 262],
-        [176, 350],
+        [520, 300],
+        [C.edge, 300],
+      ],
+    },
+    { from: "llmgw", to: "model", flow: true, packet: true, delay: 1.8, bidirectional: true },
+
+    // Step 2: evidence before the model runs.
+    { from: "orch", to: "retriever", bidirectional: true, via: [[C.right, 300]] },
+    { from: "index", to: "retriever", label: `top ${RETRIEVAL.candidates}` },
+    { from: "sync", to: "index", label: "edits", dashed: true },
+
+    // Step 3: route.
+    { from: "orch", to: "router", bidirectional: true },
+
+    // Step 4: read as the verified customer.
+    { from: "model", to: "tools", label: "get_order" },
+    { from: "tools", to: "orders", label: "orders API", bidirectional: true },
+
+    // Step 5: the model asks; the policy decides and pays once.
+    { from: "model", to: "policy", label: "request_refund", labelAt: 0.62 },
+    { from: "risk", to: "policy" },
+    { from: "policy", to: "ledger", label: "lock, sum, record" },
+    { from: "policy", to: "workflow", label: `over £${REFUNDS.autoLimit}`, dashed: true },
+    {
+      from: "policy",
+      to: "orders",
+      label: "pay once (ledger key)",
+      via: [
+        [C.right, 705],
+        [C.clients, 705],
       ],
     },
 
-    // State and grading.
-    { from: "tickets", to: "agent", bidirectional: true },
+    // Step 6: checks.
+    { from: "orch", to: "checks", bidirectional: true },
+
+    // Step 7: people and one case.
+    { from: "model", to: "helpdesk", label: "hand-off" },
+    { from: "helpdesk", to: "staff", dashed: true, bidirectional: true },
+    { from: "orch", to: "cases", label: "case state", bidirectional: true },
+
+    // Step 8: measure and learn.
+    {
+      from: "orch",
+      to: "traces",
+      label: "trace every turn",
+      dashed: true,
+      labelAt: 0.6,
+      via: [
+        [575, 88],
+        [C.store, 88],
+      ],
+    },
+    { from: "traces", to: "sim", label: "failures", dashed: true },
+    { from: "traces", to: "outcomes", dashed: true },
   ],
 };
 
