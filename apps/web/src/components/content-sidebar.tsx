@@ -192,6 +192,13 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
   }, [isGroupActive]);
 
   const GroupIcon = group.icon ? getIconComponent(group.icon) : null;
+  // A group whose only category repeats the group's title (each case-study category is its own group) lists the
+  // category's pages straight under the group header, without a second, identical sub-header.
+  const soleCategory =
+    group.categories?.length === 1 &&
+    group.categories[0].title.trim().toLowerCase() === group.title.trim().toLowerCase()
+      ? group.categories[0]
+      : null;
   const leafHrefs = React.useMemo(() => groupHrefs(group), [group]);
   const stats = useProgressStats(leafHrefs);
 
@@ -240,9 +247,19 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
 
       {open && (
         <div className="ml-4 border-l border-hairline">
-          {group.categories?.map((cat) => (
-            <SidebarCategory key={cat.title} category={cat} pathname={pathname} onNavigate={onNavigate} />
-          ))}
+          {soleCategory
+            ? soleCategory.items.map((item) => (
+                <NavLink
+                  key={item.slug}
+                  href={item.href}
+                  label={item.title}
+                  active={pathname === item.href}
+                  onNavigate={onNavigate}
+                />
+              ))
+            : group.categories?.map((cat) => (
+                <SidebarCategory key={cat.title} category={cat} pathname={pathname} onNavigate={onNavigate} />
+              ))}
           {group.items?.map((item) => (
             <NavLink
               key={item.slug}
