@@ -1,13 +1,19 @@
-title: Linking a clinical note to the patient graph
+title: From a clinical note to coded facts
 alt: >-
-  A flow from left to right. A blue note reads "Pt started on warfarin, no hx of bleeding". Two arrows lead from it to
-  teal mentions: "bleeding", linked to a SNOMED CT finding and marked negated, and "warfarin", linked to an RxNorm drug.
-  The bleeding mention leads to the highlighted violet fact "Patient NOT_HAS bleeding", a history taken from this note;
-  a dashed arrow leads to a red box, "Patient HAS bleeding", the fact written if the word "no" is dropped. The warfarin
-  mention leads to the violet fact "Patient TAKES warfarin", with the start date from the note, which feeds an
-  interaction check against new prescriptions.
+  A layout in four steps under a blue note that reads "Pt started on warfarin, no hx of GI bleed, PCN allergy (rash
+  2019)", from DocumentReference/31, signed at 10:12 in the History section. Step 1: three blue mentions with their
+  character spans: "warfarin", "PCN" and "GI bleed". Step 2: lime linking boxes: warfarin matches the RxNorm ingredient
+  exactly, GI bleed matches the SNOMED CT concept GI hemorrhage by synonym, and PCN has no exact match, so the top 20
+  candidates of about 3 million names are taken. Step 3: warfarin and GI bleed are not ambiguous and skip the
+  cross-encoder; for PCN the cross-encoder reads the sentence, sees allergy and rash, and picks penicillin, highlighted.
+  Step 4: violet facts with assertion: medication warfarin, present, which expires to historical unless reconfirmed;
+  allergy penicillin, rash, active, because a past reaction is a current allergy; and GI bleed negated, highlighted,
+  which never fires a rule. A dashed arrow leads to a red box: without assertion the pipeline would write HAS GI bleed
+  and fire bleeding-risk rules on a negation. Text says each fact stores the note id, span, linker version, score,
+  security labels and the first note it was seen in, and that copy-forward text counts only at its first note.
 caption: >-
-  The negation cue decides which fact lands in the graph; drop it and the chart says the opposite of the note.
-tags: [rag, knowledge-graph, clinical-nlp, case-study, healthcare, genai]
+  Exact match first and the cross-encoder only on ambiguous mentions; assertion decides what the fact means, so "no hx
+  of GI bleed" never becomes a bleed, and a 2019 rash is still an active penicillin allergy.
+tags: [genai, knowledge-graph, healthcare, clinical-nlp, case-study]
 source: original
-created: 2026-11-15
+created: 2026-11-17

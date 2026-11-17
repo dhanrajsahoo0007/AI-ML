@@ -1,0 +1,24 @@
+title: "One drug-safety question, end to end"
+alt: >-
+  A sequence diagram with seven lanes: the clinician in orange, the gateway and orchestrator in grey, the EHR's FHIR API
+  in blue, the rules engine and the checks in teal, and the answer model in green. Step 1: the clinician asks whether it
+  is safe to start apixaban 5 mg twice daily; the gateway takes Patient/8841 from the token and confirms the care team
+  in 40 milliseconds. Step 2: the orchestrator makes six FHIR reads, the slowest of which returns at about 374
+  milliseconds, with the classifier running alongside; the drug chip shows apixaban, oral, with the dose taken from the
+  question text, and the clinician taps to confirm 5 mg twice daily, outside the latency budget. Step 3: at 464
+  milliseconds the orchestrator sends the facts to the rules: age 82, 58 kilograms, serum creatinine 1.6 mg/dL and
+  itraconazole; the rules return 3 of 3 criteria and, in phase 2 on the criteria dose of 2.5 mg, avoid
+  coadministration; a note says the label's dose for patients meeting at least 2 criteria is 2.5 mg twice daily; the
+  two alerts reach the clinician at 507 milliseconds, before any model text. Step 4: a 4,470-token context goes to the
+  answer model at 657 milliseconds, sentence 1 returns at 1,470 milliseconds, the checks confirm its cited rule and
+  passage support it, and the first verified sentence is shown at 1,530 milliseconds. Step 5: sentence 4, "no other
+  interactions", contradicts an alert, so the checks drop it, it is never shown, and the model restarts after sentence
+  3 with the claim excluded, the next sentence arriving about 673 milliseconds later. Step 6: the EHR announces a
+  different patient over FHIRcast; sentence 6, stamped for Patient/8841, is dropped at display and the stream is closed
+  and logged.
+caption: >-
+  The alerts come from the rules at 507 ms, before the model writes anything; every sentence is checked against its
+  cited rule or passage, and every event carries its patient so a switch drops it.
+tags: [genai, knowledge-graph, healthcare, case-study, sequence]
+source: original
+created: 2026-11-17

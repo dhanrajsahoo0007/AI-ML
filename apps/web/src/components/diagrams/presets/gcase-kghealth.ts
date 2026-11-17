@@ -902,3 +902,79 @@ export const FRESHNESS = {
   fullAbstainShare: 0.02, // drug not linkable, not mapped or not covered: rules cannot run
   confirmTapShare: 0.03, // safety questions where the resolved drug needs a tap to confirm (low score or look-alike)
 } as const;
+
+/**
+ * Figure support (added by the figures agent; no existing value changed): the p50 stage lists of the three request types
+ * as LATENCY builds them (sheet §12), so the sequence and waterfall figures draw one set of numbers. Each stage value is
+ * the same literal or computed draw LATENCY uses; the totals are checked against LATENCY in the comments.
+ */
+export const WALK = (() => {
+  const st = (id: string, label: string, ms: number) => ({ id, label, ms });
+  const rulesDraw = maxOfParts(
+    [
+      { p50: LATENCY.expansion.p50, p95: LATENCY.expansion.p95 },
+      { p50: 10, p95: 25 },
+    ],
+    0.5
+  ); // expansions ‖ label-filtered note facts ≈ 30
+  // Order hook card (LATENCY.order.p50 ≈ 64): edge 15, entitlements 5, prefetch 5, rules ≈ 30, join 2, phase 2 1, card 5.
+  const order = [
+    st("edge", "TLS, JWT", 15),
+    st("entitle", "Entitlements", 5),
+    st("prefetch", "Prefetch, UCUM", 5),
+    st("rules", "Expansions ‖ note facts", rulesDraw),
+    st("join", "Join + phase 2", 2 + 1),
+    st("card", "Delta cards", 5),
+  ];
+  // Safety question, encoder route: edge 40, classifier ‖ 6 FHIR reads LATENCY.headEncoder.p50 ≈ 374, resolve 50,
+  // expansions ≈ 30, join 2, phase 2 1, alerts event 10 → alerts ≈ 507; passages 60, rerank 80, context 10 → 657; first
+  // token 500 → 1,157; first sentence 312.5 → 1,469.5; checks 60 → first verified sentence ≈ 1,530.
+  const safety = [
+    st("edge", "Token, care team, audit", 40),
+    st("head", "Classifier ‖ 6 FHIR reads", LATENCY.headEncoder.p50),
+    st("link", "Resolve the drug", 50),
+    st("expand", "7 expansions, join, phase 2", LATENCY.expansion.p50 + 2 + 1),
+    st("alerts", "alerts event", 10),
+    st("passages", "Passages + rerank + context", 60 + 80 + 10),
+    st("firstToken", "Model: first token", 500),
+    st("sentence", "First sentence (25 tokens)", (CONTEXT.sentenceTokens / LATENCY.decode) * 1_000),
+    st("checks", "Sentence checks", CHECKS.msPerSentence),
+  ];
+  // Record question, encoder route (LATENCY.recordBase.p50 ≈ 1,407): edge 40, head ≈ 374, embed 10, chunks ‖ facts ≈ 20,
+  // rerank 80, context 10, first token 500, sentence 312.5, checks 60.
+  const record = [
+    st("edge", "Token, care team, audit", 40),
+    st("head", "Classifier ‖ 6 FHIR reads", LATENCY.headEncoder.p50),
+    st(
+      "facts",
+      "Embed; chunks ‖ facts",
+      10 +
+        maxOfParts(
+          [
+            { p50: 5, p95: 15 },
+            { p50: 20, p95: 50 },
+          ],
+          0.5
+        )
+    ),
+    st("rerank", "Rerank + context", 80 + 10),
+    st("firstToken", "Model: first token", 500),
+    st("sentence", "First sentence", (CONTEXT.sentenceTokens / LATENCY.decode) * 1_000),
+    st("checks", "Sentence checks", CHECKS.msPerSentence),
+  ];
+  const total = (xs: readonly { ms: number }[]) => sum(xs.map((x) => x.ms));
+  const upTo = (xs: readonly { id: string; ms: number }[], id: string) =>
+    total(xs.slice(0, xs.findIndex((x) => x.id === id) + 1));
+  return {
+    order,
+    safety,
+    record,
+    orderMs: total(order), // ≈ 64
+    alertsMs: upTo(safety, "alerts"), // ≈ 507
+    contextMs: upTo(safety, "passages"), // ≈ 657
+    firstTokenMs: upTo(safety, "firstToken"), // ≈ 1,157
+    firstSentenceMs: upTo(safety, "sentence"), // ≈ 1,470
+    safetyFirstMs: total(safety), // ≈ 1,530
+    recordFirstMs: total(record), // ≈ 1,407
+  };
+})();
