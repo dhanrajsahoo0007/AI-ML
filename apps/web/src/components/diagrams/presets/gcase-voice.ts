@@ -10,6 +10,7 @@
 
 import { LATENCY } from "./production";
 import { VOICE_BUDGET } from "./production-speech";
+import { BRIGHTPOST } from "./agents";
 
 const usd = (tokens: number, perMillion: number) => (tokens * perMillion) / 1_000_000;
 
@@ -197,3 +198,72 @@ export const CAPACITY = (() => {
     busyHourErlangs: (CALLS.busyHourCalls * 0.5 * 6) / 60, // 480 × 6 ÷ 60 = 48
   };
 })();
+
+// ── Figure-only constants for the voice-agent/* specs (added with the figures; the sheet's numbers above are pinned) ──
+
+/** The sheet's targets (N2, N3 and the §13 release gates), so a figure marks the same lines the page states. */
+export const TARGETS = {
+  p50NoToolMs: 1_200, // N2: turns without a tool, first content p50
+  p95NoToolMs: 1_600, // N2: turns without a tool, first content p95
+  p95FillerMs: 1_200, // N2: tool turns, first audio (the filler) p95
+  p95ToolContentMs: 2_800, // N2: tool turns, first content p95
+  p95HelpMs: 1_900, // N2: help questions, first content p95
+  falseCutoffs: 0.05, // N3 and the release gate: at most 5% of turns cut off
+  bargeInStopMs: 400, // N3: agent audio stops within 400 ms of a real interruption
+  taskSuccess: 0.85, // N1 and the release gate
+  orderNumberCapture: 0.98, // release gate, after read-back
+  cardDigits: 0, // release gate: digits in transcripts and prompts on the card-digit set
+} as const;
+
+/**
+ * The inbound phone path, one way (ILLUSTRATIVE ranges, chosen to add up to the sheet's 80–200 ms phone leg):
+ *   handset → carrier (radio or access network, G.711 encode)  30–80
+ *   carrier → SIP trunk (interconnect)                         10–40
+ *   SIP trunk → media server (same region)                     10–30
+ *   media server jitter buffer, then to the worker             30–50
+ *   total 30 + 10 + 10 + 30 = 80 at best, 80 + 40 + 30 + 50 = 200 at worst; the budget's design point is BUDGET.leg
+ *   (100) each way. G.711 carries 8,000 samples a second at 8 bits = 64 kbit/s; the media server resamples to 16 kHz
+ *   PCM for recognition and the turn model.
+ */
+export const TELEPHONY = (() => {
+  const legs = [
+    { id: "access", label: "handset → carrier", minMs: 30, maxMs: 80 },
+    { id: "interconnect", label: "carrier → SIP trunk", minMs: 10, maxMs: 40 },
+    { id: "trunk", label: "SIP trunk → media server", minMs: 10, maxMs: 30 },
+    { id: "jitter", label: "jitter buffer → worker", minMs: 30, maxMs: 50 },
+  ] as const;
+  const phoneHz = 8_000;
+  return {
+    legs,
+    minMs: legs.reduce((s, l) => s + l.minMs, 0), // 80
+    maxMs: legs.reduce((s, l) => s + l.maxMs, 0), // 200
+    designMs: BUDGET.leg, // 100
+    phoneHz,
+    g711Kbps: (phoneHz * 8) / 1_000, // 64
+    workerHz: 16_000,
+  };
+})();
+
+/**
+ * The barge-in in the kettle call (sheet §9 step 5 and §15 deep dive 1). The clear lands at the last playback mark,
+ * 1,300 ms into the sentence; audio already on the line is still heard, so the caller heard 1,300 ms (nothing is
+ * subtracted for audio in flight). Word timings from synthesis (ILLUSTRATIVE, about 150 words a minute): "I've" ends
+ * at 350, "asked" at 750, "a" at 900, "colleague" at 1,450. Only words that ended by 1,300 ms count as heard: "I've
+ * asked a". False interruptions resume after 0.7 s (illustrative).
+ */
+export const BARGE_IN = (() => {
+  const sentence = `I've asked a colleague to approve your £${BRIGHTPOST.price} refund`;
+  const words = [
+    { word: "I've", endMs: 350 },
+    { word: "asked", endMs: 750 },
+    { word: "a", endMs: 900 },
+    { word: "colleague", endMs: 1_450 },
+  ] as const;
+  const playedMs = 1_300; // the last playback mark when the clear landed
+  const heardMs = playedMs; // audio already on the line is still heard
+  const heard = words.filter((w) => w.endMs <= heardMs).map((w) => w.word); // I've, asked, a
+  return { sentence, words, playedMs, heardMs, heardText: `${heard.join(" ")}…`, resumeAfterMs: 700 };
+})();
+
+/** Preemptive generation: 50–70% more model calls (Deepgram Flux, 2025, vendor; dossier F22). */
+export const PREEMPTIVE = { extraCallsLow: 0.5, extraCallsHigh: 0.7 } as const;
