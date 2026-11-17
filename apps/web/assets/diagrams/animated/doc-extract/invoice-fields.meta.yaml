@@ -1,17 +1,21 @@
-title: One invoice becomes typed fields with confidences
+title: "One scanned invoice, field by field"
 alt: >-
-  On the left, a scanned supplier invoice drawn as pale blue regions: the supplier, Harbourline Packaging Ltd, with
-  its VAT number; the invoice number INV-20417; the date printed 03/11/2026; a handwritten purchase order number
-  PO-7731; three line items, boxes for 800.00, tape for 240.00 and labels for 200.00; and the totals, subtotal
-  1,240.00, VAT at 20 percent 248.00 and total 1,488.00. In step 2 a table of extracted fields appears on the right,
-  each with a green value and a lime confidence bar on a scale from 0.5 to 1.0: supplier name 0.99, supplier VAT number
-  0.97, invoice number 0.98, invoice date 2026-11-03 at 0.71, purchase order number 0.62, line items, 3 rows totalling
-  1,240.00, at 0.93, VAT amount 0.95 and total 0.96. A dashed line marks the 0.90 threshold; the date and the purchase
-  order bars fall short of it and are red. In step 3 a note lists the checks that pass: the lines add up to 1,240.00,
-  VAT is 20 percent of the subtotal and the total is 1,488.00, and the supplier's VAT number is found in the ERP. A red
-  box says 2 of 24 fields are below 0.90, so the invoice goes to the review queue with both fields marked.
+  A layout in four steps. Step 1: on the left, Harbourline Packaging's scanned two-page invoice INV-20417 drawn as
+  pale blue regions: supplier and VAT number, invoice number and date 03/11/2026, bill-to Brightpost UK and PO-7731,
+  three lines (shipping boxes 800.00, packing tape 240.00, address labels 200.00), and the totals, net 1,240.00 and
+  VAT 248.00, with one digit of the total faint and highlighted; page 2 arrived upside down and was de-rotated; with no
+  text layer the invoice takes route B. Step 2: a table of the 11 critical fields with two green columns, the primary
+  vision-language model and the second reader, Textract on its own OCR. They agree on ten fields; on the gross total
+  the primary copies Azure Read's word 311, 1,438.00, shown red, while Textract reads 1,488.00, and a note says word 311
+  had confidence 0.71 and the boxes overlap at IoU 0.90. Step 3: a lime column shows rules passing on ten fields and a
+  blind image-only tie-break reading 1,488.00 on the gross; two lines of arithmetic show 800.00 plus 240.00 plus 200.00
+  equals 1,240.00, VAT at 20 percent is 248.00, and 1,240.00 plus 248.00 equals 1,488.00, so 1,438.00 would fail.
+  Step 4: a lime column gives each field's P(correct) against its family threshold, from 0.9971 against 0.995 on the
+  gross to 0.9997 against 0.995 on the currency; a green box says 11 of 11 critical fields pass, so the invoice is
+  auto-approved and the outbox posts it once. A note says the P(correct) values are illustrative.
 caption: >-
-  The model proposes every field; the sums and the threshold decide that a clerk checks two fields, not twenty-four.
-tags: [genai, document-processing, structured-output, case-study]
+  The model copied a misread digit; a second reader on a different OCR engine disagreed, a blind tie-break and the
+  arithmetic settled it, and only then did the calibrated score let the invoice post on its own.
+tags: [genai, case-study, document-processing, structured-output, evaluation]
 source: original
-created: 2026-11-15
+created: 2026-11-17

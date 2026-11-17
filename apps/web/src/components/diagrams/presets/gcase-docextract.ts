@@ -1042,3 +1042,75 @@ export const INVOICE = (() => {
 })();
 
 export { round };
+
+/** The difficulty router's cheap signals (design sheet §8 step 4, §10.2): a supplier's template counts as known after
+ * ≥ 5 invoices; mean OCR confidence below 0.80, handwriting on a critical field or a language the second reader does
+ * not read (F5) sends an invoice to route C. Thresholds illustrative, checked against labelled misroutes. */
+export const ROUTER = { templateMinInvoices: 5, minMeanOcrConfidence: 0.8 } as const;
+
+/**
+ * The worked invoice field by field (figure doc-extract/invoice-fields, sheet §9 walk-through and §15.1). Raw text from
+ * the primary (small VLM, citing Azure Read word ids) and the second reader (Textract on its own OCR); the one dispute
+ * is the gross total: Azure Read word 311 reads "1,438.00" at word confidence 0.71, the VLM copies it, Textract reads
+ * "1,488.00" with a box overlapping word 311 at IoU 0.90, and the blind image-only tie-break reads "1,488.00".
+ * P(correct) per field is ILLUSTRATIVE (what the calibrated scorer might return); thresholds are CALIBRATION.thresholds.
+ */
+export const INVOICE_FIELDS = (() => {
+  const t = CALIBRATION.thresholds;
+  const total = INVOICE.total.toLocaleString("en-GB", { minimumFractionDigits: 2 });
+  const rows = [
+    { field: "kind", primary: "invoice", second: "invoice", threshold: t.kind, pCorrect: 0.9995 },
+    { field: "supplier", primary: "Harbourline", second: "Harbourline", threshold: t.parties, pCorrect: 0.9993 },
+    {
+      field: "VAT number",
+      primary: "GB 284 1937 06",
+      second: "GB 284 1937 06",
+      threshold: t.parties,
+      pCorrect: 0.9996,
+    },
+    { field: "bill-to", primary: "Brightpost UK", second: "Brightpost UK", threshold: t.parties, pCorrect: 0.9994 },
+    { field: "number", primary: INVOICE.number, second: INVOICE.number, threshold: t.invoiceNumber, pCorrect: 0.9989 },
+    { field: "date", primary: "03/11/2026", second: "03/11/2026", threshold: t.dates, pCorrect: 0.9984 },
+    { field: "PO", primary: INVOICE.po, second: INVOICE.po, threshold: t.po, pCorrect: 0.999 },
+    { field: "currency", primary: "GBP", second: "GBP", threshold: t.amounts, pCorrect: 0.9997 },
+    { field: "net", primary: "1,240.00", second: "1,240.00", threshold: t.amounts, pCorrect: 0.9993 },
+    { field: "VAT", primary: "248.00", second: "248.00", threshold: t.amounts, pCorrect: 0.9992 },
+    { field: "gross", primary: INVOICE.misread, second: total, threshold: t.amounts, pCorrect: 0.9971 },
+  ];
+  return { rows, disputed: "gross", word: 311, wordConfidence: 0.71, iou: 0.9, tieBreak: total };
+})();
+
+/**
+ * Calibration checked where it decides (figure doc-extract/calibration, sheet §13). The quarter's ≈ 1,817 band labels
+ * (CALIBRATION.bandLabelsQuarter) split by field count across the three threshold groups (amounts 4 fields at 0.995;
+ * PO and dates 2 at 0.997; kind, parties and invoice number 5 at 0.998). If the scorer is calibrated, the errors in a
+ * group are ≈ Poisson(labels × (1 − threshold)); `accLow` is the observed accuracy at the 97.5% count, the bottom of
+ * the interval a calibrated scorer stays inside (the top is 100%: zero errors is likely). The intervals are wide (up
+ * to a point of accuracy), which is why the alarm pools the band: ≥ CALIBRATION.alarmAt errors of ≈ 5.45 expected.
+ */
+export const CALIBRATION_BANDS = (() => {
+  const t = CALIBRATION.thresholds;
+  const groups = [
+    { label: "amounts", threshold: t.amounts, fields: 4 },
+    { label: "PO, dates", threshold: t.po, fields: 2 },
+    { label: "kind, parties, number", threshold: t.kind, fields: 5 },
+  ];
+  const quantile = (lambda: number, q: number) => {
+    let k = 0;
+    while (poissonCdf(k, lambda) < q) k++;
+    return k;
+  };
+  return groups.map((g) => {
+    const labels = (CALIBRATION.bandLabelsQuarter * g.fields) / CRITICAL;
+    const expected = labels * (1 - g.threshold);
+    const high = quantile(expected, 0.975);
+    return { ...g, labels, expected, highErrors: high, accLow: 1 - high / labels };
+  });
+})();
+
+/** P(X = k) for X ~ Poisson(λ), for the band-alarm figure. */
+export function poissonPmf(k: number, lambda: number) {
+  let p = Math.exp(-lambda);
+  for (let i = 1; i <= k; i++) p *= lambda / i;
+  return p;
+}
