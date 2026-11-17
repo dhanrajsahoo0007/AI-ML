@@ -1,24 +1,29 @@
 // Constants and arithmetic for the "Design a Document Extraction Pipeline" case study (/genai-system-design/case-studies/
-// document-extraction-pipeline; design sheet SYSTEM-DESIGN/plans/genai-design/design/document-extraction-pipeline.md,
-// dossier research/document-extraction-pipeline.md, cited as "dossier F12"). Specs in assets/diagrams/animated/
-// doc-extract/ import from here, so the page, the figures and the tests share one set of numbers.
+// document-extraction-pipeline; design sheet SYSTEM-DESIGN/plans/genai-design/design/document-extraction-pipeline.md v2,
+// dossier research/document-extraction-pipeline.md (cited as "dossier F12"), review review/document-extraction-pipeline-
+// design.md). Specs in assets/diagrams/animated/doc-extract/ import from here, so the page, the figures and the tests
+// share one set of numbers.
 //
-// Running example: Brightpost's accounts-payable team (supplier invoices and credit notes, statements, employee
-// receipts). Every volume, mix, error rate, review time and latency below is ILLUSTRATIVE unless a comment names a
-// source. Prices are list prices as of November 2026 (read 17 November 2026):
+// Running example: Brightpost's accounts-payable (AP) team. Every volume, mix, error rate, review time and latency below
+// is ILLUSTRATIVE unless a comment names a source. Prices are list prices as of November 2026 (read 17 November 2026):
 //   - small model (Claude Haiku 5.5 class) 0.10 input / 0.01 cache read / 0.125 cache write / 0.50 output USD per million
-//     tokens; mid-size (Claude Sonnet 5.5 class) 2.00 / 0.10 / 2.50 / 10.00; Batch API −50% (dossier F36);
-//   - OCR 1.50 USD per 1,000 pages (Textract DetectDocumentText, Azure Read, Google Enterprise OCR: F1, F8, F12);
-//   - prebuilt invoice or receipt model 10 USD per 1,000 pages (Azure prebuilt, East US; Textract AnalyzeExpense the
-//     same: F3, F12); Google invoice parser 0.10 USD a document of up to 10 pages (F10); custom extractor 30 per 1,000
-//     pages (F9, F12).
+//     tokens; mid-size (Claude Sonnet 5.5 class) 2.00 / 0.10 / 2.50 / 10.00; Batch −50% (F36). These are first-party
+//     API prices; UK processing runs through a cloud partner's London endpoint, whose regional prices are not verified
+//     here (F67), so the model lines are an estimate;
+//   - OCR: Azure Read, UK South, 1.50 USD per 1,000 pages, 0.60 above 1M (F68);
+//   - second method: Amazon Textract AnalyzeExpense, EU (London), 0.01 USD a page, 0.008 above 1M (F69). It runs its own
+//     OCR, so the two methods do not share an OCR layer (review item 1);
+//   - managed generative extractors for the build-or-buy line: Bedrock Data Automation custom output 0.040 USD a page for
+//     ≤ 30 fields + 0.0005 a field above (F65); Azure Content Understanding ≈ 0.0084 USD a page in Microsoft's own
+//     illustrative invoice example (F64).
 // Image tokens = ceil(w / 28) × ceil(h / 28) (F34). Minimum cacheable prefix 512 tokens (F39).
 
 const usd = (tokens: number, perMillion: number) => (tokens * perMillion) / 1_000_000;
 const sum = (xs: readonly number[]) => xs.reduce((s, x) => s + x, 0);
+const prod = (xs: readonly number[]) => xs.reduce((p, x) => p * x, 1);
 const round = (x: number, dp = 0) => Math.round(x * 10 ** dp) / 10 ** dp;
 
-/** Standard normal CDF (Abramowitz and Stegun 7.1.26) and its inverse by bisection. */
+/** Standard normal CDF (Abramowitz and Stegun 7.1.26). */
 function phi(z: number) {
   const t = 1 / (1 + 0.3275911 * (Math.abs(z) / Math.SQRT2));
   const y =
@@ -28,6 +33,7 @@ function phi(z: number) {
       Math.exp(-(z * z) / 2);
   return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
+/** Find x in [lo, hi] where an increasing f(x) reaches target. */
 function bisect(f: (x: number) => number, target: number, lo: number, hi: number) {
   for (let i = 0; i < 200; i++) {
     const mid = (lo + hi) / 2;
@@ -37,54 +43,65 @@ function bisect(f: (x: number) => number, target: number, lo: number, hi: number
   return (lo + hi) / 2;
 }
 const Z95 = bisect(phi, 0.95, -8, 8); // 1.645
+const Z90 = bisect(phi, 0.9, -8, 8); // 1.282
 
-/** A stage's latency as a normal fit to its p50 and p95 (ms). */
+/** A stage's latency (ms), fitted as a log-normal to its p50 and p95 (no mass below 0, a long right tail). */
 type Stage = { p50: number; p95: number };
-/** Quantile q of the maximum of independent parallel stages (each a normal fit): solve Π F_i(t) = q. */
+const lnCdf = (s: Stage) => (t: number) =>
+  t <= 0 ? 0 : phi((Math.log(t) - Math.log(s.p50)) / ((Math.log(s.p95) - Math.log(s.p50)) / Z95));
+/** Quantile q of the maximum of independent parallel stages: solve Π F_i(t) = q. */
 export function maxOf(stages: readonly Stage[], q: number) {
-  const cdf = (t: number) => stages.reduce((p, s) => p * phi(((t - s.p50) / (s.p95 - s.p50)) * Z95), 1);
-  return bisect(cdf, q, 0, 1_000_000);
+  return bisect((t) => prod(stages.map((s) => lnCdf(s)(t))), q, 1, 10_000_000);
 }
 
-/** One-sided 95% Poisson upper bound on the count when k events were seen (k = 0 → 3.00, the rule of three). */
+/** P(X ≤ k) for X ~ Poisson(λ). */
+function poissonCdf(k: number, lambda: number) {
+  let term = Math.exp(-lambda);
+  let total = term;
+  for (let i = 1; i <= k; i++) {
+    term *= lambda / i;
+    total += term;
+  }
+  return total;
+}
+/** One-sided 95% Poisson upper bound on the mean when k events were seen (k = 0 → 3.00, the rule of three). */
 export function poissonUpper95(k: number) {
-  const cdfAtK = (lambda: number) => {
-    let term = Math.exp(-lambda);
-    let total = term;
-    for (let i = 1; i <= k; i++) {
-      term *= lambda / i;
-      total += term;
-    }
-    return total;
-  };
-  // P(X ≤ k; λ) falls as λ rises: find λ where it equals 0.05.
-  return bisect((l) => -cdfAtK(l), -0.05, 0, 1_000);
+  return bisect((l) => -poissonCdf(k, l), -0.05, 0, 1_000);
+}
+/** Largest k whose 95% upper bound ÷ n stays ≤ limit (the most audited errors a pass allows). */
+function maxPassingK(n: number, limit: number) {
+  let k = -1;
+  while (poissonUpper95(k + 1) / n <= limit) k++;
+  return k;
 }
 
 // ── Prices ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** USD per million tokens (dossier F36) and per page (F1, F3, F8, F12), as of November 2026. */
 export const PRICES = {
   small: { input: 0.1, cached: 0.01, write: 0.125, output: 0.5 },
   mid: { input: 2.0, cached: 0.1, write: 2.5, output: 10.0 },
   batchDiscount: 0.5,
-  ocrPerPage: 1.5 / 1_000, // 0.0015
-  prebuiltPerPage: 10 / 1_000, // 0.01 (Azure prebuilt invoice and receipt; Textract AnalyzeExpense the same)
-  googleInvoicePerDoc: 0.1, // a document of up to 10 pages
-  customExtractorPerPage: 30 / 1_000, // 0.03
-  renderPerPage: 0.0002, // CPU to rasterise, read the text layer and compare visible text (illustrative)
+  ocrPerPage: 1.5 / 1_000, // Azure Read, UK South; 0.0006 above 1M pages a month
+  ocrPerPageOver1M: 0.6 / 1_000,
+  secondPerPage: 0.01, // Textract AnalyzeExpense, London; 0.008 above 1M
+  secondPerPageOver1M: 0.008,
+  bdaCustomPerPage: 0.04, // ≤ 30 fields
+  bdaPerExtraField: 0.0005,
+  contentUnderstandingPerPage: 0.0837 / 10, // Microsoft's illustrative 10-page invoice example
+  renderPerPage: 0.0002, // CPU: rasterise, de-rotate, content-stream check (illustrative)
   clerkPerHour: 30, // fully loaded AP clerk, USD an hour (illustrative)
+  usdPerGbp: 1.3, // illustrative, for the money-at-risk sums
 } as const;
 
 // ── Volume (Brightpost accounts payable, illustrative) ────────────────────────────────────────────────────────────────
 
 /**
- * Per month: 40,000 supplier invoices and credit notes (2 pages each on average), 1,000 statements (3 pages, reconciled,
- * never posted), 30,000 employee receipts (1 photo each), 1,000 other files (classified out, 1 page).
- *   documents 40,000 + 1,000 + 30,000 + 1,000 = 72,000; pages 80,000 + 3,000 + 30,000 + 1,000 = 114,000.
- * 21 working days; 35% of invoices arrive in the last 5 working days (month end):
- *   normal day 40,000 × 0.65 ÷ 16 = 1,625 invoices; month-end day 40,000 × 0.35 ÷ 5 = 2,800.
- * Peak hour = 15% of a day's arrivals: 0.15 × 2,800 = 420 invoices an hour. Receipts spread evenly: 30,000 ÷ 21 ≈ 1,429.
+ * Per month: 40,000 supplier invoices and credit notes (2 pages on average), 1,000 statements (3 pages, reconciled
+ * against the ledger, never posted), 30,000 employee receipts (1 photo), 1,000 other files (1 page: letters, junk).
+ *   documents 72,000; pages 80,000 + 3,000 + 30,000 + 1,000 = 114,000.
+ * 21 working days; 35% of invoices in the last 5: normal day 1,625, month-end day 2,800; peak hour 15% → 420.
+ * 30% of invoices have no purchase order (utilities, services); they need budget-holder approval in the ERP, a business
+ * control outside the AP queue and outside STP.
  */
 export const VOLUME = (() => {
   const invoices = 40_000;
@@ -101,9 +118,9 @@ export const VOLUME = (() => {
   const normalDayInvoices = (invoices * (1 - monthEndShare)) / (workingDays - monthEndDays); // 1,625
   const monthEndDayInvoices = (invoices * monthEndShare) / monthEndDays; // 2,800
   const receiptsPerDay = receipts / workingDays; // 1,428.6
-  const peakHourShare = 0.15;
-  const peakHourInvoices = peakHourShare * monthEndDayInvoices; // 420
-  const peakDocsPerSecond = (peakHourInvoices + receiptsPerDay * peakHourShare) / 3_600; // (420 + 214) ÷ 3,600 ≈ 0.18
+  const peakHourInvoices = 0.15 * monthEndDayInvoices; // 420
+  const peakDocsPerSecond = (peakHourInvoices + 0.15 * receiptsPerDay) / 3_600; // ≈ 0.18
+  const burstUpload = 500; // a scanning-room or portal batch: queued by the workflow, drained at the OCR quota
   return {
     invoices,
     invoicePages,
@@ -119,45 +136,56 @@ export const VOLUME = (() => {
     normalDayInvoices,
     monthEndDayInvoices,
     receiptsPerDay,
-    peakHourShare,
     peakHourInvoices,
     peakDocsPerSecond,
+    burstUpload,
+    nonPoShare: 0.3,
   };
 })();
 
 /**
- * Fields. Invoice: 12 header fields + 5 line items × 5 fields (description, quantity, unit price, VAT rate, net amount:
- * HMRC Notice 700 16.3.1 asks for quantity, VAT rate and net amount per item, dossier F51) = 37.
- * 8 critical fields gate posting: supplier, invoice number, invoice date, currency, net total, VAT total, gross total,
- * PO number. Line items are gated by arithmetic (Σ lines = net total; quantity × unit price = line net), not field by
- * field. Bank details are never extracted for payment: they come from the supplier master.
- * Receipt: 8 fields, 4 critical (merchant, date, total, VAT).
+ * Fields. Invoice header (12): document kind (invoice or credit note: the sign), supplier (resolved to supplier_id),
+ * supplier VAT number, bill-to entity (company code), invoice number, invoice date (tax point), due date, PO number,
+ * currency, net total, VAT total, gross total. Lines: an array (1 to 200+; 5 on average) of description, quantity, unit
+ * price, VAT rate, net (HMRC 16.3.1, F51): 5 × 5 = 25. 37 fields on the average invoice.
+ * Critical (gate posting): the 11 header fields other than due date, in five rule families with different catch rates.
  */
 export const FIELDS = {
   header: 12,
   lineItems: 5,
   lineFields: 5,
   perInvoice: 12 + 5 * 5, // 37
-  critical: 8,
   receipt: 8,
   receiptCritical: 4,
+  families: [
+    { id: "amounts", fields: ["currency", "net", "vat", "gross"], rulesCatch: 0.95 }, // Σ lines, net + VAT = gross, PO, GRN
+    { id: "kind", fields: ["doc_kind"], rulesCatch: 0.95 }, // title + sign of totals + credit-note reference to an invoice
+    { id: "parties", fields: ["supplier_id", "supplier_vat", "bill_to"], rulesCatch: 0.9 }, // VAT number ↔ master (HMRC, VIES), sender domain, remit-to
+    { id: "po", fields: ["po_number"], rulesCatch: 0.9 }, // the PO must exist, be open and belong to the supplier
+    { id: "invoice_number", fields: ["invoice_number"], rulesCatch: 0.6 }, // only the supplier's pattern and sequence
+    { id: "dates", fields: ["invoice_date"], rulesCatch: 0.7 }, // ≥ PO date, ≤ today, ≤ 90 days old, in sequence with numbers
+  ],
 } as const;
+export const CRITICAL = sum(FIELDS.families.map((f) => f.fields.length)); // 11
 
 // ── The extraction call's context ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One page rasterised by us at 150 DPI (A4 1240 × 1754 px, the minimum Textract recommends, F5): ceil(1240/28) = 45 ×
- * ceil(1754/28) = 63 = 2,835 image tokens, inside the high-resolution tier's 4,784 so it is not resized and word boxes
- * map one to one (F34, F35). OCR words with ids: 350 words a page × 5 tokens ("w123 1,488.00") = 1,750 tokens.
+ * OCR runs on the native scan (or a 300 DPI render of a born-digital page); the VLM gets a 150 DPI copy (A4 1240 × 1754
+ * px → 45 × 63 = 2,835 image tokens, under the high-resolution tier's 4,784) and boxes are scaled by the DPI ratio.
+ * OCR words carry an id and a coarse position (line, x and y in tenths): 350 words × 8 tokens = 2,800 tokens a page.
+ *   stable 900 + 600 = 1,500; changing 400 + 5,670 + 5,600 = 11,670; total 13,170.
+ * Output: fixed object keys, short integer word ids; counted on the schema at ≈ 35 tokens a field → 37 × 35 ≈ 1,300.
  */
 export const PAGE = (() => {
   const widthPx = 1_240;
   const heightPx = 1_754;
-  const imageTokens = Math.ceil(widthPx / 28) * Math.ceil(heightPx / 28); // 45 × 63 = 2,835
+  const imageTokens = Math.ceil(widthPx / 28) * Math.ceil(heightPx / 28); // 2,835
   const wordsPerPage = 350;
-  const tokensPerWord = 5;
+  const tokensPerWord = 8;
   return {
-    dpi: 150,
+    vlmDpi: 150,
+    ocrDpi: 300,
     widthPx,
     heightPx,
     imageTokens,
@@ -167,13 +195,6 @@ export const PAGE = (() => {
   };
 })();
 
-/**
- * The extraction call for a 2-page invoice (figure doc-extract/context-window). Stable blocks first, so they are cached
- * (1,500 ≥ the 512-token minimum, F39); images come after the cached prefix because adding images invalidates the
- * messages cache from that point (F39).
- *   stable 900 + 600 = 1,500; changing 400 + 5,670 + 3,500 = 9,570; total 11,070. Output 800 tokens (37 fields × ≈ 20,
- *   with word ids).
- */
 export const CONTEXT = (() => {
   const pages = VOLUME.invoicePages;
   const blocks = [
@@ -183,24 +204,26 @@ export const CONTEXT = (() => {
     { id: "images", label: "Page images", tokens: pages * PAGE.imageTokens, stable: false },
     { id: "words", label: "OCR words", tokens: pages * PAGE.wordTokens, stable: false },
   ] as const;
-  const total = sum(blocks.map((b) => b.tokens)); // 11,070
+  const total = sum(blocks.map((b) => b.tokens)); // 13,170
   const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 1,500
-  const wordsOnlyChanging = 400 + pages * PAGE.wordTokens; // route A sends no image: 3,900
-  return { blocks, total, stable, changing: total - stable, wordsOnlyChanging, output: 800, tieBreakOutput: 150 };
+  const changing = total - stable; // 11,670
+  const wordsOnlyChanging = 400 + pages * PAGE.wordTokens; // route A: 6,000
+  const imageOnlyChanging = 400 + pages * PAGE.imageTokens; // tie-break: 6,070
+  return { blocks, total, stable, changing, wordsOnlyChanging, imageOnlyChanging, output: 1_300, tieBreakOutput: 150 };
 })();
 
 // ── Unit costs (USD) ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Model calls, per invoice:
- *   page classifier (small, per page): 600 cached + 1,750 words + 30 out = 0.000006 + 0.000175 + 0.000015 = 0.000196
- *   route A, small, words only: 1,500 cached + 3,900 + 800 out = 0.000015 + 0.00039 + 0.0004 = 0.000805
- *   small VLM (route B): 1,500 cached + 9,570 + 800 out = 0.000015 + 0.000957 + 0.0004 = 0.001372
- *   mid VLM (route C): 1,500 × 0.10 + 9,570 × 2.00 + 800 × 10 per million = 0.00015 + 0.01914 + 0.008 = 0.02729
- *   mid tie-break (blind, disputed fields only): same input, 150 out = 0.00015 + 0.01914 + 0.0015 = 0.02079
- *   prebuilt second opinion: 2 pages × 0.01 = 0.02
- * Receipt (1 photo resized to 900 × 1,600 px: 33 × 58 = 1,914 image tokens; 120 words × 5 = 600 word tokens; 1,200-token
- * cached receipt prefix; 250 out): 0.000012 + 0.000251 + 0.000125 = 0.000388.
+ * Small-model calls read the cached prefix (dense traffic). Mid-model calls (tie-breaks ≈ 135 and route C ≈ 81 a normal
+ * day) arrive less often than every 5 minutes, so each pays a cache write on the 1,500-token prefix (review item 46).
+ *   page classifier (small): 600 cached + 2,800 + 30 out = 0.000006 + 0.00028 + 0.000015 = 0.000301 a page
+ *   route A (small, words): 1,500 cached + 6,000 + 1,300 out = 0.000015 + 0.0006 + 0.00065 = 0.001265
+ *   small VLM (route B): 1,500 cached + 11,670 + 1,300 out = 0.000015 + 0.001167 + 0.00065 = 0.001832
+ *   mid VLM (route C pre-fill): 1,500 written + 11,670 + 1,300 out = 0.00375 + 0.02334 + 0.013 = 0.04009
+ *   mid tie-break, image only, disputed fields: 1,500 written + 6,070 + 150 out = 0.00375 + 0.01214 + 0.0015 = 0.01739
+ *   second method (Textract AnalyzeExpense, own OCR): 2 pages × 0.01 = 0.02
+ * Receipt: 900 × 1,600 photo copy (33 × 58 = 1,914 tokens) + 120 words × 8 = 960 + 1,200 cached + 300 out = 0.000437.
  */
 export const UNIT = (() => {
   const s = PRICES.small;
@@ -210,249 +233,497 @@ export const UNIT = (() => {
   const routeA =
     usd(CONTEXT.stable, s.cached) + usd(CONTEXT.wordsOnlyChanging, s.input) + usd(CONTEXT.output, s.output);
   const smallVlm = usd(CONTEXT.stable, s.cached) + usd(CONTEXT.changing, s.input) + usd(CONTEXT.output, s.output);
-  const midVlm = usd(CONTEXT.stable, m.cached) + usd(CONTEXT.changing, m.input) + usd(CONTEXT.output, m.output);
+  const midVlm = usd(CONTEXT.stable, m.write) + usd(CONTEXT.changing, m.input) + usd(CONTEXT.output, m.output);
   const tieBreak =
-    usd(CONTEXT.stable, m.cached) + usd(CONTEXT.changing, m.input) + usd(CONTEXT.tieBreakOutput, m.output);
-  const prebuilt = p * PRICES.prebuiltPerPage;
-  const perPageCommon = PRICES.ocrPerPage + PRICES.renderPerPage + classifierPage; // OCR runs on every page (hidden-text check)
-  const commonPerInvoice = p * perPageCommon;
-  const receiptImageTokens = Math.ceil(900 / 28) * Math.ceil(1_600 / 28); // 33 × 58 = 1,914
-  const receiptVlm = usd(1_200, s.cached) + usd(receiptImageTokens + 600, s.input) + usd(250, s.output);
-  // Stable-prefix cache writes: at most one per 5 minutes per model and schema; 288 a day × 1,500 tokens × 2.50 per
-  // million (mid, the dearer) ≈ 1.08 USD a day (≈ 23 USD a month): inside the infrastructure line, not per document.
-  const cacheWritesPerDay = 288 * usd(CONTEXT.stable, m.write);
+    usd(CONTEXT.stable, m.write) + usd(CONTEXT.imageOnlyChanging, m.input) + usd(CONTEXT.tieBreakOutput, m.output);
+  const second = p * PRICES.secondPerPage;
+  const perPageCommon = PRICES.ocrPerPage + PRICES.renderPerPage + classifierPage; // 0.002001
+  const commonPerInvoice = p * perPageCommon; // 0.004002
+  const receiptImageTokens = Math.ceil(900 / 28) * Math.ceil(1_600 / 28); // 1,914
+  const receiptVlm =
+    usd(1_200, s.cached) + usd(receiptImageTokens + 120 * PAGE.tokensPerWord, s.input) + usd(300, s.output);
   return {
     classifierPage,
     routeA,
     smallVlm,
     midVlm,
     tieBreak,
-    prebuilt,
+    second,
     perPageCommon,
     commonPerInvoice,
     receiptImageTokens,
     receiptVlm,
-    cacheWritesPerDay,
   };
 })();
 
-// ── Difficulty router and the error model ───────────────────────────────────────────────────────────────────────────
+// ── Error model ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Routes (by page type and layout):
- *   A: born-digital PDF + known template (supplier seen ≥ 5 times with a stable layout fingerprint) → small model on
- *      the text-layer words; second method = the supplier's template rules (anchors learned from reviewed invoices).
- *   B: born-digital with a novel layout, or a scan or photo of print → small VLM on image + OCR words; second method =
- *      a prebuilt invoice model; any disagreement on a critical field → a blind mid-size tie-break on those fields.
- *   C: handwriting on critical fields, or a degraded scan (mean OCR word confidence < 0.80) → mid VLM; second method =
- *      the prebuilt model; disagreements go to people.
+ * Routes: A born-digital + known template (small model on text-layer words; second = template anchors); B novel layout or
+ * scan of print (small VLM on image + Azure Read words; second = Textract AnalyzeExpense on its own OCR; disputed fields
+ * → a blind mid-size read of the image only); C handwriting on critical fields, degraded scans, languages Textract does
+ * not read (F5): mid VLM + Textract PRE-FILL a review task; C never auto-posts (review item 3).
  *
- * Per critical field: p1 = primary error, p2 = second-method error, shared = share of the primary's errors that the
- * second method repeats with the same wrong value (correlated errors; the number that decides what agreement is worth
- * and is measured on the gold set). agreeWrong w = p1 × shared; disagree d = p1 + p2 − 2w (both-wrong-differently
- * ignored). Rules (arithmetic, VAT, HMRC VAT-number lookup, PO and goods receipt, card feed, duplicates, date
- * plausibility) catch rulesCatch of agree-wrong errors. Tie-break (route B): resolves tieResolve of disputed fields;
- * of those, tieWrong are resolved to the wrong value before rules.
+ * Shared error = the share of the primary's errors the second method repeats with the same wrong value, built by cause
+ * (illustrative shares; measured per route and cause on the gold set):
+ *   B: OCR misreads 40% × 0.15 (two OCR engines) + field assignment 45% × 0.15 + normalisation 15% × 0.5 = 0.2025
+ *   A: no OCR (text layer is exact): assignment 80% × 0.15 + normalisation 20% × 0.5 = 0.22
+ * Raw text is compared before one shared normaliser runs; a date with day ≤ 12 from a supplier with < 5 invoices of
+ * history is flagged, so most normalisation errors become flags, not escapes; the 0.5 is what is left.
+ * Score threshold: catches scoreCatch of the agree-wrong fields that pass the rules, and flags scoreFlag of correct
+ * agreements; one illustrative trade-off curve: scoreFlag = 0.002 × (c ÷ (1 − c))² (c = 0.5 → 0.2%, 0.7 → 1.1%).
  */
 type RouteParams = { p1: number; p2: number; shared: number; tie?: { resolve: number; wrong: number } };
 type Scenario = {
   mix: { A: number; B: number; C: number };
-  routes: { A: RouteParams; B: RouteParams; C: RouteParams };
-  rulesCatch: number;
+  routes: { A: RouteParams; B: RouteParams };
   scoreCatch: number;
-  scoreFlag: number;
   lineFail: number;
   exception: number;
   failure: number;
+  holds: number;
 };
+export const scoreFlagFor = (c: number) => 0.002 * (c / (1 - c)) ** 2;
+
+export const SHARED_BY_CAUSE = {
+  B: {
+    ocr: { share: 0.4, shared: 0.15 },
+    assignment: { share: 0.45, shared: 0.15 },
+    normalisation: { share: 0.15, shared: 0.5 },
+  },
+  A: { assignment: { share: 0.8, shared: 0.15 }, normalisation: { share: 0.2, shared: 0.5 } },
+} as const;
+const sharedOf = (causes: Record<string, { share: number; shared: number }>) =>
+  sum(Object.values(causes).map((c) => c.share * c.shared));
+export const SHARED = { A: sharedOf(SHARED_BY_CAUSE.A), B: sharedOf(SHARED_BY_CAUSE.B) }; // 0.22, 0.2025
+
+/**
+ * Policy holds (never auto-post, whatever the score), illustrative: new or ambiguous supplier match 1.5%; sender domain not
+ * aligned 1.0%; any hidden text 0.1%; near-duplicate 0.5% (same supplier and gross within ± 60 days AND the same folded
+ * number in any year, a page-1 perceptual-hash match, or the same PO with identical lines; a recurring invoice with a new
+ * number and period passes) → 1 − 0.985 × 0.99 × 0.999 × 0.995 ≈ 3.1%. Value caps and the money rule are applied per
+ * value band in `evaluate`, not as a flat share (review R2-1).
+ */
+const HOLDS = 1 - (1 - 0.015) * (1 - 0.01) * (1 - 0.001) * (1 - 0.005);
 
 export const SCENARIOS = {
-  /** Twelve months in: templates for the top suppliers, supplier hints from corrections, a recalibrated scorer. */
   steady: {
     mix: { A: 0.55, B: 0.4, C: 0.05 },
     routes: {
-      A: { p1: 0.004, p2: 0.006, shared: 0.1 },
-      B: { p1: 0.01, p2: 0.015, shared: 0.1, tie: { resolve: 0.7, wrong: 0.003 } },
-      C: { p1: 0.03, p2: 0.06, shared: 0.1 },
+      A: { p1: 0.004, p2: 0.006, shared: SHARED.A },
+      B: { p1: 0.01, p2: 0.015, shared: SHARED.B, tie: { resolve: 0.7, wrong: 0.02 } },
     },
-    rulesCatch: 0.85,
-    scoreCatch: 0.3, // calibrated score below threshold on 30% of the agree-wrong fields that pass the rules
-    scoreFlag: 0.002, // and on 0.2% of agreeing fields that are in fact correct (the price of the threshold)
-    lineFail: 0.03, // lines do not add up (dropped or split rows)
-    exception: 0.08, // business exceptions: PO price or quantity variance, no goods receipt, new supplier, duplicate suspicion, bank mismatch
-    failure: 0.015, // unreadable, classifier unsure, missing pages, unsupported language → keyed by a person
+    scoreCatch: 0.5, // the floor; `solve` raises it until the count escape meets the audit budget
+    lineFail: 0.03,
+    exception: 0.08,
+    failure: 0.015,
+    holds: HOLDS,
   },
-  /** Launch: fewer learned templates (A 35%), no supplier hints yet (primary errors × 2), template rules × 2. */
+  /** Launch: route A 35% (fewer templates); primary errors × 2 (A 0.4 → 0.8%, B 1 → 2%); anchors × 2; C unchanged
+   * (reviewed anyway); lines 5%, failures 2%. */
   launch: {
     mix: { A: 0.35, B: 0.6, C: 0.05 },
     routes: {
-      A: { p1: 0.008, p2: 0.012, shared: 0.1 },
-      B: { p1: 0.02, p2: 0.015, shared: 0.1, tie: { resolve: 0.7, wrong: 0.003 } },
-      C: { p1: 0.045, p2: 0.06, shared: 0.1 },
+      A: { p1: 0.008, p2: 0.012, shared: SHARED.A },
+      B: { p1: 0.02, p2: 0.015, shared: SHARED.B, tie: { resolve: 0.7, wrong: 0.02 } },
     },
-    rulesCatch: 0.85,
-    scoreCatch: 0.6, // launch threshold set conservatively on the shadow-month labels
-    scoreFlag: 0.01,
+    scoreCatch: 0.5,
     lineFail: 0.05,
     exception: 0.08,
     failure: 0.02,
+    holds: HOLDS,
   },
 } as const satisfies Record<string, Scenario>;
 
-/** Per-route outcome for one invoice: flag rate, tie-break rate, escaped critical errors, flagged fields when flagged. */
-function routeOutcome(r: RouteParams, sc: Pick<Scenario, "rulesCatch" | "scoreCatch" | "scoreFlag">, n: number) {
+type Catches = Partial<Record<(typeof FIELDS.families)[number]["id"], number>>;
+
+/** One route at one threshold: per-field flag and escape by family; P(no flag and ≥ 1 escape) (review item 42). */
+function routeOutcome(r: RouteParams, scoreCatch: number, catches: Catches = {}) {
+  const scoreFlag = scoreFlagFor(scoreCatch);
   const w = r.p1 * r.shared;
   const d = r.p1 + r.p2 - 2 * w;
-  // Per field, goes to a person: an unresolved disagreement, or an agreement whose calibrated score is below threshold.
-  const unresolved = (r.tie ? d * (1 - r.tie.resolve) : d) + sc.scoreFlag * (1 - d);
-  const tieEscape = r.tie ? d * r.tie.resolve * r.tie.wrong : 0;
-  const escapePerField = (w + tieEscape) * (1 - sc.rulesCatch) * (1 - sc.scoreCatch);
-  const flag = 1 - (1 - unresolved) ** n;
-  const tieBreakRate = r.tie ? 1 - (1 - d) ** n : 0; // invoices that call the mid model
-  const escape = 1 - (1 - escapePerField) ** n; // invoice-level, before conditioning on not flagged
-  const flaggedFields = flag > 0 ? (n * unresolved) / flag : 0; // expected flagged fields given ≥ 1
-  return { agreeWrong: w, disagree: d, unresolved, escapePerField, flag, tieBreakRate, escape, flaggedFields };
+  const u = (r.tie ? d * (1 - r.tie.resolve) : d) + scoreFlag * (1 - d); // per field → a person
+  const tieWrong = r.tie ? d * r.tie.resolve * r.tie.wrong : 0;
+  const perField = FIELDS.families.flatMap((f) =>
+    f.fields.map(() => (w + tieWrong) * (1 - (catches[f.id] ?? f.rulesCatch)) * (1 - scoreCatch))
+  );
+  const noFlag = (1 - u) ** CRITICAL;
+  const flag = 1 - noFlag;
+  const escapeJoint = noFlag - prod(perField.map((e) => 1 - u - e));
+  const tieBreakRate = r.tie ? 1 - (1 - d) ** CRITICAL : 0;
+  const flaggedFields = flag > 0 ? (CRITICAL * u) / flag : 0;
+  return {
+    agreeWrong: w,
+    disagree: d,
+    unresolved: u,
+    scoreFlag,
+    flag,
+    escapeJoint,
+    escapeAmongAuto: escapeJoint / noFlag,
+    tieBreakRate,
+    flaggedFields,
+  };
 }
+
+// ── Money at risk ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The outcome of a scenario: straight-through rate (STP), review mix, escape rate among auto-posted invoices.
- * STP = Σ_r mix_r × (1 − flag_r) × (1 − lineFail) × (1 − exception) × (1 − failure).
- * Escape (auto-posted invoices with a wrong critical field) = Σ_r mix_r × escape_r × (other passes) ÷ STP.
+ * Expected loss of one escape (illustrative): recovery work 2 h × 30 USD + 5% of the value never recovered. The money
+ * rule: an invoice auto-posts only if (its route's escape among auto-posted at the band's threshold) × loss(value) ≤ the
+ * review cost (43 s ≈ 0.36 USD); the threshold rises with value until that holds, or the invoice is reviewed. The model
+ * uses the route's average Σ(1 − P(correct)), a simplification of the per-invoice sum the scorer computes in production.
+ * Invoice values (illustrative, from AP history): log-normal, median £1,200, σ = 1.2 → mean 1,200 × e^0.72 ≈ £2,466;
+ * 40 equal-probability bands. Caps: any invoice > £50,000 reviewed; non-PO (30%) > £5,000 reviewed.
  */
-export function outcome(sc: Scenario) {
-  const n = FIELDS.critical;
-  const r = {
-    A: routeOutcome(sc.routes.A, sc, n),
-    B: routeOutcome(sc.routes.B, sc, n),
-    C: routeOutcome(sc.routes.C, sc, n),
+export const RISK = (() => {
+  const recoveryUsd = 2 * PRICES.clerkPerHour;
+  const unrecovered = 0.05;
+  const reviewUsd = (43 * PRICES.clerkPerHour) / 3_600; // 0.358
+  const loss = (gbp: number) => recoveryUsd + unrecovered * gbp * PRICES.usdPerGbp;
+  const median = 1_200;
+  const sigma = 1.2;
+  const bands = Array.from({ length: 40 }, (_, i) => median * Math.exp(sigma * bisect(phi, (i + 0.5) / 40, -8, 8)));
+  return {
+    recoveryUsd,
+    unrecovered,
+    reviewUsd,
+    loss,
+    allowedError: (gbp: number) => reviewUsd / loss(gbp),
+    median,
+    sigma,
+    mean: median * Math.exp((sigma * sigma) / 2),
+    bands,
+    examples: [1_488, 5_000, 20_000].map((gbp) => ({ gbp, lossUsd: loss(gbp), allowedError: reviewUsd / loss(gbp) })),
+    caps: { nonPoGbp: 5_000, anyGbp: 50_000, twoApproversGbp: 100_000 },
+    shareAboveAnyCap: bands.filter((v) => v > 50_000).length / bands.length,
+    shareNonPoAboveCap: (VOLUME.nonPoShare * bands.filter((v) => v > 5_000).length) / bands.length,
   };
-  const keys = ["A", "B", "C"] as const;
-  const other = (1 - sc.lineFail) * (1 - sc.exception) * (1 - sc.failure);
-  const fieldFlag = sum(keys.map((k) => sc.mix[k] * r[k].flag));
-  const stp = sum(keys.map((k) => sc.mix[k] * (1 - r[k].flag))) * other;
-  const escaped = sum(keys.map((k) => sc.mix[k] * r[k].escape)) * other;
-  const escape = escaped / stp;
-  const tieBreak = sc.mix.B * r.B.tieBreakRate; // share of all invoices
-  const flaggedFields = sum(keys.map((k) => sc.mix[k] * r[k].flag * r[k].flaggedFields)) / fieldFlag;
-  return { routes: r, fieldFlag, stp, escape, tieBreak, flaggedFields, other };
-}
-
-export const STEADY = outcome(SCENARIOS.steady);
-export const LAUNCH = outcome(SCENARIOS.launch);
-
-/** Sensitivity: if the second method repeats 30% of the primary's errors instead of 10%. */
-export const SHARED_30 = outcome({
-  ...SCENARIOS.steady,
-  routes: {
-    A: { ...SCENARIOS.steady.routes.A, shared: 0.3 },
-    B: { ...SCENARIOS.steady.routes.B, shared: 0.3 },
-    C: { ...SCENARIOS.steady.routes.C, shared: 0.3 },
-  },
-});
-
-/** Ablation: one method only (no second opinion, no tie-break), rules and the score threshold still on. */
-export const SINGLE_METHOD = (() => {
-  const sc = SCENARIOS.steady;
-  const escapePerField = (k: "A" | "B" | "C") => sc.routes[k].p1 * (1 - sc.rulesCatch) * (1 - sc.scoreCatch);
-  const escaped = sum(
-    (["A", "B", "C"] as const).map((k) => sc.mix[k] * (1 - (1 - escapePerField(k)) ** FIELDS.critical))
-  );
-  return { escape: escaped }; // see the sheet §13: several times the N1 bound
 })();
 
-// ── Review queue, sized in staff hours ───────────────────────────────────────────────────────────────────────────────
+/** N1 is judged on the uniform audit only: 1,500 blind re-keys a month (4,500 a quarter); the 500 a month drawn by value
+ * are a separate sample for the value-weighted escape (review R2-2). */
+export const AUDIT = (() => {
+  const perMonth = 1_500;
+  const valuePerMonth = 500;
+  const quarter = 3 * perMonth; // 4,500
+  const kMax = maxPassingK(quarter, 0.003); // 7: bound 13.15 ÷ 4,500 = 0.292%
+  const budget = bisect((p) => -poissonCdf(kMax, quarter * p), -0.9, 0, 0.01); // P(pass) = 90% at ≈ 0.1035%
+  const pass = (escape: number) => poissonCdf(kMax, quarter * escape);
+  return { perMonth, valuePerMonth, quarter, kMax, budget, pass, doubleKeyShare: 0.1 };
+})();
+
+const GRID = Array.from({ length: 197 }, (_, i) => 0.5 + i * 0.0025); // score catch 0.50 … 0.99
+/** Share of auto-approved invoices sent to review as labels before posting: random 2% + band samples (10% of fields
+ * within 0.004 of the threshold, ≈ 2% of accepted fields) → 0.02 + 1 − (1 − 0.002)^11 ≈ 4.2% (review R2-7). */
+export const SAMPLED = 0.02 + (1 - (1 - 0.02 * 0.1) ** CRITICAL);
 
 /**
- * Seconds per review (illustrative): field review 30 s + 12 s per flagged field (the clerk sees the page with the
- * flagged boxes highlighted); lines that do not add up 120 s; business exception 240 s; extraction failure 360 s (key
- * the invoice, as today's 6 minutes); audit 90 s (blind re-key of the 8 critical fields); receipt 40 s.
- * A flagged invoice may have several reasons; we count each reason's time (an upper bound).
+ * The STP model with the money rule inside it. For each value band and route: caps first; then the lowest threshold on
+ * the grid at or above `floor` whose escape × loss ≤ review cost; if none, the band is reviewed.
+ */
+export function evaluate(sc: Scenario, floor = sc.scoreCatch, catches: Catches = {}) {
+  const other = (1 - sc.lineFail) * (1 - sc.exception) * (1 - sc.failure) * (1 - sc.holds);
+  const grid = GRID.filter((c) => c >= floor - 1e-9);
+  const table = {
+    A: grid.map((c) => ({ c, o: routeOutcome(sc.routes.A, c, catches) })),
+    B: grid.map((c) => ({ c, o: routeOutcome(sc.routes.B, c, catches) })),
+  };
+  const nb = RISK.bands.length;
+  let auto = 0,
+    esc = 0,
+    escValue = 0,
+    autoValue = 0,
+    flagged = 0,
+    flaggedFieldsSum = 0,
+    tie = 0,
+    valueReview = 0,
+    escLoss = 0,
+    atFloor = 0;
+  for (const v of RISK.bands) {
+    const capAll = v > RISK.caps.anyGbp;
+    const eligible = capAll ? 0 : v > RISK.caps.nonPoGbp ? 1 - VOLUME.nonPoShare : 1;
+    for (const k of ["A", "B"] as const) {
+      const m = sc.mix[k] / nb;
+      valueReview += m * (1 - eligible);
+      if (eligible === 0) continue;
+      const hit = table[k].find((t) => t.o.escapeAmongAuto * RISK.loss(v) <= RISK.reviewUsd);
+      if (!hit) {
+        valueReview += m * eligible;
+        continue;
+      }
+      if (hit.c <= floor + 1e-9) atFloor += m * eligible;
+      const o = hit.o;
+      const a = m * eligible * (1 - o.flag) * other;
+      const e = m * eligible * o.escapeJoint * other;
+      auto += a;
+      esc += e;
+      autoValue += a * v;
+      escValue += e * v;
+      escLoss += e * RISK.loss(v);
+      flagged += m * eligible * o.flag;
+      flaggedFieldsSum += m * eligible * o.flag * o.flaggedFields;
+      tie += m * eligible * o.tieBreakRate;
+    }
+  }
+  const stpPre = auto;
+  return {
+    floor,
+    other,
+    stpPre,
+    stp: stpPre * (1 - SAMPLED), // sampled invoices are touched by a clerk before posting
+    escape: esc / stpPre,
+    valueWeightedEscape: escValue / autoValue,
+    escapeLossPerInvoice: escLoss, // expected USD lost per invoice received
+    fieldFlag: flagged,
+    flaggedFields: flaggedFieldsSum / flagged,
+    tieBreak: tie,
+    valueReview, // share of all invoices reviewed by a cap or the money rule
+    atFloorShare: atFloor / (sc.mix.A + sc.mix.B),
+    A: table.A[0].o,
+    B: table.B[0].o,
+  };
+}
+
+/** Solve the floor: the lowest threshold at which the count escape meets the uniform-audit budget. */
+export function solve(sc: Scenario, catches: Catches = {}) {
+  for (const c of GRID.filter((x) => x >= sc.scoreCatch - 1e-9)) {
+    const r = evaluate(sc, c, catches);
+    if (r.escape <= AUDIT.budget) return { ...r, pass: AUDIT.pass(r.escape) };
+  }
+  const r = evaluate(sc, 0.99, catches);
+  return { ...r, pass: AUDIT.pass(r.escape) };
+}
+
+export const STEADY = solve(SCENARIOS.steady);
+export const LAUNCH = solve(SCENARIOS.launch);
+/** N2 targets, restated in round 2 so the assumed rates meet them (steady ≈ 65.9%, launch ≈ 45.0%); the curves show where
+ * they fail. */
+export const N2 = { launch: 0.4, steady: 0.6 } as const;
+
+/** Shared-error curve (review item 1): escape and audit pass at the steady floor; the floor that restores the budget. */
+export const SHARED_CURVE = [0.1, 0.2, 0.3, 0.5].map((shared) => {
+  const sc: Scenario = {
+    ...SCENARIOS.steady,
+    routes: { A: { ...SCENARIOS.steady.routes.A, shared }, B: { ...SCENARIOS.steady.routes.B, shared } },
+  };
+  const at = evaluate(sc, STEADY.floor);
+  const fixed = solve({ ...sc, scoreCatch: STEADY.floor });
+  return {
+    shared,
+    escape: at.escape,
+    stp: at.stp,
+    pass: AUDIT.pass(at.escape),
+    floorNeeded: fixed.floor,
+    stpAfter: fixed.stp,
+    n2Fails: fixed.stp < N2.steady,
+  };
+});
+
+/** Rules-catch curve for the two weak families (review R2-5): STP at steady and launch after re-solving. */
+export const RULES_CURVE = [
+  { label: "strong", invoice_number: 0.8, dates: 0.85 },
+  { label: "assumed", invoice_number: 0.6, dates: 0.7 },
+  { label: "weak", invoice_number: 0.4, dates: 0.5 },
+].map((p) => {
+  const catches: Catches = { invoice_number: p.invoice_number, dates: p.dates };
+  const s = solve(SCENARIOS.steady, catches);
+  const l = solve(SCENARIOS.launch, catches);
+  return {
+    ...p,
+    steadyStp: s.stp,
+    steadyFloor: s.floor,
+    launchStp: l.stp,
+    launchFloor: l.floor,
+    steadyMeetsN2: s.stp >= N2.steady,
+    launchMeetsN2: l.stp >= N2.launch,
+  };
+});
+
+/** Ablation: one reader only, rules and the steady floor on. */
+export const SINGLE_METHOD = evaluate(
+  { ...SCENARIOS.steady, routes: { A: { p1: 0.004, p2: 0.004, shared: 1 }, B: { p1: 0.01, p2: 0.01, shared: 1 } } },
+  STEADY.floor
+);
+
+/** Tie-break sensitivity: wrong on 5% of the disputes it resolves instead of 2% (review item 13). */
+export const TIE_WRONG_5 = evaluate(
+  {
+    ...SCENARIOS.steady,
+    routes: { ...SCENARIOS.steady.routes, B: { ...SCENARIOS.steady.routes.B, tie: { resolve: 0.7, wrong: 0.05 } } },
+  },
+  STEADY.floor
+);
+
+/** The second reader down (Textract outage): Azure's prebuilt model on the SAME OCR as the fallback, shared 0.5. */
+export const FALLBACK = solve({
+  ...SCENARIOS.steady,
+  routes: { ...SCENARIOS.steady.routes, B: { p1: 0.01, p2: 0.015, shared: 0.5, tie: { resolve: 0.7, wrong: 0.02 } } },
+});
+
+// ── Calibration you can check at the threshold ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Labels not chosen by the scorer: the uniform audit, a random 2% of auto-approved invoices, and threshold-band samples
+ * (10% of auto-approved critical fields within 0.004 of their threshold, ≈ 2% of accepted fields). The scorer predicts
+ * ≈ 0.3% wrong in the band; the alarm fires at the smallest k with P(X ≥ k) ≤ 5% under the prediction.
+ */
+export const CALIBRATION = (() => {
+  const autoPerMonth = VOLUME.invoices * STEADY.stpPre;
+  const randomSlice = 0.02 * autoPerMonth;
+  const bandLabelsQuarter = autoPerMonth * CRITICAL * 0.02 * 0.1 * 3;
+  const bandPredictedError = 0.003;
+  const expected = bandLabelsQuarter * bandPredictedError;
+  let alarmAt = 1;
+  while (1 - poissonCdf(alarmAt - 1, expected) > 0.05) alarmAt++;
+  const falseAlarm = 1 - poissonCdf(alarmAt - 1, expected);
+  const detectTriple = 1 - poissonCdf(alarmAt - 1, 3 * expected);
+  const thresholds = { amounts: 0.995, kind: 0.998, parties: 0.998, po: 0.997, invoiceNumber: 0.998, dates: 0.997 };
+  return {
+    autoPerMonth,
+    randomSlice,
+    bandLabelsQuarter,
+    bandPredictedError,
+    expected,
+    alarmAt,
+    falseAlarm,
+    detectTriple,
+    thresholds,
+  };
+})();
+
+// ── Review queue, sized in staff hours at ≤ 85% utilisation ──────────────────────────────────────────────────────────
+
+/**
+ * Seconds per task (illustrative, measured in the review app): field review 30 + 12 per flagged field; lines 120;
+ * business exception 240; failure 360 (key the invoice); route C pre-filled review 30 + 12 × 11 = 162; policy hold 90;
+ * audit 90; random calibration slice and band samples at the field-review rate; receipt 40; other mail 60; statement
+ * difference 300 (20% of statements); value review (a cap or the money rule) 162, as route C; low-confidence non-PO
+ * coding 60 (3% of non-PO invoices; the rest is suggested from supplier history and confirmed by the budget holder in the
+ * ERP). Staff = ceil(day's hours ÷ (6 productive h × 0.85)). Cost is the roster, not the hours of work (review R2-3):
+ * the normal-day team is permanent, the month-end extra is flex for 5 days, 8 paid hours a clerk-day at 30 USD an hour.
  */
 export const REVIEW = (() => {
-  const t = { fieldBase: 30, perField: 12, lines: 120, exception: 240, failure: 360, audit: 90, receipt: 40 };
-  const receiptFlag = 0.12; // no card-feed match, or extractors disagree (illustrative)
-  const auditPerMonth = 1_000;
-  const productiveHoursPerDay = 6;
-  const make = (o: ReturnType<typeof outcome>, sc: Scenario) => {
+  const t = {
+    fieldBase: 30,
+    perField: 12,
+    lines: 120,
+    exception: 240,
+    failure: 360,
+    routeC: 30 + 12 * CRITICAL,
+    hold: 90,
+    audit: 90,
+    receipt: 40,
+    other: 60,
+    statementDiff: 300,
+    valueReview: 30 + 12 * CRITICAL,
+    coding: 60,
+  };
+  const receiptFlag = 0.12;
+  const capacityPerClerk = 6 * 0.85; // 5.1 h of demand a day
+  const make = (o: ReturnType<typeof evaluate>, sc: Scenario) => {
     const fieldSeconds = t.fieldBase + t.perField * o.flaggedFields;
     const perInvoiceSeconds =
-      o.fieldFlag * fieldSeconds + sc.lineFail * t.lines + sc.exception * t.exception + sc.failure * t.failure;
+      o.fieldFlag * fieldSeconds +
+      sc.mix.C * t.routeC +
+      sc.lineFail * t.lines +
+      sc.exception * t.exception +
+      sc.failure * t.failure +
+      sc.holds * t.hold +
+      o.valueReview * t.valueReview +
+      VOLUME.nonPoShare * 0.03 * t.coding;
     const inv = VOLUME.invoices;
+    const autoPerMonth = inv * o.stpPre;
     const hours = {
       fields: (inv * o.fieldFlag * fieldSeconds) / 3_600,
+      routeC: (inv * sc.mix.C * t.routeC) / 3_600,
       lines: (inv * sc.lineFail * t.lines) / 3_600,
       exceptions: (inv * sc.exception * t.exception) / 3_600,
       failures: (inv * sc.failure * t.failure) / 3_600,
-      audit: (auditPerMonth * t.audit) / 3_600,
+      holds: (inv * sc.holds * t.hold) / 3_600,
+      valueReview: (inv * o.valueReview * t.valueReview) / 3_600,
+      coding: (inv * VOLUME.nonPoShare * 0.03 * t.coding) / 3_600,
+      audit: ((AUDIT.perMonth + AUDIT.valuePerMonth) * (1 + AUDIT.doubleKeyShare) * t.audit) / 3_600,
+      calibration: (autoPerMonth * SAMPLED * fieldSeconds) / 3_600,
       receipts: (VOLUME.receipts * receiptFlag * t.receipt) / 3_600,
+      other: (VOLUME.other * t.other) / 3_600,
+      statements: (VOLUME.statements * 0.2 * t.statementDiff) / 3_600,
     };
     const totalHours = sum(Object.values(hours));
-    const extractionHours = totalHours - hours.exceptions; // exceptions are AP work with or without extraction
-    const receiptDayHours = (VOLUME.receiptsPerDay * receiptFlag * t.receipt) / 3_600;
-    const dayHours = (invoices: number) =>
-      (invoices * perInvoiceSeconds) / 3_600 + receiptDayHours + hours.audit / VOLUME.workingDays;
+    const flatDayHours =
+      (hours.audit + hours.calibration + hours.receipts + hours.other + hours.statements) / VOLUME.workingDays;
+    const dayHours = (invoices: number) => (invoices * perInvoiceSeconds) / 3_600 + flatDayHours;
     const normalDayHours = dayHours(VOLUME.normalDayInvoices);
     const monthEndDayHours = dayHours(VOLUME.monthEndDayInvoices);
+    const normalDayStaff = Math.ceil(normalDayHours / capacityPerClerk);
+    const monthEndDayStaff = Math.ceil(monthEndDayHours / capacityPerClerk);
     return {
       fieldSeconds,
       perInvoiceSeconds,
       hours,
       totalHours,
-      extractionHours,
+      extractionHours: totalHours - hours.exceptions,
       normalDayHours,
       monthEndDayHours,
-      normalDayStaff: Math.ceil(normalDayHours / productiveHoursPerDay),
-      monthEndDayStaff: Math.ceil(monthEndDayHours / productiveHoursPerDay),
-      // Peak hour at month end: arrivals' review work in clerk-hours per hour; the backlog drains the same day when the
-      // day's capacity (staff × 6 h) exceeds the day's demand.
-      peakHourWorkHours: (VOLUME.peakHourInvoices * perInvoiceSeconds) / 3_600,
-      monthlyUsd: totalHours * PRICES.clerkPerHour,
+      normalDayStaff,
+      monthEndDayStaff,
+      normalUtilisation: normalDayHours / (normalDayStaff * 6),
+      monthEndUtilisation: monthEndDayHours / (monthEndDayStaff * 6),
+      oneOffSickMonthEnd: monthEndDayHours / ((monthEndDayStaff - 1) * 6),
+      demandUsd: totalHours * PRICES.clerkPerHour,
+      paidHours:
+        normalDayStaff * VOLUME.workingDays * 8 + (monthEndDayStaff - normalDayStaff) * VOLUME.monthEndDays * 8,
+      monthlyUsd:
+        (normalDayStaff * VOLUME.workingDays * 8 + (monthEndDayStaff - normalDayStaff) * VOLUME.monthEndDays * 8) *
+        PRICES.clerkPerHour,
+      permanent: normalDayStaff,
+      flex: monthEndDayStaff - normalDayStaff,
     };
   };
   const steady = make(STEADY, SCENARIOS.steady);
   const launch = make(LAUNCH, SCENARIOS.launch);
-  // One STP point moved out of field review = 1% of invoices × the field-review time.
   const stpPointHours = (0.01 * VOLUME.invoices * steady.fieldSeconds) / 3_600;
-  const manualHours = (VOLUME.invoices * 6 * 60) / 3_600; // today: 6 minutes an invoice = 4,000 h
+  // Savings arrive in steps of one clerk: a permanent clerk carries 21 × 5.1 h of demand a month.
+  const stpPointsPerClerk = (VOLUME.workingDays * capacityPerClerk) / stpPointHours;
+  // Today: 6 minutes keying an invoice + the same exceptions, statement checks and other mail (receipts excluded both sides).
+  const todayHours =
+    (VOLUME.invoices * 360) / 3_600 + steady.hours.exceptions + steady.hours.statements + steady.hours.other;
+  const nowHours = steady.totalHours - steady.hours.receipts;
   return {
+    nowHours,
+    reduction: todayHours / nowHours,
     t,
     receiptFlag,
-    auditPerMonth,
-    productiveHoursPerDay,
+    capacityPerClerk,
     steady,
     launch,
     stpPointHours,
     stpPointUsd: stpPointHours * PRICES.clerkPerHour,
-    manualHours,
-    manualUsd: manualHours * PRICES.clerkPerHour,
+    stpPointsPerClerk,
+    clerkMonthUsd: VOLUME.workingDays * 8 * PRICES.clerkPerHour,
+    todayHours,
   };
 })();
 
-// ── Cost per invoice, per page and per month ─────────────────────────────────────────────────────────────────────────
+// ── Cost per path, per invoice and per month ─────────────────────────────────────────────────────────────────────────
 
-/**
- * Per invoice (steady): common (OCR, render, classifier on 2 pages) + route A small (55%) + route B small VLM + prebuilt
- * (40%) + tie-break on the B invoices that disagree + route C mid VLM + prebuilt (5%).
- */
 export const COST = (() => {
   const u = UNIT;
   const mix = SCENARIOS.steady.mix;
-  const perInvoiceModels =
-    mix.A * u.routeA +
-    mix.B * (u.smallVlm + u.prebuilt) +
-    STEADY.tieBreak * u.tieBreak +
-    mix.C * (u.midVlm + u.prebuilt);
-  const perInvoice = u.commonPerInvoice + perInvoiceModels;
-  const perInvoicePage = perInvoice / VOLUME.invoicePages;
-  // Receipts: common for 1 page + receipt VLM + prebuilt receipt model only when the card feed has no match (20%).
+  const path = {
+    A: u.commonPerInvoice + u.routeA,
+    B: u.commonPerInvoice + u.smallVlm + u.second,
+    BTie: u.commonPerInvoice + u.smallVlm + u.second + u.tieBreak,
+    C: u.commonPerInvoice + u.midVlm + u.second,
+    receiptMatch: u.perPageCommon + u.receiptVlm,
+    receiptNoMatch: u.perPageCommon + u.receiptVlm + PRICES.secondPerPage,
+    classifiedOnly: u.perPageCommon,
+  };
+  const perInvoice = mix.A * path.A + mix.B * path.B + STEADY.tieBreak * u.tieBreak + mix.C * path.C;
   const receiptNoCardMatch = 0.2;
-  const perReceipt = u.perPageCommon + u.receiptVlm + receiptNoCardMatch * PRICES.prebuiltPerPage;
-  const otherPages = VOLUME.statements * VOLUME.statementPages + VOLUME.other; // 4,000 pages: classified only
-  const otherUsd = otherPages * u.perPageCommon;
-  const invoicesUsd = VOLUME.invoices * perInvoice;
-  const receiptsUsd = VOLUME.receipts * perReceipt;
-  const modelsMonthly = invoicesUsd + receiptsUsd + otherUsd;
-  // LLM share (the part Batch would halve): everything except OCR, render and prebuilt.
+  const perReceipt = (1 - receiptNoCardMatch) * path.receiptMatch + receiptNoCardMatch * path.receiptNoMatch;
+  const otherPages = VOLUME.statements * VOLUME.statementPages + VOLUME.other;
+  const modelsMonthly = VOLUME.invoices * perInvoice + VOLUME.receipts * perReceipt + otherPages * path.classifiedOnly;
+  const secondShare = ((mix.B + mix.C) * u.second) / perInvoice;
   const llmPerInvoice =
     VOLUME.invoicePages * u.classifierPage +
     mix.A * u.routeA +
@@ -461,94 +732,116 @@ export const COST = (() => {
     mix.C * u.midVlm;
   const batchSavingMonthly =
     PRICES.batchDiscount * (VOLUME.invoices * llmPerInvoice + VOLUME.receipts * (u.classifierPage + u.receiptVlm));
-  // Alternatives per invoice (same OCR and render, no routing):
-  const midEverywhere = u.commonPerInvoice + u.midVlm + u.prebuilt;
+  // Levers (review items 44, 45):
+  const tieBreakAllB = VOLUME.invoices * mix.B * u.tieBreak - VOLUME.invoices * STEADY.tieBreak * u.tieBreak;
+  const secondPages = VOLUME.invoices * (mix.B + mix.C) * VOLUME.invoicePages + receiptNoCardMatch * VOLUME.receipts;
+  const midEverywhere = u.commonPerInvoice + u.midVlm + u.second;
   const midEverywhereDeltaMonthly = VOLUME.invoices * (midEverywhere - perInvoice);
-  const breakEvenStpPoints = midEverywhereDeltaMonthly / REVIEW.stpPointUsd;
-  const buy = {
-    prebuiltOnly: VOLUME.invoicePages * PRICES.prebuiltPerPage, // 0.02, one method, no grounding to our schema
-    googleInvoice: PRICES.googleInvoicePerDoc, // 0.10 for up to 10 pages
-    customExtractor: VOLUME.invoicePages * PRICES.customExtractorPerPage, // 0.06
-  };
-  // All-in per month (illustrative): models and services + review people + 1 ML/platform engineer + infrastructure
-  // (workflow engine, PostgreSQL, object storage for 7 years of originals ≈ 2.4 TB, render workers, review app).
-  const engineerMonthly = 12_000;
+  // All-in (illustrative): engineering 2.5 FTE × 12,000 + AP-ops owner (gold set, thresholds) 0.5 × 6,000; infra 800.
+  const engineeringMonthly = 2.5 * 12_000 + 0.5 * 6_000;
   const infraMonthly = 800;
   const reviewMonthly = REVIEW.steady.monthlyUsd;
-  const allInMonthly = modelsMonthly + reviewMonthly + engineerMonthly + infraMonthly;
-  const allInPerDocument = allInMonthly / VOLUME.documents;
-  const allInPerInvoiceExReceipts =
-    (allInMonthly -
-      receiptsUsd -
-      (VOLUME.receipts * REVIEW.receiptFlag * REVIEW.t.receipt * PRICES.clerkPerHour) / 3_600) /
-    VOLUME.invoices;
+  const allInMonthly = modelsMonthly + reviewMonthly + engineeringMonthly + infraMonthly;
+  // Buy: an AP-automation product keeps review (similar hours) and needs 0.5 FTE of integration; breakeven fee per invoice.
+  const buyEngineering = 0.5 * 12_000;
+  // A vendor also replaces our infrastructure (review R2-14).
+  const buyBreakevenFeePerInvoice =
+    (engineeringMonthly + modelsMonthly + infraMonthly - buyEngineering) / VOLUME.invoices;
+  const managed = {
+    bdaPerInvoice: VOLUME.invoicePages * (PRICES.bdaCustomPerPage + (FIELDS.perInvoice - 30) * PRICES.bdaPerExtraField), // 2 × 0.0435
+    contentUnderstandingPerInvoice: VOLUME.invoicePages * PRICES.contentUnderstandingPerPage,
+  };
   return {
-    perInvoiceModels,
+    path,
+    perPage: Object.fromEntries(
+      Object.entries(path).map(([k, v]) => [
+        k,
+        k.startsWith("receipt") || k === "classifiedOnly" ? v : v / VOLUME.invoicePages,
+      ])
+    ),
     perInvoice,
-    perInvoicePage,
+    perInvoicePage: perInvoice / VOLUME.invoicePages,
     perReceipt,
     receiptNoCardMatch,
-    otherUsd,
-    invoicesUsd,
-    receiptsUsd,
     modelsMonthly,
+    secondShare,
     llmPerInvoice,
     batchSavingMonthly,
+    tieBreakAllB,
+    secondPages,
+    volumeTierNote: "Textract and Azure Read volume prices start above 1M pages a month (F68, F69)",
     midEverywhere,
     midEverywhereDeltaMonthly,
-    breakEvenStpPoints,
-    buy,
-    engineerMonthly,
+    engineeringMonthly,
     infraMonthly,
     reviewMonthly,
     allInMonthly,
-    allInPerDocument,
-    allInPerInvoiceExReceipts,
-    peopleShare: reviewMonthly / allInMonthly,
-    modelShare: modelsMonthly / allInMonthly,
+    allInPerDocument: allInMonthly / VOLUME.documents,
+    shares: {
+      review: reviewMonthly / allInMonthly,
+      engineering: engineeringMonthly / allInMonthly,
+      models: modelsMonthly / allInMonthly,
+    },
+    buyBreakevenFeePerInvoice,
+    managed,
   };
 })();
 
-// ── Latency per document type, p50 and p95 (ms, illustrative stage fits) ───────────────────────────────────────────
+/** Escapes are priced too (review item 8): what one STP point and the mid model buy, in review hours and in escapes. */
+export const LEVERS = (() => {
+  // In demand hours; on the roster an upgrade saves money only when it removes a clerk-day (REVIEW.stpPointsPerClerk).
+  const breakEvenStpPoints = COST.midEverywhereDeltaMonthly / REVIEW.stpPointUsd;
+  const escapesPerMonth = VOLUME.invoices * STEADY.stpPre * STEADY.escape;
+  // Value-weighted: each band's escapes × its own loss (review R2-15), not the median invoice.
+  const escapeLossMonthly = VOLUME.invoices * STEADY.escapeLossPerInvoice;
+  const avgLossUsd = escapeLossMonthly / escapesPerMonth;
+  // The mid model everywhere pays if it adds breakEvenStpPoints, or if it cuts escapes by midDelta ÷ escapeLossMonthly.
+  return {
+    breakEvenStpPoints,
+    avgLossUsd,
+    escapesPerMonth,
+    escapeLossMonthly,
+    escapeCutToPay: COST.midEverywhereDeltaMonthly / escapeLossMonthly,
+  };
+})();
+
+// ── Latency (ms, p50 / p95; log-normal stage fits, illustrative) ────────────────────────────────────────────────────
 
 /**
- * Decode: small model 150 tokens a second at p50, 100 at p95; mid 60 and 40. First token: small words-only 500 / 1,500;
- * small VLM 1,000 / 2,000; mid 1,500 / 3,000; receipt VLM 800 / 1,600. No vendor publishes these: illustrative.
- * Parallel work is the maximum of its branches (maxOf), at p50 and p95; sequential stages add. p95 per path is the sum
- * of stage p95s, an upper bound (stage tails rarely coincide); the targets are minutes, so the bound is enough.
+ * Decode: small 150 tokens a second at p50, 100 at p95; mid 60 and 40. First token: small words-only 500 / 1,500;
+ * small VLM 1,000 / 2,000; mid 1,500 / 3,000; receipt 800 / 1,600. Parallel branches: maxOf on log-normal fits.
+ * The p95 per path is the sum of stage p95s: a conservative estimate (stage tails rarely coincide), not a proof.
  */
 export const LATENCY = (() => {
   const gen = (first: Stage, tokens: number, tpsP50: number, tpsP95: number): Stage => ({
     p50: first.p50 + (tokens / tpsP50) * 1_000,
     p95: first.p95 + (tokens / tpsP95) * 1_000,
   });
-  const ingest: Stage = { p50: 300, p95: 1_000 }; // webhook, store original, hash, dedup lookup
-  const render: Stage = { p50: 400, p95: 1_000 }; // rasterise, text layer, per page in parallel
+  const ingest: Stage = { p50: 300, p95: 1_000 };
+  const render: Stage = { p50: 500, p95: 1_200 }; // rasterise, de-rotate, content-stream hidden-text check
   const ocrPage: Stage = { p50: 1_500, p95: 4_000 };
   const classify: Stage = { p50: 600, p95: 1_500 };
-  const validate: Stage = { p50: 300, p95: 1_000 }; // grounding check, rules, ERP lookups (supplier, PO, GRN, duplicates)
+  const validate: Stage = { p50: 400, p95: 1_200 }; // grounding, rules, ERP and HMRC/VIES lookups (cached a day)
   const score: Stage = { p50: 20, p95: 50 };
-  const post: Stage = { p50: 500, p95: 2_000 }; // outbox → ERP
-  const routeA = gen({ p50: 500, p95: 1_500 }, CONTEXT.output, 150, 100); // 5,833 / 9,500
-  const smallVlm = gen({ p50: 1_000, p95: 2_000 }, CONTEXT.output, 150, 100); // 6,333 / 10,000
-  const prebuilt: Stage = { p50: 4_000, p95: 12_000 }; // asynchronous analyse + poll, 2 pages
-  const midVlm = gen({ p50: 1_500, p95: 3_000 }, CONTEXT.output, 60, 40); // 14,833 / 23,000
-  const tieBreak = gen({ p50: 1_500, p95: 3_000 }, CONTEXT.tieBreakOutput, 60, 40); // 4,000 / 6,750
-  const receiptVlm = gen({ p50: 800, p95: 1_600 }, 250, 150, 100); // 2,467 / 4,100
+  const post: Stage = { p50: 500, p95: 2_000 }; // outbox write; the ERP acknowledgement is asynchronous
+  const routeA = gen({ p50: 500, p95: 1_500 }, CONTEXT.output, 150, 100);
+  const smallVlm = gen({ p50: 1_000, p95: 2_000 }, CONTEXT.output, 150, 100);
+  const second: Stage = { p50: 4_000, p95: 12_000 }; // Textract async analyse + poll, 2 pages
+  const midVlm = gen({ p50: 1_500, p95: 3_000 }, CONTEXT.output, 60, 40);
+  const tieBreak = gen({ p50: 1_500, p95: 3_000 }, CONTEXT.tieBreakOutput, 60, 40);
+  const receiptVlm = gen({ p50: 800, p95: 1_600 }, 300, 150, 100);
   const cardMatch: Stage = { p50: 100, p95: 300 };
-  const ocr2 = { p50: maxOf([ocrPage, ocrPage], 0.5), p95: maxOf([ocrPage, ocrPage], 0.95) }; // two pages in parallel
-  const pair = (a: Stage, b: Stage): Stage => ({ p50: maxOf([a, b], 0.5), p95: maxOf([a, b], 0.95) });
+  const par = (xs: Stage[]): Stage => ({ p50: maxOf(xs, 0.5), p95: maxOf(xs, 0.95) });
+  const ocr2 = par([ocrPage, ocrPage]);
   const path = (stages: Stage[]) => ({
     p50: sum(stages.map((s) => s.p50)),
     p95: sum(stages.map((s) => s.p95)),
     stages,
   });
-  // Digital (A): OCR for the hidden-text check runs beside extraction, off the critical path.
   const A = path([ingest, render, classify, routeA, validate, score, post]);
-  const Bdigital = path([ingest, render, classify, pair(smallVlm, prebuilt), validate, score, post]);
-  const Bscan = path([ingest, render, ocr2, classify, pair(smallVlm, prebuilt), validate, score, post]);
-  const BscanTie = path([ingest, render, ocr2, classify, pair(smallVlm, prebuilt), tieBreak, validate, score, post]);
-  const C = path([ingest, render, ocr2, classify, pair(midVlm, prebuilt), validate, score, post]);
+  const Bscan = path([ingest, render, ocr2, classify, par([smallVlm, second]), validate, score, post]);
+  const BscanTie = path([ingest, render, ocr2, classify, par([smallVlm, second]), tieBreak, validate, score, post]);
+  const CPrefill = path([ingest, render, ocr2, classify, par([midVlm, second]), validate, score]);
   const receipt = path([ingest, { p50: 300, p95: 800 }, ocrPage, classify, receiptVlm, cardMatch, score, post]);
   return {
     ingest,
@@ -561,117 +854,190 @@ export const LATENCY = (() => {
     post,
     routeA,
     smallVlm,
-    prebuilt,
+    second,
     midVlm,
     tieBreak,
     receiptVlm,
+    pairB: par([smallVlm, second]),
+    pairC: par([midVlm, second]),
     A,
-    Bdigital,
     Bscan,
     BscanTie,
-    C,
+    CPrefill,
     receipt,
   };
 })();
 
-/** Targets (N3): straight-through invoice posted ≤ 2 min p50, ≤ 10 min p95; receipt result ≤ 30 s p95. */
+/** N3: straight-through posted (outbox) ≤ 2 min p50 / 10 min p95; receipt ≤ 30 s p95; field review ≤ 8 working h p95;
+ * exceptions ≤ 2 working days from when the blocking record (PO, goods receipt) arrives. */
 export const TARGETS = {
   stpP50Ms: 120_000,
   stpP95Ms: 600_000,
   receiptP95Ms: 30_000,
   reviewedP95WorkingHours: 8,
+  exceptionWorkingDays: 2,
 } as const;
 
-// ── Evaluation, gates and audit statistics ───────────────────────────────────────────────────────────────────────────
+// ── Gold-set gates sized to pass a release as good as today (review item 4) ───────────────────────────────────────
 
 /**
- * Gold set: 2,000 invoices (A 700, B 900 = 300 novel digital + 600 scans, C 400 oversampled), 500 receipts, 300
- * multi-document and long files (splitting), 200 poisoned documents (hidden text, fake bank details, fake approvals).
- * 95% interval half-width on critical-field accuracy at 99%: 1.96 × √(0.99 × 0.01 ÷ 16,000) ≈ 0.15 points (all
- * routes); route B 7,200 fields ≈ 0.23. STP on 2,000 invoices at 80%: ± 1.75 points, so releases compare paired
- * (McNemar) on the same documents.
- * Audit: 1,000 auto-posted invoices a month, blind re-key; a quarter = 3,000. At the steady escape rate the expected
- * count is 3,000 × escape; N1 holds when the Poisson 95% upper bound ÷ 3,000 ≤ 0.3%.
+ * Gate 1, non-inferiority on invoice-level critical accuracy (all 11 right), paired on the same 2,000 invoices (C
+ * reweighted to 5%): discordant pairs ≈ 2% → SE ≈ √(0.02 ÷ 2,000) = 0.32 points; margin δ = (z95 + z90) × SE ≈ 0.93
+ * points passes an equal release 90% of the time; a drop of δ is stopped 95% of the time, a drop of 0.41 points 50%.
+ * Gate 2, replayed escapes, paired: escapes only one release makes ≈ Poisson(1) each; pass when new − old ≤ 2. Both are
+ * smoke tests with little power (a doubling passes gate 2 most of the time, review R2-4), so every release also runs a
+ * canary: 10% of suppliers for 2 weeks (≈ 2,000 invoices) with the disagreement-rate alarm and 1,000 blind audits.
  */
-export const EVAL = (() => {
-  const half = (p: number, n: number) => 1.96 * Math.sqrt((p * (1 - p)) / n);
-  const quarter = 3_000;
-  const expected = quarter * STEADY.escape;
-  const k = Math.round(expected);
-  const upper = poissonUpper95(k) / quarter;
-  const kShared30 = Math.round(quarter * SHARED_30.escape);
-  const kLaunch = Math.round(quarter * LAUNCH.escape);
+export const GATES = (() => {
+  const n = 2_000;
+  const discordant = 0.02;
+  const se = Math.sqrt(discordant / n);
+  const margin = (Z95 + Z90) * se;
+  const lambdaDiscordant = 1;
+  // P(X − Y ≤ m) for independent Poisson(λ) X, Y.
+  const skellamCdf = (m: number, l: number) => {
+    let p = 0;
+    for (let y = 0; y < 40; y++) {
+      const py = (Math.exp(-l) * l ** y) / prod(Array.from({ length: y }, (_, i) => i + 1));
+      p += py * poissonCdf(y + m, l);
+    }
+    return p;
+  };
+  // Canary power: route B invoices with a dispute ≈ 20.8%; 800 B invoices → ≈ 166 disputes; a 30% rise is a z of
+  // 0.3 × √166 ≈ 3.9, detected (one-sided 5%) with P ≈ Φ(3.9 − 1.645).
+  const canaryInvoices = VOLUME.invoices * 0.1 * 0.5;
+  const canaryDisputes = canaryInvoices * SCENARIOS.steady.mix.B * STEADY.B.tieBreakRate;
+  const canaryPower30 = phi(0.3 * Math.sqrt(canaryDisputes) - Z95);
+  // Canary audits: 1,000 at the steady escape; stop at k ≥ 3; P(stop) when escapes double.
+  const lam = 1_000 * STEADY.escape;
+  const canaryAuditFalseStop = 1 - poissonCdf(2, lam);
+  const canaryAuditPowerDouble = 1 - poissonCdf(2, 2 * lam);
   return {
-    gold: { A: 700, B: 900, C: 400, invoices: 2_000, receipts: 500, splitting: 300, poisoned: 200 },
-    criticalHalfWidth: half(0.99, 2_000 * FIELDS.critical), // 0.0015
-    routeBHalfWidth: half(0.99, 900 * FIELDS.critical), // 0.0023
-    stpHalfWidth: half(0.8, 2_000), // 0.0175
-    auditQuarter: quarter,
-    expectedEscapes: expected,
-    k,
-    upperBound: upper, // must be ≤ 0.003
-    kShared30,
-    upperBoundShared30: poissonUpper95(kShared30) / quarter,
-    kLaunch,
-    upperBoundLaunch: poissonUpper95(kLaunch) / quarter,
-    ruleOfThree: poissonUpper95(0), // 3.00
-    poisonedBound: poissonUpper95(0) / 200, // 0 of 200 followed → ≤ 1.5%
-    n1: 0.003,
+    canaryInvoices,
+    canaryDisputes,
+    canaryPower30,
+    canaryAuditFalseStop,
+    canaryAuditPowerDouble,
+    credit: { creditNotes: 60, statements: 30, bound: poissonUpper95(0) / 90 },
+    n,
+    discordant,
+    se,
+    margin,
+    passIfEqual: 0.9,
+    escapeMargin: 2,
+    escapePassIfEqual: skellamCdf(2, lambdaDiscordant),
+    poisonedBound: poissonUpper95(0) / 200,
+    classifierFiles: 300,
   };
 })();
 
-// ── The same design at the bank's 10M documents a month ──────────────────────────────────────────────────────────────
+// ── Exactly-once posting keys (review item 5) ────────────────────────────────────────────────────────────────────────
 
 /**
- * 10,000,000 documents a month at 2 pages = 20M pages; review at the steady per-invoice review time
- * (REVIEW.steady.perInvoiceSeconds) → hours and staff at 126 productive hours a clerk a month; models at our per-invoice
- * cost; Batch would halve the LLM lines; a self-hosted 7B VLM is ≈ 176 USD per million pages on its authors' hardware
- * (dossier F23).
+ * Business key: supplier id | invoice number with confusables folded | the supplier's numbering year | kind. The year is
+ * the invoice date's year counted from the month the supplier restarts its numbering (January unless its profile says
+ * otherwise), so INV-001 of January 2027 is a new invoice, not a duplicate of INV-001 of January 2026.
  */
+export function postingKey(
+  supplierId: string,
+  invoiceNo: string,
+  invoiceDateIso: string,
+  kind: "invoice" | "credit",
+  resetMonth = 1
+) {
+  // Keep the letter prefix; fold confusables only in the part from the first digit on; drop leading zeros there.
+  const raw = invoiceNo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const i = raw.search(/\d/);
+  const prefix = i < 0 ? raw : raw.slice(0, i);
+  const rest =
+    i < 0
+      ? ""
+      : raw
+          .slice(i)
+          .replace(/O/g, "0")
+          .replace(/[IL]/g, "1")
+          .replace(/S/g, "5")
+          .replace(/^0+(?=\d)/, "");
+  const [y, m] = invoiceDateIso.split("-").map(Number);
+  const numberingYear = m >= resetMonth ? y : y - 1;
+  return `${supplierId}|${prefix + rest}|Y${numberingYear}|${kind}`;
+}
+export const POSTING = {
+  example: postingKey("SUP-0193", "INV-2O417", "2026-11-03", "invoice"), // the confusable "O" folds to the same key as INV-20417
+  interfaceMaxMinutes: 30, // wait past the ERP interface's maximum processing time before any status read
+  reconcile: "daily: approved outbox rows ↔ ERP documents by key; missing or doubled → AP lead",
+} as const;
+
+// ── Scale: the bank's 10M documents a month, with volume tiers (review item 27) ─────────────────────────────────────
+
 export const SCALE = (() => {
   const docs = 10_000_000;
   const pages = docs * 2;
+  const tier = (n: number, first: number, over: number) =>
+    Math.min(n, 1_000_000) * first + Math.max(0, n - 1_000_000) * over;
+  const mix = SCENARIOS.steady.mix;
+  const ocr = tier(pages, PRICES.ocrPerPage, PRICES.ocrPerPageOver1M); // 12,900
+  const secondPages = docs * (mix.B + mix.C) * 2; // 9M
+  const second = tier(secondPages, PRICES.secondPerPage, PRICES.secondPerPageOver1M); // 74,000
+  const llm = docs * COST.llmPerInvoice;
+  const render = pages * PRICES.renderPerPage;
+  const modelsMonthly = ocr + second + llm + render;
   const reviewHours = (docs * REVIEW.steady.perInvoiceSeconds) / 3_600;
-  const staff = reviewHours / 126;
-  const modelsMonthly = docs * COST.perInvoice;
-  const batchSaving = docs * COST.llmPerInvoice * PRICES.batchDiscount;
-  const selfHostedPerMonth = (pages / 1_000_000) * 176;
-  const perSecondAverage = docs / (VOLUME.workingDays * 8 * 3_600); // over working hours
   return {
     docs,
     pages,
-    reviewHours,
-    staff,
+    ocr,
+    second,
+    llm,
     modelsMonthly,
-    batchSaving,
-    selfHostedPerMonth,
-    perSecondAverage,
-    stpPointStaff: (0.01 * docs * REVIEW.steady.fieldSeconds) / 3_600 / 126,
+    secondShare: second / modelsMonthly,
+    batchSaving: llm * PRICES.batchDiscount,
+    reviewHours,
+    staff: reviewHours / (21 * 6 * 0.85),
+    stpPointStaff: (0.01 * docs * REVIEW.steady.fieldSeconds) / 3_600 / (21 * 6 * 0.85),
+    perSecondAverage: docs / (21 * 8 * 3_600),
   };
 })();
 
-/** The worked invoice (figure doc-extract/invoice-fields): Harbourline Packaging, 3 lines. */
+/** Storage (review items 30, 54): originals by type; words as compressed blobs per page; field records per version. */
+export const STORAGE = (() => {
+  const originalsGbMonth =
+    (VOLUME.invoices * 0.3 + VOLUME.statements * 0.4 + VOLUME.receipts * 2 + VOLUME.other * 0.3) / 1_000; // ≈ 72.7 GB
+  const retentionMonths = 84; // 6 years + the current year
+  const fieldRows = VOLUME.invoices * FIELDS.perInvoice + VOLUME.receipts * FIELDS.receipt; // 1.72M a month
+  const fieldGbPerVersion = (fieldRows * 300) / 1e9; // ≈ 0.52 GB
+  const wordBlobGbMonth = (VOLUME.pages * PAGE.wordsPerPage * 40) / 4 / 1e9; // 40 B a word, 4× compression ≈ 0.4 GB
+  return {
+    originalsGbMonth,
+    originalsTbRetained: (originalsGbMonth * retentionMonths) / 1_000,
+    fieldRows,
+    fieldGbPerVersion,
+    versionsPerDoc: 1.5,
+    wordBlobGbMonth,
+  };
+})();
+
+/** The worked invoice (figure doc-extract/invoice-fields): Harbourline Packaging, a smudged digit in the total. */
 export const INVOICE = (() => {
   const lines = [
     { description: "Shipping boxes", quantity: 400, unitPrice: 2.0 },
     { description: "Packing tape", quantity: 200, unitPrice: 1.2 },
     { description: "Address labels", quantity: 1_000, unitPrice: 0.2 },
   ];
-  const net = round(sum(lines.map((l) => l.quantity * l.unitPrice)), 2); // 800 + 240 + 200 = 1,240.00
-  const vatRate = 0.2;
-  const vat = round(net * vatRate, 2); // 248.00
+  const net = round(sum(lines.map((l) => l.quantity * l.unitPrice)), 2); // 1,240.00
+  const vat = round(net * 0.2, 2); // 248.00
   return {
     supplier: "Harbourline Packaging",
     number: "INV-20417",
-    printedDate: "03/11/2026",
     isoDate: "2026-11-03",
     po: "PO-7731",
     lines,
     net,
-    vatRate,
+    vatRate: 0.2,
     vat,
     total: round(net + vat, 2), // 1,488.00
-    fieldsOnInvoice: FIELDS.header + lines.length * FIELDS.lineFields, // 12 + 15 = 27
+    misread: "1,438.00", // Azure Read on the smudged 8; Textract and the image-only tie-break read 1,488.00
+    fieldsOnInvoice: FIELDS.header + lines.length * FIELDS.lineFields, // 27
   };
 })();
 
