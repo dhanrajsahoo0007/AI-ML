@@ -1,265 +1,323 @@
-import type { DiagramSpec, LayoutTone } from "@/components/diagrams/types";
+import type { DiagramEdge, DiagramNode, DiagramSpec } from "@/components/diagrams/types";
+import { GENAI_TONE, HERO, genaiZones } from "@/components/diagrams/presets/genai-case";
+import { AGENT, MEMORY, PROPAGATION, RETRIEVAL, SOURCES, TOOLS } from "@/components/diagrams/presets/gcase-enterprise";
 
-// The enterprise AI assistant (genai-system-design/case-studies/conversational-assistant-design), built up one
-// capability at a time. Case-study figure: zones and tones follow the "Architecture diagram groups" table in
-// content/system-design/CASE-STUDY-FORMAT.md, not the RAG legend.
+// Brightpost's enterprise AI assistant (genai-system-design/case-studies/conversational-assistant-design, "Design an
+// Enterprise AI Assistant"), the hero. Rebuilt in place (same id) one requirement at a time, exactly as the design
+// sheet §8 lists it (SYSTEM-DESIGN/plans/genai-design/design/conversational-assistant-design.md, v3):
+//   1 Chat over one model behind SSO (F1): employee → API gateway → orchestrator → answer model.
+//   2 Answer from an index of company documents (F1, N1, N5): connectors, search index (32.1M chunks), retrieval
+//     service, rankers (160 → 50 → 8). The step-2 retrieval → index edge says the search is unfiltered (the crawler
+//     reads with app rights); step 3 replaces it (`until: 2`) with the principal set inside the search.
+//   3 Map identities; filter inside the search; never looser than the source (F2, N2): ACL and principal store
+//     (Entra ids from the connectors), the principal set inside both searches, the 5 ms re-check, live search for
+//     Slack and mail as the user.
+//   4 Keep permissions fresh within each source's budget (F2, N4, N10): permission sync (events, budgeted polls,
+//     drop-out) into the ACL store, which patches the index (≈ 35 s by event).
+//   5 Route; look up and act as the user, inside the company (F3, F4, N7): router, tool gateway (tier, audience,
+//     card), token broker (delegated tokens), connector tools (106 tools on MCP servers).
+//   6 An agent for multi-step tasks, with tool search (F5): agent loop (caps 10 calls, 60 s), tool search. The agent's
+//     tool calls and its `tool_search` go through the tool gateway, so it only ever finds the user's entitled tools.
+//   7 Memory the user can see and correct (F6, N9): memory store, ≤ 5 items a prompt.
+//   8 Guard, egress and evaluate (F7, N2, N7): guards (injection screen, rendering, egress), audit and traces,
+//     evaluation (permission suite, canaries, drift audit, gold, simulator).
+// Numbers (presets/gcase-enterprise.ts): SOURCES.chunks = 32.1M; RETRIEVAL.funnel 160 unique → 50 → 8;
+// PROPAGATION.eventP50 = 35.1 s; TOOLS.count = 106; AGENT.caps 10 calls, 60 s; MEMORY.injectedItems = 5.
 //
-// Eight steps: 1 chat over one model · 2 answer from company documents · 3 keep the index and its permissions in
-// sync · 4 route each message by intent · 5 act through scoped tools · 6 remember the conversation · 7 screen what
-// goes in and out · 8 trace and evaluate every turn. Nodes never move between steps. Two early shortcuts (the gateway
-// straight to the orchestrator, the LLM straight back to the gateway) last until step 6; guardrails replace them in
-// step 7.
-//
-// Grid: five columns at x 90 | 265 | 440 | 615 | 790 (175 apart, cards 150 wide) and four rows at y 100 | 225 |
-// 350 | 500.
-//
-//            c1               c2             c3               c4              c5
-//   r1       Employee         LLM            Intent router    Handoff         ·
-//   r2       API gateway      Guardrails     Orchestrator*    Tool agent      Company APIs
-//   r3       ·                Memory         Search index     Retriever       ·
-//   r4       ·                Observability  Connectors       ·               Company docs
-//
-// The orchestrator is the hub: it asks the router for the intent, calls the retriever or the tool agent, and sends
-// the prompt to the LLM; the LLM's draft goes up to the guardrails and back out through the gateway. Every edge is a
-// straight line or a short diagonal through an empty gap, so nothing crosses.
-//
-// Zones (CASE-STUDY-FORMAT): Clients neutral, Edge blue, core request path green (orchestrator is the accent),
-// application services teal, async pipeline orange, storage violet. The company's own systems (document sources and
-// the APIs the tools call) sit in a neutral "Company systems" zone. Data stores use the glyph variant.
+// Layout (1200 × 740, genaiZones() from presets/genai-case.ts). The "Search, models and tools" tab is
+// 24 characters × 8.2 + 28 = 225 px wide, x 421–646 at y 316–344, so every line into the services zone passes right
+// of x 660 or down a gutter: the left gutter x 394, the drops at x 668 and x 712 under the tool gateway, the right
+// gutter x 756 (between the middle zones and Offline).
+//   Clients x 105: employee 187. Edge x 297: API gateway 187.
+//   Assistant orchestration, columns x 490 | 660, rows y 120 | 187 | 254 (48 tall):
+//            x 490            x 660
+//     120    Router           Guards
+//     187    Orchestrator*    Retrieval
+//     254    Agent loop       Tool gateway
+//   The orchestrator (accent) has five core links: up, right, down and the two diagonals (they pass through the
+//   20 px gap between the columns). The agent loop reaches the tool gateway level at y 254.
+//   Search, models and tools, columns x 490 | 660, rows y 410 | 515 | 620:
+//            x 490            x 660
+//     410    Token broker     Tool search
+//     515    Connector tools  Rankers
+//     620    Answer model     Live search
+// Routing (every long edge checked against the boxes and tabs it passes):
+//   - The orchestrator's model line leaves its left side, runs down the left gutter to y 300, jogs left into the empty
+//     edge column (x 340) so it keeps 75 px from the broker and the connector tools, and enters the answer model from
+//     the left. The memory line shares that trunk and runs on along y 705 (under every zone) into the memory's foot.
+//   - Traces go over the top: up the left gutter, along y 84 (under the zone tabs, which end at y 74; above row 1,
+//     which starts at y 96), down into the top of the audit store.
+//   - Retrieval has one trunk down the right gutter (x 756) with four taps: the search index (right, y 240) and the
+//     ACL store (right, y 355) through Offline's gaps (evaluation ends at 140, connectors fill 272–322, permission sync
+//     405–455), the rankers and live search (left, into their right sides). The trunk passes 21 px right of the tool
+//     gateway and tool search.
+//   - The tool gateway drops twice from its bottom: x 712 straight into tool search; x 668 to y 360, left along y 360
+//     (16 px under the tab), down into the broker. Broker → connector tools is a short vertical.
+//   - Ingestion lines meet the stores from the left without crossing the retrieval lines: connectors → index rises to
+//     the index (stays below y 240), connectors → ACL store falls to it (stays above y 355), permission sync → ACL
+//     store rises from below. ACL store → index is a bracket on the right of the store column (x 1160).
+// Colours (GENAI_TONE roles): the employee orange; the answer model and agent loop green; retrieval, connectors and
+// permission sync blue (data); router and rankers lime (ranking); guards, token broker and evaluation lime (check);
+// tool gateway, connector tools, tool search and live search teal (tools); stores violet glyphs; the gateway neutral;
+// the orchestrator the one accent. Connector tools has no icon: its full name needs the card's width. The ACL store →
+// index bracket carries no label (it would sit on the index's sub); the ≈ 35 s is in the permission-sync sub.
 
-/** The zone table from CASE-STUDY-FORMAT.md, by group. */
-const ZONE_TONE = {
-  clients: "neutral",
-  edge: "blue",
-  core: "green",
-  services: "teal",
-  async: "orange",
-  storage: "violet",
-} as const satisfies Record<string, LayoutTone>;
-
-const X = [90, 265, 440, 615, 790] as const;
-const Y = [100, 225, 350, 500] as const;
+const C = { clients: 105, edge: 297, left: 490, right: 660, async: 879, store: 1098 } as const;
+const ROW = { c1: 120, c2: 187, c3: 254, s1: 410, s2: 515, s3: 620 } as const;
+const GUTTER = { left: 394, edgeCol: 340, corridor: 300, right: 756, top: 84, bottom: 705, storeRight: 1160 } as const;
+const DROP = { broker: 668, search: 712, jog: 360 } as const;
 const W = 150;
+const CH = 48;
+const AW = 190;
+const Y = { audit: 125, index: 240, acl: 355, memory: 595 } as const;
 
-/** A zone around columns c0..c1 (0-based), from top `y` to bottom `b`. */
-const zone = (id: string, title: string, tone: LayoutTone, c0: number, c1: number, y: number, b: number) => ({
+const card = (
+  id: string,
+  label: string,
+  sub: string,
+  icon: string | undefined,
+  x: number,
+  y: number,
+  step: number,
+  extra: Partial<DiagramNode> = {}
+): DiagramNode => ({ id, label, sub, ...(icon ? { icon } : {}), x, y, w: W, h: CH, step, fill: "pastel", ...extra });
+
+const store = (id: string, label: string, sub: string, icon: string, y: number, step: number): DiagramNode => ({
   id,
-  title,
-  tone,
-  x: X[c0] - 82,
+  label,
+  sub,
+  icon,
+  tone: GENAI_TONE.store,
+  variant: "glyph",
+  x: C.store,
   y,
-  w: X[c1] - X[c0] + 164,
-  h: b - y,
+  step,
 });
 
+const [, unique, personal, cross] = RETRIEVAL.funnel;
+const millions = (v: number) => `${(v / 1e6).toFixed(1)}M`;
+
+/** The orchestrator's left trunk: down the left gutter, jog into the empty edge column. */
+const leftTrunk: [number, number][] = [
+  [GUTTER.left, 205],
+  [GUTTER.left, GUTTER.corridor],
+  [GUTTER.edgeCol, GUTTER.corridor],
+];
+/** Retrieval's trunk down the right gutter, tapped at `y`. */
+const rTrunk = (y: number): [number, number][] => [
+  [GUTTER.right, 200],
+  [GUTTER.right, y],
+];
+
+const edges: DiagramEdge[] = [
+  // Step 1: one model behind SSO.
+  { from: "employee", to: "gateway", flow: true, packet: true, bidirectional: true },
+  { from: "gateway", to: "orch", flow: true, packet: true, bidirectional: true, delay: 0.6 },
+  {
+    from: "orch",
+    to: "model",
+    flow: true,
+    packet: true,
+    bidirectional: true,
+    delay: 1.2,
+    via: [...leftTrunk, [GUTTER.edgeCol, ROW.s3]],
+  },
+
+  // Step 2: an index of company documents. The crawler reads with app rights and the search is unfiltered.
+  { from: "orch", to: "retrieval", bidirectional: true },
+  {
+    from: "retrieval",
+    to: "index",
+    label: "unfiltered: app rights",
+    labelAt: 0.5,
+    bidirectional: true,
+    via: rTrunk(Y.index),
+    step: 2,
+    until: 2,
+  },
+  { from: "retrieval", to: "rankers", bidirectional: true, via: rTrunk(ROW.s2) },
+  { from: "connectors", to: "index" },
+
+  // Step 3: identities mapped, the principal set filtered inside both searches, live search for Slack and mail.
+  {
+    from: "retrieval",
+    to: "index",
+    label: "principal set inside",
+    labelAt: 0.5,
+    bidirectional: true,
+    via: rTrunk(Y.index),
+    step: 3,
+  },
+  { from: "connectors", to: "acl", label: "Entra ids", labelAt: 0.45 },
+  { from: "retrieval", to: "acl", label: "re-check 5 ms", labelAt: 0.5, bidirectional: true, via: rTrunk(Y.acl) },
+  { from: "retrieval", to: "live", label: "as the user", labelAt: 0.82, bidirectional: true, via: rTrunk(ROW.s3) },
+
+  // Step 4: permissions kept fresh within each source's budget.
+  { from: "permsync", to: "acl" },
+  {
+    from: "acl",
+    to: "index",
+    step: 4,
+    via: [
+      [GUTTER.storeRight, Y.acl],
+      [GUTTER.storeRight, Y.index],
+    ],
+  },
+
+  // Step 5: route; look up and act as the user.
+  { from: "orch", to: "router", bidirectional: true },
+  { from: "orch", to: "toolgw", bidirectional: true },
+  {
+    from: "toolgw",
+    to: "broker",
+    label: "user's token",
+    labelAt: 0.55,
+    via: [
+      [DROP.broker, ROW.c3 + CH / 2],
+      [DROP.broker, DROP.jog],
+      [C.left, DROP.jog],
+    ],
+  },
+  { from: "broker", to: "tools", label: "delegated", labelAt: 0.5 },
+
+  // Step 6: the agent, with tool search through the gateway.
+  { from: "orch", to: "agent", bidirectional: true },
+  { from: "agent", to: "toolgw" },
+  {
+    from: "toolgw",
+    to: "toolsearch",
+    label: "entitled only",
+    labelAt: 0.5,
+    bidirectional: true,
+    via: [
+      [DROP.search, ROW.c3 + CH / 2],
+      [DROP.search, ROW.s1 - 29],
+    ],
+  },
+
+  // Step 7: memory the user can see and correct, along the bottom.
+  {
+    from: "orch",
+    to: "memory",
+    label: `≤ ${MEMORY.injectedItems} items, user-saved`,
+    labelAt: 0.72,
+    bidirectional: true,
+    via: [...leftTrunk, [GUTTER.edgeCol, GUTTER.bottom], [C.store, GUTTER.bottom]],
+  },
+
+  // Step 8: guards, audit and evaluation.
+  { from: "orch", to: "guards", bidirectional: true },
+  {
+    from: "orch",
+    to: "audit",
+    label: "every turn, acl_version",
+    dashed: true,
+    labelAt: 0.35,
+    via: [
+      [GUTTER.left, 168],
+      [GUTTER.left, GUTTER.top],
+      [C.store, GUTTER.top],
+    ],
+  },
+  { from: "audit", to: "eval", dashed: true },
+];
+
 const spec: DiagramSpec = {
-  title: "Enterprise AI assistant: routed pipelines around one orchestrator",
-  width: 880,
-  height: 560,
+  title:
+    "Enterprise AI assistant: permission-aware retrieval, fresh within each source's budget, tools as the user, memory people correct",
+  width: HERO.width,
+  height: HERO.height,
   steps: [
-    { title: "Chat over one model" },
-    { title: "Answer from company documents" },
-    { title: "Keep the index and its permissions in sync" },
-    { title: "Route each message by intent" },
-    { title: "Act through scoped tools" },
-    { title: "Remember the conversation" },
-    { title: "Screen what goes in and what comes out" },
-    { title: "Trace and evaluate every turn" },
+    { title: "Chat over one model behind SSO", covers: "F1" },
+    { title: "Answer from an index of company documents", covers: "F1, N1, N5" },
+    { title: "Map identities; filter inside the search; never looser than the source", covers: "F2, N2" },
+    { title: "Keep permissions fresh within each source's budget", covers: "F2, N4, N10" },
+    { title: "Route; look up and act as the user, inside the company", covers: "F3, F4, N7" },
+    { title: "An agent for multi-step tasks, with tool search", covers: "F5" },
+    { title: "Memory the user can see and correct", covers: "F6, N9" },
+    { title: "Guard, egress and evaluate", covers: "F7, N2, N7" },
   ],
-  zones: [
-    zone("clients", "Clients", ZONE_TONE.clients, 0, 0, 40, 145),
-    zone("edge", "Edge", ZONE_TONE.edge, 0, 0, 165, 270),
-    zone("core", "Core request path", ZONE_TONE.core, 1, 2, 40, 270),
-    zone("services", "Application services", ZONE_TONE.services, 3, 3, 40, 420),
-    zone("storage", "Storage", ZONE_TONE.storage, 1, 2, 290, 420),
-    zone("async", "Async pipeline", ZONE_TONE.async, 1, 2, 440, 545),
-    zone("company", "Company systems", "neutral", 4, 4, 165, 545),
-  ],
+  zones: genaiZones({ core: "Assistant orchestration", services: "Search, models and tools" }),
   nodes: [
-    // Step 1: the smallest assistant.
-    { id: "employee", label: "Employee", sub: "signed in, SSO", icon: "users", x: X[0], y: Y[0], w: W },
-    {
-      id: "gateway",
-      label: "API gateway",
-      sub: "auth, limits",
-      icon: "gateway",
-      tone: ZONE_TONE.edge,
-      x: X[0],
-      y: Y[1],
-      w: W,
-    },
+    // Clients and edge
+    card("employee", "Employee", "web, Slack, Teams", "users", C.clients, ROW.c2, 1, { tone: GENAI_TONE.user }),
+    card("gateway", "API gateway", "SSO, status, SSE", "gateway", C.edge, ROW.c2, 1),
+
+    // Assistant orchestration
+    card("router", "Router", "path + tool bundle", "router", C.left, ROW.c1, 5, { tone: GENAI_TONE.rank }),
     {
       id: "orch",
       label: "Orchestrator",
-      sub: "state, calls",
+      sub: "runs each turn",
       icon: "coordinator",
-      tone: ZONE_TONE.core,
       accent: true,
-      x: X[2],
-      y: Y[1],
+      x: C.left,
+      y: ROW.c2,
       w: W,
+      h: CH,
+      step: 1,
     },
-    { id: "llm", label: "LLM", sub: "writes, cites", icon: "model", tone: ZONE_TONE.core, x: X[1], y: Y[0], w: W },
+    card("agent", "Agent loop", `${AGENT.caps.calls} calls, ${AGENT.caps.seconds} s cap`, "robot", C.left, ROW.c3, 6, {
+      tone: GENAI_TONE.model,
+    }),
+    card("guards", "Guards", "injection, egress", "shield", C.right, ROW.c1, 8, { tone: GENAI_TONE.check }),
+    card("retrieval", "Retrieval", "hybrid search", "search", C.right, ROW.c2, 2, { tone: GENAI_TONE.data }),
+    card("toolgw", "Tool gateway", "audience, cards", "policy", C.right, ROW.c3, 5, { tone: GENAI_TONE.tool }),
 
-    // Step 2: retrieval.
-    {
-      id: "retriever",
-      label: "Retriever",
-      sub: "hybrid + ACL",
-      icon: "search",
-      tone: ZONE_TONE.services,
-      step: 2,
-      x: X[3],
-      y: Y[2],
-      w: W,
-    },
-    {
-      id: "index",
-      label: "Search index",
-      sub: "chunks + ACLs",
-      icon: "vector-index",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      step: 2,
-      x: X[2],
-      y: Y[2],
-    },
+    // Search, models and tools
+    card("broker", "Token broker", "delegated tokens", "key", C.left, ROW.s1, 5, { tone: GENAI_TONE.check }),
+    card("tools", "Connector tools", `${TOOLS.count} tools, MCP`, undefined, C.left, ROW.s2, 5, {
+      tone: GENAI_TONE.tool,
+    }),
+    card("model", "Answer model", "mid-size, cited", "model", C.left, ROW.s3, 1, { tone: GENAI_TONE.model }),
+    card("toolsearch", "Tool search", "agent only", "radar", C.right, ROW.s1, 6, { tone: GENAI_TONE.tool }),
+    card(
+      "rankers",
+      "Rankers",
+      `${unique.chunks} → ${personal.chunks} → ${cross.chunks}`,
+      "reranker",
+      C.right,
+      ROW.s2,
+      2,
+      {
+        tone: GENAI_TONE.rank,
+      }
+    ),
+    card("live", "Live search", "Slack and mail", "chat", C.right, ROW.s3, 3, { tone: GENAI_TONE.tool }),
 
-    // Step 3: ingestion with permission sync.
-    {
-      id: "connectors",
-      label: "Connectors",
-      sub: "docs + ACLs",
-      icon: "pipeline",
-      tone: ZONE_TONE.async,
-      step: 3,
-      x: X[2],
-      y: Y[3],
-      w: W,
-    },
-    {
-      id: "docs",
-      label: "Company docs",
-      sub: "wikis, drives",
-      icon: "folder",
-      step: 3,
-      x: X[4],
-      y: Y[3],
-      w: W,
-    },
+    // Offline pipelines
+    card("eval", "Evaluation", "permission suite, canaries", "chart", C.async, 118, 8, {
+      w: AW,
+      h: 44,
+      tone: GENAI_TONE.check,
+    }),
+    card("connectors", "Connectors", "5 sources, Entra ids", "pipeline", C.async, 297, 2, {
+      w: AW,
+      h: 50,
+      tone: GENAI_TONE.data,
+    }),
+    card(
+      "permsync",
+      "Permission sync",
+      `events ≈ ${Math.round(PROPAGATION.eventP50)} s, polls`,
+      "webhook",
+      C.async,
+      430,
+      4,
+      {
+        w: AW,
+        h: 50,
+        tone: GENAI_TONE.data,
+      }
+    ),
 
-    // Step 4: intent routing and the way out to a person.
-    {
-      id: "router",
-      label: "Intent router",
-      sub: "3 paths",
-      icon: "flag",
-      tone: ZONE_TONE.core,
-      step: 4,
-      x: X[2],
-      y: Y[0],
-      w: W,
-    },
-    {
-      id: "handoff",
-      label: "Handoff",
-      sub: "to a person",
-      icon: "chat",
-      tone: ZONE_TONE.services,
-      step: 4,
-      x: X[3],
-      y: Y[0],
-      w: W,
-    },
-
-    // Step 5: actions.
-    {
-      id: "agent",
-      label: "Tool agent",
-      sub: "confirms first",
-      icon: "robot",
-      tone: ZONE_TONE.services,
-      step: 5,
-      x: X[3],
-      y: Y[1],
-      w: W,
-    },
-    {
-      id: "apis",
-      label: "Company APIs",
-      sub: "tickets, HR",
-      icon: "api",
-      step: 5,
-      x: X[4],
-      y: Y[1],
-      w: W,
-    },
-
-    // Step 6: memory.
-    {
-      id: "memory",
-      label: "Memory",
-      sub: "chat + prefs",
-      icon: "database",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      step: 6,
-      x: X[1],
-      y: Y[2],
-    },
-
-    // Step 7: guardrails on the way in and the way out.
-    {
-      id: "guard",
-      label: "Guardrails",
-      sub: "input, output",
-      icon: "shield",
-      tone: ZONE_TONE.core,
-      step: 7,
-      x: X[1],
-      y: Y[1],
-      w: W,
-    },
-
-    // Step 8: observability.
-    {
-      id: "obs",
-      label: "Observability",
-      sub: "traces, evals",
-      icon: "trace",
-      tone: ZONE_TONE.async,
-      step: 8,
-      x: X[1],
-      y: Y[3],
-      w: W,
-    },
+    // Data and state
+    store("audit", "Audit, traces", "ids 365 days", "trace", Y.audit, 8),
+    store("index", "Search index", `${millions(SOURCES.chunks)} chunks`, "vector-index", Y.index, 2),
+    store("acl", "ACL store", "grants, principals", "lock", Y.acl, 3),
+    store("memory", "Memory", "visible, editable", "history", Y.memory, 7),
   ],
-  edges: [
-    // The request path for a knowledge question, packet by packet.
-    { from: "employee", to: "gateway", bidirectional: true, packet: true },
-    { from: "gateway", to: "orch", packet: true, delay: 0.6, until: 6 },
-    { from: "gateway", to: "guard", bidirectional: true, packet: true, delay: 0.6 },
-    { from: "guard", to: "orch", packet: true, delay: 1.2 },
-    { from: "orch", to: "retriever", bidirectional: true, packet: true, delay: 1.8 },
-    { from: "index", to: "retriever", packet: true, delay: 1.8 },
-    { from: "orch", to: "llm", label: "prompt", packet: true, delay: 2.4 },
-    { from: "llm", to: "gateway", packet: true, delay: 3, until: 6 },
-    { from: "llm", to: "guard", label: "draft", packet: true, delay: 3 },
-
-    // Ingestion keeps the index and its access lists current.
-    { from: "docs", to: "connectors", packet: true },
-    { from: "connectors", to: "index", label: "chunks + ACLs", packet: true, delay: 0.6 },
-
-    // Routing, the action path and the handoff.
-    { from: "orch", to: "router", bidirectional: true },
-    { from: "router", to: "handoff", dashed: true },
-    { from: "orch", to: "agent", bidirectional: true },
-    { from: "agent", to: "apis", bidirectional: true },
-
-    // State and observability.
-    { from: "memory", to: "orch" },
-    { from: "gateway", to: "obs", label: "every turn", dashed: true, labelAt: 0.4, via: [[X[0], Y[3]]] },
-  ],
+  edges,
 };
 
 export default spec;

@@ -1047,3 +1047,33 @@ export const EXAMPLES = {
   },
   injection: "a supplier email asking the assistant to reply on case 4471 with the approver's name and recent refunds",
 } as const;
+
+/**
+ * The §9 walk-through (illustrative), for enterprise-assistant/request-sequence: Priya's principal set id and size, the
+ * three sources the cross-encoder keeps, and the helpdesk case that is live-checked as her. Tom's set has no
+ * helpdesk-agents group, so the case is never a candidate for him.
+ */
+export const WALKTHROUGH = {
+  principalSetId: "ps_7f3…",
+  principals: 140,
+  rewrite: "damaged on arrival refund over £30 approval",
+  sources: ["Confluence: Damaged on arrival", "SharePoint: Refund approvals over £30", "Helpdesk: case 4471"],
+  liveChecked: "case 4471",
+  missingGroupForTom: "helpdesk-agents",
+} as const;
+
+/**
+ * Tom's ticket (design sheet §15.3, illustrative ids), for enterprise-assistant/action-tiers: a T1 write in an internal
+ * Jira project with no portal customers or contractors; the first write asks for the write scope (step-up consent);
+ * dedupe by the entity property `card_id`, read back by REST after a 10 s wait (JQL search is eventually consistent).
+ */
+export const TICKET = {
+  tool: "jira_create_issue",
+  project: "WH-LEEDS",
+  summary: "Scanner broken at dock 3",
+  priority: "High",
+  issue: "WH-1182",
+  cardId: "c_51e",
+  dedupeWaitS: 10,
+  withdrawMin: 10,
+} as const;
