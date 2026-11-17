@@ -1,274 +1,296 @@
-import type { DiagramSpec, LayoutTone } from "@/components/diagrams/types";
+import type { DiagramNode, DiagramSpec } from "@/components/diagrams/types";
+import { GENAI_TONE, HERO, genaiZones } from "@/components/diagrams/presets/genai-case";
+import { INDEX, RETRIEVAL, TRAFFIC } from "@/components/diagrams/presets/gcase-answer";
 
-// The AI answer engine (genai-system-design/case-studies/ai-answer-engine), built up one requirement at a time.
-// Case-study figure: zones and tones follow the "Architecture diagram groups" table in
-// content/system-design/CASE-STUDY-FORMAT.md, not the RAG legend.
+// The AI answer engine (genai-system-design/case-studies/ai-answer-engine), the hero. Built one requirement at a time,
+// exactly as the design sheet §8 lists it (SYSTEM-DESIGN/plans/genai-design/design/ai-answer-engine.md):
+//   1 Search, then write from the snippets (F1): user → API gateway → orchestrator → search APIs → answer model.
+//   2 Plan the question; look up the cache in parallel (F1, F2): query planner; the gateway looks up the answer cache
+//     while the planner runs (a hit returns the whole answer, the planner is cancelled).
+//   3 Read pages as spans (F1, F3): fetcher and parser (top 3 pages, 500 ms deadline), page store.
+//   4 Rank spans in stages (F1, N1): ranker (prefilter, cheap scorer, 400 → 60) and the cross-encoder (60 → 12).
+//   5 Cite while writing; check each sentence before showing (F3, N2, N3): sentence checks (support, copy, harm).
+//   6 Escalate: multi-hop and research tiers (F2, F5): research lead and read-only subagents.
+//   7 Own the head of the web (F4, N3): crawler and scheduler, indexer, span index (20B spans) feeding the ranker.
+//   8 Publisher controls, screening and evaluation (F6, F7, N2, N6): host flags (to the crawler and replicated to
+//     retrieval), safety screen, answer traces, evaluation.
+// Numbers: RETRIEVAL.funnel (600 retrieved, 400 unique, 60 after the cheap scorer, 12 after the cross-encoder),
+// INDEX.spans = 20B (2B pages × 10 spans), TRAFFIC.mix.cache = 14%; all from presets/gcase-answer.ts.
 //
-// Eight steps: 1 search, then summarise the snippets · 2 rewrite the question into several searches · 3 read the
-// pages, not the snippets · 4 rank passages, keep the best ten · 5 stream the answer with numbered citations ·
-// 6 cache answers by freshness · 7 screen the query, the pages and the answer · 8 log, evaluate and learn.
-// Nodes never move between steps. Shortcuts that a later step replaces carry `until`: the orchestrator waits for the
-// LLM's whole answer until step 4 (streaming arrives in step 5), the fetcher hands whole pages back until step 3
-// (the reranker arrives in step 4), and the gateway talks to the orchestrator directly until step 6 (safety sits
-// between them from step 7).
-//
-// The scale numbers behind the sub lines (all illustrative, derived once; the page's tables use the same ones):
-// - 3 searches per question × 10 links each = 30 links, about 20 unique after de-duplication; the top 8 are fetched.
-// - Page cache hit rate 60%: 8 × 0.4 = 3.2 live fetches per question.
-// - 8 pages × about 2,500 tokens of main text = 20,000 tokens, cut into 250-token passages = 80 passages; the
-//   reranker keeps 10 (2,500 tokens of context).
-//
-// Grid: five columns at x 90 | 265 | 440 | 615 | 790 (175 apart, cards 150 wide) and three rows at y 100 | 225 | 355.
-//
-//            c1               c2             c3               c4               c5
-//   r1       User             LLM            Query planner    Search fan-out   Search API
-//   r2       API gateway      Safety         Orchestrator*    Fetcher          Web pages
-//   r3       Evaluation       Answer cache   ·                Reranker         Page cache
-//
-// Every edge is a straight line or a short diagonal through an empty gap, so nothing crosses.
-//
-// Zones (CASE-STUDY-FORMAT): Clients neutral, Edge blue, core request path green (the orchestrator is the accent),
-// application services teal, async pipeline orange, storage violet. The public web (the search provider and the
-// pages it links to) sits in a neutral "The web" zone. The two caches sit next to the service that reads them, so
-// there are two small storage zones. Data stores use the glyph variant.
+// Layout (1200 × 740, genaiZones() from presets/genai-case.ts). The "Search, models and checks" tab is
+// 25 characters × 8.2 + 28 = 233 px wide, x 421–654 at y 316–344, so no line crosses the
+// core/services boundary left of x 662. Three channels instead: the left gutter x 394 (between the edge zone and the
+// middle zones), the drop at x 705 (right of the tab), and the right gutter x 756 (between the middle zones and Offline).
+//   Clients x 105: user 187. Edge x 297: API gateway 187.
+//   Answer orchestration, columns x 490 | 660, rows y 120 | 187 | 254 (48 tall):
+//            x 490            x 660
+//     120    Safety screen    Sentence checks
+//     187    Orchestrator     Ranker
+//     254    Query planner    Research lead
+//   The orchestrator (accent) sits in the middle of the left column, so its five core links are up, down, right and the
+//   two diagonals (checked: the diagonals pass between the boxes), and its left side faces the gateway.
+//   Search, models and checks, columns x 490 | 660, rows y 400 | 505 | 615: answer model, search APIs, fetcher (left,
+//   reached from the orchestrator down the left gutter, one trunk with three taps) | subagents (under the lead, the
+//   x 705 drop), cross-encoder (the ranker's line down the right gutter), · .
+//   Offline x 879: evaluation 118, indexer 360, crawler 450. Data and state x 1098 (glyphs 115 apart): answer traces
+//   125, span index 240, host flags 355, page store 470, answer cache 595.
+// Routing (every long edge checked against the boxes and tabs it passes):
+//   - Traces go over the top: out of the orchestrator's left side, up the left gutter, along y 84 (under the zone tabs,
+//     which end at y 74; above row 1, which starts at y 96), down into the trace store.
+//   - The cache lookup goes along the bottom: down the empty edge column, along y 705 under every zone, up into the
+//     foot of the answer cache.
+//   - Span index → ranker bends at (1000, 190) and runs level at y ≈ 188 through the gap in Offline (evaluation ends at
+//     140, the indexer starts at 335), 13 px above the ranker's right-gutter elbow (y 201).
+//   - Fetcher → page store runs from the fetcher's right side over the empty services slot (660, 615), under Offline
+//     (y ≈ 517 at x 974), into the page store's left side.
+//   - Host flags → span index is a bracket on the right of the store column (x 1160), clear of both glyphs.
+//   - Indexer above the crawler: crawler → indexer is a short vertical; indexer → span index leaves the indexer's top;
+//     host flags → crawler passes under the indexer (y ≈ 409 at x 974).
+// Colours (GENAI_TONE roles): the user orange; the answer model, research lead and subagents green; search APIs and the
+// fetcher teal (tools); planner, ranker and cross-encoder lime (ranking); checks, safety screen and evaluation lime
+// (check); crawler and indexer blue (data); stores violet glyphs; the gateway neutral; the orchestrator the one accent.
 
-/** The zone table from CASE-STUDY-FORMAT.md, by group. */
-const ZONE_TONE = {
-  clients: "neutral",
-  edge: "blue",
-  core: "green",
-  services: "teal",
-  async: "orange",
-  storage: "violet",
-} as const satisfies Record<string, LayoutTone>;
-
-/** Illustrative scale numbers, shared with the page (see the working above). */
-const ANSWER_ENGINE = {
-  searchesPerQuestion: 3,
-  linksPerSearch: 10,
-  pagesFetched: 8,
-  pageCacheHitRate: 0.6,
-  passages: 80,
-  passagesKept: 10,
-} as const;
-
-const X = [90, 265, 440, 615, 790] as const;
-const Y = [100, 225, 355] as const;
+const C = { clients: 105, edge: 297, left: 490, right: 660, async: 879, store: 1098 } as const;
+const ROW = { c1: 120, c2: 187, c3: 254, s1: 400, s2: 505, s3: 615 } as const;
+const GUTTER = { left: 394, drop: 705, right: 756, top: 84, bottom: 705, storeRight: 1160 } as const;
 const W = 150;
+const CH = 48;
+const AW = 190;
 
-/** A zone around columns c0..c1 (0-based), from top `y` to bottom `b`. */
-const zone = (id: string, title: string, tone: LayoutTone, c0: number, c1: number, y: number, b: number) => ({
+const card = (
+  id: string,
+  label: string,
+  sub: string,
+  icon: string | undefined,
+  x: number,
+  y: number,
+  step: number,
+  extra: Partial<DiagramNode> = {}
+): DiagramNode => ({ id, label, sub, ...(icon ? { icon } : {}), x, y, w: W, step, fill: "pastel", ...extra });
+
+const core = (
+  id: string,
+  label: string,
+  sub: string,
+  icon: string | undefined,
+  x: number,
+  y: number,
+  step: number,
+  extra: Partial<DiagramNode> = {}
+): DiagramNode => card(id, label, sub, icon, x, y, step, { h: CH, ...extra });
+
+const store = (id: string, label: string, sub: string, icon: string, y: number, step: number): DiagramNode => ({
   id,
-  title,
-  tone,
-  x: X[c0] - 82,
+  label,
+  sub,
+  icon,
+  tone: GENAI_TONE.store,
+  variant: "glyph",
+  x: C.store,
   y,
-  w: X[c1] - X[c0] + 164,
-  h: b - y,
+  step,
 });
 
+const [retrieved, unique, , cheap, cross] = RETRIEVAL.funnel;
+const billions = (v: number) => `${Math.round(v / 1e9)}B`;
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+
 const spec: DiagramSpec = {
-  title: "AI answer engine: search, read, rank, then write with citations",
-  width: 880,
-  height: 450,
+  title: "AI answer engine: plan, retrieve spans, rank in stages, check every sentence, escalate when it pays",
+  width: HERO.width,
+  height: HERO.height,
   steps: [
-    { title: "Search, then summarise the snippets", covers: "F1" },
-    { title: "Rewrite the question into several searches", covers: "F2" },
-    { title: "Read the pages, not the snippets", covers: "N3" },
-    { title: "Rank passages and keep the best ten", covers: "N2, N3" },
-    { title: "Stream the answer with numbered citations", covers: "F3, N1" },
-    { title: "Cache answers by how fast the topic changes", covers: "F4, N2" },
-    { title: "Screen the query, the pages and the answer", covers: "N4" },
-    { title: "Log, evaluate and learn", covers: "N3" },
+    { title: "Search, then write from the snippets", covers: "F1" },
+    { title: "Plan the question; look up the cache in parallel", covers: "F1, F2" },
+    { title: "Read pages as spans", covers: "F1, F3" },
+    { title: "Rank spans in stages", covers: "F1, N1" },
+    { title: "Cite while writing; check each sentence before showing", covers: "F3, N2, N3" },
+    { title: "Escalate: multi-hop and research tiers", covers: "F2, F5" },
+    { title: "Own the head of the web", covers: "F4, N3" },
+    { title: "Publisher controls, screening and evaluation", covers: "F6, F7, N2, N6" },
   ],
-  zones: [
-    zone("clients", "Clients", ZONE_TONE.clients, 0, 0, 40, 145),
-    zone("edge", "Edge", ZONE_TONE.edge, 0, 0, 165, 270),
-    zone("async", "Async pipeline", ZONE_TONE.async, 0, 0, 290, 430),
-    zone("core", "Core request path", ZONE_TONE.core, 1, 2, 40, 270),
-    zone("answer-store", "Storage", ZONE_TONE.storage, 1, 1, 290, 430),
-    zone("services", "App services", ZONE_TONE.services, 3, 3, 40, 430),
-    zone("web", "The web", "neutral", 4, 4, 40, 270),
-    zone("page-store", "Storage", ZONE_TONE.storage, 4, 4, 290, 430),
-  ],
+  zones: genaiZones({ core: "Answer orchestration", services: "Search, models and checks" }),
   nodes: [
-    // Step 1: one search, ten snippets, one model.
-    { id: "user", label: "User", sub: "asks, reads", icon: "browser", x: X[0], y: Y[0], w: W },
-    {
-      id: "gateway",
-      label: "API gateway",
-      sub: "auth, limits",
-      icon: "gateway",
-      tone: ZONE_TONE.edge,
-      x: X[0],
-      y: Y[1],
-      w: W,
-    },
+    // Clients and edge
+    card("user", "User", "web, app", "users", C.clients, ROW.c2, 1, { tone: GENAI_TONE.user }),
+    card("gateway", "API gateway", "auth, limits, SSE", "gateway", C.edge, ROW.c2, 1),
+
+    // Answer orchestration
+    core("safety", "Safety screen", "query, spans", "shield", C.left, ROW.c1, 8, { tone: GENAI_TONE.check }),
     {
       id: "orch",
       label: "Orchestrator",
-      sub: "runs a query",
+      sub: "routes, streams",
       icon: "coordinator",
-      tone: ZONE_TONE.core,
       accent: true,
-      x: X[2],
-      y: Y[1],
+      x: C.left,
+      y: ROW.c2,
       w: W,
+      h: CH,
+      step: 1,
     },
-    { id: "llm", label: "LLM", sub: "writes, cites", icon: "model", tone: ZONE_TONE.core, x: X[1], y: Y[0], w: W },
-    {
-      id: "fanout",
-      label: "Search fan-out",
-      sub: "in parallel",
-      icon: "load-balancer",
-      tone: ZONE_TONE.services,
-      x: X[3],
-      y: Y[0],
-      w: W + 8, // "Search fan-out" needs a little more room than the other cards
-    },
-    {
-      id: "search",
-      label: "Search API",
-      sub: `${ANSWER_ENGINE.linksPerSearch} links each`,
-      icon: "search",
-      x: X[4],
-      y: Y[0],
-      w: W,
-    },
+    core("planner", "Query planner", "3 rewrites, route", "router", C.left, ROW.c3, 2, { tone: GENAI_TONE.rank }),
+    // No icon: the full name needs the card's width.
+    core("checks", "Sentence checks", "support, copy, harm", undefined, C.right, ROW.c1, 5, {
+      tone: GENAI_TONE.check,
+    }),
+    core("ranker", "Ranker", `${unique.spans} → ${cheap.spans} spans`, "chart", C.right, ROW.c2, 4, {
+      tone: GENAI_TONE.rank,
+    }),
+    core("lead", "Research lead", "tiers S, M, L", "coordinator", C.right, ROW.c3, 6, { tone: GENAI_TONE.model }),
 
-    // Step 2: query understanding.
-    {
-      id: "planner",
-      label: "Query planner",
-      sub: `${ANSWER_ENGINE.searchesPerQuestion} searches`,
-      icon: "tree",
-      tone: ZONE_TONE.core,
-      step: 2,
-      x: X[2],
-      y: Y[0],
-      w: W,
-    },
+    // Search, models and checks
+    card("model", "Answer model", "small or mid-size", "model", C.left, ROW.s1, 1, { tone: GENAI_TONE.model }),
+    card("search", "Search APIs", "two vendors", "search", C.left, ROW.s2, 1, { tone: GENAI_TONE.tool }),
+    card("fetcher", "Fetcher, parser", "3 pages, 500 ms", "browser", C.left, ROW.s3, 3, { tone: GENAI_TONE.tool }),
+    card("subagents", "Subagents", "search and fetch", "robot", C.right, ROW.s1, 6, { tone: GENAI_TONE.model }),
+    card("crossenc", "Cross-encoder", `${cheap.spans} → ${cross.spans} spans`, "layers", C.right, ROW.s2, 4, {
+      tone: GENAI_TONE.rank,
+    }),
 
-    // Step 3: fetch and parse the pages, with a cache.
-    {
-      id: "fetcher",
-      label: "Fetcher",
-      sub: "fetch, parse",
-      icon: "workers",
-      tone: ZONE_TONE.services,
-      step: 3,
-      x: X[3],
-      y: Y[1],
-      w: W,
-    },
-    {
-      id: "pages",
-      label: "Web pages",
-      sub: `top ${ANSWER_ENGINE.pagesFetched} links`,
-      icon: "globe",
-      step: 3,
-      x: X[4],
-      y: Y[1],
-      w: W,
-    },
-    {
-      id: "pagecache",
-      label: "Page cache",
-      sub: `${Math.round(ANSWER_ENGINE.pageCacheHitRate * 100)}% hits`,
-      icon: "cache",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      step: 3,
-      x: X[4],
-      y: Y[2],
-    },
+    // Offline pipelines
+    card("eval", "Evaluation", "gold sets, grader, gates", "chart", C.async, 118, 8, {
+      w: AW,
+      h: 44,
+      tone: GENAI_TONE.check,
+    }),
+    card("indexer", "Indexer", "dedup, spans, vectors", "pipeline", C.async, 360, 7, {
+      w: AW,
+      h: 50,
+      tone: GENAI_TONE.data,
+    }),
+    card("crawler", "Crawler, scheduler", "per-URL recrawl", "globe", C.async, 450, 7, {
+      w: AW,
+      h: 50,
+      tone: GENAI_TONE.data,
+    }),
 
-    // Step 4: passages ranked.
-    {
-      id: "reranker",
-      label: "Reranker",
-      sub: `${ANSWER_ENGINE.passages} → ${ANSWER_ENGINE.passagesKept}`,
-      icon: "reranker",
-      tone: ZONE_TONE.services,
-      step: 4,
-      x: X[3],
-      y: Y[2],
-      w: W,
-    },
-
-    // Step 6: the answer cache.
-    {
-      id: "answercache",
-      label: "Answer cache",
-      sub: "TTL by topic",
-      icon: "cache",
-      tone: ZONE_TONE.storage,
-      variant: "glyph",
-      step: 6,
-      x: X[1],
-      y: Y[2],
-    },
-
-    // Step 7: safety on the way in and the way out.
-    {
-      id: "safety",
-      label: "Safety",
-      sub: "in and out",
-      icon: "shield",
-      tone: ZONE_TONE.core,
-      step: 7,
-      x: X[1],
-      y: Y[1],
-      w: W,
-    },
-
-    // Step 8: evaluation.
-    {
-      id: "eval",
-      label: "Evaluation",
-      sub: "traces, evals",
-      icon: "trace",
-      tone: ZONE_TONE.async,
-      step: 8,
-      x: X[0],
-      y: Y[2],
-      w: W,
-    },
+    // Data and state
+    store("traces", "Answer traces", "every stage", "trace", 125, 8),
+    store("index", "Span index", `${billions(INDEX.spans)} spans`, "vector-index", 240, 7),
+    store("flags", "Host flags", "per-host rules", "flag", 355, 8),
+    store("pages", "Page store", "raw HTML, spans", "blob", 470, 3),
+    store("cache", "Answer cache", `${pct(TRAFFIC.mix.cache)} of questions`, "cache", 595, 2),
   ],
   edges: [
-    // The request path, packet by packet.
-    { from: "user", to: "gateway", bidirectional: true, packet: true },
-    { from: "gateway", to: "orch", bidirectional: true, packet: true, delay: 0.6, until: 4 },
-    { from: "gateway", to: "orch", packet: true, delay: 0.6, step: 5, until: 6 },
-    { from: "gateway", to: "safety", bidirectional: true, packet: true, delay: 0.6 },
-    { from: "safety", to: "orch", bidirectional: true, packet: true, delay: 1 },
-    { from: "orch", to: "planner", bidirectional: true, packet: true, delay: 1.2 },
-    { from: "orch", to: "fanout", bidirectional: true, packet: true, delay: 1.6 },
-    { from: "fanout", to: "search", bidirectional: true, packet: true, delay: 1.8 },
-    { from: "orch", to: "fetcher", bidirectional: true, packet: true, delay: 2.2, until: 3 },
-    { from: "orch", to: "fetcher", packet: true, delay: 2.2, step: 4 },
-    { from: "fetcher", to: "pages", bidirectional: true, packet: true, delay: 2.4 },
-    { from: "fetcher", to: "pagecache", bidirectional: true },
-    { from: "fetcher", to: "reranker", label: "passages", packet: true, delay: 2.8 },
-    { from: "reranker", to: "orch", label: "top 10", packet: true, delay: 3.2 },
-    { from: "orch", to: "llm", bidirectional: true, label: "prompt", packet: true, delay: 3.4, until: 4 },
-    { from: "orch", to: "llm", label: "prompt", packet: true, delay: 3.4, step: 5 },
-    { from: "llm", to: "gateway", label: "stream", labelAt: 0.35, packet: true, delay: 3.8, step: 5, until: 6 },
-    { from: "llm", to: "safety", label: "stream", packet: true, delay: 3.8 },
-
-    // Cache and evaluation.
-    { from: "orch", to: "answercache", bidirectional: true },
-    // Routed down the gap right of the Clients column, so it enters the evaluation card from the side, clear of the
-    // zone title tab.
+    // Step 1: one search, snippets in a prompt, a streamed answer.
+    { from: "user", to: "gateway", flow: true, packet: true, bidirectional: true },
+    { from: "gateway", to: "orch", flow: true, packet: true, bidirectional: true, delay: 0.6 },
     {
-      from: "gateway",
-      to: "eval",
-      dashed: true,
+      from: "orch",
+      to: "search",
+      flow: true,
+      packet: true,
+      bidirectional: true,
+      delay: 1.2,
       via: [
-        [177, 244],
-        [177, Y[2]],
+        [GUTTER.left, 210],
+        [GUTTER.left, ROW.s2],
       ],
     },
+    {
+      from: "orch",
+      to: "model",
+      flow: true,
+      packet: true,
+      bidirectional: true,
+      delay: 2,
+      via: [
+        [GUTTER.left, 210],
+        [GUTTER.left, ROW.s1],
+      ],
+    },
+
+    // Step 2: plan; the cache lookup runs at the gateway in parallel.
+    { from: "orch", to: "planner" },
+    {
+      from: "gateway",
+      to: "cache",
+      label: "lookup in parallel; a hit ≈ 50 ms",
+      labelAt: 0.45,
+      bidirectional: true,
+      via: [
+        [C.edge, GUTTER.bottom],
+        [C.store, GUTTER.bottom],
+      ],
+    },
+
+    // Step 3: read the top pages as spans.
+    {
+      from: "orch",
+      to: "fetcher",
+      via: [
+        [GUTTER.left, 210],
+        [GUTTER.left, ROW.s3],
+      ],
+    },
+    { from: "fetcher", to: "pages", label: "pages as spans", labelAt: 0.42, bidirectional: true },
+
+    // Step 4: rank in stages.
+    { from: "orch", to: "ranker" },
+    {
+      from: "ranker",
+      to: "crossenc",
+      bidirectional: true,
+      via: [
+        [GUTTER.right, 205],
+        [GUTTER.right, ROW.s2],
+      ],
+    },
+
+    // Step 5: every sentence checked before it is shown.
+    { from: "orch", to: "checks", bidirectional: true },
+
+    // Step 6: escalate.
+    { from: "orch", to: "lead", bidirectional: true },
+    {
+      from: "lead",
+      to: "subagents",
+      label: "tasks",
+      bidirectional: true,
+      via: [
+        [GUTTER.drop, ROW.c3 + CH / 2],
+        [GUTTER.drop, ROW.s1 - 29],
+      ],
+    },
+
+    // Step 7: own the head of the web.
+    { from: "crawler", to: "pages", label: "raw HTML", labelAt: 0.62 },
+    { from: "crawler", to: "indexer" },
+    { from: "indexer", to: "index", label: "spans", labelAt: 0.55 },
+    {
+      from: "index",
+      to: "ranker",
+      label: `${retrieved.spans} spans`,
+      labelAt: 0.42,
+      via: [[1000, 190]],
+    },
+
+    // Step 8: publisher rules, screening, traces and evaluation.
+    { from: "orch", to: "safety" },
+    { from: "flags", to: "crawler", label: "robots, signals", labelAt: 0.6 },
+    {
+      from: "flags",
+      to: "index",
+      dashed: true,
+      via: [
+        [GUTTER.storeRight, 355],
+        [GUTTER.storeRight, 240],
+      ],
+    },
+    {
+      from: "orch",
+      to: "traces",
+      label: "trace every answer",
+      dashed: true,
+      labelAt: 0.62,
+      via: [
+        [GUTTER.left, 165],
+        [GUTTER.left, GUTTER.top],
+        [C.store, GUTTER.top],
+      ],
+    },
+    { from: "traces", to: "eval", label: "1% graded", dashed: true },
   ],
 };
 

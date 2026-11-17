@@ -1,191 +1,211 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
-import { RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
+import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
+import { LATENCY as L, RETRIEVAL, TARGETS } from "@/components/diagrams/presets/gcase-answer";
+import { PROD_TONE, n, waterfall, waterfallSize, type WaterfallSpan } from "@/components/diagrams/presets/production";
 
-// "The latency budget" (genai-system-design/case-studies/ai-answer-engine). A waterfall of the five stages between a
-// question arriving and the first answer token, on one time axis.
-//
-// Stage budgets in milliseconds, illustrative (the page's latency table uses the same numbers):
-// - Understand and rewrite the question with a small model: 150 → ends at 150.
-// - Three searches in parallel; the stage lasts as long as the slowest: 300 → ends at 450.
-// - Fetch and parse the top 8 pages in parallel, with a hard 500 ms deadline: 500 → ends at 950.
-// - Chunk the pages and rerank 80 passages: 150 → ends at 1,100. The source cards can be shown now.
-// - The LLM reads about 3,000 prompt tokens and emits its first token: 400 → ends at 1,500 (time to first token).
-// Total to the first token = 150 + 300 + 500 + 150 + 400 = 1,500 ms.
-//
-// Step 2: one page takes 3 s. Waiting for it would push the first token to 1,500 - 950 + (450 + 3,000) = 4,000 ms;
-// the deadline drops it at 950 and the answer uses the 7 pages that arrived.
-// Step 3: an answer-cache hit returns the whole stored answer in about 50 ms (illustrative).
-//
-// Tones (four plus neutral, RAG legend): the question orange, search neutral (an outside service), pages blue,
-// ranking lime, the LLM and the answer green. Axis: 0..2,000 ms over x 240..840 (0.3 units per ms).
+// The answer engine's latency budget to the first verified sentence, p50, per path (design sheet §12). Every stage is
+// LATENCY.own / LATENCY.api in presets/gcase-answer.ts:
+//   Own-index path (75% of quick answers): edge, screen, cache lookup 30 + planner 250 + index 80 (3 queries × 100
+//   shards, 60 ms per-shard deadline hedged at 40, + 20 merge) + rank 110 (prefilter and cheap scorer 30, cross-encoder
+//   80) → `sources` at LATENCY.sourcesOwn = 470 + assembly 10 + first token 500 + first sentence 312.5 (25 tokens at 80
+//   a second) + checks 60 = LATENCY.ownP50 ≈ 1,353 ms (N3 ≤ 1,500; p95 ≈ 1,980 ≤ 2,500).
+//   API-routed path (25%): edge 30 + planner 250 + one API call 513 (Brave class p50, vendor-run test by Perplexity,
+//   September 2025) + the slowest of 3 fetches LATENCY.fetchP50 ≈ 400 (one fetch p50 300, p95 500: q = 0.5^(1/3) =
+//   0.794 → 300 + 0.82 × 122) + parse 30 + rank 110 → sources ≈ 1,333 + assembly 10 + first token 500 + sentence 312.5
+//   + checks 60 = LATENCY.apiP50 ≈ 2,215 ms (N3 ≤ 2,400; p95 ≈ 2,910 ≤ 3,200).
+//   Cache hit: edge 30 + lookup 10 + send 10 = 50 ms (the planner is cancelled).
+//   Multi-hop (own index): edge and planner 280 + 2 rounds × LATENCY.roundMs 1,940 (index 80 + cheap 30 + cross 80 +
+//   first token 500 + 100 tokens 1,250) + the answer stages 1,072.5 = LATENCY.hopOwnP50 = 5,232.5; the 25% whose first
+//   round calls the API add LATENCY.hopRoutedExtra ≈ 863; mixed p50 ≈ 5,400, p95 ≈ 6,480 (N3 ≤ 6,000 / 9,000).
+// The own path draws the index and ranking as one row (80 + 110 = 190 ms, ending at `sources`) and the API path draws
+// fetch + parse as one row (≈ 430 ms), so no duration text sits under the `sources` marker.
+// Steps: 1 own-index path · 2 API-routed path (the max-of-3 fetch marked) · 3 cache hit · 4 multi-hop (own scale).
+// Layout (880 wide): waterfall() from presets/production.ts; steps 1–3 share one msPerPx fitted to the API path's
+// 2,400 ms target; multi-hop has its own scale, said in its heading. Label column 196 px, rows 24 px.
+// Colours (GENAI_TONE): edge and assembly neutral, planner and ranking lime, the index violet, the API call and fetches
+// teal (tools), the model green, checks lime, the cache hit violet.
 
-const STAGES: { label: string; ms: number; tone: LayoutTone }[] = [
-  { label: "Understand and rewrite", ms: 150, tone: RAG_TONE.query },
-  { label: "3 searches in parallel", ms: 300, tone: RAG_TONE.infra },
-  { label: "Fetch and parse 8 pages", ms: 500, tone: RAG_TONE.text },
-  { label: "Chunk and rerank", ms: 150, tone: RAG_TONE.rank },
-  { label: "LLM to first token", ms: 400, tone: RAG_TONE.answer },
-];
-
-const SLOW_PAGE_MS = 3_000;
-const CACHE_HIT_MS = 50;
-
-const X0 = 240;
-const SCALE = 0.3;
-const AXIS_MS = 2_000;
-const at = (ms: number) => Math.round(X0 + ms * SCALE);
-
-const starts = STAGES.map((_, i) => STAGES.slice(0, i).reduce((s, st) => s + st.ms, 0));
-const ends = STAGES.map((st, i) => starts[i] + st.ms);
-const SOURCES_MS = ends[3];
-const FIRST_TOKEN_MS = ends[4];
-const FETCH = { start: starts[2], end: ends[2] };
-
-/** A bar of at least 250 ms (75 units) holds its "300 ms" label. */
-const inside = (ms: number) => ms >= 250;
-
-const ROW_Y = (i: number) => 76 + i * 42;
-const BAR_H = 26;
-const AXIS_Y = ROW_Y(7) - 4;
-
-const text = (
+const X = 12;
+const LABEL_W = 196;
+const ms = (s: readonly { id: string; ms: number }[], id: string) => s.find((x) => x.id === id)?.ms ?? 0;
+const sp = (
   id: string,
-  x: number,
-  y: number,
-  w: number,
   label: string,
-  opts: { tone?: LayoutTone; step?: number; h?: number } = {}
-): LayoutShape => ({ id, type: "text", x, y, w, h: opts.h ?? 20, label, tone: opts.tone, step: opts.step });
+  startMs: number,
+  durationMs: number,
+  tone: LayoutTone,
+  step: number,
+  note?: string
+): WaterfallSpan => ({ id, label, startMs, durationMs: Math.round(durationMs), tone, step, note });
 
-const vline = (id: string, ms: number): LayoutShape => ({
-  id,
-  type: "path",
-  x: 0,
-  y: 0,
-  dashed: true,
-  points: [
-    [at(ms), 60],
-    [at(ms), AXIS_Y],
+/** A path as consecutive spans from a list of [id, label, ms, tone, note?]. */
+function chain(rows: [string, string, number, LayoutTone, string?][], step: number): WaterfallSpan[] {
+  let t = 0;
+  return rows.map(([id, label, d, tone, note]) => {
+    const s = sp(id, label, Math.round(t), d, tone, step, note);
+    t += d;
+    return s;
+  });
+}
+
+const rank = ms(L.own, "cheap") + ms(L.own, "cross");
+const [retrieved, , , , cross] = RETRIEVAL.funnel;
+const rankRow: [string, string, number, LayoutTone, string?] = [
+  "rank",
+  `Rank ${retrieved.spans} → ${cross.spans}`,
+  rank,
+  GENAI_TONE.rank,
+];
+const tail: [string, string, number, LayoutTone, string?][] = [
+  ["assemble", "Assemble prompt", ms(L.own, "assemble"), PROD_TONE.infra],
+  ["first", "Model: first token", ms(L.own, "firstToken"), GENAI_TONE.model],
+  ["sentence", "First sentence", L.sentenceMs, GENAI_TONE.model],
+  ["checks", "Checks", ms(L.own, "verify"), GENAI_TONE.check],
+];
+const head: [string, string, number, LayoutTone, string?][] = [
+  ["edge", "Edge, screen, cache", ms(L.own, "edge"), PROD_TONE.infra],
+  ["planner", "Planner (small)", ms(L.own, "planner"), GENAI_TONE.rank],
+];
+const own = chain(
+  [
+    ...head,
+    ["index", `Own index + rank ${retrieved.spans} → ${cross.spans}`, ms(L.own, "index") + rank, GENAI_TONE.store],
+    ...tail,
   ],
+  1
+);
+const api = chain(
+  [
+    ...head,
+    ["api", "One search-API call", ms(L.api, "api"), GENAI_TONE.tool],
+    ["fetch", "Slowest of 3 fetches + parse", L.fetchP50 + ms(L.api, "parse"), GENAI_TONE.tool],
+    rankRow,
+    ...tail,
+  ],
+  2
+);
+const hit = [sp("hit", "Cache hit: whole answer", 0, L.cacheHit.p50, GENAI_TONE.store, 3)];
+const answerStages = L.hopOwnP50 - (ms(L.own, "edge") + ms(L.own, "planner")) - 2 * L.roundMs;
+const hop = chain(
+  [
+    ["h-head", "Edge and planner", ms(L.own, "edge") + ms(L.own, "planner"), GENAI_TONE.rank],
+    ["h-r1", "Round 1: retrieve, step", L.roundMs, GENAI_TONE.model],
+    ["h-r2", "Round 2: retrieve, step", L.roundMs, GENAI_TONE.model],
+    ["h-answer", "Answer to first sentence", answerStages, GENAI_TONE.model],
+  ],
+  4
+);
+
+const scale = waterfallSize([...own, ...api], { width: 856, labelW: LABEL_W, total: { ms: TARGETS.apiP50Ms } });
+const common = { msPerPx: scale.msPerPx, labelW: LABEL_W, tickMs: 500, rowH: 24, barH: 16 };
+
+const text = (id: string, y: number, label: string, step: number, w = 856): LayoutShape => ({
+  id,
+  type: "text",
+  x: X,
+  y,
+  w,
+  h: 18,
+  label,
+  tone: PROD_TONE.infra,
+  step,
 });
+
+const ownP50 = Math.round(L.ownP50);
+const apiP50 = Math.round(L.apiP50);
+const H1 = 4;
+const W1 = H1 + 24;
+const s1 = waterfallSize(own, { ...common, total: { ms: ownP50 } });
+const H2 = W1 + s1.height + 12;
+const W2 = H2 + 24;
+const s2 = waterfallSize(api, { ...common, total: { ms: apiP50 } });
+const H3 = W2 + s2.height + 12;
+const W3 = H3 + 24;
+const hitOpts = {
+  ...common,
+  tickMs: 250,
+  total: false as const,
+  marks: [
+    {
+      ms: L.own[0].ms + L.own[1].ms,
+      label: `planner done: ${L.own[0].ms + L.own[1].ms} ms`,
+    },
+  ],
+};
+const s3 = waterfallSize(hit, hitOpts);
+const H4 = W3 + s3.height + 12;
+const W4 = H4 + 24;
+const s4 = waterfallSize(hop, {
+  width: 856,
+  labelW: LABEL_W,
+  rowH: 24,
+  barH: 16,
+  tickMs: 1_000,
+  total: { ms: L.hopOwnP50 },
+});
+const FOOT = W4 + s4.height + 8;
 
 const spec: LayoutSpec = {
   kind: "layout",
-  title: "The latency budget to the first answer token",
+  title:
+    "Latency to the first verified sentence, p50: 1,353 ms on the own index, 2,215 ms when the search API is called",
   width: 880,
-  height: 420,
+  height: FOOT + 46,
   steps: [
-    { title: "Five stages, 1,500 ms to the first token" },
-    { title: "A slow page is dropped at the fetch deadline" },
-    { title: "A cached answer skips every stage" },
+    { title: `Own-index path: ${n(ownP50)} ms` },
+    { title: `API-routed path: ${n(apiP50)} ms` },
+    { title: `Cache hit: ${L.cacheHit.p50} ms` },
+    { title: `Multi-hop: ${n(Math.round(L.hopOwnP50))} ms on the own index` },
   ],
   shapes: [
-    text("h-stage", 20, 32, 200, "Stage"),
-    text("m-sources", at(SOURCES_MS) - 58, 20, 116, `Sources shown\n${fmt(SOURCES_MS)} ms`, { h: 36 }),
-    text("m-first", at(FIRST_TOKEN_MS) - 58 + 6, 20, 116, `First token\n${fmt(FIRST_TOKEN_MS)} ms`, {
-      h: 36,
-      tone: RAG_TONE.answer,
+    text("h1", H1, `Own-index path (75% of quick answers): ${n(ownP50)} ms, target ${n(TARGETS.ownP50Ms)}`, 1),
+    ...waterfall("own", X, W1, own, {
+      ...common,
+      step: 1,
+      total: { ms: ownP50, label: `first verified sentence ${n(ownP50)} ms` },
+      marks: [{ ms: L.sourcesOwn, label: `sources ${L.sourcesOwn} ms` }],
     }),
-    vline("v-sources", SOURCES_MS),
-    vline("v-first", FIRST_TOKEN_MS),
-
-    // Step 1: the five stages.
-    ...STAGES.flatMap((st, i): LayoutShape[] => [
-      text(`s${i}-label`, 20, ROW_Y(i) + 3, 210, st.label),
-      {
-        id: `s${i}-bar`,
-        type: "cell",
-        x: at(starts[i]),
-        y: ROW_Y(i),
-        w: at(ends[i]) - at(starts[i]),
-        h: BAR_H,
-        // The duration sits inside a bar wide enough for it, otherwise just after it (clear of the marker lines).
-        label: inside(st.ms) ? `${st.ms} ms` : undefined,
-        tone: st.tone,
-        fill: "pastel",
-      },
-      ...(inside(st.ms) ? [] : [text(`s${i}-ms`, at(ends[i]) + 6, ROW_Y(i) + 3, 60, `${st.ms} ms`)]),
-    ]),
-
-    // Step 2: one page is slow; the fetch deadline drops it.
-    text("slow-label", 20, ROW_Y(5) + 3, 210, `One slow page (${SLOW_PAGE_MS / 1_000} s)`, { step: 2 }),
-    {
-      id: "slow-bar",
-      type: "cell",
-      x: at(FETCH.start),
-      y: ROW_Y(5),
-      w: at(FETCH.end) - at(FETCH.start),
-      h: BAR_H,
-      label: "dropped",
-      tone: RAG_TONE.text,
-      fill: "soft",
+    text("h2", H2, `API-routed path (25%): ${n(apiP50)} ms, target ${n(TARGETS.apiP50Ms)}`, 2),
+    ...waterfall("api", X, W2, api, {
+      ...common,
       step: 2,
-    },
-    {
-      id: "slow-rest",
-      type: "path",
-      x: 0,
-      y: 0,
-      dashed: true,
-      step: 2,
-      points: [
-        [at(FETCH.end), ROW_Y(5) + BAR_H / 2],
-        [at(AXIS_MS), ROW_Y(5) + BAR_H / 2],
-      ],
-    },
+      total: { ms: apiP50, label: `first verified sentence ${n(apiP50)} ms` },
+      marks: [{ ms: Math.round(L.sourcesApi), label: `sources ${n(Math.round(L.sourcesApi))} ms` }],
+    }),
     text(
-      "slow-note",
-      at(FIRST_TOKEN_MS) + 22,
-      ROW_Y(5) - 14,
-      150,
-      `would end at ${fmt(FETCH.start + SLOW_PAGE_MS)} ms`,
-      {
-        step: 2,
-      }
+      "h3",
+      H3,
+      `Cache hit (14% of questions): ${L.cacheHit.p50} ms p50, target ≤ ${TARGETS.cacheHitP95Ms} ms p95; a hit cancels the planner`,
+      3
     ),
-
-    // Step 3: an answer-cache hit.
-    text("cache-label", 20, ROW_Y(6) + 3, 210, "Answer cache hit", { step: 3 }),
-    {
-      id: "cache-bar",
-      type: "cell",
-      x: at(0),
-      y: ROW_Y(6),
-      w: at(CACHE_HIT_MS) - at(0),
-      h: BAR_H,
-      tone: RAG_TONE.answer,
-      fill: "pastel",
-      step: 3,
-    },
-    text("cache-ms", at(CACHE_HIT_MS) + 6, ROW_Y(6) + 3, 190, `${CACHE_HIT_MS} ms for the whole answer`, {
-      step: 3,
+    ...waterfall("hit", X, W3, hit, { ...hitOpts, step: 3 }),
+    text(
+      "h4",
+      H4,
+      `Multi-hop, own index (different scale): ${n(Math.round(L.hopOwnP50))} ms; mixed with API rounds ≈ ${n(Math.round(L.hopP50 / 10) * 10)} p50, target ${n(TARGETS.hopP50Ms)}`,
+      4
+    ),
+    ...waterfall("hop", X, W4, hop, {
+      width: 856,
+      labelW: LABEL_W,
+      rowH: 24,
+      barH: 16,
+      tickMs: 1_000,
+      step: 4,
+      total: { ms: L.hopOwnP50, label: `first verified sentence ${n(Math.round(L.hopOwnP50))} ms` },
     }),
-
-    // The time axis.
-    {
-      id: "axis",
-      type: "path",
-      x: 0,
-      y: 0,
-      points: [
-        [at(0), AXIS_Y],
-        [at(AXIS_MS), AXIS_Y],
-      ],
-    },
-    ...[0, 500, 1_000, 1_500, 2_000].flatMap((ms): LayoutShape[] => [
-      {
-        id: `tick-${ms}`,
-        type: "path",
-        x: 0,
-        y: 0,
-        points: [
-          [at(ms), AXIS_Y],
-          [at(ms), AXIS_Y + 6],
-        ],
-      },
-      text(`tick-${ms}-label`, at(ms) - 30, AXIS_Y + 8, 60, fmt(ms)),
-    ]),
-    text("axis-title", at(0), AXIS_Y + 30, 600, "Milliseconds after the question arrives (illustrative)"),
+    text(
+      "foot-1",
+      FOOT,
+      `Fetches: one p50 300, p95 500; the slowest of 3 is one fetch's p79.4 ≈ ${Math.round(L.fetchP50)} ms. API p50 513 ms is vendor-run (Perplexity's test).`,
+      2
+    ),
+    text(
+      "foot-2",
+      FOOT + 20,
+      `p95: own ≈ ${n(Math.round(L.ownP95 / 10) * 10)} ms (≤ ${n(TARGETS.ownP95Ms)}), API ≈ ${n(Math.round(L.apiP95 / 10) * 10)} ms (≤ ${n(TARGETS.apiP95Ms)}). Stage times illustrative.`,
+      2
+    ),
   ],
 };
 
