@@ -35,7 +35,7 @@ The answer must also cite every claim, be about the right patient, and keep pati
     { q: "What volume?", a: "About 7,200 questions, 51,200 medication orders and 122,900 hook calls a day (illustrative): a correctness problem, not a scale problem." },
     { q: "What latency?", a: "An order card well inside CDS Hooks’ “on the order of 500 ms”; a question’s alerts in under a second; the first cited sentence in about 2 s." },
     { q: "Does the EHR already check interactions?", a: "Yes, on coded data, with the network’s own alert tiers. We add what it cannot see (facts written only in notes) and explanations." },
-    { q: "Why not buy?", a: "The EHR vendor’s assistant with licensed reference content covers chart summaries and reference answers; we build only the note-derived delta and the network’s rules." },
+    { q: "Why not buy?", a: "The EHR vendor’s assistant with licensed reference content covers reference answers (we assume chart summaries too); we build only the note-derived delta and the network’s rules." },
     { q: "If constraints conflict?", a: "No missed alert first, then no false reassurance, then right patient and right data access, then latency, then cost." },
   ]}
   outOfScope={["Children, dialysis and continuous renal replacement", "Pregnancy and lactation rules (named as a gap)", "Diagnosis and dose calculation (mg/kg, infusions, titration)", "Emergency and resuscitation use", "Patient-facing answers", "Writing to the chart without a clinician", "Imaging, waveforms and scanned documents"]}
@@ -61,9 +61,7 @@ The answer must also cite every claim, be about the right patient, and keep pati
 
 <KeyIdea>In clinical decision support the model is the narrator, not the judge. Alerts come from rules over coded, unit-checked facts about the right patient; the model explains them with citations, and when an input is missing the system says which one.</KeyIdea>
 
-- **Terms used on this page:** EHR (electronic health record); FHIR (the standard API for health records); PHI (protected health information); BAA (business associate agreement, the contract HIPAA requires before a vendor may handle PHI); CDS (clinical decision support).
-- **Vocabularies:** RxNorm (US drug names and codes), SNOMED CT (clinical terms), LOINC (lab tests), UMLS (the metathesaurus that maps between them), UCUM (the units standard).
-- **Clinical terms:** CrCl and eGFR (two kidney-function estimates), NKDA (no known drug allergies), LASA (look-alike, sound-alike drug names), AF (atrial fibrillation), VTE (venous thromboembolism).
+- **Terms:** EHR (electronic health record), FHIR (the standard health-record API), PHI (protected health information), BAA (business associate agreement, the contract HIPAA requires before a vendor handles PHI), CDS (clinical decision support); RxNorm (US drug codes), SNOMED CT (clinical terms), LOINC (lab tests), UMLS (the metathesaurus between them), UCUM (units); CrCl and eGFR (kidney-function estimates), NKDA (no known drug allergies), AF (atrial fibrillation), VTE (venous thromboembolism).
 
 ## Functional requirements
 
@@ -87,9 +85,9 @@ The answer must also cite every claim, be about the right patient, and keep pati
 <RequirementsTable
   kind="non-functional"
   rows={[
-    { id: "N1", property: "Alert recall (quality)", target: "150 of 150 high-priority cases (15 ONC pairs × 10 orderable variants); every major and contraindicated pair in the licensed base as orderable products, 100% (≈ 3M cases); 2,000 of 2,000 patient-context cases; 0 missed alerts on the clinician-graded set", why: "The pairs come from the base the rules read, so a miss is our defect (mapping, expansion), not a statistic; a miss blocks the release" },
-    { id: "N2", property: "Explanation quality", target: "≥ 95% of answers acceptable to two clinicians (600 questions, ± 1.7 points); 0 major hallucinations; shown unsupported sentences ≤ 0.5%; every factual sentence cites a rule, edge, resource or passage", why: "2025 papers: models detect interactions but “cannot reliably exclude” them" },
-    { id: "N3", property: "Linking", target: "Medication mentions ≥ 95% correct at ingredient level (1,600, ± 1.1); problems ≥ 85% (3,000, ± 1.3); assertion F1 ≥ 0.95; abbreviation, unseen-concept and look-alike slices ≥ 85%", why: "n2c2 2019: 95.3% on common concepts, 69.5% on unseen text" },
+    { id: "N1", property: "Alert recall (quality)", target: "150 of 150 high-priority cases (15 ONC pairs × 10 orderable variants, a must-pass list); every interaction pair in the licensed base (≈ 300,000), each as ≈ 10 orderable products, 100% (≈ 3M cases); 2,000 of 2,000 patient-context cases; 0 missed alerts on the clinician-graded set", why: "The pairs come from the base the rules read, so a miss is our defect (mapping, expansion), not a statistic; a miss blocks the release" },
+    { id: "N2", property: "Explanation quality", target: "≥ 95% of answers acceptable to two clinicians (600 questions, ± 1.7 points); 0 major hallucinations; shown unsupported sentences ≤ 0.5%; every factual sentence cites a rule, edge, resource or passage", why: "Against Micromedex (2023 paper) ChatGPT-4 had specificity 0.519; a 2025 preprint finds accuracy falls as drugs are added" },
+    { id: "N3", property: "Linking", target: "Medication mentions ≥ 95% correct at ingredient level (1,600, ± 1.1 if independent); problems ≥ 85% (3,000, ± 1.3); intervals bootstrapped by note are wider; gold labels adjudicated, agreement reported per slice; assertion F1 ≥ 0.95; abbreviation, unseen-concept and look-alike slices ≥ 85%", why: "n2c2 2019: 95.3% on common concepts, 69.5% on unseen text" },
     { id: "N4", property: "Abstention", target: "≥ 95% correct gaps on 150 questions (Wilson 90.3–97.5%); ≤ 5% over-abstention on answerable controls", why: "Models answer confidently when the right option is missing" },
     { id: "N5", property: "Latency per request type (p50 / p95)", target: "Order card ≤ 200 / 500 ms; safety alerts shown ≤ 600 / 1,000 ms; first verified sentence ≤ 2.0 / 3.0 s; complete ≤ 5 / 7 s; record question first verified sentence ≤ 2.0 / 3.0 s", why: "CDS Hooks expects about 500 ms; questions are not time-critical, but clinicians leave a slow panel" },
     { id: "N6", property: "Privacy, access and right patient (safety)", target: "PHI only in the PHI zone and in processors with a BAA; access only with a treatment relationship or logged break-glass; restricted notes follow EHR entitlements on panel and cards; 0 PHI in logs; 0 answers shown for a patient other than the EHR’s current one", why: "HIPAA business associate rules, 42 CFR Part 2; embeddings are PHI" },
@@ -111,10 +109,10 @@ The answer must also cite every claim, be about the right patient, and keep pati
   rows={[
     { quantity: "Network", assumption: "12 hospitals, 4,000 beds at 85% occupancy, 140 clinics, 30,000 clinic visits a day, 2M patients with records (1.2M seen in 3 years), 6,000 prescribers", result: "3,400 occupied beds" },
     { quantity: "Questions", assumption: "6,000 × 30% active a day × 4 questions", result: "7,200 a day: safety 2,880, record 3,240, reference 1,080" },
-    { quantity: "Question peak", assumption: "12% in the morning-rounds hour ÷ 3,600 s; × 4 burst inside the hour", result: "0.24 a second; ≈ 1 a second at burst (0.96)" },
+    { quantity: "Question peak", assumption: "12% in the morning-rounds hour ÷ 3,600 s; × 4 burst; × 4,470 tokens × 60", result: "0.24 a second; ≈ 1 at burst (0.96); ≈ 257,000 input tokens a minute, inside standard provider tiers" },
     { quantity: "Medication orders", assumption: "Inpatient 3,400 × 8 a bed-day = 27,200; outpatient 30,000 × 0.8 = 24,000", result: "51,200 a day" },
     { quantity: "Hook calls", assumption: "`order-select` ≈ 2 calls an order = 102,400; `order-sign` once per signing session of ≈ 2.5 orders = 20,480", result: "122,880 a day; peak hour 10% → 3.4 a second, ≈ 13.7 at burst" },
-    { quantity: "Order cards", assumption: "1.5% of orders meet a rule only through a note-derived fact; 10% of those critical; 20% get “Explain”", result: "768 cards a day, 77 interruptive, 154 explanations" },
+    { quantity: "Order cards", assumption: "1.5% of orders meet a rule only through a note-derived fact; 10% of those critical; 20% get “Explain”", result: "768 cards a day; 77 with the CDS Hooks critical indicator (interruptive); 154 explanations" },
     { quantity: "Notes", assumption: "3,400 × 6 + 30,000 × 1.5 + 15,000 reports = 80,400 a day × 700 tokens; 40 mentions a note", result: "56.3M tokens and 3.2M mentions a day" },
     { quantity: "Stored notes", assumption: "≈ 55,000 a day ten years ago growing linearly to 80,400: average 67,700 × 3,650 days", result: "247M notes, 172.9B tokens, 9.88B mentions (293.5M notes at today’s rate throughout)" },
     { quantity: "Knowledge layer", assumption: "SNOMED CT 360,000+ concepts + RxNorm ≈ 300,000 + LOINC ≈ 100,000 + classes, dosing rules, label sets, guidelines ≈ 240,000; edges from SNOMED’s inferred relationships, RxNorm relations, ≈ 300,000 interactions", result: "≈ 1.0M nodes, ≈ 12M edges, ≈ 6 GB at ≈ 500 bytes an edge in a compact layout" },
@@ -125,20 +123,17 @@ The answer must also cite every claim, be about the right patient, and keep pati
     { quantity: "PHI storage", assumption: "Fact rows ≈ 400 B with indexes 4.4 TB + vectors 0.51 TB + chunk text 0.69 TB", result: "≈ 5.6 TB on primary volumes, + 2 backup copies" },
     { quantity: "Prompt (safety)", assumption: "Stable 1,300 + question 100 + patient facts 590 + rule results and coverage 340 + paths 300 + 8 headers 240 + 8 passages 1,600", result: "4,470 tokens (1,300 cached); 250 out. Record 4,130; reference 3,240; the whole chart 35,250" },
     { quantity: "Answer call", assumption: "1,300 × 0.10 + 3,170 × 2.50 + 250 × 10.00, per million", result: "0.00013 + 0.00793 + 0.0025 = 0.0106 USD" },
-    { quantity: "Planner", assumption: "Encoder classifier on 85%; small model on 15%: 600 cached × 0.01 + 120 × 0.10 + 80 × 0.50 per million = 0.000058", result: "0.0000087 USD a question" },
+    { quantity: "Planner", assumption: "Encoder classifier on 85%; small model on 15%: 600 cached (if the small model's cache minimum allows) × 0.01 + 120 × 0.10 + 80 × 0.50 per million = 0.000058", result: "0.0000087 USD a question; negligible either way" },
     { quantity: "Restart after a dropped sentence", assumption: "4,470 cached × 0.10 + 125 shown tokens × 2.00; 0.56 restarts an answer", result: "0.0007 USD each" },
-    { quantity: "Safety question, model", assumption: "0.0000087 + 0.0106 + 0.56 × 0.0007", result: "≈ 0.0110 USD; record 0.0101; reference 0.0078; card “Explain” 0.0076" },
+    { quantity: "Safety question, model", assumption: "0.0000087 + 0.0106 + 0.56 × 0.0007; marginal adds the query half of the GPUs (120 USD) ÷ 7,200", result: "≈ 0.0110 USD (record 0.0101, reference 0.0078, card “Explain” 0.0076); marginal ≈ 0.028 (N9 ≤ 0.05)" },
     { quantity: "Model per day", assumption: "2,880 × 0.0110 + 3,240 × 0.0101 + 1,080 × 0.0078 + 154 × 0.0076", result: "≈ 74 USD a day (≈ 113 with no caching; 148 if prices double)" },
-    { quantity: "Marginal per safety question", assumption: "0.0110 + the query half of the GPUs (120 USD) ÷ 7,200", result: "≈ 0.028 USD (N9 ≤ 0.05)" },
-    { quantity: "Ingestion GPUs", assumption: "3 passes over note tokens 168.8M + 510 tokens a mention (10 to embed + cross-encoder on the ambiguous 25% × 20 candidates × 100) × 3.2M = 1.64B; ÷ 200,000 tokens a second", result: "≈ 9,050 GPU-seconds a day: 2 GPUs with room for bursts" },
+    { quantity: "Ingestion GPUs", assumption: "3 passes over note tokens 168.8M + 510 tokens a mention (10 to embed + cross-encoder on the ambiguous 25% × 20 candidates × 100) × 3.2M = 1.64B; 168.8M + 1.64B = 1.81B tokens ÷ 200,000 a second", result: "≈ 9,050 GPU-seconds a day: ≈ 5% of 2 GPUs kept for availability and freshness; 2 more serve queries" },
     { quantity: "Linking backfill", assumption: "Encoder cascade 5.56T tokens ÷ 200,000 a second ≈ 7,720 GPU-hours × 2.5 USD", result: "≈ 19,300 USD once (hosted small LLM ≈ 116,100; small open LLM in the PHI zone ≈ 60,900)" },
     { quantity: "Infrastructure", assumption: "GPUs 4 × 24 × 2.5 = 240 + rules service 108 + fact store 192 + passage search 144 + platform 150 + storage 56 + warm standby 132", result: "≈ 1,022 USD a day" },
     { quantity: "Drug knowledge licence", assumption: "Vocabularies free in the US; vendors do not publish knowledge-base prices: placeholder 300,000 USD a year", result: "822 USD a day (placeholder)" },
     { quantity: "People", assumption: "3 clinical pharmacists or informaticists + 8 engineers + 3 ML engineers = 14 × 300,000 USD fully loaded ÷ 365", result: "11,507 USD a day" },
     { quantity: "Clinician grading", assumption: "600 questions × 2 graders × 6 min × 150 USD an hour per monthly release (592 a day) + weekly pharmacist audit (143 a day)", result: "735 USD a day" },
-    { quantity: "Per day, all-in", assumption: "74 + 1,022 + 822 + 11,507 + 592 + 143", result: "≈ 14,200 USD (14,159): people 86%, infrastructure 7%, drug knowledge 6%, model 0.5%" },
-    { quantity: "Per unit", assumption: "÷ 7,200 questions; ÷ (7,200 + 51,200) decisions supported", result: "1.97 USD a question; 0.24 USD a decision" },
-    { quantity: "Throughput", assumption: "0.96 questions a second × 4,470 tokens × 60", result: "≈ 257,000 input tokens a minute: inside standard provider tiers" },
+    { quantity: "Per day, all-in", assumption: "74 + 1,022 + 822 + 11,507 + 592 + 143", result: "≈ 14,200 USD (14,159): people 86%, infrastructure 7%, drug knowledge 6%, model 0.5%; 1.97 USD a question, 0.24 a decision (questions + orders)" },
     { quantity: "Audit and stored decisions", assumption: "130,080 AuditEvents × 4 KB + 7,200 answers and 768 cards × 20 KB + ≈ 122,100 no-card hook hashes × 0.5 KB", result: "≈ 740 MB a day, kept ≥ 6 years write-once (illustrative policy)" },
   ]}
   note="The model is 0.5% of the bill and people are 86%. The design is shaped by correctness, privacy and alert burden, not by tokens: spend goes to curation and clinician grading, not to a larger model."
@@ -190,11 +185,11 @@ event: alerts   data: {"patient": "Patient/8841", "snapshot": "kg-2026-11-14", "
                   {"rule": "dosing", "severity": "warning", "criteria_met": ["age 82 (≥ 80)", "weight 58 kg (≤ 60), measured today",
                    "serum creatinine 1.6 mg/dL (≥ 1.5), from 141 µmol/L, outside lab, drawn 2026-11-15"],
                    "label_statement": "the label's dose for patients with at least 2 of these criteria is 2.5 mg twice daily; she meets 3",
-                   "intended": "5 mg twice daily", "source": "Eliquis label section 2, revised 8/2026"},
+                   "intended": "5 mg twice daily (unconfirmed)", "source": "Eliquis label 2.1, revised 8/2026"},
                   {"rule": "interaction", "severity": "major", "with": "itraconazole (MedicationRequest/77, active)",
-                   "at_label_dose": "avoid coadministration", "source": "drug KB 2026.11.2; Eliquis label section 2"}],
+                   "at_label_dose": "avoid coadministration", "source": "drug KB 2026.11.2; Eliquis label 2.6"}],
                   "checked": {"active_meds": 8, "allergies": "2 confirmed", "conditions": 10, "outside_med_history": "read 10:41"},
-                  "data_as_of": "10:41", "notes_read_to": "10:30; unsigned notes not read", "gaps": []}
+                  "data_as_of": "10:41", "notes_read_to": "10:30; unsigned notes not read", "gaps": ["intended dose unconfirmed (question text)"]}
 event: sentence data: {"patient": "Patient/8841", "i": 0, "text": "She meets all three of the label's dose-reduction criteria for atrial fibrillation, and the label's dose for patients meeting at least two is 2.5 mg twice daily [1].", "cites": ["rule_dose_apx_af", "p_label_2"]}
 event: done     data: {"patient": "Patient/8841", "answer_id": "ans_4f2", "dropped_sentences": 0, "explanation": "complete"}
 ```
@@ -202,15 +197,14 @@ event: done     data: {"patient": "Patient/8841", "answer_id": "ans_4f2", "dropp
 - **Identity and patient before data:** the gateway validates the SMART token, takes the patient from its context, checks the care-team relationship (a cached table) and computes the clinician's note entitlements before any PHI read. Break-glass access needs a reason, is logged and reviewed daily.
 - **Right patient at display:** a persistent banner shows two identifiers (name and date of birth, never sent to the model); the panel drops any event whose `patient` is not the EHR's current one and closes the stream.
 - **Without FHIRcast:** close-on-switch relies on the EHR hosting one app instance per patient context; the app is never embedded in a patient-agnostic frame.
-- **Right drug, dose and indication:** coded drug from the draft order first, then an exact RxNorm string match, then embedding candidates. A tap is required on a low score, a close look-alike, or a dose or indication that only free text supplies; until then the dosing template returns a gap.
+- **Right drug, dose and indication:** coded drug from the draft order first, then an exact RxNorm string match, then embedding candidates; a tap is required on a low score, a close look-alike, or a dose or indication only free text supplies.
+- **Until the tap:** a free-text indication makes the dosing rule a gap (AF and VTE differ). A free-text dose does not stop the rules, since the criteria dose needs indication, age, weight and creatinine; only the comparison with the intended dose is marked "unconfirmed".
 - **Order cards follow the user's entitlements:** the hook authenticates the EHR by its JWT, so the service reads `context.userId`, looks up that user's entitlements (5 ms) and filters note-derived facts by security label before the join.
 - **A restricted fact never reaches a card:** where one would change the result, the card says only "A restricted record may be relevant to this order. Ask pharmacy, or open the chart with break-the-glass". Part 2 facts never contribute without consent on file.
-- **Alerts are rendered by code;** the explanation may cite them but cannot add, remove or downgrade one. A sentence that contradicts an alert ("no interactions") fails the checks.
-- **No directive words:** never "safe", "start" or "do not start"; doses and options only as the source states them, with their criteria.
-- **The CDS service never writes to the EHR.** A suggestion ("add penicillin allergy, rash, to the coded list") is a CDS Hooks `create` action the EHR applies only if the clinician accepts it.
+- **Alerts by code, no directive words, no writes:** the explanation cannot add, remove or downgrade an alert, never says "safe" or "start", and a suggestion is a CDS Hooks `create` action the EHR applies only on acceptance (Safety and guardrails lists the rest).
 - **Transport:** SSE, because alerts, gaps and sentences must arrive in order on one connection, alerts first; polling adds a round trip per event.
-- **Idempotency:** `Idempotency-Key` on questions returns the same stream on retry; hook calls are deduplicated on `hookInstance` and the draft-order set, so a card shown at `order-select` is not repeated at `order-sign`.
-- **Model calls** use covered features only (Messages with prompt caching, structured outputs with PHI-free schemas, as of November 2026); the gateway blocks excluded features such as Batch, Files, code execution, web fetch and external MCP.
+- **Idempotency:** `Idempotency-Key` on questions returns the same stream on retry; `hookInstance` deduplicates retries of one hook call. Cards are deduplicated on user, patient, encounter, draft-order ids, rule and inputs hash for the signing session, so an `order-select` card is not repeated at `order-sign`.
+- **Model calls** use covered features only; the gateway blocks Batch, Files, code execution, web fetch and external MCP. Under the vendor's BAA (as of November 2026) covered models keep inputs and outputs for 30 days, and caching and structured outputs are covered only on BAA versions accepted after 1 April 2026.
 
 ## Data model
 
@@ -282,7 +276,7 @@ The baseline: the clinician's question and recent facts from the chart go to one
   3. The orchestrator reads recent facts over FHIR and puts them in a prompt.
   4. The answer streams back, every event stamped with its patient.
 - **Why this and not that:** identity and patient before any data read (P11); the simplest thing that answers (P1). The patient never comes from the request body, so a bug in the panel cannot ask about someone else.
-- **The gap:** 2025 papers find models detect interactions well but "cannot reliably exclude" them, which is what "is it safe?" asks. Answers vary between runs and nothing cites a source.
+- **The gap:** models are weakest at ruling interactions out (ChatGPT-4 specificity 0.519 against Micromedex, a 2023 paper), which is what "is it safe?" asks. Answers vary between runs and nothing cites a source.
 
 <PremiumBreak />
 
@@ -297,7 +291,7 @@ The baseline: the clinician's question and recent facts from the chart go to one
   3. Seven drug-centric expansions run from the drug; code joins them with the patient's facts.
   4. Phase 1 runs the dosing rules and produces the criteria dose; phase 2 runs dose-dependent rules (inhibitors, inducers) on that dose.
   5. Code renders the alerts card.
-- **Why this and not that:** rules in code, not in the prompt (P10), so the same facts and snapshot give the same alerts; ground before generating (P2). Dosing rules are multi-fact predicates because labels state doses as "at least 2 of 3 criteria".
+- **Why this and not that:** rules in code, not in the prompt (P10), so the same facts and snapshot give the same alerts; dosing rules are multi-fact predicates because labels state doses as combinations of criteria.
 - **The gap:** facts written only in notes ("PCN allergy, rash 2019") are invisible to rules that read coded data.
 
 ### Step 3: Notes become coded facts with context and lifecycle (F4, N3)
@@ -324,24 +318,19 @@ The baseline: the clinician's question and recent facts from the chart go to one
   2. The drug comes from the draft order or an exact RxNorm match; embedding candidates are a fallback, with a tap to confirm.
   3. Expansions and the join produce the `alerts` event.
   4. Passages attached to the alert paths are retrieved by concept id and reranked; the context is 4,470 tokens.
-- **Why this and not that:** exact before similar on the safety path, because a misspelt name can land on a look-alike drug. Similarity seeds survive spelling and case (a research-graph result, KG-RAG 2024), so they stay as a fallback only.
+- **Why this and not that:** exact before similar on the safety path. Similarity seeds survive lower-cased names (KG-RAG 2024: 97% against Cypher's 0%) and, by the same mechanism, misspellings, which can land on a look-alike drug.
 - **The gap:** the model can still write past its evidence, and a missing input looks like "no alert".
 
 The graph slice shows the two layers this step joins and the two alert paths for the apixaban example.
 
 <AnimatedDiagram spec="animated/kg-health/graph-slice" caption="Each edge names its source, and the dosing rule reads several facts at once; the interaction rule runs on the criteria dose 2.5 mg, so it says “avoid”, not “reduce by 50%”." />
 
-**How to read it:**
-
-- The top band is the knowledge layer (snapshot `kg-2026-11-14`, no PHI); the bottom band is this patient's facts, joined to concepts by RxNorm and SNOMED CT codes.
-- Every edge label carries its source: the drug-knowledge release or Eliquis label section 2, revised 8/2026.
-- Step 3 brackets the five dosing facts into Alert 1; step 4 feeds Alert 1's criteria dose into Alert 2 in phase 2.
+- **How to read it:** the top band is the knowledge layer (no PHI), the bottom band this patient's facts, joined by RxNorm and SNOMED CT codes; every edge names its source (the drug-knowledge release, or Eliquis label section 2: 2.1 for the AF dose, 2.6 for inhibitors).
 
 **The numbers:**
 
-- Creatinine 141 µmol/L ÷ 88.4 = 1.595 mg/dL, compared unrounded against ≥ 1.5 and shown as 1.6.
-- Criteria met: age 82 (≥ 80), weight 58 kg (≤ 60), creatinine 1.595 (≥ 1.5) = 3 of 3; the label's dose for patients with at least 2 is 2.5 mg twice daily.
-- Itraconazole is a combined P-gp and strong CYP3A4 inhibitor: the label says reduce by 50% at 5 or 10 mg, and avoid at 2.5 mg. Phase 2 on the criteria dose gives "avoid".
+- Creatinine 141 µmol/L ÷ 88.4 = 1.595 mg/dL, compared unrounded against ≥ 1.5; with age 82 and 58 kg that is 3 of 3 criteria, and the label's AF dose for at least 2 is 2.5 mg twice daily.
+- Itraconazole is a combined P-gp and strong CYP3A4 inhibitor: the label says reduce by 50% at 5 or 10 mg and avoid at 2.5 mg, so phase 2 on the criteria dose gives "avoid".
 
 <Callout tone="red" title="What breaks">
   Run the inhibitor rule on the intended 5 mg instead of the criteria dose and the card says "reduce by 50%", which lands on the 2.5 mg the label then says to avoid with itraconazole. Rules compose in two phases, and a 32-case dosing grid tests the composition.
@@ -366,7 +355,7 @@ The graph slice shows the two layers this step joins and the two alert paths for
 
 - **Adds:** the CDS Hooks service.
 - **Flow:**
-  1. `order-select` warms the cache and returns only critical cards; `order-sign` arrives with the required prefetch.
+  1. `order-select` warms the cache and returns only cards with the CDS Hooks critical indicator; `order-sign` arrives with the required prefetch.
   2. The user's entitlements come from `context.userId`; note facts are filtered by security label before the join.
   3. The templates run on coded facts with the EHR's local configuration, then again with the permitted note facts.
   4. Only the difference becomes a card, labelled "found only in notes", with a suggestion to code the fact; feedback is recorded.
@@ -377,17 +366,12 @@ The order-card figure shows the two runs and the difference that becomes a card.
 
 <AnimatedDiagram spec="animated/kg-health/order-cards" caption="The rules run twice, on coded facts with the EHR’s own configuration and then with the note facts this user may see; only the difference interrupts the prescriber, about 1.5 cards per 100 orders." />
 
-**How to read it:**
-
-- Step 1 is the entitlement filter: `context.userId` → cached entitlements (5 ms) → note facts filtered by security label, with Part 2 records needing consent.
-- Step 2 is the two runs: Run A is what the EHR already shows; Run B adds the permitted note facts. Step 3 keeps B minus A, and shows the restricted-record card.
-- Step 4 is the interruption budget and the feedback loop.
+- **How to read it:** step 1 filters note facts by the user's entitlements; step 2 runs the rules on what the EHR already shows (A) and with permitted note facts (B); step 3 keeps B minus A and the restricted-record card; step 4 is the budget and feedback.
 
 **The numbers:**
 
-- 51,200 orders × 1.5% = 768 cards a day; 10% critical = 77 interruptive (0.15 per 100 orders); 20% get "Explain" = 154 model calls.
-- The card is ready at ≈ 64 ms p50 and ≈ 87 ms p95, against N5's 200 and 500.
-- Warning-tier types are limited to 3 interruptive cards per prescriber per shift (illustrative); critical allergies and contraindicated pairs are exempt, and hitting the limit flags the type for pharmacy review, never demotes a card.
+- Interruptive means the CDS Hooks critical indicator: ≈ 10% of 768 delta cards, 77 a day (0.15 per 100 orders); the card is ready at ≈ 64 ms p50, 87 p95.
+- The shift budget (3 a prescriber, illustrative) applies to interruptive types other than high-criticality allergies and contraindicated pairs, such as a major interaction tiered critical by local policy; hitting it flags the type for pharmacy review, never demotes a card.
 
 <Callout tone="red" title="What breaks">
   Show every alert the rules find and the prescriber sees a second copy of each EHR alert, in a different tier. Clinicians already override 49% to 96% of drug alerts (a 2006 review), so duplicates train them to dismiss the one card that matters.
@@ -401,7 +385,7 @@ The order-card figure shows the two runs and the difference that becomes a card.
 - **Flow:**
   1. A vendor or NLM release arrives and is diffed against the live snapshot.
   2. Patient facts are re-mapped through the release history (inactive code → replacement); unmapped counts are reported.
-  3. Regression runs: 150 high-priority cases, every pair as orderable products, 2,000 patient contexts, slices and golden patients.
+  3. Every weekly or monthly release runs the deterministic gates: 150 high-priority cases, every pair as orderable products, 2,000 contexts, the grid and the slices. The 600-answer clinician grade runs monthly and on any model, prompt or template change.
   4. The snapshot is swapped atomically. Urgent path: a pharmacist-authored local edge with committee provenance goes live within 24 h after a reduced regression.
 - **Why this and not that:** evaluate before release (P16). A release that retires a code would otherwise silence every rule that used it, without an error.
 - **The gap:** nobody yet knows whether answers are right, for whom, or which links fail.
@@ -436,26 +420,19 @@ The sequence follows one drug-safety question through the seven parts it touches
 
 <AnimatedDiagram spec="animated/kg-health/request-sequence" stepper caption="The alerts come from the rules at 507 ms, before the model writes anything; every sentence is checked against its cited rule or passage, and every event carries its patient so a switch drops it." />
 
-**How to read it:**
-
-- Seven lanes, left to right: clinician, gateway, orchestrator, EHR FHIR, rules, answer model, checks; times are p50 estimates on the encoder route.
-- Steps 1 to 4 are the happy path: patient and care team, the reads and the drug tap, alerts at 507 ms, the first verified sentence at 1,530 ms.
-- Step 5 drops sentence 4 ("no other interactions" contradicts an alert) and restarts ≈ 673 ms later; step 6 drops an event stamped for Patient/8841 after a FHIRcast patient switch.
+- **How to read it:** seven lanes, p50 estimates on the encoder route; steps 1 to 4 are the happy path (alerts at 507 ms, first verified sentence at 1,530 ms), step 5 drops a contradicting sentence and restarts ≈ 673 ms later, step 6 drops an event after a patient switch.
 
 The apixaban question, step by step (outpatient cardiology clinic, 17 November 2026 at 10:41, encoder route, p50 estimates; the clinical facts are the Eliquis label's, the patient is illustrative):
 
 1. 0–40 ms: token validated, care team found, entitlements computed, AuditEvent written; the banner shows her name and date of birth.
 2. 40–414 ms: classifier (`drug_safety`, "apixaban", "5 mg twice daily", "AF") alongside six FHIR reads. Facts: female, 82, 58 kg measured today; creatinine 141 µmol/L from an outside lab on 15 November (inside the 90-day outpatient window); itraconazole active; penicillin allergy (rash, confirmed); nonvalvular AF coded.
-3. 414–464 ms: exact match to RxNorm 1364430, oral; no look-alike in the margin; the indication is confirmed by the problem list, the dose needs a tap.
+3. 414–464 ms: exact match to RxNorm 1364430, oral; no look-alike in the margin; the indication is on the problem list. The dose came from free text, so the chip asks for a tap, and the rules do not wait for it.
 4. 464–497 ms: the AF dosing rule meets 3 of 3 criteria, and the label's dose for patients meeting at least 2 is 2.5 mg twice daily, against the intended 5 mg. Phase 2 at 2.5 mg with itraconazole gives "avoid coadministration"; the other templates return nothing.
-5. ≈ 507 ms: the `alerts` event (≈ 516 ms mixed over both planner routes), with no gaps; the pregnancy gap is shown only where a rule could apply.
-6. 507–657 ms: 8 passages (label sections 2 and 7, a guideline section) retrieved and reranked.
-7. ≈ 1,530 ms: the first verified sentence (≈ 1,562 ms mixed over both routes, drops included).
-8. ≈ 4.5 s: ten sentences shown, the dose only as the label states it with its criteria; stored with every input, `kg-2026-11-14`, `vendor-2026.11.2` and model versions. Model cost ≈ 0.011 USD.
+5. ≈ 507 ms: the `alerts` event (≈ 516 ms mixed over both routes) with one gap, "intended dose unconfirmed", which clears on the tap; no pregnancy gap, since no rule could apply.
+6. 507–1,530 ms: 8 passages (label 2.1, 2.6 and 7, a guideline section) reranked; the first verified sentence at ≈ 1,530 ms (≈ 1,562 mixed, drops included).
+7. ≈ 4.5 s: ten sentences shown, the dose only as the label states it with its criteria; stored with every input, `kg-2026-11-14`, `vendor-2026.11.2` and model versions. Model cost ≈ 0.011 USD.
 
-- **No indication recorded:** the dosing template cannot run ("dose check needs the indication: AF or VTE treatment have different rules"); the interaction alert still shows, worded for both doses.
-- **As an inpatient:** a creatinine drawn on 15 November is older than 48 h on the 17th, so the rule returns "renal input not current for an inpatient" instead of a criterion met.
-- **Without unit normalisation:** 141 read as mg/dL is 88× too high, so the rule fires on nonsense or rejects it; the unit check turns an unknown unit into a gap, never a number.
+- **As an inpatient:** a creatinine collected at 08:00 on 15 November is 50 h old at 10:41 on the 17th, past the illustrative 48 h window, so the rule returns "renal input not current for an inpatient".
 
 ## Component choices and why
 
@@ -463,7 +440,7 @@ The apixaban question, step by step (outpatient cardiology clinic, 17 November 2
 
 ### Build or buy: buy the reference answer, build the delta
 
-- **Choice:** use the EHR vendor's assistant with licensed reference content for chart summaries and reference answers; build only the note-derived delta at order entry and the network's own rules and tiers.
+- **Choice:** use the EHR vendor's assistant with licensed reference content for reference answers (we assume chart summaries too); build only the note-derived delta at order entry and the network's own rules and tiers.
 - **Why:** the reference answer is a commodity the content owner sells (G4); the checks of facts written only in notes, against this network's local alert configuration, are what no product publishes (G1).
 - **Why not build everything:** a team rebuilds a licensed product and still has to evaluate it.
 - **Why not buy everything:** no vendor publishes checks of note-only facts against local tiers; revisit when one does.
@@ -472,7 +449,7 @@ The apixaban question, step by step (outpatient cardiology clinic, 17 November 2
 
 - **Choice:** seven templates in the rules engine decide every alert; the model writes only the explanation.
 - **Why:** the same facts and snapshot give the same alerts, and each alert names its rule and source (G1, G2, G8). FDA lists interaction and allergy notifications based on current labelling as non-device CDS examples.
-- **Evidence (papers):** a 2025 study found models detected 95–99% of interactions that caused harm but "cannot reliably exclude" them; a 2025 benchmark of 750 scenarios found accuracy fell as the drug count grew; in 2023 ChatGPT-4 had a specificity of 0.519 against Micromedex.
+- **Evidence (papers):** against Micromedex (2023) ChatGPT-4 had sensitivity 0.915 but specificity 0.519; a 2025 preprint on 750 scenarios found accuracy and self-consistency fall as drugs are added. A 2025 study reports models "cannot reliably exclude" interactions (read from its abstract record).
 - **The templates:** interaction (clinical-drug level, so topical ketoconazole is not oral), allergy and cross-reactivity (by reaction type), drug–disease, dosing (multi-fact predicates), duplicate therapy, cumulative risk (QT with the latest QTc and potassium, bleeding, serotonergic, CNS depression) and coverage.
 - **Why not the model with a "check interactions" tool:** it may not call it, and "no tool call" reads as "no alert".
 - **Why not the model alone with the chart:** ruling out is exactly what it cannot do reliably, and its answer changes between runs.
@@ -480,7 +457,7 @@ The apixaban question, step by step (outpatient cardiology clinic, 17 November 2
 ### Drug knowledge: a licensed curated base, diffed against the EHR
 
 - **Choice:** license a curated drug-knowledge base; vocabularies from NLM and SNOMED International; diff every card against the EHR's knowledge-base release and local suppressions.
-- **Why:** NLM's free interaction API was discontinued on 2 January 2024; the 15-pair high-priority list is a floor, not a base; DrugBank is non-commercial unless licensed (G1, G6).
+- **Why:** NLM's free interaction API was discontinued on 2 January 2024; the 15-pair high-priority list is a floor, not a base; DrugBank is non-commercial unless licensed (terms read November 2026) (G1, G6).
 - **Licence terms:** sending monograph text to a model vendor may need an AI-use rider, so until then only FDA labels and openly licensed guidelines are passages; only structured fields of the licensed base reach the model.
 - **Why not extract interactions from labels with an LLM:** hallucinated edges, and thousands to validate by hand.
 - **Why not public research graphs (SPOKE, Hetionet, PrimeKG):** research use and text-mined edges.
@@ -526,24 +503,18 @@ The apixaban question, step by step (outpatient cardiology clinic, 17 November 2
 ### Answer model: a hosted mid-size model under the vendor's BAA
 
 - **Choice:** a mid-size model (Claude Sonnet 5.5 class, as of November 2026) on the vendor's API under its BAA, in the network's HIPAA-eligible cloud setup.
-- **Why:** ≈ 74 USD a day for every question; the BAA covers the API, prompt caching and structured outputs (G4, G9).
+- **Why:** ≈ 74 USD a day for every question; the BAA covers the API, and prompt caching and structured outputs on BAA versions accepted after 1 April 2026 (as of November 2026) (G4, G9).
 - **Why not self-hosting a 70B-class model:** ≈ 480 USD a day (6.5×), a lower quality tier that must pass the same clinician gate, and an operations team.
-- **Why not de-identify the prompt and use any model:** prompts still hold dates and rare combinations; 87% of the US population was likely unique on ZIP, sex and date of birth (Sweeney, 2000).
+- **Why not de-identify the prompt and use any model:** prompts still hold dates and rare combinations; 87% of the US population was likely unique on 5-digit ZIP, sex and date of birth (Sweeney, 2000, on 1990 census data).
 - **Standby:** a second model family on a HIPAA-eligible service, used only if it passes the same gate; otherwise alerts without explanation.
 
-### Sentence checks: rules, then a 0.8B checker
+### Checks and abstention: coverage rules, then sentence checks
 
-- **Choice:** rules first (every drug, dose, lab value and severity in a sentence must appear in a cited rule, edge or passage; no sentence may contradict an alert), then an entailment checker; restart on a drop.
-- **Why:** 60 ms a sentence p50 (G3, N2); ≈ 0.16% unsupported among shown sentences if the checker's misses are independent of the model's errors, which is optimistic, so the gate measures it.
-- **Why not an LLM judge per sentence:** ≈ 200–300 ms each, ten times a question.
-- **Why not check the whole answer once at the end:** the clinician waits for all ten sentences before seeing any.
-
-### Abstention: coverage rules per template
-
-- **Choice:** each template names the inputs it needs and the recency, units and mapping each must meet; a failure is a named gap; conflicts show both sources and the more severe drives the card.
-- **Why:** FDA asks the output to show missing or unexpected inputs (G2, N4); models abstain poorly (MetaMedQA, 2025) and reasoning tuning made abstention 24% worse on average (AbstentionBench, 2025).
+- **Choice:** each template names its inputs and their recency, units and mapping; a failure is a named gap. Each sentence then passes rules (its drugs, doses and values appear in a cited rule, edge or passage; nothing contradicts an alert) and a 0.8B entailment checker.
+- **Why:** FDA asks the output to show missing inputs (G2, N4); models abstain poorly (MetaMedQA, 2025; AbstentionBench, 2025: reasoning tuning made it 24% worse). Checks cost 60 ms a sentence (G3); ≈ 0.16% shown unsupported is optimistic, so the gate measures it.
+- **Conflicts:** sources that disagree on severity show both, and the more severe drives the card. Values that disagree in a dose criterion take the later valid specimen by collection time; if they cannot be ordered, the criterion is a gap, because a lower anticoagulant dose has its own harm.
 - **Why not model confidence:** it is not calibrated to "an input is missing", and it differs between runs.
-- **Why not refuse whenever anything is missing:** over-abstention trains clinicians to ignore the panel; the gate allows ≤ 5% on answerable controls.
+- **Why not an LLM judge per sentence:** ≈ 200–300 ms each, ten times a question.
 
 ## Model, prompt and context design
 
@@ -565,24 +536,19 @@ The context-window figure draws these blocks to scale and puts the whole chart b
 
 <AnimatedDiagram spec="animated/kg-health/context-window" caption="The rules choose what the model sees: 4,470 tokens of facts, rule results and label passages, not a 35,250-token chart; the first 1,300 are stable and cached." />
 
-**How to read it:**
-
-- Step 1 is the stable prefix (instructions and format), read from cache; step 2 adds the changing blocks, coloured by kind (patient facts violet, rule results and passages blue).
-- Step 3 is a second bar on its own scale: the whole chart, with this call's 4,470 tokens at its start and the 30,780 the rules leave out in grey.
+- **How to read it:** steps 1 and 2 are the cached prefix and the changing blocks, coloured by kind; step 3 is the whole chart on its own scale, with the 30,780 tokens the rules leave out in grey.
 
 **The numbers:**
 
 - Stable 900 + 400 = 1,300; changing 100 + 590 + 340 + 300 + 240 + 1,600 = 3,170.
-- Whole chart: 850 coded facts × 25 tokens + the last 20 notes × 700 = 35,250 tokens, 7.9× this call.
-- Sending the chart would cost ≈ 0.062 USD more a call (30,780 × 2.00 per million), send more PHI and dilute the alerts.
+- Whole chart: 850 coded facts × 25 + 20 notes × 700 = 35,250 tokens (7.9×), ≈ 0.062 USD more a call, more PHI sent and the alerts diluted.
 
 <Callout tone="red" title="What breaks">
   Put today's patient name or record number in the instructions and every call misses the cache and sends an identifier the model does not need. The banner is shown by the panel from the EHR context; the model sees "the patient".
 </Callout>
 
-- **Record questions:** 4,130 tokens; no rule results or paths, and 5 of the patient's note chunks with headers (1,840 tokens) in place of passages. Note text goes as it is, as PHI under the BAA.
-- **Reference questions:** 3,240 tokens; no patient block, rule results or paths.
-- **The cache holds PHI** at the vendor in memory for its time to live, then deletes it; deep dive 1 says so.
+- **Other question types:** record questions are 4,130 tokens, with 5 of the patient's note chunks (1,840 tokens, note text as it is, PHI under the BAA) in place of rule results, paths and passages; reference questions are 3,240, with no patient block.
+- **What the vendor holds:** under the BAA, covered models keep inputs and outputs for 30 days, and the KV cache lives for its time to live (vendor BAA page, as of November 2026); both are PHI stores under the BAA.
 
 | Stage | Model | Where it runs | Why |
 | --- | --- | --- | --- |
@@ -595,8 +561,7 @@ The context-window figure draws these blocks to scale and puts the whole chart b
 | Sentence checker | Rules + 0.8B entailment model | PHI-zone GPUs | 60 ms p50, 100 p95 |
 | Independent grader (eval only) | A different family, mid-size class | A HIPAA-eligible service under its BAA | Grades between clinician rounds, calibrated to clinicians |
 
-- **Structured outputs:** the planner returns intent, drug text, dose, indication and confidence against a JSON schema; schemas carry no PHI because the vendor may cache them.
-- **No tools:** the answer model has no tools and no write path; everything it needs is assembled before it runs.
+- **Structured outputs and tools:** the planner returns intent, drug, dose, indication and confidence against a JSON schema with no PHI (the vendor may cache schemas); the answer model has no tools and no write path.
 
 ## Latency and cost budget
 
@@ -604,10 +569,7 @@ The waterfall puts the order card, the safety question and the record question o
 
 <AnimatedDiagram spec="animated/kg-health/latency" caption="The order card never waits for a model, and alerts are on screen at 507 ms; the model’s first token is a third of the first-sentence budget, so the vendor’s tail is what the release gate watches." />
 
-**How to read it:**
-
-- Each lane is one request type; each bar is a stage at its start time. Bars marked "slowest of n" are parallel draws budgeted as their maximum, not one call.
-- The dashed marker on the safety lane is the `alerts` event; everything after it is explanation the clinician can wait for.
+- **How to read it:** one lane per request type, each bar a stage at its start time; "slowest of n" bars are parallel draws budgeted as their maximum, and the dashed marker is the `alerts` event.
 
 **The numbers (p50, ms, estimates):**
 
@@ -646,7 +608,7 @@ The waterfall puts the order card, the safety question and the record question o
 | Encoder cascade instead of a hosted LLM extractor | ≈ 96,800 USD on the backfill (116,100 − 19,300); no vendor sees ten years of notes | Annotated notes to fine-tune and a linking team; the small open LLM (≈ 60,900) is the close alternative |
 | Cross-encoder only on the ambiguous 25% | ≈ 4× fewer tokens than scoring every mention (1.64B vs ≈ 6.4B a day) | Mis-links on the 75% judged unambiguous, measured on the linking set |
 | Rules decide, the model explains | The model is 0.5% of cost and off the order path | A curated base (822 USD a day, placeholder) and pharmacists |
-| Hosted model under the BAA instead of self-hosting | ≈ 406 USD a day (480 − 74) and an operations team | Vendor feature limits; cached PHI at the vendor for the time to live |
+| Hosted model under the BAA instead of self-hosting | ≈ 406 USD a day (480 − 74) and an operations team | Vendor feature limits; PHI retained at the vendor (30 days, plus the cache's time to live) |
 | Encoder planner first | ≈ 57 ms at p50 on 85% of questions, and one fewer vendor call | A classifier to train |
 | Cap the explanation at 200 tokens (8 sentences) | ≈ 625 ms on the complete answer at 80 tokens a second | Shorter explanations; the alerts and evidence carry the rest |
 | Minimal context (4,470 vs 35,250 tokens) | ≈ 0.062 USD a call and attention | Rules must pick the facts first |
@@ -669,45 +631,41 @@ The waterfall puts the order card, the safety question and the record question o
 | Checker | 2,000 sentences, 500 unsupported | Labelled | False accept 5% ± 1.9 points |
 
 - **Why the pair set is exhaustive:** a deterministic test this cheap is run in full, not sampled; a broken crosswalk silences a whole class, which a sample can miss. A pair the network suppresses by committee is excluded with its record.
-- **What the sample bounds:** 0 misses in 150 bounds the miss rate below 2% at 95% (rule of three), so that set is a floor; 0 in 2,000 bounds it below 0.15% per order at observed frequencies, not per class.
+- **What each set proves:** 150 of 150 is a must-pass list (15 pairs × 10 products), not a sample; the exhaustive gate is the coverage claim, and it cannot find a pair the base lacks (pharmacist flags and the replay cover that). 0 misses in 2,000 contexts bounds misses below 0.15% per order at observed frequencies.
 - **Clinician rubric:** correctness, omission (major or minor), possible harm, citation support, gap handling, no directive, right patient; kappa ≥ 0.6 before a grade counts; acceptable ≥ 95% (± 1.7 points).
 - **Checker rates (illustrative):** 3% unsupported, 5% false accepts, 3% false rejects give 5.76% drops a sentence; 55.3% of answers have no drop, 33.8% one, 9.3% two, 1.7% three or more (the explanation is replaced by the rules card).
 - **Replay and subgroups:** 12 months of orders (≈ 18.7M) with known pharmacist interventions, replayed in the PHI zone; linking accuracy and alert rates by age band, sex, race and ethnicity, note language and outside-lab patients.
 
 The release gate runs every check on a knowledge release candidate before the snapshot swap.
 
-<AnimatedDiagram spec="animated/kg-health/release-gate" caption="Every release is run against all nine checks inside the PHI zone; two unit errors in 200 outside-lab results are enough to keep the old snapshot live." />
+<AnimatedDiagram spec="animated/kg-health/release-gate" caption="Every release is run against all nine checks inside the PHI zone; one unit error in 200 outside-lab results is enough to keep the old snapshot live, and the figure shows two." />
 
-**How to read it:**
-
-- The candidate `vendor-2026.12.1` with its mapping fans out to nine checks; each result sits on the right, lime for pass and red for fail.
-- One failing check blocks the swap, and the live snapshot `kg-2026-11-14` stays.
+- **How to read it:** the candidate `vendor-2026.12.1` fans out to nine checks, lime for pass and red for fail; one failure blocks the swap and `kg-2026-11-14` stays live.
 
 **The numbers:**
 
-- The units slice allows 0 errors in 200, which bounds the rate below 1.9% (Wilson); 2 errors fail it. The measured values in the figure are illustrative.
+- The units slice allows 0 errors in 200, which bounds the rate below 1.9% (Wilson), so one error fails it. The measured values in the figure are illustrative.
 - The latency check needs the vendor's first-token p95 under ≈ 1.74 s and decode above ≈ 70 tokens a second at the peak hour.
 
-- **The gates (a release blocks if any fails):** 150 of 150; every pair 100%; 2,000 of 2,000; 32 of 32; every slice at target; assertion F1 ≥ 0.95; clinician acceptable ≥ 95% with 0 major hallucinations; abstention ≥ 95%; 20 of 20 wrong-patient cases; peak-hour latency; ≤ 2 cards per 100 orders.
+- **The gates (a release blocks if any fails):** every release runs the deterministic ones; the clinician grade runs monthly and on any model, prompt or template change. 150 of 150; every pair 100%; 2,000 of 2,000; 32 of 32; every slice at target; assertion F1 ≥ 0.95; clinician acceptable ≥ 95% with 0 major hallucinations; abstention ≥ 95%; 20 of 20 wrong-patient cases; peak-hour latency; ≤ 2 cards per 100 orders.
 - **Silent mode before go-live:** 4 weeks computing cards and answers without showing them; pharmacists compare them with their own interventions. Every estimated rate on this page is measured here.
-- **Online:** acceptance and overrides per card type, ignore rate from display logs, interruptive cards per prescriber per shift, flags per 1,000 answers, gap rate by type, wrong-patient displays (must be 0), break-glass count, and harm triggers (vitamin K or naloxone orders, INR above 5, potassium above 6) linked to recent answers.
+- **Online:** acceptance and overrides per card type, ignore rate from display logs, interruptive cards per prescriber per shift, flags per 1,000 answers, gap rate by type, wrong-patient displays (must be 0), break-glass count, and harm triggers (vitamin K or naloxone orders, INR above 5, potassium above 6: illustrative thresholds adapted from trigger-tool practice) linked to recent answers.
 - **Rollout:** one ward and one clinic → one hospital → the network; a missed high-priority case, any wrong-patient display or a 50% rise in flags rolls back.
-- **Judge calibration:** the independent grader is trusted between clinician rounds only while its agreement with clinicians holds; MedHELM (paper, 2025) is the reminder that LLM juries agree with clinicians only moderately.
+- **Judge calibration:** in MedHELM (paper, 2025) an LLM jury agreed with clinicians at ICC 0.47, against 0.43 between clinicians, so the grader is calibrated against adjudicated grades, not single clinicians.
 
 ## Safety and guardrails
 
 | Threat | Where it enters | Control | Code or prompt |
 | --- | --- | --- | --- |
 | Missed interaction or rule | Mapping, expansion, knowledge base | Rules by code; crosswalks with unmapped-as-gap; route and form; cumulative risk; exhaustive pair gate | Code |
-| Wrong dosing input | Indication, dose, renal measure | Multi-fact `DOSING_RULE`; indication and intended dose required; each rule names its renal measure | Code |
-| Dose-dependent rule on the wrong dose | Rules | Two phases on the criteria dose; 32-case grid | Code |
+| Wrong dosing input, or a rule on the wrong dose | Indication, dose, renal measure | Multi-fact `DOSING_RULE`; each rule names its renal measure; two phases on the criteria dose; 32-case grid | Code |
 | Unit mismatch | Outside labs, weights | UCUM at ingestion; unknown unit is a gap; units slice | Code |
 | False reassurance ("no interactions") | Answer | No directive words; coverage line with data times; gaps named; contradiction check | Code + prompt |
 | Negation, history or copy-forward read as current | Note NLP | Assertion with per-kind meaning; mention expiry; first-occurrence rule | Code |
 | Allergy vs intolerance; refuted; NKDA vs empty | Allergy facts | Type, criticality, verification, reaction stored; refuted never fires; an empty list is a gap | Code |
 | Stale or retracted fact | Fact store | Lifecycle columns; live reads; a washout table for recently stopped drugs; entered-in-error supersedes | Code |
 | Look-alike drug name | Question | Exact first; a tap on a low score or a close look-alike; look-alike slice | Code + UI |
-| Free-text dose or indication | Question | Shown on the chip with its source; a tap when the record does not confirm it, else a gap | Code + UI |
+| Free-text dose or indication | Question | Shown on the chip with its source and a tap; until then the intended-dose comparison is "unconfirmed" and a free-text indication is a gap | Code + UI |
 | Wrong patient | Panel, EHR context, merges | Two-identifier banner; patient stamp on every event; FHIRcast or close-on-switch; merge re-keying; 20/20 gate | Code |
 | Restricted note disclosed | Fact store, record answers | Security labels; EHR entitlements; Part 2 and psychotherapy notes excluded or read live with the clinician's token; a gap | Code + policy |
 | Restricted fact on an order card | CDS Hooks path | `context.userId` → entitlements → label filter before the join; the card shows no fact or quote | Code |
@@ -724,11 +682,7 @@ The panel puts the controls in the order a clinician needs them.
 
 <AnimatedDiagram spec="animated/kg-health/panel" caption="The panel shows who and what first, then the alerts from the rules, then the explanation; what was read and when is on every answer, and provenance is one click away." />
 
-**How to read it:**
-
-- Step 1 is the banner (two identifiers, placeholders in the figure) and the drug chip with route, dose and indication, each with its source.
-- Step 2 is the two alerts, rendered by code in the EHR's tier and labelled "also shown by the EHR" or "found only in notes"; step 3 is gaps, then the explanation.
-- Step 4 is the data times, the label citation with a DailyMed link, collapsed provenance and the actions (flag, override with a reason, code this fact).
+- **How to read it:** banner and drug chip (step 1), alerts by code in the EHR's tier labelled "also shown by the EHR" or "found only in notes" (2), gaps then the explanation (3), data times, DailyMed citation, collapsed provenance and actions (4).
 
 **The numbers:**
 
@@ -741,15 +695,14 @@ The panel puts the controls in the order a clinician needs them.
 
 - **Regulatory framing (FDA, design reading only):** the design aims at the four non-device CDS criteria: no images or signals; medical information in; recommendations to a professional, not a directive; the basis shown (inputs, sources with versions, method, population, missing inputs).
 - **The guidance in force:** issued 29 January 2026, superseding 6 January 2026. It adds enforcement discretion where one recommendation is clinically appropriate, and does not address generative AI, so the model-written explanation is our reading, not a determination.
-- **Quoting the label's dose:** "2.5 mg twice daily for patients meeting at least 2 of these criteria" is stated as the label's words with its criteria, never as an instruction; dose calculation stays out of scope.
-- **Also in force:** 42 CFR Part 2 (compliance date 16 February 2026) and 45 CFR 92.210 on decision-support tools. ONC's source-attribute requirements were removed by HTI-5 in October 2026, as reported by law firms; the design shows sources anyway.
-- **This is interview framing, not legal or regulatory advice.**
+- **Quoting the label's dose:** the 2.5 mg AF dose is stated with the criteria label 2.1 gives, never as an instruction; dose calculation stays out of scope. Also in force: 42 CFR Part 2 (compliance 16 February 2026) and 45 CFR 92.210.
+- **HTI-5** (final rule 28 October 2026; effective at the end of 2026 per law-firm summaries) removes ONC's source-attribute requirements; the design shows sources anyway. This is interview framing, not legal or regulatory advice.
 
 ## Deep dives
 
 ### Where PHI may flow, and which model runs where
 
-- **Treatment use:** HIPAA's minimum-necessary rule does not bind disclosures to a provider for treatment; the design minimises anyway (4,470 tokens, not the chart).
+- **Minimum necessary:** it does not bind a disclosure to a provider for treatment (the clinician reading the answer), but it does shape what goes to a business associate and what workforce roles may read. The care-team check is the role-based limit; the 4,470-token prompt is the minimum for the vendor.
 - **The BAA chain:** every processor that sees PHI (cloud account, model vendor, log sink) needs a business associate agreement, and only the vendor's covered features may be used.
 - **Pseudonymised is not de-identified:** structured facts say "the patient" with relative dates, but dates and rare combinations still identify; note text in record prompts is not pseudonymised at all. Both are PHI under the BAA.
 - **Embeddings are PHI:** vec2text (paper, 2023) recovered 92% of 32-token inputs exactly, so the chunk vectors live in the PHI store.
@@ -758,16 +711,13 @@ The boundary figure labels every flow by what crosses it.
 
 <AnimatedDiagram spec="animated/kg-health/phi-boundary" caption="Patient data stays in the network’s account except the prompt, which goes to a vendor model under a BAA with covered features only; the knowledge build holds no PHI, and only de-identified copies ever leave." />
 
-**How to read it:**
-
-- The violet region is the PHI zone in the network's account; the green region is the vendor model under the BAA; the blue region is the knowledge build with no PHI; the bottom strip is de-identified copies.
-- Step 4 adds the restricted-notes box (security labels, Part 2 needs consent) and the ids-only logs.
+- **How to read it:** violet is the PHI zone in the network's account, green the vendor model under the BAA, blue the knowledge build with no PHI, the bottom strip de-identified copies; step 4 adds restricted notes and ids-only logs.
 
 **The numbers:**
 
-- One flow crosses to the vendor: the 4,470-token prompt; the cache holds it in memory for its time to live.
+- One flow crosses to the vendor: the 4,470-token prompt. Under the BAA the vendor keeps covered-model inputs and outputs for 30 days, plus the KV cache for its time to live (vendor BAA page, as of November 2026); both are PHI stores under the BAA, and caching is covered only on BAA versions accepted after 1 April 2026: check ours.
 - Self-hosting the answer model would keep that flow inside, at ≈ 480 USD a day against ≈ 74 hosted (6.5×), for a lower quality tier; it wins only if policy forbids the vendor or the BAA drops a feature we need.
-- De-identified copies use Expert Determination with surrogates and per-patient date shifts; the best published tool still missed ≈ 4% of identifiers (a vendor-authored 2025 paper), so a measured residual goes in the determination.
+- De-identified copies use Expert Determination with surrogates and per-patient date shifts; the best tool in a vendor-authored 2025 comparison scored 96% F1 on 48 documents, so some identifiers are missed and a measured residual goes in the determination.
 
 <Callout tone="red" title="What breaks">
   "We de-identified by removing names" fails on the first note: dates, places and rare combinations remain, and Safe Harbor keeps only the year of dates, which breaks drug timelines. Evaluate inside the PHI zone with workforce annotators instead.
@@ -775,10 +725,8 @@ The boundary figure labels every flow by what crosses it.
 
 ### From a note to a coded fact, and its lifecycle
 
-- **Where accuracy is (paper, n2c2 2019):** top systems scored 95.3% on the 100 most common concepts but 69.5% on unseen text; human agreement was 74.2% after adjudication.
-- **Local tuning matters:** MedCAT reached F1 above 0.94 after hospital fine-tuning (paper, 2021).
 - **Lifecycle:** copy-forward text counts only at its first note; amendments and entered-in-error supersede; note-derived medication facts expire into "historical" unless reconfirmed.
-- **Low-confidence facts are kept but cannot fire an order card;** they show as "possible, from note, unverified" until a clinician accepts a suggestion.
+- **Low-confidence facts do not interrupt;** they show as "possible, from note, unverified". A low-confidence high-criticality allergy gets a non-interruptive "possible allergy in notes: verify" card, and the allergy-semantics slice measures how often.
 
 The figure follows one sentence from mentions to facts.
 
@@ -786,33 +734,26 @@ The figure follows one sentence from mentions to facts.
 
 **How to read it:**
 
-- The note "Pt started on warfarin, no hx of GI bleed, PCN allergy (rash 2019)" yields three mentions; warfarin and GI bleed match exactly or by synonym, "PCN" takes the top 20 candidates.
-- The cross-encoder reads the sentence, sees "allergy" and "rash", and picks penicillin; assertion then writes warfarin present, penicillin allergy active, GI bleed negated.
-- The red box is the fact a pipeline without assertion would write: "HAS GI bleed", firing bleeding-risk rules on a negation.
+- Three mentions: warfarin and GI bleed match exactly or by synonym; "PCN" takes the top 20 candidates, and the cross-encoder reads "allergy" and "rash" and picks penicillin.
+- Assertion writes warfarin present, penicillin allergy active, GI bleed negated; the red box is what a pipeline without assertion would write ("HAS GI bleed").
 
-**The numbers:**
-
-- 3.2M mentions a day × 510 tokens of linking work + 3 passes over 56.3M note tokens ≈ 1.81B tokens ≈ 9,050 GPU-seconds a day.
-- Backfill: ≈ 19,300 USD with the cascade, ≈ 60,900 with a small open LLM in the PHI zone, ≈ 116,100 with a hosted LLM.
+- **The numbers:** n2c2 2019 (paper): top systems 95.3% on common concepts, 69.5% on unseen text, which is why the unseen-concept slice has its own target and only the ambiguous 25% pays for the cross-encoder.
 
 ### Abstention and provenance: "no alert" is not "safe"
 
 - **Rates (illustrative):** 8% of safety questions carry at least one named gap, 2% cannot run the rules at all, and 1.7% of explanations are replaced by the rules card.
-- **Conflicts:** when the base says major and the label says monitor, or two creatinines disagree on the same day, both are shown with sources and the more severe drives the card.
+- **Conflicts:** when the base says major and the label says monitor, both show and the more severe drives the card. Two creatinines that disagree take the later valid specimen by collection time; if they cannot be ordered, both show with lab and units and the gap is "creatinine results disagree", since no dose is the safe side.
 - **Untemplated questions** (peri-procedural anticoagulation) get "no rule covers this question type; no safety check run", with a reference answer marked as not patient-checked.
 
 The abstention figure lists each template's inputs and what each input state becomes.
 
 <AnimatedDiagram spec="animated/kg-health/abstention" caption="Each template names the inputs it needs; a stale, missing, unmapped, restricted or conflicting input becomes a named gap on the answer, so “no alert found” never reads as “safe”." />
 
-**How to read it:**
-
-- Step 1 is the seven templates and their inputs; step 2 is seven input states and the words each produces (present runs the rule; the rest become gaps).
-- Step 3 is the coverage line on every answer; step 4 is two provenance chains: a sentence to its rule and label version, a fact to its stored FHIR content and AuditEvent.
+- **How to read it:** templates and their inputs (step 1), seven input states and the words each produces (2), the coverage line (3), and two provenance chains: a sentence to its rule and label version, a fact to its stored FHIR content (4).
 
 **The numbers:**
 
-- Recency (illustrative): creatinine within 48 h for an inpatient or 90 days for an outpatient; weight this admission or within 30 days.
+- Recency (illustrative, from collection time): creatinine within 48 h for an inpatient or 90 days for an outpatient; weight this admission or within 30 days.
 - Thresholds compare unrounded converted values: 133 µmol/L = 1.504 mg/dL meets ≥ 1.5; 132 = 1.493 does not.
 
 ### Worked example: no kidney result in 90 days
@@ -862,12 +803,9 @@ The abstention figure lists each template's inputs and what each input state bec
 | Pattern | Where in this design | Why it is needed here |
 | --- | --- | --- |
 | [Idempotency](/system-design/patterns/idempotency) | `Idempotency-Key` on questions; `hookInstance` and the draft-order set on hooks | A retried hook must not show a card twice |
-| [Caching](/system-design/patterns/caching) | Care-team and entitlement table, the snapshot, per-drug expansions | Access checks in 5 ms; expansions reused per snapshot |
 | [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) | Max-of-n budgets, FHIR deadlines, rules-only fallback | Six parallel reads set the head at 374 ms |
 | [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | The vendor model and FHIR reads | A slow vendor degrades to alerts without explanation |
 | [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) | HL7 v2 feeds into the fact store | Coded changes in 30 s p50 |
-| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) | The per-patient fact projection | One-patient reads without querying the EHR |
-| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) | The linking backfill and knowledge releases | 7,720 GPU-hours and a regression gate per release |
 | [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) | A warm standby rules instance and database node | The hook and panel are 24/7 |
 
 ## Same design, other systems
@@ -877,14 +815,14 @@ The abstention figure lists each template's inputs and what each input state bec
 | Clinical trial matching | Linking, the fact store with lifecycle, coverage rules, provenance | Eligibility criteria become predicates over the same facts; a coordinator reviews matches |
 | A prior authorisation assistant | Facts with provenance, rules, cited explanations | Payer policies become the knowledge layer; the output is a draft packet the clinician signs |
 | Pharmacovigilance from notes | Note NLP, assertion, linking | Batch over all patients in the PHI zone; signals reviewed by safety scientists |
-| A second health system on another EHR, 5× the patients | Snapshot, rules, model, checks | An adapter and capability matrix per EHR; ≈ 35B fact rows; re-tuned linking; per-EHR delta baselines; a cross-system patient index |
+| A second health system on another EHR, 5× the patients | Snapshot, rules, model, checks | An adapter and capability matrix per EHR; ≈ 55B more fact rows (today's 1.02B + 9.88B ≈ 10.9B × 5, if their history is as deep); re-tuned linking and a second backfill; per-EHR delta baselines; a cross-system patient index |
 | An industrial knowledge graph | Ontology first, rules in code, provenance, abstention | No PHI; sensor data linked, not stored in the graph: [Semiconductor knowledge graph](/genai-system-design/case-studies/kg-semiconductor-case-study) |
 
 ## How real systems do it
 
 - **No product or paper publishes latency, volume or in-use accuracy** for a clinical GraphRAG assistant; products exist, and their makers' announcements are labelled as such.
 - **2026 (September), Epic and Wolters Kluwer:** UpToDate content is embedded in Epic's Art clinician assistant ("Evidence in Art") and will help power Epic Agent Factory; UpToDate Expert AI launched in 2025 (vendor announcements).
-- **2026 (as of November), model hosting:** Anthropic signs a BAA for its first-party API with listed covered features (prompt caching and structured outputs, but not Batch, Files or code execution); AWS lists Bedrock among HIPAA-eligible services.
+- **2026 (as of November), model hosting:** Anthropic signs a BAA for its first-party API with listed covered features (prompt caching and structured outputs on BAA versions accepted after 1 April 2026, but not Batch, Files or code execution), and covered models require 30-day retention; AWS lists Bedrock among HIPAA-eligible services.
 - **2025, benchmarks:** MedHELM (121 clinical tasks, 29 clinicians) found models scored lower on clinical decision support (0.56–0.72) than on note generation; a 750-scenario interaction benchmark found "uneven" capabilities that fall as drugs are added.
 - **2024, research graphs and retrieval:** KG-RAG over SPOKE (41 sources, ≈ 42M nodes) linked entities by embedding similarity and cut prompt tokens by 53.9% against Cypher retrieval; MedRAG's MIRAGE (7,663 questions) showed gains of up to 18%. NLM discontinued its free interaction API on 2 January 2024.
 - **2021, MedCAT:** trained on ≈ 17M records and evaluated at three London hospitals, with F1 above 0.94 after local tuning.
@@ -924,131 +862,88 @@ The abstention figure lists each template's inputs and what each input state bec
 ## Further reading
 
 - [Clinical Decision Support Software, guidance](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/clinical-decision-support-software) (US FDA, 2026)
-- [45 CFR 164.514, de-identification](https://www.law.cornell.edu/cfr/text/45/164.514) and [45 CFR 164.502, minimum necessary and business associates](https://www.law.cornell.edu/cfr/text/45/164.502) (Cornell LII)
-- [Part 2 final rule compliance deadline](https://www.hipaajournal.com/february-16-2026-compliance-deadline-part-2-final-rule/) (HIPAA Journal, 2026) and [45 CFR 92.210](https://www.law.cornell.edu/cfr/text/45/92.210) (Cornell LII)
+- [45 CFR 164.514, de-identification](https://www.law.cornell.edu/cfr/text/45/164.514) and [45 CFR 164.502, minimum necessary and business associates](https://www.law.cornell.edu/cfr/text/45/164.502) (Cornell LII); [Part 2 final rule compliance deadline](https://www.hipaajournal.com/february-16-2026-compliance-deadline-part-2-final-rule/) (HIPAA Journal, 2026) and [45 CFR 92.210](https://www.law.cornell.edu/cfr/text/45/92.210) (Cornell LII)
 - [CDS Hooks 2.0](https://cds-hooks.hl7.org/2.0/), [FHIRcast](https://fhircast.org/), [FHIR R4 Provenance](https://hl7.org/fhir/R4/provenance.html) (HL7) and [PROV-O](https://www.w3.org/TR/prov-o/) (W3C, 2013)
-- [RxNorm overview](https://www.nlm.nih.gov/research/umls/rxnorm/overview.html), [UMLS statistics](https://www.nlm.nih.gov/research/umls/knowledge_sources/metathesaurus/release/statistics.html) and [SNOMED CT US Edition](https://www.nlm.nih.gov/healthit/snomedct/us_edition.html) (NLM)
-- [Eliquis label](https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=e9481622-7cc6-418a-acb6-c5450daae9b0) (DailyMed, revised 8/2026)
+- [RxNorm overview](https://www.nlm.nih.gov/research/umls/rxnorm/overview.html), [UMLS statistics](https://www.nlm.nih.gov/research/umls/knowledge_sources/metathesaurus/release/statistics.html) and [SNOMED CT US Edition](https://www.nlm.nih.gov/healthit/snomedct/us_edition.html) (NLM); [Eliquis label](https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=e9481622-7cc6-418a-acb6-c5450daae9b0) (DailyMed, revised 8/2026)
 - [Anthropic BAA for commercial customers](https://privacy.claude.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers) and [AWS HIPAA eligible services](https://aws.amazon.com/compliance/hipaa-eligible-services-reference/) (read November 2026)
 - [KG-RAG over SPOKE](https://pmc.ncbi.nlm.nih.gov/articles/PMC11441322/) (Bioinformatics, 2024), [MedRAG and MIRAGE](https://arxiv.org/abs/2402.13178) (2024), [MedHELM](https://arxiv.org/abs/2505.23802) (2025)
 - [SapBERT](https://arxiv.org/abs/2010.11784) (2021), [MedCAT](https://arxiv.org/abs/2010.01165) (2021), [n2c2 2019 concept normalisation](https://pmc.ncbi.nlm.nih.gov/articles/PMC7647359/) (JAMIA, 2020)
-- [High-priority DDIs for EHRs](https://pmc.ncbi.nlm.nih.gov/articles/PMC3422823/) (JAMIA, 2012) and [overriding of drug safety alerts](https://pmc.ncbi.nlm.nih.gov/articles/PMC1447540/) (JAMIA, 2006)
+- [High-priority DDIs for EHRs](https://pmc.ncbi.nlm.nih.gov/articles/PMC3422823/) (JAMIA, 2012) and [overriding of drug safety alerts](https://pmc.ncbi.nlm.nih.gov/articles/PMC1447540/) (JAMIA, 2006); [LLMs against Micromedex on drug interactions](https://pmc.ncbi.nlm.nih.gov/articles/PMC10518176/) (2023)
 - [AbstentionBench](https://arxiv.org/abs/2506.09038) (2025), [vec2text](https://arxiv.org/abs/2310.06816) (2023), [clinical hallucination framework](https://pmc.ncbi.nlm.nih.gov/articles/PMC12075489/) (npj Digital Medicine, 2025)
 - Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Knowledge Graph Systems for AI](/ai-system-design/genai-system-design/knowledge-graph-systems) · [GraphRAG](/ai-system-design/genai-system-design/graphrag) · [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)
 
 <InterviewQuestions>
   <InterviewQuestion question="Why are standard vocabularies like SNOMED CT and RxNorm important for a healthcare knowledge graph?" category="Concepts" level="Junior">
-  - They give each concept one code, so a brand name, a generic name and an order's NDC all land on one node (apixaban is RxNorm ingredient 1364430), and a rule written once fires for every way the drug is written.
-  - They are how the two layers join: the patient's facts carry RxNorm, SNOMED CT and LOINC codes, and the knowledge snapshot's ≈ 12M edges use the same codes, so the join is a lookup, not a guess.
-  - The cost is upkeep: RxNorm releases monthly with weekly updates, SNOMED CT US twice a year, and US problem lists arrive in ICD-10-CM and orders as EHR or NDC ids, so crosswalks and code versions are part of the design. RxNorm, UMLS and LOINC are free in the US; SNOMED CT is free in member countries.
-  - It fails silently when a release retires a code: the fact stops matching and the rule goes quiet. Store the code version on every fact, re-map through the release history, report unmapped counts and make an unmapped drug a gap; the 100-case unmapped slice verifies it.
+  - They give each concept one code: a brand name, a generic name and an order's NDC all reach one ingredient (apixaban, RxNorm IN 1364430) through has-ingredient links, so a rule written once on the ingredient fires for every product.
+  - They are how the two layers join: the patient's facts carry RxNorm, SNOMED CT and LOINC codes, and the snapshot's ≈ 12M edges use the same codes, so the join is a lookup, not a guess.
+  - The cost is upkeep: RxNorm releases monthly with weekly updates, SNOMED CT US twice a year, and problem lists arrive in ICD-10-CM and orders as EHR or NDC ids, so crosswalks and code versions are part of the design. RxNorm, UMLS and LOINC are free in the US; SNOMED CT is free in member countries.
+  - It fails silently when a release retires a code: the fact stops matching and the rule goes quiet. Store the code version on every fact, re-map through the release history and make an unmapped drug a gap; the 100-case unmapped slice verifies it.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you structure the graph for a clinical assistant?" category="Architecture" level="Mid">
+  <InterviewQuestion question="How would you structure the graph for a clinical assistant?" category="Architecture" level="Mid" followUps={[{ question: "The vendor’s December release retires 300 codes and changes 4,000 edges. How do you ship it?", level: "Senior", answer: "Diff it against the live snapshot, re-map patient facts through the release history and report unmapped counts. Run the deterministic gates (150 of 150, every pair as orderable products, 2,000 contexts, the 32-case grid, the slices) and swap atomically; the old snapshot stays live on any failure. An unmapped drug becomes a gap, never silence, and an urgent warning goes in as a pharmacist-authored local edge within 24 hours." },]}>
   - Two layers joined by codes: a knowledge layer (≈ 1.0M concepts, ≈ 12M edges, no PHI) and a patient layer of coded and note-derived facts, partitioned by patient.
-  - The knowledge layer is an in-memory snapshot (≈ 6 GB in a compact layout) inside the rules service, with provenance on every edge; dosing lives in `DOSING_RULE` nodes that read several facts at once, because labels say "at least 2 of 3 criteria".
-  - The patient layer is a PostgreSQL fact table with lifecycle (status, valid times, superseded by), UCUM units and security labels, not graph nodes: every read is one patient, and PHI stays apart from public knowledge.
-  - The trade-off is two stores to join in code; the runner-up for the knowledge layer is PostgreSQL closure tables, simpler but with multi-join paths for per-hop provenance. Verify with the exhaustive pair gate (≈ 3M orderable cases at 100%), which tests mapping and expansion together.
+  - The knowledge layer is an in-memory snapshot (≈ 6 GB in a compact layout) inside the rules service, with provenance on every edge; dosing lives in `DOSING_RULE` nodes that read several facts at once, because labels state doses as combinations of criteria.
+  - The patient layer is a PostgreSQL fact table with lifecycle, UCUM units and security labels, not graph nodes: every read is one patient, and PHI stays apart from public knowledge.
+  - The trade-off is two stores to join in code; the runner-up is PostgreSQL closure tables, simpler but with multi-join paths for per-hop provenance. Verify with the exhaustive pair gate (≈ 3M orderable cases at 100%), which proves mapping and expansion; it cannot find a pair the base lacks, so pharmacist flags and the 12-month replay cover that.
   </InterviewQuestion>
-  <InterviewQuestion question="Why shouldn't the LLM decide whether a drug combination is safe?" category="Trade-offs" level="Mid">
-  - Because "is it safe?" asks the model to rule out every interaction, and that is what it does worst: a 2025 study found models detected 95–99% of harmful interactions but "cannot reliably exclude" them.
+  <InterviewQuestion question="Why shouldn't the LLM decide whether a drug combination is safe?" category="Trade-offs" level="Mid" followUps={[{ question: "Neither drug interacts with the other, but both prolong QT. Who catches it?", level: "Senior", answer: "The cumulative-risk template, which sums risk properties (QT, bleeding, serotonergic, CNS depression) across active drugs and reads the latest QTc and potassium. A stale QTc or potassium is a named gap, not a pass; the 100-case cumulative slice tests it." },]}>
+  - Because "is it safe?" asks the model to rule out every interaction, and ruling out is where it is weakest: against Micromedex (2023 paper) ChatGPT-4 had sensitivity 0.915 but specificity 0.519, and a 2025 preprint on 750 scenarios found accuracy and self-consistency fall as drugs are added.
   - Rules give the same alerts for the same facts and snapshot, each with a named rule and source; the model only explains them, and code renders the alerts card so the model cannot drop one.
-  - FDA's non-device criteria also want options, not directives, and the basis shown, which rules with provenance supply; the answer says "no alert found in these sources", never "safe".
+  - FDA's non-device criteria want options, not directives, and the basis shown, which rules with provenance supply; the answer says "no alert found in these sources", never "safe".
   - The cost is a licensed knowledge base (placeholder ≈ 822 USD a day) and pharmacists to curate it, and rules miss what the base lacks. Verify with 150 of 150 high-priority cases and a contradiction check that drops any sentence saying "no interactions" against an alert.
   </InterviewQuestion>
-  <InterviewQuestion question="What clinical NLP challenges matter when extracting facts from notes?" category="Failure modes" level="Mid">
+  <InterviewQuestion question="What clinical NLP challenges matter when extracting facts from notes?" category="Failure modes" level="Mid" followUps={[{ question: "The note says “PCN allergy: nausea”. Do you alert on amoxicillin?", level: "Mid", answer: "Nausea is an intolerance, not an allergy: the fact stores type, criticality, verification and reaction, and cross-reactivity rules key on reaction type. A refuted allergy never fires, an empty list is a gap rather than NKDA, and de-labelling is a pharmacist workflow that marks the fact refuted; the 150-case allergy slice tests it." },]}>
   - Assertion first: negation ("no hx of GI bleed"), history, family history, hypotheticals and uncertainty, with per-kind meaning; a 2019 penicillin rash is still an active allergy.
   - Abbreviations and unseen concepts: in n2c2 2019 (paper) top systems scored 95.3% on common concepts but 69.5% on unseen text, and "pt" is patient, prothrombin time or physical therapy by context.
   - Note habits: copy-forward text counts only at its first note, amendments and entered-in-error supersede, and medication mentions expire into "historical" unless reconfirmed.
-  - The cost of a wrong fact is a false alert or a silenced one, so low-confidence facts are shown as "possible, unverified" and never fire an order card. Verify on 200 annotated network notes (≈ 8,000 mentions) by slice: abbreviations, unseen concepts, negation, family history, copy-forward.
+  - A wrong fact is a false alert or a silenced one, so low-confidence facts show as "possible, from note, unverified" and do not interrupt; a high-criticality allergy is the exception worth a non-interruptive "possible allergy in notes: verify" card. Verify on 200 annotated notes (≈ 8,000 mentions) against N3 (medications ≥ 95%, problems ≥ 85%); mentions cluster by note, so the real interval is wider than ± 1.1.
   </InterviewQuestion>
-  <InterviewQuestion
-    question="How do you handle privacy and compliance in this design?"
-    category="Architecture"
-    level="Senior"
-    followUps={[
-      { question: "A restricted psychiatry note mentions a drug that interacts with today’s order. What does the prescriber see?", level: "Senior", answer: "If they are not entitled to the note, the card never shows, quotes or relies on that fact; where it would change the result, the card says only that a restricted record may be relevant, and to ask pharmacy or use break-the-glass. Part 2 facts never contribute without consent on file; 20 order-hook cases in the restricted slice test it." },
-    ]}
-  >
+  <InterviewQuestion question="How do you handle privacy and compliance in this design?" category="Architecture" level="Senior" followUps={[{ question: "A restricted psychiatry note mentions a drug that interacts with today’s order. What does the prescriber see?", level: "Senior", answer: "If they are not entitled to the note, the card never shows, quotes or relies on that fact; where it would change the result, the card says only that a restricted record may be relevant, and to ask pharmacy or use break-the-glass. Part 2 facts never contribute without consent on file; 20 order-hook cases in the restricted slice test it." },]}>
   - Draw the PHI boundary first: everything online runs in the network's HIPAA-eligible account; the only flow out is the 4,470-token prompt to a vendor model under a BAA, with covered features only.
   - Identity and patient before data: the patient comes from the SMART token, the care team is checked in ≈ 5 ms, entitlements filter restricted notes on the panel and on order cards, and one AuditEvent per request lists every resource read (≈ 520 MB a day).
-  - Minimum necessary does not bind treatment disclosures, but the design minimises anyway; structured facts are pseudonymised, note text is not, and embeddings are PHI too, so the chunk vectors stay in the PHI store.
-  - The trade-off is cached PHI at the vendor for the cache's time to live, accepted under the BAA; self-hosting would cost ≈ 480 USD a day against ≈ 74. Verify with a log scanner, a feature allowlist at the gateway and the 50-case restricted-notes slice.
+  - Minimum necessary does not bind a disclosure to a provider for treatment, but the prompt goes to a business associate and workforce reads need role-based limits, so the design minimises by construction: 4,470 tokens, not the 35,250-token chart. Structured facts are pseudonymised, note text is not, and embeddings are PHI, so chunk vectors stay in the PHI store.
+  - The trade-off is PHI held by the vendor: the KV cache for its time to live, and inputs and outputs for 30 days, which the vendor requires of covered models (its BAA page, as of November 2026); caching and structured outputs are covered only on BAA versions accepted after 1 April 2026. Self-hosting removes that flow for ≈ 480 USD a day against ≈ 74; verify with a log scanner, the gateway's feature allowlist and the 50-case restricted-notes slice.
   </InterviewQuestion>
-  <InterviewQuestion
-    question="How would you evaluate a clinical knowledge-graph assistant?"
-    category="Evaluation"
-    level="Senior"
-    followUps={[
-      { question: "Acceptance of an interruptive card type falls to 25%. What do you do?", level: "Senior", answer: "It is below the 30% floor, so pharmacists review the type and downgrade it if the overrides are justified. Ignored cards come from display logs, because CDS Hooks feedback reports only accepted and overridden; the budget of 3 interruptive warning-tier cards a shift flags types, never demotes a critical card." },
-    ]}
-  >
+  <InterviewQuestion question="How would you evaluate a clinical knowledge-graph assistant?" category="Evaluation" level="Senior" followUps={[{ question: "Acceptance of an interruptive card type falls to 25%. What do you do?", level: "Senior", answer: "It is below the 30% floor, so pharmacists review the type and downgrade it if the overrides are justified. Ignored cards come from display logs, because CDS Hooks feedback reports only accepted and overridden; the per-shift budget flags types for review and never demotes a card." },]}>
   - By component, then end to end: the rules on 150 of 150 high-priority cases, every pair as orderable products (≈ 3M cases, 100%) and 2,000 of 2,000 patient contexts; linking on ≈ 8,000 annotated mentions; abstention on 150 questions.
   - Then 600 clinician-graded answers, two clinicians each and a pharmacist adjudicating, with kappa ≥ 0.6 before a grade counts; ≥ 95% acceptable (± 1.7 points) and 0 major hallucinations.
   - Then the real world: a 12-month replay (≈ 18.7M orders) against pharmacist interventions, 4 weeks of silent mode, and subgroup slices by age, sex, race and ethnicity.
-  - Data-quality slices catch what averages hide: 2 unit errors in 200 outside-lab results block a release. The cost is ≈ 735 USD a day of clinician grading, all done inside the PHI zone.
+  - Data-quality slices catch what averages hide: the units slice allows 0 errors in 200 (Wilson bound 1.9%), so a single unit error blocks a release. The trade-off is clinician time inside the PHI zone (≈ 735 USD a day), so full grading runs monthly and weekly vocabulary updates pass only the deterministic gates.
+  - Where it fails: 95% ± 1.7 on 600 lets a 94% release pass; 0 major hallucinations in 600 bounds the rate only below 0.5% (rule of three); and no offline gate sees a pair the base lacks. Silent mode and the replay against pharmacist interventions measure recall in use.
   </InterviewQuestion>
-  <InterviewQuestion question="Walk through what happens when a clinician asks “is it safe to start this patient on apixaban?”" category="Architecture" level="Junior">
+  <InterviewQuestion question="Walk through what happens when a clinician asks “is it safe to start this patient on apixaban?”" category="Architecture" level="Junior" followUps={[{ question: "The clinician switches patient while the answer is streaming. What stops the old answer showing?", level: "Senior", answer: "Every SSE event carries its patient, and the panel drops any event that is not the EHR’s current patient and closes the stream. FHIRcast patient-close and patient-open tell the panel about the switch; without FHIRcast, the EHR hosts one app instance per patient. The banner shows two identifiers from the EHR context, and 20 wrong-patient cases are a release gate." },]}>
   - The gateway takes the patient from the token and checks the care team; six FHIR reads and an intent classifier run together and finish at ≈ 414 ms.
-  - "Apixaban" matches RxNorm exactly; the 5 mg dose comes only from the question text, so the clinician taps once to confirm it.
+  - "Apixaban" matches RxNorm 1364430 exactly. The 5 mg dose comes only from the question text, so the chip asks for a tap; the rules do not wait, because the criteria dose needs indication, age, weight and creatinine, not the intended dose, so the dosing alert shows with "intended dose unconfirmed".
   - The rules find 3 of 3 dose criteria (age 82, 58 kg, creatinine 1.6 mg/dL converted from 141 µmol/L), so the label's dose is 2.5 mg twice daily; at 2.5 mg with itraconazole the label says avoid. Both alerts show at ≈ 516 ms.
-  - The model then explains with citations; the first checked sentence shows at ≈ 1.56 s. The trade-off is that alerts arrive before prose, and a mistake (running the inhibitor rule on 5 mg would say "reduce by 50%") is caught by the 32-case dosing grid.
+  - The model then explains with citations; the first checked sentence shows at ≈ 1.56 s (p50 estimate, both planner routes). The trade-off is a second of prose behind the alerts in exchange for a model that can never drop one; the classic bug, running the inhibitor rule on the intended 5 mg ("reduce by 50%"), is caught by the 32-case dosing grid.
   </InterviewQuestion>
   <InterviewQuestion question="How do you combine vector search and graph traversal for one question?" category="Architecture" level="Mid">
   - Seed, expand, then retrieve text: the seed is the drug from the draft order or an exact RxNorm match, with embedding candidates only as a fallback; seven templated expansions run from it in ≈ 30 ms and join the patient's facts in code.
-  - Vectors come back for the text: label and guideline passages attached to the alert paths, reranked from ≈ 40 candidates, and this patient's note chunks searched exactly (≈ 412 on average).
-  - Embedding seeds first is the trap on the safety path: they survive misspelling, so a typo can land on a look-alike drug; a tap is required on a low score or a close look-alike (≈ 3% of questions, illustrative).
+  - The graph is a typed join over coded facts, not a similarity: "itraconazole IN_CLASS combined inhibitor INTERACTS_WITH apixaban" is a path vector search cannot rank. Vectors come back for the text: label passages attached to the alert paths, reranked from ≈ 40, and this patient's chunks searched exactly (≈ 412 on average).
+  - Embedding seeds first is the trap on the safety path. KG-RAG (2024) kept 97% retrieval with lower-cased names where Cypher fell to 0%, but the same tolerance lets a misspelling land on a look-alike (hydroxyzine → hydralazine); most safety questions carry a coded draft order, so a tap is required on a low score or a close look-alike (≈ 3%, illustrative).
   - The trade-off against free text-to-Cypher is flexibility: templates cover seven question shapes, and an empty Cypher result would read as "no alert". Verify on the 100-case look-alike slice and 50 untemplated questions that must say "no rule covers this question type".
   </InterviewQuestion>
-  <InterviewQuestion
-    question="The patient has no kidney-function result in the last 90 days. What does the assistant say, and how does it decide?"
-    category="Failure modes"
-    level="Senior"
-    followUps={[
-      { question: "What if two creatinine results on the same day disagree?", level: "Senior", answer: "That is a conflict: both values are shown with their sources, the more severe one drives the card, and the gap “sources disagree” is named; the 50-case conflict slice tests it." },
-    ]}
-  >
+  <InterviewQuestion question="The patient has no kidney-function result in the last 90 days. What does the assistant say, and how does it decide?" category="Failure modes" level="Senior" followUps={[{ question: "What if two creatinine results on the same day disagree?", level: "Senior", answer: "That is a conflict, and “more severe” is not defined for a dose criterion: the higher value lowers the dose, and under-dosing an anticoagulant has its own harm. Take the later valid specimen by collection time; if the two cannot be ordered (same draw, two labs), show both with lab and units and return the gap “creatinine results disagree” for that criterion, while the interaction alert shows for both doses. The 50-case conflict slice tests it." },]}>
   - It names the gap only if the missing input could change the result: the apixaban AF rule uses serum creatinine as one of three criteria, so if age and weight already meet 2 of 3, the label's 2.5 mg holds without it.
   - If creatinine decides (one other criterion met), the dosing template returns "renal input not current: creatinine needed for the AF dose criteria", and the interaction alert is worded for both doses.
-  - The decision is a coverage rule per template, with recency by setting (48 h inpatient, 90 days outpatient) and the measure each label names (creatinine for apixaban AF, creatinine clearance for others), never model confidence; models abstain poorly, and reasoning tuning made it 24% worse (AbstentionBench, 2025).
+  - The decision is a coverage rule per template, with recency by setting (48 h inpatient, 90 days outpatient; illustrative, measured from collection time) and the measure each label names (creatinine for apixaban AF, creatinine clearance for others), never model confidence; reasoning tuning made abstention 24% worse (AbstentionBench, 2025).
   - The trade-off is some over-abstention, capped at ≤ 5% on answerable controls; verify with ≥ 95% correct gaps on the 150-question abstention set (Wilson 90.3–97.5%).
   </InterviewQuestion>
-  <InterviewQuestion
-    question="Is this a medical device? How does that shape the design?"
-    category="Trade-offs"
-    level="Senior"
-    followUps={[
-      { question: "Why show only the difference from the EHR’s own alerts?", level: "Senior", answer: "Clinicians override 49% to 96% of drug alerts (a 2006 review), so a second copy of every EHR alert in another tier trains them to dismiss the card that matters; delta cards fire on 1.5 of every 100 orders, 0.15 interruptive." },
-    ]}
-  >
+  <InterviewQuestion question="Is this a medical device? How does that shape the design?" category="Trade-offs" level="Senior" followUps={[{ question: "Why show only the difference from the EHR’s own alerts?", level: "Senior", answer: "Clinicians override 49% to 96% of drug alerts (a 2006 review), so a second copy of every EHR alert in another tier trains them to dismiss the card that matters; delta cards fire on 1.5 of every 100 orders, 0.15 interruptive." }, { question: "Why build any of this when the EHR vendor ships an assistant with licensed reference content?", level: "Senior", answer: "Buy the reference answer and, we assume, chart summaries; build only the note-derived delta at order entry and the network’s own rules and tiers, which no product publishes. Revisit when the vendor’s checker reads notes itself." },]}>
   - It is designed to fit FDA's four non-device CDS criteria, in our reading, not a determination: no images or signals; medical information in; options for a professional, not a directive; and the basis shown.
-  - That forces product choices: clinician users and a stated population (adults, not on dialysis); no "safe", "start" or "do not start"; the label's dose quoted with its criteria; sources, versions and missing inputs on screen; not for emergency use, where automation bias is worst.
-  - The guidance in force was issued 29 January 2026 and does not address generative AI, so the model-written explanation is the uncertain part; quoting a label's criteria-based dose fits its single-recommendation enforcement discretion in our reading.
+  - That forces product choices: clinician users and a stated population (adults, not on dialysis); no "safe", "start" or "do not start"; the label's dose stated with its criteria; sources, versions and missing inputs on screen; not for emergency use, where automation bias is worst.
+  - The guidance in force (29 January 2026) does not mention generative AI, so the model-written explanation is the uncertain part: if a clinician relies primarily on fluent prose, criterion 4 fails. That is why alerts, criteria and sources render by code without the model and the prose comes last; quoting a label's criteria-based dose fits its single-recommendation enforcement discretion, in our reading.
   - The cost is a narrower product: no patient-facing mode (that is a device) and no dose calculation. Verify with the "no directive" rubric item on all 600 graded answers; this is framing, not legal advice.
   </InterviewQuestion>
-  <InterviewQuestion
-    question="Which model runs where, and what is each allowed to see?"
-    category="Cost"
-    level="Senior"
-    followUps={[
-      { question: "Would you self-host the answer model instead?", level: "Senior", answer: "Only if policy forbids the vendor or the BAA drops a feature we need: a 70B-class model on 8 GPUs costs about 480 USD a day against about 74 hosted, is a lower quality tier and must pass the same clinician gate." },
-    ]}
-  >
-  - Encoders run in the PHI zone and see everything: the intent classifier, note recognition, linking, the cross-encoder and the 0.8B sentence checker, ≈ 9,050 GPU-seconds a day for ingestion on 4 GPUs.
+  <InterviewQuestion question="Which model runs where, and what is each allowed to see?" category="Cost" level="Senior" followUps={[{ question: "Why does the order card take ≈ 64 ms but the question’s alerts ≈ 507 ms?", level: "Senior", answer: "The hook gets its data in the prefetch; the question reads six FHIR resources itself, and the slowest of six is ≈ 374 ms at p50, not 150. Without prefetch the card would be ≈ 437 / 677 ms, over CDS Hooks’ ≈ 500 ms at p95, so prefetch is required in the hook registration." },]}>
+  - Encoders run in the PHI zone and see everything: the intent classifier, note recognition, linking, the cross-encoder and the 0.8B checker. Ingestion needs ≈ 9,050 GPU-seconds a day, ≈ 5% of 2 GPUs kept for availability; 2 more serve queries.
   - The vendor models see only the prompt, under the BAA: the mid-size answer model (0.0106 USD a call) gets pseudonymised structured facts and, on record questions, note text as it is; the small planner sees a PHI-free JSON schema on 15% of questions.
-  - The rules and the order path use no model, so a slow vendor never delays a card; the model is ≈ 74 USD of a ≈ 14,200 USD day (0.5%).
-  - The trade-off: cached PHI at the vendor for the cache's time to live and a feature allowlist (no Batch, Files or code execution). Verify with gateway logs of every model call's feature and a scanner that blocks names and record numbers in logs.
+  - The rules and the order path use no model, so a slow vendor never delays a card; the model is ≈ 74 USD of a ≈ 14,200 USD day (0.5%), so placement is decided by data and latency, not price.
+  - The trade-off is a split fleet: encoders to run and tune in-house against one vendor dependency for prose, with alerts that degrade to "explanation unavailable" when it fails. Verify with gateway logs of every model call's feature and a scanner that blocks names and record numbers in logs.
   </InterviewQuestion>
-  <InterviewQuestion
-    question="The network merges with a health system on a different EHR and five times the patients. What changes first?"
-    category="Scaling"
-    level="Senior"
-    followUps={[
-      { question: "What breaks first if you skip the cross-system patient index?", level: "Senior", answer: "The right-patient guarantee: one person with two records gets two fact sets, so an allergy on one side never meets an order on the other; merges and unmerges must re-key facts, and the 20-case wrong-patient gate grows to cover cross-system merges." },
-    ]}
-  >
+  <InterviewQuestion question="The network merges with a health system on a different EHR and five times the patients. What changes first?" category="Scaling" level="Senior" followUps={[{ question: "What breaks first if you skip the cross-system patient index?", level: "Senior", answer: "The right-patient guarantee: one person with two records gets two fact sets, so an allergy on one side never meets an order on the other; merges and unmerges must re-key facts, and the 20-case wrong-patient gate grows to cover cross-system merges." },]}>
   - Integration changes first, not the models: a FHIR and HL7 v2 adapter per EHR and a capability matrix (which hooks fire, whether prefetch is honoured, which suggestions are supported).
   - Delta cards need a baseline per EHR: each one's knowledge-base release and local alert configuration, or the second EHR's prescribers get duplicate cards.
-  - Linking is re-tuned on the new notes (locally tuned MedCAT reached F1 above 0.94; open data 0.448–0.738), and the fact store grows to ≈ 35B rows, still partitioned by patient.
-  - The snapshot, rules, model and checks stay as they are: question volume is ≈ 1 a second at burst today, so 5× is still small. The trade-off is a second set of release gates; verify with silent mode on the new EHR first.
+  - Linking is re-tuned on the new notes (locally tuned MedCAT reached F1 above 0.94 against 0.448–0.738 on open data) and the backfill runs again (≈ 19,300 USD here, scaled by their note volume). The patient layer grows with patients: ≈ 10.9B rows today, so ≈ 55B more at 5× if their history is as deep; still partitioned by patient.
+  - The snapshot, rules, model and checks stay. Questions scale with prescribers, not patients; even at 5× that is ≈ 5 questions and ≈ 70 hook calls a second at burst. The trade-off is a second set of release gates and delta baselines; verify with silent mode on the new EHR first.
   </InterviewQuestion>
 </InterviewQuestions>

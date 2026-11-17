@@ -137,3 +137,14 @@ describe("gcase-enterprise: the enterprise assistant's numbers", () => {
     expect(Number(found![1])).toBeCloseTo(0.48, 2);
   });
 });
+
+describe("gcase-kghealth: the clinical knowledge-graph assistant's numbers", () => {
+  it("keeps the network's daily volumes of the design sheet", async () => {
+    const { NETWORK } = await import("@/components/diagrams/presets/gcase-kghealth");
+    expect(NETWORK.occupiedBeds).toBe(3_400);
+    expect(NETWORK.questionsPerDay).toBe(7_200);
+    expect(NETWORK.ordersPerDay).toBe(51_200);
+    expect(NETWORK.notesPerDay).toBe(80_400);
+    expect(NETWORK.storedNotes).toBe(247_000_000);
+  });
+});

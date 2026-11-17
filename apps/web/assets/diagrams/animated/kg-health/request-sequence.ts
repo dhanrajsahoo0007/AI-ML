@@ -8,7 +8,8 @@ import { CONTEXT, EXAMPLE, LATENCY, WALK } from "@/components/diagrams/presets/g
 // Times are WALK in presets/gcase-kghealth.ts (the same stages LATENCY uses):
 //   edge 40 (SMART token, Patient/8841 from context, care team, entitlements, one AuditEvent); classifier ‖ six FHIR
 //   reads, the slowest of six LATENCY.headEncoder ≈ 374 → 414; resolve the drug 50 → 464 (exact RxNorm match; the
-//   dose comes only from the question text, so the chip asks for one tap, clinician time outside the budget);
+//   dose comes only from the question text, so the chip asks for one tap; the rules do not wait for it, and the
+//   alerts carry an "intended dose unconfirmed" gap until the tap, clinician time outside the budget);
 //   expansions ≈ 30 + join 2 + phase 2 1 → 497; `alerts` event 10 → WALK.alertsMs ≈ 507 (≈ 516 mixed over both routes,
 //   LATENCY.safetyAlerts); passages 60 + rerank 80 + context 10 → 657; first token 500 → 1,157; first sentence 25
 //   tokens at 80 a second = 312.5 → 1,470; checks 60 → WALK.safetyFirstMs ≈ 1,530 (≈ 1,562 mixed with drops).
@@ -45,14 +46,14 @@ const messages: SequenceMessage[] = [
   m("orch", "ehr", "6 reads: meds, allergies, conditions, labs", 2),
   m("ehr", "orch", `slowest of 6 ≈ ${ms(LATENCY.headEncoder.p50)}`, 2, "return"),
   m("orch", "gateway", "drug chip: apixaban, oral; dose from text", 2, "return"),
-  m("gateway", "user", "tap: confirm 5 mg twice daily", 2, "return"),
-  m("user", "gateway", "confirmed (outside the budget)", 2),
+  m("gateway", "user", "chip: confirm 5 mg? rules don't wait", 2, "return"),
 
   // Step 3: rules decide; alerts sent before any model text.
   m("orch", "rules", `facts at ${ms(resolved)}: 82 y, ${EXAMPLE.weightKg} kg, SCr 1.6, itraconazole`, 3),
   m("rules", "orch", `${EXAMPLE.criteriaMet} of 3 criteria; phase 2 on ${EXAMPLE.afDose} mg: avoid`, 3, "return"),
   m("orch", "gateway", `alerts at ${ms(WALK.alertsMs)}`, 3, "return"),
-  m("gateway", "user", "2 alerts with sources, first", 3, "return"),
+  m("gateway", "user", "2 alerts + gap: dose unconfirmed", 3, "return"),
+  m("user", "gateway", "tap: 5 mg confirmed, gap clears", 3),
 
   // Step 4: passages, the model, the first sentence checked.
   m("orch", "model", `${n(CONTEXT.total)}-token context at ${ms(WALK.contextMs)}`, 4),

@@ -313,6 +313,7 @@ describe("GenAI System Design case studies: interview-grade format", () => {
     "ai-answer-engine",
     "document-extraction-pipeline",
     "conversational-assistant-design",
+    "kg-healthcare-case-study",
   ];
   const pages = DONE.map((slug) => ({
     f: `${slug}.mdx`,
