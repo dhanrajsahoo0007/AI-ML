@@ -26,7 +26,7 @@ interface PrincipleRow {
   caseStudies: string[];
 }
 
-export interface Principle extends PrincipleRow {
+interface Principle extends PrincipleRow {
   /** The heading id on the principles page: slugify(`${id} ${name}`). */
   anchor: string;
 }

@@ -137,7 +137,9 @@ export const BUDGET = (() => {
   const p95NoTool = preemptive + noToolSpread; // ≈ 1,494
   const p95Tool = toolReply + Math.sqrt(noToolSpread ** 2 + 300 ** 2 + 250 ** 2); // ≈ 2,655
   const p95Help = helpReply + Math.sqrt(noToolSpread ** 2 + 100 ** 2); // ≈ 1,716
-  const bargeInStop = 216 + 30 + 20 + leg; // ≈ 370 (LiveKit adaptive interruption, 2026: median 216 ms of audio)
+  // Mouth to ear: inbound leg + detection (LiveKit adaptive interruption, 2026: median 216 ms of audio) + inference
+  // + cancel and clear + outbound leg ≈ 470.
+  const bargeInStop = leg + 216 + 30 + 20 + leg;
   return {
     leg,
     wait,

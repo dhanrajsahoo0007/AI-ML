@@ -96,7 +96,7 @@ describe("gcase-voice: the voice agent's numbers", () => {
     expect(Math.round(BUDGET.p95NoTool / 10) * 10).toBe(1_490);
     expect(BUDGET.p95NoTool).toBeLessThanOrEqual(1_600);
     expect(BUDGET.p95Tool).toBeLessThanOrEqual(2_800);
-    expect(BUDGET.bargeInStop).toBe(366);
+    expect(BUDGET.bargeInStop).toBe(466);
     expect(BUDGET.conceptPage).toBe(1_000);
     expect(CAPACITY.workers).toBe(15);
     expect(CAPACITY.peakModelCallsPerSecond).toBeCloseTo(30);

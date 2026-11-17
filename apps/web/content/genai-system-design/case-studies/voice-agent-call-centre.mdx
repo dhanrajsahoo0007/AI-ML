@@ -29,7 +29,7 @@ The hard parts are a reply gap a caller tolerates at p95, knowing when they have
     { q: "What volume?", a: "8,000 calls a day, 4 minutes on average (illustrative)." },
     { q: "Phone or app?", a: "The public phone network; an app voice button is a variant." },
     { q: "What can it do?", a: "The chat agent's procedures: order status, returns, damaged-item refunds (up to £30 automatically)." },
-    { q: "How fast?", a: "About 1.1 s from the end of the caller's speech at p50 on ordinary turns, about 1.5 s at p95; tool turns covered by a filler within 1.2 s." },
+    { q: "How fast?", a: "Under about 1.2 s from the end of the caller's speech at p50 and 1.6 s at p95 on ordinary turns; tool turns covered by a filler within 1.2 s." },
     { q: "Which languages?", a: "English first." },
     { q: "Are calls recorded?", a: "Yes, with an announcement; card numbers must never be stored." },
     { q: "Card payments?", a: "Out of scope; the agent never takes card details." },
@@ -81,9 +81,9 @@ The hard parts are a reply gap a caller tolerates at p95, knowing when they have
 <RequirementsTable
   kind="non-functional"
   rows={[
-    { id: "N1", property: "Task success (quality)", target: "≥ 85% of contained calls end with the task done (judged, plus the end state)", why: "A fast agent that gets it wrong is worse than a queue" },
+    { id: "N1", property: "Task success (quality)", target: "≥ 85% of contained calls end with the task done (judged, plus the end state), always read beside containment (N6)", why: "A fast agent that gets it wrong is worse than a queue; read alone, handing off every hard call would raise it" },
     { id: "N2", property: "Response gap (latency)", target: "No-tool turns: first content p50 ≤ 1,200 ms, p95 ≤ 1,600 ms. Tool turns: first audio p95 ≤ 1,200 ms, first content p95 ≤ 2,800 ms. Help questions: first content p95 ≤ 1,900 ms", why: "People's gaps between turns are about 200 ms (Levinson & Torreira, 2015); 1,500 ms is the target in the Voice AI primer and Daily's writing (2026). Per-type targets are ours: a tool turn cannot meet a no-tool target" },
-    { id: "N3", property: "Turn-taking", target: "False cut-offs ≤ 5% of turns on our phone test set; agent audio stops ≤ 400 ms after a real interruption begins", why: "The best published detector cuts off 4.5% of turns at a 600 ms budget (LiveKit, 2026, vendor claim)" },
+    { id: "N3", property: "Turn-taking", target: "False cut-offs ≤ 5% of turns on our phone test set; agent audio stops within 500 ms at p50, from the caller starting to talk to silence at their ear", why: "LiveKit reports its audio model cuts off 4.5% of turns at a 600 ms budget on its own benchmark (2026, vendor claim)" },
     { id: "N4", property: "Cost", target: "Speech, models and telephony ≤ 0.05 USD a call minute", why: "32,000 minutes a day" },
     { id: "N5", property: "Safety", target: "0 refunds outside policy; 0 card numbers in recordings, transcripts or prompts; 0 spoken claims of an action without its tool result", why: "A spoken promise is heard by a person" },
     { id: "N6", property: "Containment", target: "≥ 50% of calls end without a person (illustrative)", why: "The business case; vendor cases report 50–73% (How real systems do it)" },
@@ -111,22 +111,22 @@ The hard parts are a reply gap a caller tolerates at p95, knowing when they have
     { quantity: "Small call", assumption: "2,000 × 0.01 + 1,600 × 0.10 + 25 × 0.50, per million", result: "0.00019 USD" },
     { quantity: "Blended call", assumption: "70% of nodes small, 30% mid-size (refunds and complaints)", result: "0.7 × 0.00019 + 0.3 × 0.00365 = 0.00123 USD" },
     { quantity: "Agent model per minute", assumption: "7.2 × 0.00123", result: "0.0089 USD" },
-    { quantity: "Other model calls per minute", assumption: "Safety detector 4 × 0.0001; sentence judge 4 × 0.0003; briefing 0.5 a call × 0.006 ÷ 4 minutes", result: "0.0004 + 0.0012 + 0.00075 = 0.0024 USD" },
+    { quantity: "Other model calls per minute", assumption: "Small model: safety detector ≈ 1,000 tokens in (0.0001) and sentence judge ≈ 2,800 in + 40 out (0.0003), 4 turns a minute; briefing on the mid-size model ≈ 2,500 in + 100 out (0.006), 0.5 a call ÷ 4 minutes", result: "0.0004 + 0.0012 + 0.00075 = 0.0024 USD" },
     { quantity: "Speech recognition", assumption: "Streaming, 0.0048 USD a minute (Deepgram Nova-3, promo price)", result: "0.0048 USD" },
     { quantity: "Speech synthesis", assumption: "0.5 min × 150 words × 6 characters = 450 characters × 0.04 USD per 1,000 (ElevenLabs Flash)", result: "0.018 USD" },
-    { quantity: "Telephony, media, workers", assumption: "Carrier and SIP 0.007 + media, noise suppression and turn-model compute 0.002", result: "0.009 USD" },
+    { quantity: "Telephony, media, workers", assumption: "Carrier and SIP 0.007 + media, noise suppression and turn-model compute 0.002 (both illustrative)", result: "0.009 USD" },
     { quantity: "Wasted speculative synthesis", assumption: "Only the first clause (10 of 25 tokens) is synthesised before a turn is confirmed: 0.6 × 0.4 × 0.018", result: "0.004 USD (vendors bill cancelled streams)" },
     { quantity: "Hedged model requests", assumption: "A hedge at the first-token p90 (≈ 550 ms) fires on ≈ 10% of mid-size calls: 0.1 × 0.3 × 7.2 × 0.00365", result: "0.0008 USD" },
     { quantity: "Per call minute", assumption: "0.0089 + 0.0024 + 0.0048 + 0.018 + 0.009 + 0.004 + 0.0008; × 4 a call; × 32,000 a day", result: "≈ 0.048 USD (N4: ≤ 0.05); 0.19 USD a call; ≈ 1,540 USD a day" },
     { quantity: "All mid-size instead", assumption: "7.2 × 0.00365 = 0.026 against 0.0089 a minute", result: "The small-model split saves 66% of agent model cost" },
     { quantity: "Speech-to-speech", assumption: "Caller audio 600 tokens a minute × 32 + agent audio 50% × 1,200 × 64, per million (gpt-realtime-2) + telephony 0.009", result: "0.019 + 0.038 + 0.009 ≈ 0.067 USD a minute before re-billing (1.4 × the cascade)" },
-    { quantity: "Re-billing", assumption: "History grows 300 audio tokens a turn: 300 × (0 + 1 + … + 15) = 36,000 a call = 9,000 a minute; cached 0.40, uncached 32 per million; 2,000 instruction tokens a reply at 4.00 uncached", result: "+ 0.004 to + 0.32 USD a minute: ≈ 0.07–0.39 USD a minute in all" },
-    { quantity: "Bundled voice platform", assumption: "0.075–0.08 USD a minute (Deepgram and ElevenLabs list prices)", result: "(0.075 − 0.048) × 32,000 ≈ 860 USD a day more than the cascade's usage cost" },
+    { quantity: "Re-billing", assumption: "History grows (600 caller + 600 agent tokens a minute) ÷ 4 turns = 300 audio tokens a turn: 300 × (0 + 1 + … + 15) = 36,000 a call = 9,000 a minute; cached 0.40, uncached 32 per million; 2,000 instruction tokens a reply at 4.00 uncached", result: "+ 0.004 to + 0.32 USD a minute: ≈ 0.07–0.39 USD a minute in all" },
+    { quantity: "Bundled voice platform", assumption: "0.075–0.08 USD a minute (Deepgram and ElevenLabs list prices)", result: "(0.075 − 0.048) × 32,000 ≈ 860 USD a day more than the cascade's usage cost, if the bundle also excludes carrier minutes; check what each bundle includes" },
     { quantity: "Peak model load", assumption: "250 calls × 7.2 a minute ÷ 60 = 30 calls/s × 3,600 tokens", result: "108,000 tokens/s ≈ 6.5 M input tokens a minute" },
     { quantity: "Workers and streams", assumption: "25 calls per agent worker (VAD, turn model, noise suppression on CPU)", result: "10 workers at 250 calls + 50% headroom = 15; 250 recognition, 250 synthesis streams and 250 media rooms committed" },
     { quantity: "Carrier trunk", assumption: "A queue transfer frees our room and worker, but the trunk carries AI, queue and staff time: 64 + 48 + queue", result: "≈ 115 channels in the busy hour; ≈ 350 on a sales day" },
     { quantity: "Recordings", assumption: "Two channels of Opus at 16 kbit/s = 240 KB a minute × 32,000", result: "7.7 GB a day; 2.8 TB a year (two-channel μ-law would be 4 ×)" },
-    { quantity: "Hand-offs", assumption: "50% of calls = 4,000 a day; busy hour 480 × 6 minutes ÷ 60", result: "48 Erlangs: ≈ 55 staff seated, ≈ 75 rostered with 30% shrinkage; × 3 on a sales day, with a callback offer past 5 minutes" },
+    { quantity: "Hand-offs", assumption: "50% of calls = 4,000 a day; busy hour 480 × 6 minutes ÷ 60", result: "48 Erlangs: Erlang C gives ≈ 53 seated for 80% answered in 60 s (55 with margin), ≈ 79 rostered at 30% shrinkage (55 ÷ 0.7); × 3 on a sales day, with a callback offer past 5 minutes" },
   ]}
   note="Synthesis is the largest line (0.018 of 0.048), not the model: the small-model split and the cascade's text hops are what keep a minute under 0.05 USD."
 />
@@ -195,7 +195,8 @@ The transfer tool forces a structured briefing, so staff never start from nothin
 - **Speculative turns:** preemptive output may be generated and synthesised but is never played before the turn is confirmed. Only read tools without side effects run (not `verify_caller`, which counts toward a lockout).
 - **A barge-in never cancels a write already sent:** the next turn sees it in case state. A change of remedy is one confirmed turn ("Shall I cancel the refund request and send a replacement instead?") → withdraw → reship.
 - **Races with staff:** if staff approved the refund meanwhile, the withdrawal returns `409 already_approved` and the agent keeps the refund. The policy service refuses a reship while a refund on the same item is open.
-- **Timeouts:** reads time out at 3 s with one retry, covered by fillers at 0 s and 2 s. A write that times out stays pending ("I've logged it; you'll get a text").
+- **Confirmed writes skip the model:** after a spoken yes, the orchestrator fires the write held as a proposal in case state and speaks the outcome from a template, so a yes turn costs about 900 ms (legs 200 + commit 200 + call 300 + template synthesis 200), not a model tool call.
+- **Timeouts:** a read has a 3 s budget (a 1.5 s attempt and one 1.5 s retry), covered by fillers at 0 s and 2 s, and the fallback line plays at 3 s, so no silence passes 2 s. A write that times out stays pending ("I've logged it; you'll get a text").
 - **Idempotency:** the chat agent's refund request ids; `call_id + turn + tool` for other tools; a retried transfer returns the same transfer id.
 
 The telephony path shows what happens to the audio before any model hears it.
@@ -210,7 +211,7 @@ The telephony path shows what happens to the audio before any model hears it.
 **The numbers:**
 
 - Each phone leg is 80–200 ms (illustrative); the design point is 100 ms each way, so 200 ms of the 1,100 ms budget is spent on the line.
-- G.711 carries 8,000 samples a second, half the 16 kHz that recognition and turn models are trained on: every model is tested on 8 kHz calls (G11).
+- G.711 carries 8,000 samples a second, half the 16 kHz that many recognition and turn models are trained on: every model is tested on 8 kHz calls (G11).
 
 <Callout tone="red" title="What breaks">
   Put the SIP trunk in London and the agent workers in a US region, and every turn pays a transatlantic hop in each direction (about 80 ms each, illustrative). Keep trunk, media and models in one region.
@@ -388,10 +389,10 @@ The cracked kettle, step by step (call CA7f21):
 2. "Yes, my kettle arrived cracked." → verify: the order number is read back, then the postcode → `customer_id` 1847. Only now: "Is this about the kettle on order 4471?", and the order is fetched on entering `damaged_item`.
 3. The model proposes a refund; the agent asks "Shall I ask for a £42 refund for the kettle?" → "Yes" → `request_refund` → `pending_approval` (over £30).
 4. The sentence gate passes "I've asked a colleague to approve your £42 refund" (the tool result is in case state). It would block "your refund is done".
-5. The caller cuts in after 1.3 s, having heard "I've asked a…": "Actually, can I get a replacement instead?"
+5. The caller cuts in about 1 s into the reply; by the time playback stops at the 1,300 ms mark they have heard "I've asked a…": "Actually, can I get a replacement instead?"
 6. "Shall I cancel the refund request and send a replacement kettle instead?" → yes → withdraw (not yet approved) → `request_reship` → allowed.
 7. The outcome is spoken from a template: "A replacement kettle is on its way; you'll get a text." Wrap-up; SMS confirmation; hang-up.
-8. The recording and transcript are stored masked; outcome `contained`. Gaps this call: median ≈ 1,100 ms, max ≈ 2,100 ms (the one tool turn, its filler heard at ≈ 850 ms).
+8. The recording and transcript are stored masked; outcome `contained`. Gaps this call: median ≈ 1,100 ms; the three yes turns (verify, refund, change of remedy) fire their writes from the orchestrator at ≈ 900 ms each; no turn waits on a model tool call.
 
 ## Component choices and why
 
@@ -401,7 +402,7 @@ The cracked kettle, step by step (call CA7f21):
 
 - **Choice:** streaming recognition → language model → streaming synthesis, with text at every hop.
 - **Why:** text at every hop for the sentence gate, logs and tests (G2, G8); 0.048 against 0.067 USD a minute before re-billing, and up to 0.39 with it (G4, N4).
-- **Why not speech-to-speech (gpt-realtime-2 or Gemini 3.8 Live class):** one hop, native barge-in and truncation, and it hears tone. It costs more, is harder to guard sentence by sentence, and the 2026 Voice AI primer finds its tool use less reliable; revisit when a newer model (gpt-realtime-2.1 class) passes our simulator within 1.5 × our cost.
+- **Why not speech-to-speech (gpt-realtime-2 or Gemini 3.8 Live class):** one hop, native barge-in and truncation, and it hears tone. It costs more, is harder to guard sentence by sentence, and the 2026 Voice AI primer finds its tool use less reliable; with cache hits it is already about 0.071 a minute (1.5 × ours), so the simulator decides, not price: revisit when a newer model (gpt-realtime-2.1 class) passes it on tool calls, digit capture and zero unconfirmed claims.
 - **Why not a half-cascade (an audio-in model with text out, then our own synthesis):** it hears tone and keeps a text hop to guard. Revisit for complaints, where tone matters most.
 
 The comparison puts the two pipelines on one row each, so the text hops are visible.
@@ -435,16 +436,16 @@ The comparison puts the two pipelines on one row each, so the text hops are visi
 ### Recognition: streaming, telephony-capable, hinted with the caller's orders
 
 - **Choice:** streaming recognition that handles telephony audio (Deepgram Nova-3 class), given the caller's own order numbers as key terms.
-- **Why:** partials while the caller talks; 0.0048 USD a minute (promo price); hints from the open case raise digit capture (G1, G4). Sierra reports context-aware transcription raised verification by over 25% (2026, vendor claim).
+- **Why:** partials while the caller talks; 0.0048 USD a minute (promo price); hints from the open case raise digit capture (G1, G4). Hints apply after verification only, so a spoofed caller ID cannot steer the order-number check (How real systems do it has the vendor result).
 - **Why not two recognisers ensembled:** about 25% fewer meaning-changing errors (Sierra, 2026, vendor claim), but twice the cost and the slower of two latencies. Revisit if digit capture falls below 98%.
-- **Why not recognition with end of turn fused in (Deepgram Flux class):** about 260 ms end of turn, but a vendor p95 of about 1.5 s (Deepgram, 2025).
+- **Why not recognition with end of turn fused in (Deepgram Flux class):** a fair choice, but on the same benchmark it cuts off 12.9% of turns at a 300 ms budget and 9.9% at 600 ms, against 9.9% and 4.5% for the audio turn model (LiveKit eot-bench, 2026, vendor claim).
 
 ### End of turn: an audio turn model with a 600 ms backstop
 
-- **Choice:** an audio end-of-turn model on CPU (LiveKit Turn Detector v1 class) that commits at about 300 ms and never waits past 600 ms.
+- **Choice:** an audio end-of-turn model on CPU (LiveKit Turn Detector v1-mini class) that commits at about 300 ms and never waits past 600 ms; the published figures below are for the cloud v1, so v1-mini is measured on our 8 kHz set.
 - **Why:** 9.9% false cut-offs at a 300 ms budget and 4.5% at 600 ms (LiveKit, 2026, vendor claim); with preemptive generation the longer wait adds no latency (G3, N3).
 - **Why not a silence timer alone:** 800 ms of waiting on every turn, or cut-offs if it is shortened.
-- **Why not Smart Turn v3.1:** open and fast (9–57 ms on CPUs, Daily, 2025), a fair choice. It was trained on 16 kHz audio, so test it on 8 kHz calls first.
+- **Why not Smart Turn v3.1:** open and fast (9–57 ms on CPUs, Daily, 2025), a fair choice. It uses a Whisper Tiny encoder with 16 kHz input, so test it on 8 kHz calls first.
 
 ### Agent model: small on simple nodes, mid-size on refunds and complaints, hedged
 
@@ -457,7 +458,7 @@ The comparison puts the two pipelines on one row each, so the text hops are visi
 
 - **Choice:** a streaming voice (ElevenLabs Flash class) with word timings on, at about 200 ms to the first audible sound.
 - **Why:** vendor first-byte figures exclude the network and leading silence; third-party measurements put first audible sound at 166–300 ms (Vapi and Coval, 2026) (G3, F3).
-- **Why not the cheapest voice (Cartesia Sonic 3.5 class):** measured at 291 ms, p95 394 (Coval, 2026): about 90 ms more per turn for about 0.004 USD a minute less (0.028 USD per minute of speech × 0.5 = 0.014, against 0.018).
+- **Why not a cheaper voice (Cartesia Sonic 3.5 class):** measured at 291 ms, p95 394 (Coval, 2026): about 90 ms more per turn for about 0.004 USD a minute less (0.028 USD per minute of speech × 0.5 = 0.014, against 0.018).
 
 ### Orchestration: a state machine with global functions
 
@@ -579,9 +580,10 @@ p95 by turn type, from stage spreads (p95 minus p50, illustrative), assuming ind
 
 - **Spreads:** both phone legs together 200 (they share a route); commit 100; model 250 after hedging; clause 50; synthesis 200; a tool 300; a second model call 250; retrieval 100.
 - **No tool:** √(200² + 100² + 250² + 50² + 200²) ≈ 394 → p95 ≈ 1,100 + 394 ≈ 1,500 ms (target 1,600). Adding stage p95s, an upper bound, gives 1,900.
-- **Tool turn, first content:** √(394² + 300² + 250²) ≈ 555 → ≈ 2,650 ms (target 2,800). The filler's own p95 ≈ 850 + 250 ≈ 1,100 (target 1,200).
+- **Tool turn, first content:** √(394² + 300² + 250²) ≈ 555 → ≈ 2,650 ms (target 2,800). The filler's own p95 ≈ 850 + √(200² + 100² + 250²) ≈ 850 + 335 ≈ 1,185 (target 1,200): 15 ms of margin, so it is an alert, not a comfort.
 - **Help question:** 1,100 + retrieval 210 = 1,310 at p50; √(394² + 100²) ≈ 406 → ≈ 1,720 ms (target 1,900).
-- **Barge-in stop at the ear:** detect a real interruption (median 216 ms of audio, LiveKit, 2026, vendor claim) + inference ≤ 30 + cancel and clear 20 + outbound leg 100 ≈ 370 ms, inside N3's 400. The concept page's "about 100 ms" is the stop after detection only.
+- **Barge-in, mouth to ear:** inbound leg 100 + detecting a real interruption (median 216 ms of audio, LiveKit, 2026, vendor claim) + inference ≤ 30 + cancel and clear 20 + outbound leg 100 ≈ 470 ms, inside N3's 500 at p50. The concept page's "about 100 ms" leaves out detection and the phone legs.
+- **Against the concept page's tool turn** (a 300 ms tool makes the reply 1,000 + 300 = 1,300 ms there): this page adds the 300 ms of tool-call tokens, the second 400 ms first token and the 100 ms first clause, the penalty the primer describes: 2,100 ms.
 
 <Callout tone="red" title="What breaks">
   Report one mean latency and the tool turns disappear inside it. A 2,100 ms tool turn and a 1,100 ms ordinary turn average to a number no caller hears; store first audio and first content per turn type.
@@ -626,7 +628,7 @@ Every release passes the same checks before it takes real calls.
 **The numbers:**
 
 - Rollout: staff test line → 10% of calls (≈ 800 a day, ≈ 400 of them contained) → 50% → 100%, per intent.
-- At 10%, a day gives ± 3.5 points on task success (400 contained calls at 85%); a p95 regression of 200 ms or a 3-point task-success drop rolls back.
+- At 10%, compared with the other 90% by a two-proportion test, a 3-point task-success drop shows in about 3 days (one day of 400 contained calls is ± 3.5 points: noise); a p95 regression of 200 ms rolls back at once.
 
 <Callout tone="red" title="What breaks">
   Test only in text and a release that cuts callers off passes every gate: turn-taking, echo and digit capture exist only in audio. Run audio simulations nightly and real probe calls every release.
@@ -646,7 +648,7 @@ Every release passes the same checks before it takes real calls.
 | A spoken promise the system did not make | Agent speech | Outcome templates; sentence gate before synthesis; the judge can stop the next sentence | Code |
 | A misheard "yes" becomes a refund | Transcript | An explicit confirmation turn naming item and amount; read-back | Code + prompt |
 | Card number read out | Caller audio | Runs of 8 or more digits on partials masked before the prompt and transcripts (order numbers and postcodes pass), confirmed by a Luhn check on 13–19 digits | Code |
-| Card number in a recording | Recorder | The 10 s delay buffer, longer than the 6–8 s it takes to read a card number plus detection, cuts the span | Code |
+| Card number in a recording | Recorder | The 10 s delay buffer, longer than the time to read a card number (16 digits at 2–2.5 a second ≈ 6.5–8 s, illustrative) plus detection, cuts the span; digits are counted across segments, so a number read in groups is still caught | Code |
 | Card data at a vendor | Recognition vendor | A PCI DSS compliant vendor with its data retention switched off; keypad digits sent out of band (RFC 4733) and their tones masked | Code |
 | PCI scope stated precisely | Recordings | Card security codes must never be stored after authorisation (PCI DSS 3.3.1); card numbers are kept out of every store by design | Code |
 | Recording without notice | Call start | Announcement; a refusal turns recording off; UK GDPR transparency; EU AI Act disclosure for EU callers (open item) | Code |
@@ -679,17 +681,18 @@ The sequence follows the kettle call's interruption through the caller, the medi
     VAD fires while the agent is talking. The interruption model checks that it is speech, not "mm-hmm" and not echo, using about 216 ms of audio and up to 30 ms of inference.
   </StepCard>
   <StepCard n={3} title="Stop, cancel, clear">
-    The orchestrator sends `response.cancel` to the model and synthesis and `clear` to the media server, which drops the buffered audio. The caller hears silence about 370 ms after they started talking.
+    The orchestrator sends `response.cancel` to the model and synthesis and `clear` to the media server, which drops the buffered audio. The caller hears silence about 470 ms after they started talking (100 inbound + 216 + 30 + 20 + 100 outbound).
   </StepCard>
   <StepCard n={4} title="Cut the history to what was heard">
-    The last playback mark is 1,300 ms; about 100 ms of that is still in the phone network, so the caller heard 1,200 ms. Word timings give "I've asked a…", and only those words stay in the history.
+    The clear lands at the 1,300 ms playback mark; audio already on the line still reaches the caller, so they heard 1,300 ms. Word timings give "I've asked a…", and only those words stay in the history.
   </StepCard>
 </StepCards>
 
 **The numbers:**
 
-- Heard = last playback mark − audio in flight = 1,300 − 100 = 1,200 ms; the words ending before 1,200 ms are "I've asked a" (3 words).
-- Stop at the ear: 216 + 30 + 20 + 100 ≈ 370 ms, against N3's 400. The default minimum interruption of 0.5 s in one open framework (LiveKit) is overridden to meet it.
+- Heard = the playback mark at the clear = 1,300 ms; at 150 words a minute that is 3.25 words: "I've asked a".
+- Stop, mouth to ear: inbound 100 + detection 216 + inference 30 + cancel and clear 20 + outbound 100 ≈ 470 ms, inside N3's 500. The default minimum interruption of 0.5 s in one open framework (LiveKit) is overridden to meet it.
+- The trade-off: waiting for about 216 ms of audio means about 200 ms of talking over, but it rejects about half of VAD barge-ins (51%, LiveKit, 2026, vendor claim).
 - A false interruption resumes after 0.7 s of silence (illustrative), or the agent says "sorry, go ahead".
 
 <Callout tone="red" title="What breaks">
@@ -703,7 +706,7 @@ The concept page's timeline shows the same interruption on a time axis, with its
 **How to read it:**
 
 - Three lanes: the caller, the turn detector and the agent; the soft block on the agent's lane is the part of the reply that was generated but never played.
-- The stop marker is the concept page's 100 ms from detection to silence; on the phone line add detection (216 ms) and the outbound leg (100 ms).
+- The concept page's timeline is idealised: its 100 ms stop leaves out detection and the phone legs, which this page counts (≈ 470 ms mouth to ear).
 
 **The numbers:**
 
@@ -737,10 +740,10 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
 
 ### Worked example: the kettle call
 
-1. 16 caller turns in 4 minutes; the order was fetched on entering `damaged_item`, so only one turn waits on a tool long enough to need a filler.
-2. Gaps: median ≈ 1,100 ms; max ≈ 2,100 ms on the tool turn, whose filler is heard at ≈ 850 ms.
+1. 16 caller turns in 4 minutes; the order was fetched on entering `damaged_item`, and the three writes (verify, refund request, change of remedy) fire from the orchestrator after a spoken yes, so no turn waits on a model tool call.
+2. Gaps: median ≈ 1,100 ms; the yes turns ≈ 900 ms; a mid-turn model tool call, had there been one, would take ≈ 2,100 ms with its filler heard at ≈ 850 ms.
 3. Model calls: 1.8 a turn × 16 ≈ 29, at 0.00123 USD each ≈ 0.036 USD. Synthesis 4 × 0.018 = 0.072 USD, recognition 0.019; the whole call 4 × 0.048 ≈ 0.19 USD.
-4. One barge-in: stopped ≈ 370 ms after the caller spoke; the history kept 3 words of the reply. Recording: 4 × 240 KB = 960 KB, masked; outcome `contained`, no person needed.
+4. One barge-in: silence ≈ 470 ms after the caller started, mouth to ear; the history kept 3 words of the reply. Recording: 4 × 240 KB = 960 KB, masked; outcome `contained`, no person needed.
 
 ## Design decisions and why
 
@@ -787,7 +790,7 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
 
 | If the interviewer asks for… | What stays the same | What changes |
 | --- | --- | --- |
-| An in-app voice button | Cascade, turn detection, barge-in | WebRTC with Opus at 48 kHz; no phone legs (≈ 200 ms less); better recognition |
+| An in-app voice button | Cascade, turn detection, barge-in | WebRTC with Opus at 48 kHz: about the same transport time (≈ 200 ms on the primer's WebRTC path); the gain is wideband audio and better recognition |
 | A clinic booking line | State machine, hand-off | Health data rules; calendar tools; emergencies straight to a person |
 | Taking card payments by phone | Everything | Keypad digits through a PCI layer; the model sees only a status and the last four digits |
 | Outbound reminder calls | The pipeline | US rules on AI voices in robocalls (FCC, 2024); answering-machine detection |
@@ -851,31 +854,32 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
     level="Senior"
     followUps={[
       { question: "Your p50 is fine but callers still complain. What do you look at?", level: "Senior", answer: "The p95 per turn type, measured at the caller's side with probe calls: tool turns, help questions and slow first tokens dominate the tail, and the mean hides all of them." },
+      { question: "A sales day triples calls. What runs out first?", level: "Senior", answer: "People and lines before compute: about 48 to 144 Erlangs of staff, about 350 trunk channels and 250 committed recognition and synthesis streams; model load is only about 6.5 M input tokens a minute. Past a 5-minute queue, callers are offered a callback." },
     ]}
   >
   - From the end of the caller's speech to sound at their ear: inbound phone leg 100 ms, recognition commit 200, model first token 400, first clause 100, synthesis first audible sound 200, outbound leg 100, with the 300 ms end-of-turn wait running in parallel: about 1,100 ms at p50.
-  - Cut first by taking the wait off the critical path with preemptive generation, then by keeping trunk, media and models in one region, then with a faster first token on the simple nodes (a small model).
-  - Budget the p95 per turn type, not one number: about 1,500 ms on ordinary turns, 2,650 ms to the content of a tool turn, which is why a filler must start by about 850 ms.
-  - The trade-off: preemptive generation costs 50–70% more model calls and wasted first clauses, about 0.007 USD a minute here.
+  - From the sequential 1,200 ms, the first cut is to overlap the wait with the model (preemptive generation, −100 ms); after that the largest stage is the 400 ms first token, so put a small model on simple nodes, hedge at the p90, and keep trunk, media and models in one region.
+  - Budget the p95 per turn type and check it at the ear with probe calls: about 1,500 ms on ordinary turns (target 1,600), about 2,650 ms to a tool turn's content, and the filler heard at about 850 ms at p50 and 1,185 at p95 (target 1,200).
+  - The trade-off: preemptive generation costs more model calls and wasted first clauses, about 0.007 USD a minute here.
   </InterviewQuestion>
   <InterviewQuestion
     question="Cascaded pipeline or a speech-to-speech model: which, and why?"
     category="Trade-offs"
     level="Senior"
     followUps={[
-      { question: "What would make you switch?", level: "Senior", answer: "A speech-to-speech model that passes the same simulator, including tool calls and digit capture, at no more than about 1.5 times the cascade's cost per minute once history re-billing is counted." },
+      { question: "What would make you switch?", level: "Senior", answer: "Price alone almost qualifies now: about 0.071 USD a minute with cache hits. I would switch when it passes the simulator on tool calls and digit capture with zero unconfirmed claims, the sentence gate can run on its transcript stream in time, and the measured cache-hit rate keeps it under about 0.075 a minute." },
     ]}
   >
   - A cascade for a support line: every hop is text, so a sentence gate, logs, tests and the shared refund policy all work on it.
   - It costs about 0.048 USD a minute; a speech-to-speech model costs about 0.067 before re-billing and up to about 0.39 when the growing audio history is re-billed on every reply without cache hits.
   - Speech-to-speech wins on tone and one fewer hop, and gives truncation for free; it loses on guarding each sentence and, in the 2026 primer's view, on tool reliability.
-  - A half-cascade (audio in, text out, our own voice) is the middle option to test for complaint calls, where tone matters most.
+  - Verify, don't assume: run a speech-to-speech candidate through the same 300-call simulator and 8 kHz probe calls, scoring tool calls, digit capture and unconfirmed claims; with cache hits it is already about 1.5 times our cost, so those gates decide, not price.
   </InterviewQuestion>
   <InterviewQuestion question="How does the agent know the caller has finished speaking?" category="Concepts" level="Mid">
   - Voice activity detection finds silence, but a pause is not the end of a turn: "my order is four four…" pauses mid-number.
   - An audio end-of-turn model judges the last seconds of speech and commits about 300 ms after a confident pause, waiting up to a 600 ms backstop when unsure.
-  - The best published detector cuts off 9.9% of turns at a 300 ms budget and 4.5% at 600 ms (vendor benchmark, 2026), so the wait trades latency against cut-offs.
-  - Preemptive generation removes most of that trade: the model starts on the final transcript, and any wait up to about 900 ms after speech ends costs model calls, not latency.
+  - LiveKit reports its audio model cuts off 9.9% of turns at a 300 ms budget and 4.5% at 600 ms on its own benchmark (vendor claim, 2026); we re-measure on our own 8 kHz calls and gate releases at 5% or less.
+  - Preemptive generation removes most of the trade: the model starts on the final transcript, and at p50 any wait up to about 900 ms after speech ends costs model calls, not latency; on fast turns the wait is back on the critical path.
   </InterviewQuestion>
   <InterviewQuestion
     question="The caller interrupts the agent mid-sentence. What happens, including to the conversation history?"
@@ -885,52 +889,52 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
       { question: "The interruption came just after the agent sent a refund request. What happens to it?", level: "Senior", answer: "Nothing automatically: a barge-in never cancels a write already sent. The next turn sees the pending request in case state, and changing the remedy is one confirmed turn: cancel the refund request, then send the replacement; if staff already approved it, the refund stays." },
     ]}
   >
-  - An interruption model decides it is real speech, not "mm-hmm", a cough or the agent's own echo, after a median of about 216 ms of audio.
-  - The orchestrator cancels the model and synthesis and the media server clears playback: audio stops at the caller's ear about 370 ms after they started.
-  - The history keeps only what was heard: the last playback mark (1,300 ms) minus about 100 ms still in the phone network, mapped to words with synthesis word timings, so "I've asked a…" stays and the rest is dropped.
-  - Get this wrong and the agent later refers to things the caller never heard; measure it by comparing generated and played words per interrupted turn.
+  - Playback stops, the model and synthesis are cancelled, the history is cut to the words the caller heard, and any write already sent is kept.
+  - An interruption model first rules out "mm-hmm", coughs and echo using a median of about 216 ms of audio (LiveKit, vendor claim): inbound 100 + 216 + 30 inference + 20 cancel + outbound 100 ≈ 470 ms from the caller starting to silence at their ear.
+  - The history keeps the words played up to the mark at the clear (1,300 ms → "I've asked a…", from synthesis word timings); audio already on the line is heard, so nothing is subtracted for it.
+  - The trade-off is false stops against talking over: waiting for about 216 ms of audio means about 200 ms of overlap, but it rejects about half of VAD barge-ins (51%, vendor claim). Verify by comparing generated and played words on every interrupted turn.
   </InterviewQuestion>
   <InterviewQuestion question="A tool call takes 3 seconds. What does the caller hear?" category="Architecture" level="Mid">
   - A pre-recorded filler in the agent's own voice ("Let me pull that up") starting within about 50 ms of the tool call, heard about 850 ms after they stopped speaking.
-  - A second filler at 2 s, so the line is never silent for more than 2 s; reads time out at 3 s with one retry.
-  - If it still fails: "I can't see that right now; I'll text you", or a person; a write that times out stays pending and is never described as done.
-  - Prefetching the order when the call enters the refund node removes this tool turn altogether, about 1,000 ms saved per refund call.
+  - A second filler at 2 s; a read has a 3 s budget (a 1.5 s attempt and one retry), and the fallback line plays at 3 s, so no silence lasts more than 2 s.
+  - The fallback is "I can't see that right now; I'll text you", or a person; a write that times out stays pending and is never described as done, and a circuit breaker stops later calls waiting on an API that is down.
+  - Fetching the order when the call enters the refund node removes this wait altogether, about 1,000 ms saved per refund call, at the cost of one read that may not be needed.
   </InterviewQuestion>
   <InterviewQuestion question="How do you transfer to a person without the caller repeating themselves?" category="Architecture" level="Mid">
-  - Transfer into the staff queue with a screen-pop: the case id travels with the call, and staff see a briefing of verified facts, what the caller wants and what was tried.
+  - Transfer into the staff queue with a screen-pop: the case id travels with the call, and staff see a briefing of the reason, verified facts and what the caller wants.
   - For refunds over £30 and disputes, a short spoken consult briefs the person before the caller is connected.
-  - The cost is staff time: 4,000 hand-offs a day is 48 Erlangs in the busy hour, about 55 seated and 75 rostered, three times that on a sales day.
-  - If nobody answers within 60 s, the agent offers a callback slot by SMS rather than leaving the caller in a queue that may never move.
+  - The cost is staff time: 4,000 hand-offs a day is 48 Erlangs in the busy hour, about 53 seated by Erlang C for 80% answered in 60 s and about 79 rostered, three times that on a sales day.
+  - Past a 5-minute queue the contact-centre platform offers a callback by SMS. Verify hand-offs with the judge's briefing score and by how often staff re-ask for facts the briefing already had.
   </InterviewQuestion>
   <InterviewQuestion question="Why does voice need a tighter latency budget than chat?" category="Concepts" level="Junior">
   - People leave gaps of about 200 ms between turns in conversation, so a 2-second silence on a phone sounds broken, while a chat customer sees a typing indicator.
-  - Voice adds stages chat does not have: two phone legs, speech recognition and speech synthesis, about 600 ms before the model is counted.
+  - Voice adds stages chat does not have: two phone legs (200 ms), the recognition commit (200) and the first audible sound (200), about 600 ms before the model is counted, and it is measured at the caller's ear, not in the server.
   - So the chat agent's checked 2.5 s reply would be unusable here; voice streams the first clause to synthesis after about 100 ms of generation.
   - The cost is less checking per reply: voice guards sentences with templates and rules, while chat can run a full judge before sending.
   </InterviewQuestion>
   <InterviewQuestion question="How do you capture an order number reliably over phone audio?" category="Failure modes" level="Mid">
   - Phone audio is 8 kHz, so letters and digits are easy to mishear; read the number back and ask the caller to confirm.
-  - Bias recognition with the caller's own recent order numbers once caller ID finds them; a vendor reports over 25% better verification from context like this (2026).
+  - Once the caller is verified, bias recognition with their own recent order numbers; hints never apply to the verification answer itself, so a spoofed caller ID cannot steer the check.
   - Fall back to the keypad after one failed read-back, with the tones kept out of the recording and the transcript.
-  - Gate releases on capture of at least 98% after read-back on a test set of real phone audio; ensembling two recognisers is the next lever, at twice the recognition cost.
+  - Gate releases on capture of at least 98% after read-back on real phone audio; ensembling two recognisers is the next lever, at twice the recognition cost.
   </InterviewQuestion>
   <InterviewQuestion question="What does a minute of a call cost, and what dominates it?" category="Cost" level="Junior">
-  - About 0.048 USD a minute: speech synthesis 0.018, model calls 0.011, telephony and media 0.009, recognition 0.0048, wasted speculative synthesis 0.004.
+  - About 0.048 USD a minute: synthesis 0.018, model calls 0.012 (agent 0.0089, safety detector, judge and briefing 0.0024, hedges 0.0008), telephony and media 0.009, recognition 0.0048, wasted speculative synthesis 0.004.
   - Synthesis dominates because the agent talks half the time; a cheaper voice saves about 0.004 a minute but adds about 90 ms a turn.
-  - Model cost stays small because 70% of turns run on a small model; all on the mid-size model it would be 0.026 a minute instead of 0.0089.
-  - At 32,000 minutes a day that is about 1,540 USD a day; a bundled voice platform at 0.075 a minute would cost about 860 USD a day more.
+  - Model cost stays small because 70% of nodes run on a small model; all on the mid-size model it would be 0.026 a minute instead of 0.0089.
+  - At 32,000 minutes a day that is about 1,540 USD a day; check it against the provider bills each week, because a wordier prompt shows up in synthesis first.
   </InterviewQuestion>
   <InterviewQuestion
     question="You stream the reply sentence by sentence. What stops it promising a refund that has not happened?"
     category="Failure modes"
     level="Senior"
     followUps={[
-      { question: "Why not run the chat agent's full judge before speaking?", level: "Senior", answer: "It adds about 300 ms to every turn, a quarter of the whole budget; instead a small judge checks each sentence while the previous one plays and can stop the next one." },
+      { question: "Why not run the chat agent's full judge before speaking?", level: "Senior", answer: "The chat agent's supervisor check takes about 300 ms, more than a quarter of the 1,100 ms budget; instead a small judge checks each sentence while the previous one plays and can stop the next one." },
     ]}
   >
   - Action outcomes are never worded by the model: "A replacement kettle is on its way" comes from a template filled by the tool result.
   - Every other sentence passes a rule gate before synthesis that blocks outcome words and amounts without a matching tool result in case state, in 1–5 ms.
-  - A small-model judge checks each sentence while the previous one plays and can stop the next sentence; it also feeds QA.
+  - A small-model judge checks each sentence while the previous one plays and can stop the next; the trade-off is that a reply's first sentence is checked by rules only, which keeps the gate off the critical path.
   - Writes need a spoken yes naming the item and amount, so a misheard word cannot become a refund; the gate's misses show up as judge flags in traces.
   </InterviewQuestion>
   <InterviewQuestion
@@ -939,17 +943,25 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
     level="Senior"
     followUps={[
       { question: "Your simulator passes but real callers get cut off. Why?", level: "Senior", answer: "Simulated audio does not cross the phone network: 8 kHz audio, carrier delays, echo and noisy lines change turn detection. That is why 50 real test calls through the trunk and an 8 kHz turn-detection set are part of the gate." },
+      { question: "How do you compare two voices on latency?", level: "Mid", answer: "By time to first audible sound at the client, including network and leading silence, not first byte: ElevenLabs Flash is about 100 ms by its vendor and 197–198 ms measured, and a change of metric moved one vendor from 172 to 430 ms (Coval, 2026)." },
     ]}
   >
   - Text simulations on every commit and audio simulations nightly: 300 simulated callers with accents, noise, speakerphone echo, interruptions and mumbled order numbers.
   - 50 real test calls through the trunk per release measure the gap at the caller's side; 200 replayed real calls check that nothing regressed.
   - The gate blocks on task success under 85%, order-number capture under 98%, false cut-offs over 5%, p95 gaps over target per turn type, or any card digits in a transcript.
-  - Then 10% of calls (about 800 a day, ± 3.5 points on task success) before wider rollout; a p95 regression of 200 ms rolls back.
+  - Then 10% of calls (about 800 a day), compared with the other 90%: a 3-point task-success drop shows in about 3 days and a 200 ms p95 regression rolls back at once; the trade-off is about a day of probe calls before any change ships.
   </InterviewQuestion>
-  <InterviewQuestion question="The order API goes down in the middle of a call. What does the agent say and do?" category="Failure modes" level="Mid">
-  - It never goes silent and never guesses: after a filler and one retry within 3 s, it says it cannot see the order right now.
-  - It offers a text with an update or a person, and records the open request in the case so the next contact starts from it.
-  - A circuit breaker stops later calls from waiting 3 s each while the API is down, and the procedure moves straight to the fallback line.
-  - The trade-off is containment: those calls go to people or a callback; watch the hand-off rate per reason to see the outage in the metrics.
+  <InterviewQuestion
+    question="A caller starts reading their card number aloud. What reaches the prompt, the transcript and the recording?"
+    category="Failure modes"
+    level="Senior"
+    followUps={[
+      { question: "They read it in four groups with long pauses. Does the mask still work?", level: "Senior", answer: "Only if digits are counted across segments for the whole call and the recorder's delay buffer outlasts the longest gap; count per call, not per utterance, and test grouped reading in the card-digit set." },
+    ]}
+  >
+  - None of it: runs of 8 or more digits on partial transcripts are masked before the prompt and the transcript store, confirmed by a Luhn check on 13–19 digits, so 4-digit order numbers and postcodes pass.
+  - The recorder writes through a 10 s delay buffer, longer than the 6.5–8 s it takes to read 16 digits, so the span is cut before anything is stored; the recognition vendor is PCI DSS compliant with retention off.
+  - The agent asks callers not to read card details at all; card security codes must never be stored after authorisation (PCI DSS 3.3.1), and payments are out of scope.
+  - The trade-off: an 11-digit phone number read aloud is masked too. Verify on the 100-call card-digit set, where the gate is zero digits in any store.
   </InterviewQuestion>
 </InterviewQuestions>
