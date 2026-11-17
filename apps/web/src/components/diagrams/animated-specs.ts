@@ -816,116 +816,127 @@ import s810 from "../../../assets/diagrams/animated/serving/stream-cancel";
 import s811 from "../../../assets/diagrams/animated/serving/stream-path";
 import s812 from "../../../assets/diagrams/animated/serving/stream-timeline";
 import s813 from "../../../assets/diagrams/animated/support-agent/architecture";
-import s814 from "../../../assets/diagrams/animated/support-agent/refund-guard";
-import s815 from "../../../assets/diagrams/animated/support-agent/rollout";
-import s816 from "../../../assets/diagrams/animated/ticketmaster/architecture";
-import s817 from "../../../assets/diagrams/animated/ticketmaster/double-sell";
-import s818 from "../../../assets/diagrams/animated/ticketmaster/hold-pay-confirm";
-import s819 from "../../../assets/diagrams/animated/ticketmaster/seat-states";
-import s820 from "../../../assets/diagrams/animated/ticketmaster/waiting-room";
-import s821 from "../../../assets/diagrams/animated/tiktok/architecture";
-import s822 from "../../../assets/diagrams/animated/tiktok/feedback-loop";
-import s823 from "../../../assets/diagrams/animated/tiktok/funnel";
-import s824 from "../../../assets/diagrams/animated/tiktok/latency-budget";
-import s825 from "../../../assets/diagrams/animated/tiktok/prefetch";
-import s826 from "../../../assets/diagrams/animated/tinder/architecture";
-import s827 from "../../../assets/diagrams/animated/tinder/geoshards";
-import s828 from "../../../assets/diagrams/animated/tinder/match-race";
-import s829 from "../../../assets/diagrams/animated/tinder/nudge-push";
-import s830 from "../../../assets/diagrams/animated/transformer/add-and-norm";
-import s831 from "../../../assets/diagrams/animated/transformer/architecture";
-import s832 from "../../../assets/diagrams/animated/transformer/attention-arcs-long-range";
-import s833 from "../../../assets/diagrams/animated/transformer/attention-arcs-two-heads";
-import s834 from "../../../assets/diagrams/animated/transformer/attention-causal-example";
-import s835 from "../../../assets/diagrams/animated/transformer/attention-cost-grid";
-import s836 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
-import s837 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
-import s838 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
-import s839 from "../../../assets/diagrams/animated/transformer/bpe-encode";
-import s840 from "../../../assets/diagrams/animated/transformer/bpe-merges";
-import s841 from "../../../assets/diagrams/animated/transformer/causal-mask";
-import s842 from "../../../assets/diagrams/animated/transformer/compute-estimate";
-import s843 from "../../../assets/diagrams/animated/transformer/context-extension";
-import s844 from "../../../assets/diagrams/animated/transformer/cross-attention";
-import s845 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
-import s846 from "../../../assets/diagrams/animated/transformer/feed-forward";
-import s847 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
-import s848 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
-import s849 from "../../../assets/diagrams/animated/transformer/kv-cache-budget";
-import s850 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
-import s851 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
-import s852 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
-import s853 from "../../../assets/diagrams/animated/transformer/mlm-masking-rule";
-import s854 from "../../../assets/diagrams/animated/transformer/moe-balance-loss";
-import s855 from "../../../assets/diagrams/animated/transformer/moe-capacity";
-import s856 from "../../../assets/diagrams/animated/transformer/moe-routing";
-import s857 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
-import s858 from "../../../assets/diagrams/animated/transformer/multi-head";
-import s859 from "../../../assets/diagrams/animated/transformer/objectives-compared";
-import s860 from "../../../assets/diagrams/animated/transformer/output-head";
-import s861 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
-import s862 from "../../../assets/diagrams/animated/transformer/path-length";
-import s863 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
-import s864 from "../../../assets/diagrams/animated/transformer/pe-waves";
-import s865 from "../../../assets/diagrams/animated/transformer/position-injection";
-import s866 from "../../../assets/diagrams/animated/transformer/rope-angle-range";
-import s867 from "../../../assets/diagrams/animated/transformer/rope-rotation";
-import s868 from "../../../assets/diagrams/animated/transformer/rope-worked-example";
-import s869 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
-import s870 from "../../../assets/diagrams/animated/transformer/serving-stack";
-import s871 from "../../../assets/diagrams/animated/transformer/softmax-scale";
-import s872 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
-import s873 from "../../../assets/diagrams/animated/transformer/three-families";
-import s874 from "../../../assets/diagrams/animated/transformer/three-masks";
-import s875 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
-import s876 from "../../../assets/diagrams/animated/transformer/training-pipeline";
-import s877 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
-import s878 from "../../../assets/diagrams/animated/transformer/utf8-bytes";
-import s879 from "../../../assets/diagrams/animated/twitter/architecture";
-import s880 from "../../../assets/diagrams/animated/twitter/hybrid-merge";
-import s881 from "../../../assets/diagrams/animated/twitter/timeline-cache";
-import s882 from "../../../assets/diagrams/animated/typeahead/architecture";
-import s883 from "../../../assets/diagrams/animated/typeahead/keystroke-budget";
-import s884 from "../../../assets/diagrams/animated/typeahead/merge-recent";
-import s885 from "../../../assets/diagrams/animated/typeahead/structures";
-import s886 from "../../../assets/diagrams/animated/uber-eats/architecture";
-import s887 from "../../../assets/diagrams/animated/uber-eats/dispatch-offer";
-import s888 from "../../../assets/diagrams/animated/uber-eats/hex-search";
-import s889 from "../../../assets/diagrams/animated/uber-eats/order-states";
-import s890 from "../../../assets/diagrams/animated/url-shortener/architecture";
-import s891 from "../../../assets/diagrams/animated/url-shortener/code-options";
-import s892 from "../../../assets/diagrams/animated/url-shortener/long-tail";
-import s893 from "../../../assets/diagrams/animated/url-shortener/range-alloc";
-import s894 from "../../../assets/diagrams/animated/url-shortener/redirect-path";
-import s895 from "../../../assets/diagrams/animated/user-data-export/architecture";
-import s896 from "../../../assets/diagrams/animated/user-data-export/batch-scan";
-import s897 from "../../../assets/diagrams/animated/user-data-export/delivery";
-import s898 from "../../../assets/diagrams/animated/user-data-export/job-states";
-import s899 from "../../../assets/diagrams/animated/vending-machine/architecture";
-import s900 from "../../../assets/diagrams/animated/vending-machine/auth-vend-capture";
-import s901 from "../../../assets/diagrams/animated/vending-machine/classes";
-import s902 from "../../../assets/diagrams/animated/vending-machine/states";
-import s903 from "../../../assets/diagrams/animated/vending-machine/store-forward";
-import s904 from "../../../assets/diagrams/animated/web-crawler/architecture";
-import s905 from "../../../assets/diagrams/animated/web-crawler/frontier";
-import s906 from "../../../assets/diagrams/animated/web-crawler/lease-recovery";
-import s907 from "../../../assets/diagrams/animated/web-crawler/seen-test";
-import s908 from "../../../assets/diagrams/animated/web-crawler/simhash";
-import s909 from "../../../assets/diagrams/animated/whatsapp/architecture";
-import s910 from "../../../assets/diagrams/animated/whatsapp/connection-budget";
-import s911 from "../../../assets/diagrams/animated/whatsapp/device-fanout";
-import s912 from "../../../assets/diagrams/animated/whatsapp/offline-queue";
-import s913 from "../../../assets/diagrams/animated/whatsapp/prekey-session";
-import s914 from "../../../assets/diagrams/animated/whatsapp/sender-keys";
-import s915 from "../../../assets/diagrams/animated/youtube/abr-ladder";
-import s916 from "../../../assets/diagrams/animated/youtube/architecture";
-import s917 from "../../../assets/diagrams/animated/youtube/transcode-dag";
-import s918 from "../../../assets/diagrams/animated/youtube/upload-resume";
-import s919 from "../../../assets/diagrams/animated/zillow/architecture";
-import s920 from "../../../assets/diagrams/animated/zillow/cluster-zoom";
-import s921 from "../../../assets/diagrams/animated/zillow/listing-ingest";
-import s922 from "../../../assets/diagrams/animated/zillow/reverse-match";
-import s923 from "../../../assets/diagrams/animated/zillow/viewport-query";
+import s814 from "../../../assets/diagrams/animated/support-agent/context-window";
+import s815 from "../../../assets/diagrams/animated/support-agent/latency-budget";
+import s816 from "../../../assets/diagrams/animated/support-agent/refund-guard";
+import s817 from "../../../assets/diagrams/animated/support-agent/resolution-funnel";
+import s818 from "../../../assets/diagrams/animated/support-agent/retrieval-funnel";
+import s819 from "../../../assets/diagrams/animated/support-agent/rollout";
+import s820 from "../../../assets/diagrams/animated/ticketmaster/architecture";
+import s821 from "../../../assets/diagrams/animated/ticketmaster/double-sell";
+import s822 from "../../../assets/diagrams/animated/ticketmaster/hold-pay-confirm";
+import s823 from "../../../assets/diagrams/animated/ticketmaster/seat-states";
+import s824 from "../../../assets/diagrams/animated/ticketmaster/waiting-room";
+import s825 from "../../../assets/diagrams/animated/tiktok/architecture";
+import s826 from "../../../assets/diagrams/animated/tiktok/feedback-loop";
+import s827 from "../../../assets/diagrams/animated/tiktok/funnel";
+import s828 from "../../../assets/diagrams/animated/tiktok/latency-budget";
+import s829 from "../../../assets/diagrams/animated/tiktok/prefetch";
+import s830 from "../../../assets/diagrams/animated/tinder/architecture";
+import s831 from "../../../assets/diagrams/animated/tinder/geoshards";
+import s832 from "../../../assets/diagrams/animated/tinder/match-race";
+import s833 from "../../../assets/diagrams/animated/tinder/nudge-push";
+import s834 from "../../../assets/diagrams/animated/transformer/add-and-norm";
+import s835 from "../../../assets/diagrams/animated/transformer/architecture";
+import s836 from "../../../assets/diagrams/animated/transformer/attention-arcs-long-range";
+import s837 from "../../../assets/diagrams/animated/transformer/attention-arcs-two-heads";
+import s838 from "../../../assets/diagrams/animated/transformer/attention-causal-example";
+import s839 from "../../../assets/diagrams/animated/transformer/attention-cost-grid";
+import s840 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
+import s841 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
+import s842 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
+import s843 from "../../../assets/diagrams/animated/transformer/bpe-encode";
+import s844 from "../../../assets/diagrams/animated/transformer/bpe-merges";
+import s845 from "../../../assets/diagrams/animated/transformer/causal-mask";
+import s846 from "../../../assets/diagrams/animated/transformer/compute-estimate";
+import s847 from "../../../assets/diagrams/animated/transformer/context-extension";
+import s848 from "../../../assets/diagrams/animated/transformer/cross-attention";
+import s849 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
+import s850 from "../../../assets/diagrams/animated/transformer/feed-forward";
+import s851 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
+import s852 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
+import s853 from "../../../assets/diagrams/animated/transformer/kv-cache-budget";
+import s854 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
+import s855 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
+import s856 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
+import s857 from "../../../assets/diagrams/animated/transformer/mlm-masking-rule";
+import s858 from "../../../assets/diagrams/animated/transformer/moe-balance-loss";
+import s859 from "../../../assets/diagrams/animated/transformer/moe-capacity";
+import s860 from "../../../assets/diagrams/animated/transformer/moe-routing";
+import s861 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
+import s862 from "../../../assets/diagrams/animated/transformer/multi-head";
+import s863 from "../../../assets/diagrams/animated/transformer/objectives-compared";
+import s864 from "../../../assets/diagrams/animated/transformer/output-head";
+import s865 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
+import s866 from "../../../assets/diagrams/animated/transformer/path-length";
+import s867 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
+import s868 from "../../../assets/diagrams/animated/transformer/pe-waves";
+import s869 from "../../../assets/diagrams/animated/transformer/position-injection";
+import s870 from "../../../assets/diagrams/animated/transformer/rope-angle-range";
+import s871 from "../../../assets/diagrams/animated/transformer/rope-rotation";
+import s872 from "../../../assets/diagrams/animated/transformer/rope-worked-example";
+import s873 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
+import s874 from "../../../assets/diagrams/animated/transformer/serving-stack";
+import s875 from "../../../assets/diagrams/animated/transformer/softmax-scale";
+import s876 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
+import s877 from "../../../assets/diagrams/animated/transformer/three-families";
+import s878 from "../../../assets/diagrams/animated/transformer/three-masks";
+import s879 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
+import s880 from "../../../assets/diagrams/animated/transformer/training-pipeline";
+import s881 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s882 from "../../../assets/diagrams/animated/transformer/utf8-bytes";
+import s883 from "../../../assets/diagrams/animated/twitter/architecture";
+import s884 from "../../../assets/diagrams/animated/twitter/hybrid-merge";
+import s885 from "../../../assets/diagrams/animated/twitter/timeline-cache";
+import s886 from "../../../assets/diagrams/animated/typeahead/architecture";
+import s887 from "../../../assets/diagrams/animated/typeahead/keystroke-budget";
+import s888 from "../../../assets/diagrams/animated/typeahead/merge-recent";
+import s889 from "../../../assets/diagrams/animated/typeahead/structures";
+import s890 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s891 from "../../../assets/diagrams/animated/uber-eats/dispatch-offer";
+import s892 from "../../../assets/diagrams/animated/uber-eats/hex-search";
+import s893 from "../../../assets/diagrams/animated/uber-eats/order-states";
+import s894 from "../../../assets/diagrams/animated/url-shortener/architecture";
+import s895 from "../../../assets/diagrams/animated/url-shortener/code-options";
+import s896 from "../../../assets/diagrams/animated/url-shortener/long-tail";
+import s897 from "../../../assets/diagrams/animated/url-shortener/range-alloc";
+import s898 from "../../../assets/diagrams/animated/url-shortener/redirect-path";
+import s899 from "../../../assets/diagrams/animated/user-data-export/architecture";
+import s900 from "../../../assets/diagrams/animated/user-data-export/batch-scan";
+import s901 from "../../../assets/diagrams/animated/user-data-export/delivery";
+import s902 from "../../../assets/diagrams/animated/user-data-export/job-states";
+import s903 from "../../../assets/diagrams/animated/vending-machine/architecture";
+import s904 from "../../../assets/diagrams/animated/vending-machine/auth-vend-capture";
+import s905 from "../../../assets/diagrams/animated/vending-machine/classes";
+import s906 from "../../../assets/diagrams/animated/vending-machine/states";
+import s907 from "../../../assets/diagrams/animated/vending-machine/store-forward";
+import s908 from "../../../assets/diagrams/animated/voice-agent/architecture";
+import s909 from "../../../assets/diagrams/animated/voice-agent/barge-in";
+import s910 from "../../../assets/diagrams/animated/voice-agent/context-window";
+import s911 from "../../../assets/diagrams/animated/voice-agent/latency-budget";
+import s912 from "../../../assets/diagrams/animated/voice-agent/release-gate";
+import s913 from "../../../assets/diagrams/animated/voice-agent/telephony-path";
+import s914 from "../../../assets/diagrams/animated/voice-agent/turn-tradeoff";
+import s915 from "../../../assets/diagrams/animated/web-crawler/architecture";
+import s916 from "../../../assets/diagrams/animated/web-crawler/frontier";
+import s917 from "../../../assets/diagrams/animated/web-crawler/lease-recovery";
+import s918 from "../../../assets/diagrams/animated/web-crawler/seen-test";
+import s919 from "../../../assets/diagrams/animated/web-crawler/simhash";
+import s920 from "../../../assets/diagrams/animated/whatsapp/architecture";
+import s921 from "../../../assets/diagrams/animated/whatsapp/connection-budget";
+import s922 from "../../../assets/diagrams/animated/whatsapp/device-fanout";
+import s923 from "../../../assets/diagrams/animated/whatsapp/offline-queue";
+import s924 from "../../../assets/diagrams/animated/whatsapp/prekey-session";
+import s925 from "../../../assets/diagrams/animated/whatsapp/sender-keys";
+import s926 from "../../../assets/diagrams/animated/youtube/abr-ladder";
+import s927 from "../../../assets/diagrams/animated/youtube/architecture";
+import s928 from "../../../assets/diagrams/animated/youtube/transcode-dag";
+import s929 from "../../../assets/diagrams/animated/youtube/upload-resume";
+import s930 from "../../../assets/diagrams/animated/zillow/architecture";
+import s931 from "../../../assets/diagrams/animated/zillow/cluster-zoom";
+import s932 from "../../../assets/diagrams/animated/zillow/listing-ingest";
+import s933 from "../../../assets/diagrams/animated/zillow/reverse-match";
+import s934 from "../../../assets/diagrams/animated/zillow/viewport-query";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/agents/a2a-discovery": s0,
@@ -1742,114 +1753,125 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/serving/stream-path": s811,
   "diagrams/animated/serving/stream-timeline": s812,
   "diagrams/animated/support-agent/architecture": s813,
-  "diagrams/animated/support-agent/refund-guard": s814,
-  "diagrams/animated/support-agent/rollout": s815,
-  "diagrams/animated/ticketmaster/architecture": s816,
-  "diagrams/animated/ticketmaster/double-sell": s817,
-  "diagrams/animated/ticketmaster/hold-pay-confirm": s818,
-  "diagrams/animated/ticketmaster/seat-states": s819,
-  "diagrams/animated/ticketmaster/waiting-room": s820,
-  "diagrams/animated/tiktok/architecture": s821,
-  "diagrams/animated/tiktok/feedback-loop": s822,
-  "diagrams/animated/tiktok/funnel": s823,
-  "diagrams/animated/tiktok/latency-budget": s824,
-  "diagrams/animated/tiktok/prefetch": s825,
-  "diagrams/animated/tinder/architecture": s826,
-  "diagrams/animated/tinder/geoshards": s827,
-  "diagrams/animated/tinder/match-race": s828,
-  "diagrams/animated/tinder/nudge-push": s829,
-  "diagrams/animated/transformer/add-and-norm": s830,
-  "diagrams/animated/transformer/architecture": s831,
-  "diagrams/animated/transformer/attention-arcs-long-range": s832,
-  "diagrams/animated/transformer/attention-arcs-two-heads": s833,
-  "diagrams/animated/transformer/attention-causal-example": s834,
-  "diagrams/animated/transformer/attention-cost-grid": s835,
-  "diagrams/animated/transformer/attention-worked-example": s836,
-  "diagrams/animated/transformer/bert-input-embeddings": s837,
-  "diagrams/animated/transformer/bert-pretrain-finetune": s838,
-  "diagrams/animated/transformer/bpe-encode": s839,
-  "diagrams/animated/transformer/bpe-merges": s840,
-  "diagrams/animated/transformer/causal-mask": s841,
-  "diagrams/animated/transformer/compute-estimate": s842,
-  "diagrams/animated/transformer/context-extension": s843,
-  "diagrams/animated/transformer/cross-attention": s844,
-  "diagrams/animated/transformer/decoder-only-block": s845,
-  "diagrams/animated/transformer/feed-forward": s846,
-  "diagrams/animated/transformer/flash-attention-io": s847,
-  "diagrams/animated/transformer/input-embedding-sum": s848,
-  "diagrams/animated/transformer/kv-cache-budget": s849,
-  "diagrams/animated/transformer/kv-cache-generation": s850,
-  "diagrams/animated/transformer/kv-cache-growth": s851,
-  "diagrams/animated/transformer/mha-gqa-mqa": s852,
-  "diagrams/animated/transformer/mlm-masking-rule": s853,
-  "diagrams/animated/transformer/moe-balance-loss": s854,
-  "diagrams/animated/transformer/moe-capacity": s855,
-  "diagrams/animated/transformer/moe-routing": s856,
-  "diagrams/animated/transformer/moe-total-vs-active": s857,
-  "diagrams/animated/transformer/multi-head": s858,
-  "diagrams/animated/transformer/objectives-compared": s859,
-  "diagrams/animated/transformer/output-head": s860,
-  "diagrams/animated/transformer/parallelism-3d": s861,
-  "diagrams/animated/transformer/path-length": s862,
-  "diagrams/animated/transformer/pe-heatmap": s863,
-  "diagrams/animated/transformer/pe-waves": s864,
-  "diagrams/animated/transformer/position-injection": s865,
-  "diagrams/animated/transformer/rope-angle-range": s866,
-  "diagrams/animated/transformer/rope-rotation": s867,
-  "diagrams/animated/transformer/rope-worked-example": s868,
-  "diagrams/animated/transformer/scaled-dot-product": s869,
-  "diagrams/animated/transformer/serving-stack": s870,
-  "diagrams/animated/transformer/softmax-scale": s871,
-  "diagrams/animated/transformer/tensor-shapes": s872,
-  "diagrams/animated/transformer/three-families": s873,
-  "diagrams/animated/transformer/three-masks": s874,
-  "diagrams/animated/transformer/tokenizer-pipeline": s875,
-  "diagrams/animated/transformer/training-pipeline": s876,
-  "diagrams/animated/transformer/training-vs-inference": s877,
-  "diagrams/animated/transformer/utf8-bytes": s878,
-  "diagrams/animated/twitter/architecture": s879,
-  "diagrams/animated/twitter/hybrid-merge": s880,
-  "diagrams/animated/twitter/timeline-cache": s881,
-  "diagrams/animated/typeahead/architecture": s882,
-  "diagrams/animated/typeahead/keystroke-budget": s883,
-  "diagrams/animated/typeahead/merge-recent": s884,
-  "diagrams/animated/typeahead/structures": s885,
-  "diagrams/animated/uber-eats/architecture": s886,
-  "diagrams/animated/uber-eats/dispatch-offer": s887,
-  "diagrams/animated/uber-eats/hex-search": s888,
-  "diagrams/animated/uber-eats/order-states": s889,
-  "diagrams/animated/url-shortener/architecture": s890,
-  "diagrams/animated/url-shortener/code-options": s891,
-  "diagrams/animated/url-shortener/long-tail": s892,
-  "diagrams/animated/url-shortener/range-alloc": s893,
-  "diagrams/animated/url-shortener/redirect-path": s894,
-  "diagrams/animated/user-data-export/architecture": s895,
-  "diagrams/animated/user-data-export/batch-scan": s896,
-  "diagrams/animated/user-data-export/delivery": s897,
-  "diagrams/animated/user-data-export/job-states": s898,
-  "diagrams/animated/vending-machine/architecture": s899,
-  "diagrams/animated/vending-machine/auth-vend-capture": s900,
-  "diagrams/animated/vending-machine/classes": s901,
-  "diagrams/animated/vending-machine/states": s902,
-  "diagrams/animated/vending-machine/store-forward": s903,
-  "diagrams/animated/web-crawler/architecture": s904,
-  "diagrams/animated/web-crawler/frontier": s905,
-  "diagrams/animated/web-crawler/lease-recovery": s906,
-  "diagrams/animated/web-crawler/seen-test": s907,
-  "diagrams/animated/web-crawler/simhash": s908,
-  "diagrams/animated/whatsapp/architecture": s909,
-  "diagrams/animated/whatsapp/connection-budget": s910,
-  "diagrams/animated/whatsapp/device-fanout": s911,
-  "diagrams/animated/whatsapp/offline-queue": s912,
-  "diagrams/animated/whatsapp/prekey-session": s913,
-  "diagrams/animated/whatsapp/sender-keys": s914,
-  "diagrams/animated/youtube/abr-ladder": s915,
-  "diagrams/animated/youtube/architecture": s916,
-  "diagrams/animated/youtube/transcode-dag": s917,
-  "diagrams/animated/youtube/upload-resume": s918,
-  "diagrams/animated/zillow/architecture": s919,
-  "diagrams/animated/zillow/cluster-zoom": s920,
-  "diagrams/animated/zillow/listing-ingest": s921,
-  "diagrams/animated/zillow/reverse-match": s922,
-  "diagrams/animated/zillow/viewport-query": s923,
+  "diagrams/animated/support-agent/context-window": s814,
+  "diagrams/animated/support-agent/latency-budget": s815,
+  "diagrams/animated/support-agent/refund-guard": s816,
+  "diagrams/animated/support-agent/resolution-funnel": s817,
+  "diagrams/animated/support-agent/retrieval-funnel": s818,
+  "diagrams/animated/support-agent/rollout": s819,
+  "diagrams/animated/ticketmaster/architecture": s820,
+  "diagrams/animated/ticketmaster/double-sell": s821,
+  "diagrams/animated/ticketmaster/hold-pay-confirm": s822,
+  "diagrams/animated/ticketmaster/seat-states": s823,
+  "diagrams/animated/ticketmaster/waiting-room": s824,
+  "diagrams/animated/tiktok/architecture": s825,
+  "diagrams/animated/tiktok/feedback-loop": s826,
+  "diagrams/animated/tiktok/funnel": s827,
+  "diagrams/animated/tiktok/latency-budget": s828,
+  "diagrams/animated/tiktok/prefetch": s829,
+  "diagrams/animated/tinder/architecture": s830,
+  "diagrams/animated/tinder/geoshards": s831,
+  "diagrams/animated/tinder/match-race": s832,
+  "diagrams/animated/tinder/nudge-push": s833,
+  "diagrams/animated/transformer/add-and-norm": s834,
+  "diagrams/animated/transformer/architecture": s835,
+  "diagrams/animated/transformer/attention-arcs-long-range": s836,
+  "diagrams/animated/transformer/attention-arcs-two-heads": s837,
+  "diagrams/animated/transformer/attention-causal-example": s838,
+  "diagrams/animated/transformer/attention-cost-grid": s839,
+  "diagrams/animated/transformer/attention-worked-example": s840,
+  "diagrams/animated/transformer/bert-input-embeddings": s841,
+  "diagrams/animated/transformer/bert-pretrain-finetune": s842,
+  "diagrams/animated/transformer/bpe-encode": s843,
+  "diagrams/animated/transformer/bpe-merges": s844,
+  "diagrams/animated/transformer/causal-mask": s845,
+  "diagrams/animated/transformer/compute-estimate": s846,
+  "diagrams/animated/transformer/context-extension": s847,
+  "diagrams/animated/transformer/cross-attention": s848,
+  "diagrams/animated/transformer/decoder-only-block": s849,
+  "diagrams/animated/transformer/feed-forward": s850,
+  "diagrams/animated/transformer/flash-attention-io": s851,
+  "diagrams/animated/transformer/input-embedding-sum": s852,
+  "diagrams/animated/transformer/kv-cache-budget": s853,
+  "diagrams/animated/transformer/kv-cache-generation": s854,
+  "diagrams/animated/transformer/kv-cache-growth": s855,
+  "diagrams/animated/transformer/mha-gqa-mqa": s856,
+  "diagrams/animated/transformer/mlm-masking-rule": s857,
+  "diagrams/animated/transformer/moe-balance-loss": s858,
+  "diagrams/animated/transformer/moe-capacity": s859,
+  "diagrams/animated/transformer/moe-routing": s860,
+  "diagrams/animated/transformer/moe-total-vs-active": s861,
+  "diagrams/animated/transformer/multi-head": s862,
+  "diagrams/animated/transformer/objectives-compared": s863,
+  "diagrams/animated/transformer/output-head": s864,
+  "diagrams/animated/transformer/parallelism-3d": s865,
+  "diagrams/animated/transformer/path-length": s866,
+  "diagrams/animated/transformer/pe-heatmap": s867,
+  "diagrams/animated/transformer/pe-waves": s868,
+  "diagrams/animated/transformer/position-injection": s869,
+  "diagrams/animated/transformer/rope-angle-range": s870,
+  "diagrams/animated/transformer/rope-rotation": s871,
+  "diagrams/animated/transformer/rope-worked-example": s872,
+  "diagrams/animated/transformer/scaled-dot-product": s873,
+  "diagrams/animated/transformer/serving-stack": s874,
+  "diagrams/animated/transformer/softmax-scale": s875,
+  "diagrams/animated/transformer/tensor-shapes": s876,
+  "diagrams/animated/transformer/three-families": s877,
+  "diagrams/animated/transformer/three-masks": s878,
+  "diagrams/animated/transformer/tokenizer-pipeline": s879,
+  "diagrams/animated/transformer/training-pipeline": s880,
+  "diagrams/animated/transformer/training-vs-inference": s881,
+  "diagrams/animated/transformer/utf8-bytes": s882,
+  "diagrams/animated/twitter/architecture": s883,
+  "diagrams/animated/twitter/hybrid-merge": s884,
+  "diagrams/animated/twitter/timeline-cache": s885,
+  "diagrams/animated/typeahead/architecture": s886,
+  "diagrams/animated/typeahead/keystroke-budget": s887,
+  "diagrams/animated/typeahead/merge-recent": s888,
+  "diagrams/animated/typeahead/structures": s889,
+  "diagrams/animated/uber-eats/architecture": s890,
+  "diagrams/animated/uber-eats/dispatch-offer": s891,
+  "diagrams/animated/uber-eats/hex-search": s892,
+  "diagrams/animated/uber-eats/order-states": s893,
+  "diagrams/animated/url-shortener/architecture": s894,
+  "diagrams/animated/url-shortener/code-options": s895,
+  "diagrams/animated/url-shortener/long-tail": s896,
+  "diagrams/animated/url-shortener/range-alloc": s897,
+  "diagrams/animated/url-shortener/redirect-path": s898,
+  "diagrams/animated/user-data-export/architecture": s899,
+  "diagrams/animated/user-data-export/batch-scan": s900,
+  "diagrams/animated/user-data-export/delivery": s901,
+  "diagrams/animated/user-data-export/job-states": s902,
+  "diagrams/animated/vending-machine/architecture": s903,
+  "diagrams/animated/vending-machine/auth-vend-capture": s904,
+  "diagrams/animated/vending-machine/classes": s905,
+  "diagrams/animated/vending-machine/states": s906,
+  "diagrams/animated/vending-machine/store-forward": s907,
+  "diagrams/animated/voice-agent/architecture": s908,
+  "diagrams/animated/voice-agent/barge-in": s909,
+  "diagrams/animated/voice-agent/context-window": s910,
+  "diagrams/animated/voice-agent/latency-budget": s911,
+  "diagrams/animated/voice-agent/release-gate": s912,
+  "diagrams/animated/voice-agent/telephony-path": s913,
+  "diagrams/animated/voice-agent/turn-tradeoff": s914,
+  "diagrams/animated/web-crawler/architecture": s915,
+  "diagrams/animated/web-crawler/frontier": s916,
+  "diagrams/animated/web-crawler/lease-recovery": s917,
+  "diagrams/animated/web-crawler/seen-test": s918,
+  "diagrams/animated/web-crawler/simhash": s919,
+  "diagrams/animated/whatsapp/architecture": s920,
+  "diagrams/animated/whatsapp/connection-budget": s921,
+  "diagrams/animated/whatsapp/device-fanout": s922,
+  "diagrams/animated/whatsapp/offline-queue": s923,
+  "diagrams/animated/whatsapp/prekey-session": s924,
+  "diagrams/animated/whatsapp/sender-keys": s925,
+  "diagrams/animated/youtube/abr-ladder": s926,
+  "diagrams/animated/youtube/architecture": s927,
+  "diagrams/animated/youtube/transcode-dag": s928,
+  "diagrams/animated/youtube/upload-resume": s929,
+  "diagrams/animated/zillow/architecture": s930,
+  "diagrams/animated/zillow/cluster-zoom": s931,
+  "diagrams/animated/zillow/listing-ingest": s932,
+  "diagrams/animated/zillow/reverse-match": s933,
+  "diagrams/animated/zillow/viewport-query": s934,
 };
