@@ -1,25 +1,28 @@
 // Constants and arithmetic for the "Design a Clinical Knowledge-Graph Assistant" case study (/genai-system-design/
 // case-studies/kg-healthcare-case-study; design sheet SYSTEM-DESIGN/plans/genai-design/design/kg-healthcare-case-study.md
-// v1, dossier research/kg-healthcare-case-study.md, facts cited as "dossier F12"). Specs in assets/diagrams/animated/
-// kg-health/ import from here, so the page, the figures and the tests share one set of numbers.
+// v2, after design review round 1; dossier research/kg-healthcare-case-study.md, facts cited as "dossier F12"; review
+// review/kg-healthcare-case-study-design.md). Specs in assets/diagrams/animated/kg-health/ import from here, so the page,
+// the figures and the tests share one set of numbers.
 //
 // This page is NOT Brightpost. It defines its own ILLUSTRATIVE hospital network ("the network"): 12 hospitals, 4,000
-// beds, 140 clinics, 2M patients with records, 6,000 prescribers. NO production source publishes volume, latency or
-// cost for a clinical GraphRAG assistant (dossier §9): every volume, mix, rate, latency, salary, licence fee and unit
-// cost below is an ESTIMATE unless a comment names a source. Paper results are quoted with their paper and task.
+// beds, 140 clinics, 2M patients with records, 6,000 prescribers; v1 scope is adults (≥ 18), not on dialysis or
+// continuous renal replacement. NO production source publishes volume, latency or cost for a clinical GraphRAG assistant
+// (dossier §9): every volume, mix, rate, latency, salary, licence fee and unit cost below is an ESTIMATE unless a
+// comment names a source. Paper results are quoted with their paper and task.
 //
 // Sources used for numbers (dossier): CDS Hooks "on the order of 500 ms" (F23, a spec expectation, not a measurement);
 // UMLS 2026AB 3,550,208 concepts (F1); SNOMED CT 360,000+ concepts (F7); ONC high-priority list 15 pairs (F15); n2c2
-// 2019 human agreement 74.20% after adjudication (F30). Model list prices as of November 2026 are imported from the
-// answer-engine preset so one price has one value across the site (mid-size Claude Sonnet 5.5 class 2.00 input /
-// 0.10 cache read / 2.50 5-minute cache write / 10.00 output USD per million tokens; small Claude Haiku 5.5 class
-// 0.10 / 0.01 / 0.125 / 0.50). Both run under the vendor's BAA (dossier F58). GPU hour 2.5 USD and encoder throughput
+// 2019 human agreement 74.20% after adjudication (F30); Eliquis label dose criteria and inhibitor rule (F66, F67).
+// Model list prices as of November 2026 are imported from the answer-engine preset so one price has one value across
+// the site (mid-size Claude Sonnet 5.5 class 2.00 input / 0.10 cache read / 2.50 5-minute cache write / 10.00 output USD
+// per million tokens; small Claude Haiku 5.5 class 0.10 / 0.01 / 0.125 / 0.50). Both run under the vendor's BAA (F58);
+// prompt caching and structured outputs are HIPAA-eligible features (F69). GPU hour 2.5 USD and encoder throughput
 // 200,000 tokens a second a GPU are the answer-engine preset's illustrative values, reused.
 //
-// Latency: parallel stages are the maximum of their draws (maxOfN for identical calls, maxOfParts for different ones),
-// at p50 and p95. p95 per path is p50 + the root-sum-square of stage spreads (p95 − p50), with a correlated case where
-// the three model-provider stages (planner, first token, sentence) slow together, then mixed with the answers whose
-// first sentence is dropped by the checker (restart).
+// Latency: parallel stages are the maximum of their draws (maxOfParts, the product of the draws' normal CDFs), at p50
+// and p95. p95 per path is p50 + the root-sum-square of stage spreads (p95 − p50), with a correlated case where the
+// model-provider stages (first token, sentence, and the planner when it runs) slow together, then mixed with the answers
+// whose first sentence is dropped by the checker (restart). Two planner routes (encoder 85%, small model 15%) are mixed.
 
 import { mixtureQuantile, PRICES } from "./gcase-answer";
 
@@ -54,6 +57,7 @@ export function maxOfParts(parts: readonly Dist[], q: number) {
   return (lo + hi) / 2;
 }
 const maxDist = (parts: readonly Dist[]): Dist => ({ p50: maxOfParts(parts, 0.5), p95: maxOfParts(parts, 0.95) });
+const times = (n: number, d: Dist) => Array.from({ length: n }, () => d);
 
 /** P(exactly k of n) for a binomial with rate p. */
 function binom(n: number, k: number, p: number) {
@@ -62,14 +66,29 @@ function binom(n: number, k: number, p: number) {
   return c * p ** k * (1 - p) ** (n - k);
 }
 
+/** Wilson 95% interval for a proportion p observed on n cases: [low, high]. */
+function wilson(p: number, n: number) {
+  const z = 1.96;
+  const den = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / den;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / den;
+  return [centre - half, centre + half] as const;
+}
+
 /** Prices (imported list prices, as of November 2026) and illustrative infrastructure rates. */
 export const KH_PRICES = {
   mid: PRICES.mid,
   small: PRICES.small,
   gpuHour: PRICES.gpuHour, // 2.5 USD, illustrative
   encoderTokensPerSecond: PRICES.smallEncoderTokensPerSecond, // 200,000, illustrative
-  graphNodeHour: 4, // memory-optimised graph database node, illustrative
-  dbNodeHour: 3, // PostgreSQL / search node, illustrative
+  // A small open LLM (8B class) inside the PHI zone, batched on one GPU (illustrative): prefill 20,000 tokens a second,
+  // decode 2,500 output tokens a second across the batch.
+  smallLlmPrefillPerSecond: 20_000,
+  smallLlmDecodePerSecond: 2_500,
+  serviceNodeHour: 1.5, // rules service instance holding the in-memory knowledge snapshot, illustrative
+  dbNodeHour: 4, // PostgreSQL node with pgvector, illustrative
+  searchNodeHour: 3, // passage search node (no PHI), illustrative
+  storageGbMonth: 0.1, // backup and DR copies, illustrative
 } as const;
 
 /** The illustrative hospital network and its daily volumes (sheet §5). */
@@ -91,18 +110,30 @@ export const NETWORK = (() => {
   const burst = 4; // within-hour burst over the peak-hour mean
   const questionsPeakPerSecond = (questionsPerDay * peakHourShare) / 3_600; // 0.24
   // Medication orders: inpatient 3,400 occupied beds × 8 orders a bed-day = 27,200; outpatient 30,000 visits × 0.8
-  // prescriptions = 24,000. Each order fires the CDS Hooks order-select hook once (dossier F22).
+  // prescriptions = 24,000.
   const inpatientOrders = occupiedBeds * 8; // 27,200
   const outpatientOrders = clinicVisitsPerDay * 0.8; // 24,000
   const ordersPerDay = inpatientOrders + outpatientOrders; // 51,200
+  // CDS Hooks calls (review item 21): order-select fires on each selection and draft change, ≈ 2 calls an order
+  // (illustrative, 1.5–3); order-sign fires once per signing session of ≈ 2.5 orders. Cards are shown at order-sign
+  // (the full draft set is known); order-select warms the cache and returns only critical cards.
+  const selectCallsPerOrder = 2;
+  const ordersPerSignSession = 2.5;
+  const selectCalls = ordersPerDay * selectCallsPerOrder; // 102,400
+  const signCalls = ordersPerDay / ordersPerSignSession; // 20,480
+  const hookCalls = selectCalls + signCalls; // 122,880
   const ordersPeakHourShare = 0.1;
-  const ordersPeakPerSecond = (ordersPerDay * ordersPeakHourShare) / 3_600; // 1.42
+  const hookPeakPerSecond = (hookCalls * ordersPeakHourShare) / 3_600; // 3.41
   // Notes: inpatient 3,400 × 6 a day = 20,400; outpatient 30,000 × 1.5 = 45,000; reports (radiology, pathology,
   // discharge) 15,000 → 80,400 a day at 700 tokens each.
   const notesPerDay = occupiedBeds * 6 + clinicVisitsPerDay * 1.5 + 15_000; // 80,400
   const noteTokens = 700;
   const mentionsPerNote = 40;
-  const storedNotes = 150_000_000; // 10 years of history
+  // Stored notes (review item 19): note volume grew over the decade (more electronic documentation, more clinics), from
+  // ≈ 2,400 to 80,400 a day linearly, so the 10-year average is ≈ 41,400 a day → 41,400 × 3,650 ≈ 150M. At today's rate
+  // throughout it would be 293.5M (sensitivity in COST.backfillAtTodaysRate).
+  const avgNotesPerDayOverDecade = (2_400 + notesPerDay) / 2; // 41,400
+  const storedNotes = Math.round((avgNotesPerDayOverDecade * 3_650) / 1e6) * 1e6; // 151.1M → 151,000,000
   return {
     hospitals,
     beds,
@@ -129,24 +160,57 @@ export const NETWORK = (() => {
     inpatientOrders,
     outpatientOrders,
     ordersPerDay,
-    ordersPeakPerSecond,
-    ordersBurstPerSecond: ordersPeakPerSecond * burst, // 5.7
+    selectCallsPerOrder,
+    ordersPerSignSession,
+    selectCalls,
+    signCalls,
+    hookCalls,
+    hookPeakPerSecond,
+    hookBurstPerSecond: hookPeakPerSecond * burst, // 13.7
     notesPerDay,
     noteTokens,
     noteTokensPerDay: notesPerDay * noteTokens, // 56.3M
     mentionsPerNote,
     mentionsPerDay: notesPerDay * mentionsPerNote, // 3.2M
-    storedNotes,
-    storedNoteTokens: storedNotes * noteTokens, // 105B
+    avgNotesPerDayOverDecade,
+    storedNotes, // 151M
+    storedNoteTokens: storedNotes * noteTokens, // 105.7B
+    notesAtTodaysRate: notesPerDay * 3_650, // 293.5M
   };
 })();
 
-/** Order-time cards (CDS Hooks order-select): only alerts that depend on a note-derived fact (sheet §10.3). */
+/**
+ * The worked example (sheet §9), checked against the Eliquis label (F66, F67). Adult, nonvalvular atrial fibrillation,
+ * intended dose 5 mg twice daily, age 82, weight 58 kg, female, serum creatinine 141 µmol/L from an outside lab,
+ * itraconazole active. Units are converted at ingestion (UCUM); µmol/L ÷ 88.4 = mg/dL.
+ */
+export const EXAMPLE = (() => {
+  const age = 82;
+  const weightKg = 58;
+  const female = true;
+  const scrUmolL = 141;
+  const scrMgDl = scrUmolL / 88.4; // 1.595 → shown as 1.6 mg/dL
+  const criteria = [age >= 80, weightKg <= 60, scrMgDl >= 1.5]; // label: at least 2 of 3 (F66)
+  const criteriaMet = criteria.filter(Boolean).length; // 3
+  const afDose = criteriaMet >= 2 ? 2.5 : 5; // mg twice daily
+  // Combined P-gp and strong CYP3A4 inhibitor (itraconazole): on 5 or 10 mg reduce by 50%; already at 2.5 mg: avoid (F67).
+  const inhibitorAction = afDose <= 2.5 ? "avoid" : "reduce 50%";
+  // Cockcroft–Gault, for rules whose label names creatinine clearance (not used by the apixaban AF rule):
+  // (140 − age) × weight ÷ (72 × SCr mg/dL) × 0.85 if female = 58 × 58 ÷ 114.8 × 0.85 ≈ 24.9 mL/min.
+  const crclCG = (((140 - age) * weightKg) / (72 * scrMgDl)) * (female ? 0.85 : 1);
+  // Without unit normalisation, 141 read as mg/dL is 88× too high (the rule fires on nonsense or rejects the value).
+  const unitErrorFactor = 88.4;
+  return { age, weightKg, female, scrUmolL, scrMgDl, criteriaMet, afDose, inhibitorAction, crclCG, unitErrorFactor };
+})();
+
+/** Order-time cards: only alerts that depend on a note-derived fact (sheet §10.3). */
 export const ORDER_CARDS = (() => {
   const deltaShare = 0.015; // illustrative: 1.5% of orders meet a rule only through a fact found in notes
   const cards = NETWORK.ordersPerDay * deltaShare; // 768
   const criticalShare = 0.1; // of delta cards, interruptive (critical indicator)
-  const explainShare = 0.2; // clinicians click "Explain" on 20% of delta cards → one LLM call
+  const explainShare = 0.2; // clinicians click "Explain" on 20% of delta cards → one model call, checked like any answer
+  const interruptiveBudgetPerShift = 3; // per prescriber; above it, further cards are shown non-interruptively
+  const acceptanceFloor = 0.3; // an interruptive card type below 30% acceptance is downgraded after review
   return {
     deltaShare,
     cardsPerDay: cards,
@@ -154,6 +218,8 @@ export const ORDER_CARDS = (() => {
     explainsPerDay: cards * explainShare, // 153.6
     cardsPer100Orders: deltaShare * 100, // 1.5
     criticalPer100Orders: deltaShare * criticalShare * 100, // 0.15
+    interruptiveBudgetPerShift,
+    acceptanceFloor,
   };
 })();
 
@@ -163,25 +229,34 @@ export const SIZES = (() => {
   const snomedConcepts = 360_000; // SNOMED CT International, "more than 360,000" (F7)
   const rxnormConcepts = 300_000; // estimate (ingredients, clinical and branded drugs, packs)
   const loincTerms = 100_000; // estimate
-  const knowledgeNodes = snomedConcepts + rxnormConcepts + loincTerms + 240_000; // + classes, label and guideline sections ≈ 1.0M
-  const knowledgeEdges = 12_000_000; // estimate: SNOMED IS_A and attributes, RxNorm relations, ≈ 300,000 interaction edges
+  // + drug classes, dosing-rule nodes, label SET nodes (one per reference label, not per section) and guideline nodes
+  const otherNodes = 240_000;
+  const knowledgeNodes = snomedConcepts + rxnormConcepts + loincTerms + otherNodes; // ≈ 1.0M
+  const knowledgeEdges = 12_000_000; // estimate: SNOMED inferred IS_A and attributes, RxNorm relations, ≈ 300,000 interactions
+  const snapshotGB = 6; // in-memory snapshot of nodes, edges and properties, estimate
   const linkingNames = 3_000_000; // estimate: names and synonyms from SNOMED CT, RxNorm and LOINC only
   const codedFactsPerPatient = 850; // estimate: 30 meds, 2 allergies, 20 conditions, ≈ 800 lab results
   const codedFacts = NETWORK.activePatients * codedFactsPerPatient; // 1.02B rows
-  const storedMentions = NETWORK.storedNotes * NETWORK.mentionsPerNote; // 6.0B rows
+  const storedMentions = NETWORK.storedNotes * NETWORK.mentionsPerNote; // 6.04B rows
   const chunkTokens = 350;
-  const chunks = NETWORK.storedNoteTokens / chunkTokens; // 300M
-  const chunksPerActivePatient = chunks / NETWORK.activePatients; // 250
+  const chunks = NETWORK.storedNoteTokens / chunkTokens; // 302M
+  const chunksPerActivePatient = chunks / NETWORK.activePatients; // ≈ 252 on average
+  const chunksTail = 10_000; // a chronic inpatient over a decade
   const vectorBytes = 1_024; // 1,024 dims × INT8
   const chunkVectorsTB = (chunks * vectorBytes) / 1e12; // 0.31 TB
+  const chunkTextTB = (NETWORK.storedNoteTokens * 4) / 1e12; // ≈ 4 bytes a token → 0.42 TB
+  const factRowsTB = ((codedFacts + storedMentions) * 400) / 1e12; // ≈ 400 B a row with indexes → 2.8 TB
+  // Passages are search-engine documents carrying concept ids, not graph nodes (review item 20).
   const passages = 1_500_000 + 200_000; // estimate: FDA label sections + guideline passages
   return {
     umlsConcepts,
     snomedConcepts,
     rxnormConcepts,
     loincTerms,
+    otherNodes,
     knowledgeNodes,
     knowledgeEdges,
+    snapshotGB,
     linkingNames,
     codedFactsPerPatient,
     codedFacts,
@@ -189,56 +264,68 @@ export const SIZES = (() => {
     chunkTokens,
     chunks,
     chunksPerActivePatient,
+    chunksTail,
     vectorBytes,
     chunkVectorsTB,
+    chunkTextTB,
+    factRowsTB,
+    phiStorageTB: chunkVectorsTB + chunkTextTB + factRowsTB, // ≈ 3.5 TB
     passages,
-    // Exact search inside one patient's chunks: 250 × 1,024 INT8 dot products ≈ 256,000 multiply-adds (< 1 ms of CPU).
+    // Exact search inside one patient: 252 × 1,024 ≈ 258,000 multiply-adds on average (< 1 ms); the 10,000-chunk tail is
+    // ≈ 10M (single-digit ms).
     perPatientDotProducts: chunksPerActivePatient * 1_024,
+    tailDotProducts: chunksTail * 1_024,
   };
 })();
 
 /** Context window of one drug-safety answer call (sheet §11). Record and reference calls are below it. */
 export const CONTEXT = (() => {
   const blocks = [
-    { id: "instructions", label: "Instructions, citation and abstention rules", tokens: 900, stable: true },
+    { id: "instructions", label: "Instructions, citation and gap rules", tokens: 900, stable: true },
     { id: "format", label: "Output format and two examples", tokens: 400, stable: true },
-    { id: "question", label: "Question and planner notes", tokens: 100, stable: false },
-    // 8 active meds × 25 + 2 allergies × 20 + 10 conditions × 15 + 6 key labs × 20 + age, sex, weight, pregnancy 30
+    { id: "question", label: "Question, resolved drug and planner notes", tokens: 100, stable: false },
+    // 8 active meds × 25 + 2 allergies × 30 (type, criticality, verification, reaction) + 10 conditions × 15 + 6 key labs
+    // × 20 + age, sex, weight, derived renal estimates 40 + indication and intended dose 20
     {
       id: "patient",
-      label: "Patient facts (pseudonymised)",
-      tokens: 8 * 25 + 2 * 20 + 10 * 15 + 6 * 20 + 30,
+      label: "Patient facts (structured, pseudonymised)",
+      tokens: 8 * 25 + 2 * 30 + 10 * 15 + 6 * 20 + 40 + 20,
       stable: false,
     },
-    // 2 alerts × 120 + the coverage list (what was checked, versions, missing inputs) 100
+    // 2 alerts × 120 + the coverage list (what was checked, versions, data times, gaps) 100
     { id: "alerts", label: "Rule results and coverage", tokens: 2 * 120 + 100, stable: false },
-    { id: "paths", label: "Graph paths behind the alerts", tokens: 10 * 30, stable: false },
+    { id: "paths", label: "Graph paths and rule criteria behind the alerts", tokens: 10 * 30, stable: false },
     { id: "headers", label: "8 passage headers", tokens: 8 * 30, stable: false },
+    // FDA label sections and openly licensed guidelines only; licensed monograph text is not sent (review item 35)
     { id: "passages", label: "8 label and guideline passages", tokens: 8 * 200, stable: false },
   ] as const;
-  const total = sum(blocks.map((b) => b.tokens)); // 4,420
+  const total = sum(blocks.map((b) => b.tokens)); // 4,470
   const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 1,300 ≥ 512, cacheable
+  const patient = blocks.find((b) => b.id === "patient")!.tokens; // 590
+  const alerts = blocks.find((b) => b.id === "alerts")!.tokens; // 340
+  const paths = blocks.find((b) => b.id === "paths")!.tokens; // 300
   const outputTokens = 250; // 10 sentences of 25
   const sentenceTokens = 25;
   // Record question: no rule results or paths (−640); 5 of this patient's note chunks of 350 tokens (1,750) + 5 headers
-  // of 18 (90) = 1,840 in place of the label passages (the same 1,840); a longer timeline summary (+300) →
-  // 4,420 − 640 + 300 = 4,080. Reference question: no patient block (−540) → 3,880.
-  const recordTotal = total - (340 + 300) + 300; // 4,080
-  const referenceTotal = total - 540; // 3,880
+  // of 18 (90) = 1,840 in place of the passages and headers (the same 1,840); a longer timeline summary (+300).
+  // Note text is sent as is (PHI under the BAA), not pseudonymised (review item 11).
+  const recordTotal = total - (alerts + paths) + 300; // 4,130
+  // Reference question: no patient block, no patient rule results, no paths (review item 39).
+  const referenceTotal = total - patient - alerts - paths; // 3,240
   // The whole chart instead: 850 coded facts × 25 tokens + the last 20 notes × 700 = 21,250 + 14,000 = 35,250 tokens.
   const wholeChart = SIZES.codedFactsPerPatient * 25 + 20 * NETWORK.noteTokens;
   return {
     blocks,
     total,
     stable,
-    changing: total - stable, // 3,120
+    changing: total - stable, // 3,170
     outputTokens,
     sentenceTokens,
     sentences: outputTokens / sentenceTokens, // 10
     recordTotal,
     referenceTotal,
     wholeChart,
-    plannerPrefix: 600, // intent schema and examples, above the 512 minimum, so cached
+    plannerPrefix: 600, // intent schema and examples, above the 512 minimum, so cached; no PHI in the schema (F69)
   };
 })();
 
@@ -246,6 +333,7 @@ export const CONTEXT = (() => {
  * Sentence checks (sheet §13, §15.3). Rates ILLUSTRATIVE, measured on a labelled set; the unsupported rate is a release
  * gate the answer model must pass. A dropped sentence is not replaced: generation restarts from the last shown sentence
  * with the claim excluded (≤ 2 restarts). A 3rd drop replaces the explanation with the rules card and the evidence list.
+ * shownUnsupportedShare assumes the checker's misses are independent of the model's errors: OPTIMISTIC (review item 37).
  */
 export const CHECKS = (() => {
   const unsupported = 0.03; // gate: ≤ 3% unsupported sentences from the answer model on the clinician set
@@ -270,7 +358,7 @@ export const CHECKS = (() => {
     p2,
     pFallback, // ≈ 1.7%
     expectedRestarts, // ≈ 0.56
-    shownUnsupportedShare, // ≈ 0.16% of shown sentences
+    shownUnsupportedShare, // ≈ 0.16% of shown sentences, if independent
     msPerSentence: 60,
   };
 })();
@@ -278,48 +366,83 @@ export const CHECKS = (() => {
 /** Cost per call and per day (sheet §5, §12). */
 export const COST = (() => {
   const p = KH_PRICES;
-  // Mid-size answer call, whole prompt written to the 5-minute cache so a restart reads it back.
+  // Mid-size answer call, whole prompt written to the 5-minute cache so a restart reads it back (caching is a
+  // HIPAA-eligible feature, F69).
   const answerCall = (total: number, stable: number, out: number) =>
     usd(stable, p.mid.cached) + usd(total - stable, p.mid.cacheWrite) + usd(out, p.mid.output);
   const restart = (total: number) => usd(total, p.mid.cached) + usd(125, p.mid.input); // 125 shown tokens fed back
-  const planner = usd(CONTEXT.plannerPrefix, p.small.cached) + usd(120, p.small.input) + usd(80, p.small.output);
-  const safetyAnswer = answerCall(CONTEXT.total, CONTEXT.stable, CONTEXT.outputTokens); // 0.01043
-  const safety = planner + safetyAnswer + CHECKS.expectedRestarts * restart(CONTEXT.total);
-  const record =
-    planner +
-    answerCall(CONTEXT.recordTotal, CONTEXT.stable, CONTEXT.outputTokens) +
-    CHECKS.expectedRestarts * restart(CONTEXT.recordTotal);
-  const reference =
-    planner +
-    answerCall(CONTEXT.referenceTotal, CONTEXT.stable, CONTEXT.outputTokens) +
-    CHECKS.expectedRestarts * restart(CONTEXT.referenceTotal);
-  // "Explain" on an order card: rule result + paths + 4 passages, 150 tokens out, no planner.
-  const explain = answerCall(1_300 + 100 + 540 + 340 + 300 + 4 * 230, 1_300, 150);
+  // Sensitivity: no caching at all (every call and restart at the input price).
+  const answerNoCache = (total: number, out: number) => usd(total, p.mid.input) + usd(out, p.mid.output);
+  const restartNoCache = (total: number) => usd(total + 125, p.mid.input);
+  // Planner: the small model runs only on the 15% of questions the encoder intent classifier is unsure of.
+  const plannerShare = 0.15;
+  const plannerCall = usd(CONTEXT.plannerPrefix, p.small.cached) + usd(120, p.small.input) + usd(80, p.small.output);
+  const planner = plannerShare * plannerCall;
+  const r = CHECKS.expectedRestarts;
+  const perType = (total: number) =>
+    planner + answerCall(total, CONTEXT.stable, CONTEXT.outputTokens) + r * restart(total);
+  const perTypeNoCache = (total: number) =>
+    planner + answerNoCache(total, CONTEXT.outputTokens) + r * restartNoCache(total);
+  const safetyAnswer = answerCall(CONTEXT.total, CONTEXT.stable, CONTEXT.outputTokens);
+  const safety = perType(CONTEXT.total);
+  const record = perType(CONTEXT.recordTotal);
+  const reference = perType(CONTEXT.referenceTotal);
+  // "Explain" on an order card: rule result + paths + 4 passages, 150 tokens out, no planner; sentences checked as usual.
+  const explainTokens = 1_300 + 100 + 590 + 340 + 300 + 4 * 230; // 3,550
+  const explain = answerCall(explainTokens, 1_300, 150);
   const t = NETWORK.perType;
   const llmPerDay =
     t.safety * safety + t.record * record + t.reference * reference + ORDER_CARDS.explainsPerDay * explain;
-  // GPUs inside the PHI zone. Ingestion: 56.3M note tokens × 3 encoder passes (NER, linking, assertion) + 1 embedding
-  // pass = 225M tokens ÷ 200,000 a second = 1,126 GPU-seconds a day; run on 2 GPUs for availability and minutes-level
-  // freshness. Query side (linker, cross-encoder, checker): 2 GPUs. 4 × 24 × 2.5 = 240 USD a day.
-  const ingestTokens = NETWORK.noteTokensPerDay * 4;
-  const ingestGpuSeconds = ingestTokens / p.encoderTokensPerSecond;
-  const gpus = 4;
-  const gpuPerDay = gpus * 24 * p.gpuHour;
-  // Backfill of 10 years: 105B tokens × 4 passes ÷ 200,000 = 2.1M GPU-seconds = 583 GPU-hours ≈ 1,460 USD once.
-  const backfillGpuHours = (NETWORK.storedNoteTokens * 4) / p.encoderTokensPerSecond / 3_600;
-  const backfillUsd = backfillGpuHours * p.gpuHour;
-  // The rejected alternative: a small LLM extracts facts from every stored note: 105B input × 0.10 + 150 output tokens
-  // a note × 150M × 0.50, per million = 10,500 + 11,250 = 21,750 USD, and ten years of notes go to the vendor.
-  const llmBackfillUsd = usd(NETWORK.storedNoteTokens, p.small.input) + usd(150 * NETWORK.storedNotes, p.small.output);
-  // Stores (illustrative): knowledge graph 3 replicas; patient fact store PostgreSQL primary + replica; note-chunk
-  // vectors and passage index on 3 search nodes; gateway, orchestrator, audit, provenance and traces 150.
-  const graphPerDay = 3 * 24 * p.graphNodeHour; // 288
-  const factStorePerDay = 2 * 24 * p.dbNodeHour; // 144
-  const searchPerDay = 3 * 24 * p.dbNodeHour; // 216
+  const llmNoCachePerDay =
+    t.safety * perTypeNoCache(CONTEXT.total) +
+    t.record * perTypeNoCache(CONTEXT.recordTotal) +
+    t.reference * perTypeNoCache(CONTEXT.referenceTotal) +
+    ORDER_CARDS.explainsPerDay * answerNoCache(explainTokens, 150);
+
+  // Note linking on encoders inside the PHI zone (review item 18). Passes over note tokens: NER, assertion, embedding (3);
+  // candidate retrieval embeds each mention (≈ 10 tokens). The cross-encoder scores (mention, candidate) pairs and runs only
+  // on ambiguous mentions (small margin between the top candidates, 25%, illustrative): 20 candidates × 100 tokens a pair.
+  const ambiguousShare = 0.25;
+  const pairTokens = 20 * 100;
+  const linkTokensPerNoteMention = 10 + ambiguousShare * pairTokens; // 510
+  const ingestTokens = NETWORK.noteTokensPerDay * 3 + NETWORK.mentionsPerDay * linkTokensPerNoteMention; // 168.8M + 1.64B
+  const ingestGpuSeconds = ingestTokens / p.encoderTokensPerSecond; // ≈ 9,050 of 172,800 on 2 GPUs
+  const gpus = 4; // 2 ingestion (availability, minutes-level freshness), 2 query (linker, cross-encoder, checker)
+  const gpuPerDay = gpus * 24 * p.gpuHour; // 240
+  const backfillTokens = NETWORK.storedNoteTokens * 3 + SIZES.storedMentions * linkTokensPerNoteMention;
+  const backfillGpuHours = backfillTokens / p.encoderTokensPerSecond / 3_600;
+  const backfillUsd = backfillGpuHours * p.gpuHour; // ≈ 4,720 GPU-hours ≈ 11,800 USD
+  const backfillAtTodaysRate = backfillUsd * (NETWORK.notesAtTodaysRate / NETWORK.storedNotes); // ≈ 22,900
+  // A hosted small LLM extracts facts from every stored note: input 105.7B × 0.10 + 800 output tokens a note (40 coded
+  // mentions with spans and assertions at ≈ 20 tokens each) × 151M × 0.50, per million; ten years of notes go to a vendor.
+  const llmOutPerNote = 800;
+  const llmBackfillUsd =
+    usd(NETWORK.storedNoteTokens, p.small.input) + usd(llmOutPerNote * NETWORK.storedNotes, p.small.output);
+  // A small open LLM inside the PHI zone instead: prefill 105.7B ÷ 20,000 + decode 120.8B ÷ 2,500, GPU-seconds.
+  const selfLlmBackfillGpuHours =
+    (NETWORK.storedNoteTokens / p.smallLlmPrefillPerSecond +
+      (llmOutPerNote * NETWORK.storedNotes) / p.smallLlmDecodePerSecond) /
+    3_600;
+  const selfLlmBackfillUsd = selfLlmBackfillGpuHours * p.gpuHour; // ≈ 37,200
+  const selfLlmDailyGpuSeconds =
+    NETWORK.noteTokensPerDay / p.smallLlmPrefillPerSecond +
+    (NETWORK.notesPerDay * llmOutPerNote) / p.smallLlmDecodePerSecond; // ≈ 28,500
+
+  // Stores (illustrative). Knowledge snapshot held in memory by 3 rules-service instances (no graph database server,
+  // review item 12): 3 × 1.5 × 24 = 108. Fact store with note chunks and pgvector (one PHI store, review item 46): primary
+  // + replica 2 × 4 × 24 = 192. Passage search (no PHI) 2 × 3 × 24 = 144. Gateway, orchestrator, audit, provenance,
+  // traces 150. Storage and DR: PHI data ≈ 3.5 TB × 2 copies × 0.10 USD a GB-month ÷ 30 ≈ 24, + a warm standby (1 rules
+  // instance + 1 database node in a second region) (1.5 + 4) × 24 = 132.
+  const servicePerDay = 3 * 24 * p.serviceNodeHour;
+  const factStorePerDay = 2 * 24 * p.dbNodeHour;
+  const searchPerDay = 2 * 24 * p.searchNodeHour;
   const platformPerDay = 150;
-  const infraPerDay = gpuPerDay + graphPerDay + factStorePerDay + searchPerDay + platformPerDay; // 1,038
+  const storageDrPerDay =
+    (SIZES.phiStorageTB * 1_000 * 2 * p.storageGbMonth) / 30 + (p.serviceNodeHour + p.dbNodeHour) * 24;
+  const infraPerDay = gpuPerDay + servicePerDay + factStorePerDay + searchPerDay + platformPerDay + storageDrPerDay;
   // Licences: vocabularies free in the US (RxNorm, UMLS, SNOMED CT US Edition in a member country, LOINC: F5, F8, F9,
-  // F11). The curated drug-knowledge base is licensed; vendors do not publish prices: PLACEHOLDER 300,000 USD a year.
+  // F11). The curated drug-knowledge base is licensed; vendors do not publish prices: PLACEHOLDER 300,000 USD a year,
+  // including an AI-use rider to check (review item 35).
   const drugKbPerDay = 300_000 / 365; // 822
   // People (illustrative): 3 clinical pharmacists or informaticists + 8 engineers + 3 ML engineers = 14 × 300,000 USD
   // fully loaded ÷ 365.
@@ -331,28 +454,40 @@ export const COST = (() => {
   const gradingPerDay = (gradingPerRelease * 12) / 365;
   const auditPerDay = (100 * (5 / 60) * 120) / 7;
   const total = llmPerDay + infraPerDay + drugKbPerDay + teamPerDay + gradingPerDay + auditPerDay;
-  // Self-hosting the answer model instead (70B class, 2 nodes × 8 GPUs for availability): 16 × 24 × 2.5 = 960 USD a day.
-  const selfHostAnswerPerDay = 16 * 24 * p.gpuHour;
+  // Self-hosting the answer model instead (70B class at FP8, 2 replicas × 4 GPUs): 8 × 24 × 2.5 = 480 USD a day; a lower
+  // quality tier than the hosted mid-size model, so it must pass the same clinician gate.
+  const selfHostAnswerPerDay = 8 * 24 * p.gpuHour;
   const supported = NETWORK.questionsPerDay + NETWORK.ordersPerDay; // 58,400 decisions supported a day
   return {
-    planner,
+    plannerShare,
+    plannerCall,
     safetyAnswer,
-    safety, // ≈ 0.0109 USD: planner 0.000058 + answer 0.01043 + 0.56 restarts × 0.00069
+    safety, // ≈ 0.0110 USD
     record,
     reference,
+    explainTokens,
     explain,
-    llmPerDay, // ≈ 75 USD
+    llmPerDay, // ≈ 74 USD
+    safetyNoCache: perTypeNoCache(CONTEXT.total), // ≈ 0.0166
+    llmNoCachePerDay, // ≈ 113
+    ambiguousShare,
     ingestTokens,
     ingestGpuSeconds,
     gpus,
     gpuPerDay,
     backfillGpuHours,
     backfillUsd,
-    llmBackfillUsd,
-    graphPerDay,
+    backfillAtTodaysRate,
+    llmOutPerNote,
+    llmBackfillUsd, // ≈ 71,000
+    selfLlmBackfillGpuHours,
+    selfLlmBackfillUsd,
+    selfLlmDailyGpuSeconds,
+    servicePerDay,
     factStorePerDay,
     searchPerDay,
     platformPerDay,
+    storageDrPerDay,
     infraPerDay,
     drugKbPerDay,
     team,
@@ -360,10 +495,11 @@ export const COST = (() => {
     gradingPerRelease,
     gradingPerDay,
     auditPerDay,
-    total, // ≈ 14,170 USD a day
-    perQuestion: total / NETWORK.questionsPerDay, // ≈ 1.97 USD all-in
-    perDecision: total / supported, // ≈ 0.24 USD
-    marginalPerSafetyQuestion: safety + gpuPerDay / 2 / NETWORK.questionsPerDay, // model + query GPUs ≈ 0.027
+    total, // ≈ 14,100 USD a day
+    perQuestion: total / NETWORK.questionsPerDay,
+    perDecision: total / supported,
+    // Upper-end average: model + the query half of the GPUs spread over all 7,200 questions, added to a safety question.
+    marginalPerSafetyQuestion: safety + gpuPerDay / 2 / NETWORK.questionsPerDay,
     shares: {
       llm: llmPerDay / total,
       people: (teamPerDay + gradingPerDay + auditPerDay) / total,
@@ -371,9 +507,19 @@ export const COST = (() => {
       drugKb: drugKbPerDay / total,
     },
     selfHostAnswerPerDay,
-    selfHostRatio: selfHostAnswerPerDay / llmPerDay, // ≈ 13×
+    selfHostRatio: selfHostAnswerPerDay / llmPerDay,
     doubledLlmPerDay: llmPerDay * 2,
   };
+})();
+
+/** Audit and trace volumes (review item 32): one AuditEvent per request listing every resource read. */
+export const AUDIT = (() => {
+  const requests = NETWORK.questionsPerDay + NETWORK.hookCalls; // 130,080
+  const eventKB = 4; // one AuditEvent with ≈ 6–10 entity references
+  const answerKB = 20; // stored answer with the content of every fact read (replay shows stored inputs)
+  const auditMB = (requests * eventKB) / 1_000; // ≈ 520
+  const answersMB = (NETWORK.questionsPerDay * answerKB) / 1_000; // 144
+  return { requests, eventKB, answerKB, auditMB, answersMB, totalMB: auditMB + answersMB, retentionYears: 6 };
 })();
 
 /** Latency, p50 and p95, ms (sheet §12). All stage numbers are ESTIMATES. */
@@ -386,86 +532,133 @@ export const LATENCY = (() => {
     (CONTEXT.sentenceTokens / decode) * 1_000,
     (CONTEXT.sentenceTokens / decode) * 1_000 + 100
   ); // 312.5
-  const firstToken = s("firstToken", 500, 900); // ≈ 4,400-token prompt, mid-size, illustrative
   const checks = s("checks", CHECKS.msPerSentence, 100);
-  const traversal = { p50: 12, p95: 35 }; // one templated traversal on the in-memory knowledge graph
-  const traversals = maxDist(Array.from({ length: 6 }, () => traversal)); // 6 templates in parallel: ≈ 29 / 45
-  const fhirRead = { p50: 150, p95: 400 }; // one FHIR read from the EHR (estimate)
-  const fhir = maxDist(Array.from({ length: 4 }, () => fhirRead)); // meds, allergies, conditions, labs in parallel: ≈ 302 / 490
-  const planner = { p50: 300, p95: 600 }; // small model, JSON schema, 600-token cached prefix
-  // Planner and FHIR reads start together (the patient is in the launch context). The max of two near-equal medians
-  // (300, 302) is ≈ 379 at p50, later than either.
-  const head = maxDist([planner, fhir]);
+  const firstTokenP50 = 500; // ≈ 4,500-token prompt, mid-size, illustrative
+  const firstTokenP95 = 900; // illustrative; the target holds up to the breakpoint computed below
+  // Seven drug-centric templates in parallel on the in-memory snapshot (review item 16): expand from the seed drug to
+  // interacting ingredients and classes, dosing rules, contraindicated conditions, cross-reacting allergen classes,
+  // duplicate classes and risk properties; then an in-code join with the patient's facts (2 / 5 ms).
+  const template = { p50: 12, p95: 35 };
+  const expansion = maxDist(times(7, template)); // ≈ 30 / 46
+  const join = s("join", 2, 5);
+  // FHIR reads (review items 7, 14): MedicationRequest, MedicationStatement, MedicationAdministration (72 h),
+  // AllergyIntolerance, Condition at 150 / 400 each; the lab Observation read filtered to the LOINC codes the templates
+  // need with a date floor at 250 / 600 (paged, slower).
+  const fhirRead = { p50: 150, p95: 400 };
+  const labRead = { p50: 250, p95: 600 };
+  const fhir = maxDist([...times(5, fhirRead), labRead]); // ≈ 374 / 612
+  const classifier = { p50: 20, p95: 40 }; // encoder intent and mention classifier (85% of questions)
+  const planner = { p50: 300, p95: 600 }; // small model, JSON schema (the other 15%)
+  const headEncoder = maxDist([classifier, fhir]);
+  const headPlanner = maxDist([planner, fhir]);
   const factStore = { p50: 10, p95: 25 };
+  const plannerShare = COST.plannerShare;
 
   const pathP = (stages: readonly { p50: number; p95: number }[]) => ({
     p50: sum(stages.map((x) => x.p50)),
     p95: sum(stages.map((x) => x.p50)) + rss(stages.map((x) => x.p95 - x.p50)),
   });
+  const mix2 = (a: Dist, b: Dist, wb: number, q: number) =>
+    mixtureQuantile(
+      [
+        { weight: 1 - wb, p50: a.p50, spread: a.p95 - a.p50 },
+        { weight: wb, p50: b.p50, spread: b.p95 - b.p50 },
+      ],
+      q
+    );
 
-  // Order-select card, with the EHR's prefetch (meds, allergies, conditions, labs come in the hook call).
+  // Order-select / order-sign call, with the EHR's prefetch.
   const orderStages = [
     s("edge", 15, 30), // TLS, JWT verify (F24)
-    s("prefetch", 5, 10), // parse the prefetched FHIR bundle
-    { id: "rules", ...maxDist([traversals, factStore]) }, // traversals ‖ note-derived facts for this patient
-    s("card", 5, 10), // dedupe against coded-only results, assemble cards; audit written asynchronously
+    s("prefetch", 5, 10), // parse the prefetched FHIR bundle; UCUM normalisation
+    { id: "rules", ...maxDist([expansion, factStore]) }, // drug-centric expansion ‖ note-derived facts for this patient
+    join,
+    s("card", 5, 10), // diff against the EHR's local alert configuration, assemble cards; audit written asynchronously
   ];
   const order = pathP(orderStages);
-  // Without prefetch the service would read FHIR itself: + the slowest of 4 reads.
   const orderNoPrefetch = pathP([...orderStages, { id: "fhir", ...fhir }]);
 
-  // Drug-safety question, to the alerts event and to the first verified sentence.
-  const toAlerts = [
-    s("edge", 40, 80), // SMART token, care-team check (cached), audit
+  // Drug-safety question. Linking (review item 6): coded drug from context or exact / normalised RxNorm string match first,
+  // embedding candidates only as a fallback; 50 / 90 ms budgets the fallback (the common case is faster).
+  const toAlerts = (head: Dist) => [
+    s("edge", 40, 80), // SMART token, patient-context check, care-team check (cached), audit
     { id: "head", ...head },
-    s("link", 50, 90), // embed the drug mention, ANN over 3M names, rerank top 20
-    { id: "traverse", ...traversals },
+    s("link", 50, 90),
+    { id: "expand", ...expansion },
+    join,
     s("alertsOut", 10, 20),
   ];
   const toContext = [s("passages", 60, 120), s("rerank", 80, 120), s("context", 10, 20)];
-  const write = [firstToken, sentence, checks];
-  const safetyAlerts = pathP(toAlerts);
-  const safetyFirst = pathP([...toAlerts, ...toContext, ...write]);
-  // Correlated case: planner, first token and sentence share the model provider; their spreads add linearly.
-  const indep = [...toAlerts, ...toContext, ...write].filter((x) => !["head", "firstToken", "sentence"].includes(x.id));
-  const correlatedSpread = head.p95 - head.p50 + (firstToken.p95 - firstToken.p50) + (sentence.p95 - sentence.p50);
-  const safetyFirstCorrelatedP95 = safetyFirst.p50 + rss([...indep.map((x) => x.p95 - x.p50), correlatedSpread]);
+  const safetyFirstFor = (head: Dist, ftP95: number, plannerCorrelated: boolean) => {
+    const ft = s("firstToken", firstTokenP50, ftP95);
+    const stages = [...toAlerts(head), ...toContext, ft, sentence, checks];
+    const base = pathP(stages);
+    // Correlated tails: first token and sentence (and the planner when it runs) share the model provider.
+    const corrIds = plannerCorrelated ? ["head", "firstToken", "sentence"] : ["firstToken", "sentence"];
+    const indep = stages.filter((x) => !corrIds.includes(x.id));
+    const corrSpread = sum(stages.filter((x) => corrIds.includes(x.id)).map((x) => x.p95 - x.p50));
+    return { p50: base.p50, p95: base.p95, p95Corr: base.p50 + rss([...indep.map((x) => x.p95 - x.p50), corrSpread]) };
+  };
   // Restart after a dropped first sentence: cached-prompt first token 300 + a sentence + checks = 672.5 ms.
   const restartMs = 300 + sentence.p50 + checks.p50;
-  const withDrops = (p50: number, p95: number) =>
-    mixtureQuantile(
-      [
-        { weight: 1 - CHECKS.drop, p50, spread: p95 - p50 },
-        { weight: CHECKS.drop, p50: p50 + restartMs, spread: p95 - p50 },
-      ],
-      0.95
-    );
-  const safetyFirstP95 = withDrops(safetyFirst.p50, safetyFirst.p95);
-  const safetyFirstCorrelatedP95WithDrops = withDrops(safetyFirst.p50, safetyFirstCorrelatedP95);
+  const withDrops = (d: Dist): Dist => {
+    const parts = [
+      { weight: 1 - CHECKS.drop, p50: d.p50, spread: d.p95 - d.p50 },
+      { weight: CHECKS.drop, p50: d.p50 + restartMs, spread: d.p95 - d.p50 },
+    ];
+    return { p50: mixtureQuantile(parts, 0.5), p95: mixtureQuantile(parts, 0.95) };
+  };
+  const alertsEnc = pathP(toAlerts(headEncoder));
+  const alertsPlan = pathP(toAlerts(headPlanner));
+  const safetyAlerts = {
+    p50: mix2(alertsEnc, alertsPlan, plannerShare, 0.5),
+    p95: mix2(alertsEnc, alertsPlan, plannerShare, 0.95),
+  };
+  const gatedFirst = (ftP95: number) => {
+    const e = safetyFirstFor(headEncoder, ftP95, false);
+    const pl = safetyFirstFor(headPlanner, ftP95, true);
+    const eD = withDrops({ p50: e.p50, p95: e.p95Corr });
+    const pD = withDrops({ p50: pl.p50, p95: pl.p95Corr });
+    return { p50: mix2(eD, pD, plannerShare, 0.5), p95: mix2(eD, pD, plannerShare, 0.95) };
+  };
+  const enc = safetyFirstFor(headEncoder, firstTokenP95, false);
+  const safetyFirstIndependent = enc; // encoder route, independent tails, no drops
+  const safetyFirst = gatedFirst(firstTokenP95); // the gated value: both routes, correlated tails, drops
+  // Breakpoint (review item 15): the vendor first-token p95 at which the gated p95 reaches the 3,000 ms target.
+  let lo = firstTokenP50 + 1;
+  let hi = 5_000;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (gatedFirst(mid).p95 < 3_000) lo = mid;
+    else hi = mid;
+  }
+  const firstTokenP95Breakpoint = (lo + hi) / 2;
 
   // Complete answer: first token, then 250 tokens at 80 a second (p95 at 65), last check 60; each restart (a dropped
-  // sentence is not replaced) adds the restart first token 300 + checks 60 = 360 ms, at most 2.
+  // sentence is not replaced) adds the restart first token 300 + checks 60 = 360 ms, at most 2. Encoder route.
   const genP50 = (CONTEXT.outputTokens / decode) * 1_000; // 3,125
   const genP95 = (CONTEXT.outputTokens / decodeP95) * 1_000; // 3,846
-  const beforeFirstToken = [...toAlerts, ...toContext];
-  const completeBase = pathP([...beforeFirstToken, firstToken, s("generate", genP50, genP95), checks]);
+  const completeBase = pathP([
+    ...toAlerts(headEncoder),
+    ...toContext,
+    s("firstToken", firstTokenP50, firstTokenP95),
+    s("generate", genP50, genP95),
+    checks,
+  ]);
   const restartAdd = 300 + CHECKS.msPerSentence; // 360
+  const spread = completeBase.p95 - completeBase.p50;
   const completeParts = [
-    { weight: CHECKS.p0, p50: completeBase.p50, spread: completeBase.p95 - completeBase.p50 },
-    { weight: CHECKS.p1, p50: completeBase.p50 + restartAdd, spread: completeBase.p95 - completeBase.p50 },
-    {
-      weight: 1 - CHECKS.p0 - CHECKS.p1,
-      p50: completeBase.p50 + 2 * restartAdd,
-      spread: completeBase.p95 - completeBase.p50,
-    },
+    { weight: CHECKS.p0, p50: completeBase.p50, spread },
+    { weight: CHECKS.p1, p50: completeBase.p50 + restartAdd, spread },
+    { weight: 1 - CHECKS.p0 - CHECKS.p1, p50: completeBase.p50 + 2 * restartAdd, spread },
   ];
   const safetyComplete = { p50: mixtureQuantile(completeParts, 0.5), p95: mixtureQuantile(completeParts, 0.95) };
 
-  // Record question: no rule traversal on the path; question embedding 10 + exact search in one patient's 250 chunks 5
-  // + patient fact query 20 (in parallel with the chunk search) instead of link + traverse.
+  // Record question (encoder route): question embedding 10 + exact search in one patient's chunks (pgvector, 5 / 15) ‖
+  // fact query (20 / 50), then rerank and context.
   const recordStages = [
     s("edge", 40, 80),
-    { id: "head", ...head },
+    { id: "head", ...headEncoder },
     s("embed", 10, 20),
     {
       id: "facts",
@@ -476,26 +669,33 @@ export const LATENCY = (() => {
     },
     s("rerank", 80, 120),
     s("context", 10, 20),
-    ...write,
+    s("firstToken", firstTokenP50, firstTokenP95),
+    sentence,
+    checks,
   ];
-  const recordFirst = pathP(recordStages);
-  const recordFirstP95 = withDrops(recordFirst.p50, recordFirst.p95);
+  const recordBase = pathP(recordStages);
+  const recordFirst = withDrops(recordBase);
 
+  // Values (p50 / p95, ms): expansion ≈ 30 / 46; FHIR ≈ 374 / 612; order ≈ 58 / 81 (no prefetch ≈ 431 / 671); alerts
+  // ≈ 515 / 761; first verified sentence ≈ 1,561 / 2,246 gated (encoder route independent ≈ 1,529 / 2,016); breakpoint
+  // vendor first-token p95 ≈ 1,736; complete ≈ 4,535 / 5,508; record ≈ 1,428 / 2,023.
   return {
     decode,
-    traversals,
+    expansion,
     fhir,
-    head,
-    order, // ≈ 54 / 77 ms
-    orderNoPrefetch, // ≈ 356 / 545 ms: over 500 at p95, so prefetch is required
-    safetyAlerts, // ≈ 508 / 743 ms
-    safetyFirst, // ≈ 1,530 / 2,012 ms (independent tails, no drops)
-    safetyFirstP95, // ≈ 2,146 with drops
-    safetyFirstCorrelatedP95WithDrops, // ≈ 2,364: the gated value
+    headEncoder,
+    headPlanner,
+    order,
+    orderNoPrefetch,
+    safetyAlerts,
+    safetyFirstIndependent,
+    safetyFirst,
+    firstTokenP95,
+    firstTokenP95Breakpoint,
     restartMs,
-    safetyComplete, // ≈ 4,537 / 5,508 ms
-    recordFirst, // ≈ 1,411 / 1,889 ms
-    recordFirstP95, // ≈ 2,023 with drops
+    safetyComplete,
+    recordBase,
+    recordFirst,
   };
 })();
 
@@ -503,7 +703,7 @@ export const LATENCY = (() => {
 export const TARGETS = (() => {
   const L = LATENCY;
   const rows = [
-    { id: "order", label: "Order-select card", p50: L.order.p50, p95: L.order.p95, targetP50: 200, targetP95: 500 },
+    { id: "order", label: "Order hook card", p50: L.order.p50, p95: L.order.p95, targetP50: 200, targetP95: 500 },
     {
       id: "alerts",
       label: "Safety question: alerts shown",
@@ -514,9 +714,9 @@ export const TARGETS = (() => {
     },
     {
       id: "first",
-      label: "Safety question: first verified sentence (correlated tails, drops)",
+      label: "Safety question: first verified sentence (both routes, correlated tails, drops)",
       p50: L.safetyFirst.p50,
-      p95: L.safetyFirstCorrelatedP95WithDrops, // ≈ 2,364: the gated value
+      p95: L.safetyFirst.p95,
       targetP50: 2_000,
       targetP95: 3_000,
     },
@@ -532,7 +732,7 @@ export const TARGETS = (() => {
       id: "record",
       label: "Record question: first verified sentence",
       p50: L.recordFirst.p50,
-      p95: L.recordFirstP95,
+      p95: L.recordFirst.p95,
       targetP50: 2_000,
       targetP95: 3_000,
     },
@@ -540,18 +740,35 @@ export const TARGETS = (() => {
   return rows.map((r) => ({ ...r, meets: r.p50 <= r.targetP50 && r.p95 <= r.targetP95 }));
 })();
 
-/** Evaluation sets and their 95% confidence half-widths (sheet §13). */
+/** Evaluation sets and their 95% intervals (sheet §13). */
 export const EVAL = (() => {
   const half = (p: number, n: number) => 1.96 * Math.sqrt((p * (1 - p)) / n);
   const ruleOfThree = (n: number) => 3 / n; // 95% upper bound on a rate after 0 failures in n
-  const highPriorityCases = 15 * 10; // 15 pairs (F15) × 10 orderable variants (brand, generic, combination, class member)
-  const majorSample = 2_000;
+  const highPriorityCases = 15 * 10; // 15 pairs (F15) × 10 orderable variants
+  const majorSample = 2_000; // gate 2,000 of 2,000 (review item 9)
   const linkingNotes = 200;
   const linkingMentions = linkingNotes * NETWORK.mentionsPerNote; // 8,000
   const medMentions = 1_600;
   const problemMentions = 3_000;
   const clinicianSet = 600;
   const abstentionSet = 150;
+  // Slices added after review (counts illustrative): outside-lab units 200, allergy semantics (intolerance, refuted,
+  // NKDA vs empty) 150, look-alike drug names 100, cumulative risk 100, route and dose form 100, wrong patient and merges
+  // 20, restricted notes 30, conflicts 50, untemplated safety questions 50, unmapped and inactive codes 100.
+  const slices = {
+    units: 200,
+    allergy: 150,
+    lasa: 100,
+    cumulative: 100,
+    route: 100,
+    wrongPatient: 20,
+    restricted: 30,
+    conflicts: 50,
+    untemplated: 50,
+    unmapped: 100,
+  };
+  // Retrospective replay: 12 months of de-identified orders with pharmacist interventions.
+  const replayOrders = NETWORK.ordersPerDay * 365; // 18.7M
   return {
     highPriorityCases,
     highPriorityUpperMiss: ruleOfThree(highPriorityCases), // 2%
@@ -566,21 +783,28 @@ export const EVAL = (() => {
     clinicianSet,
     clinicianHalfWidth: half(0.95, clinicianSet), // ± 1.7 points
     abstentionSet,
-    abstentionHalfWidth: half(0.95, abstentionSet), // ± 3.5 points
+    abstentionWilson: wilson(0.95, abstentionSet), // ≈ 90.2% – 97.3%
     checkerSentences: 2_000,
     checkerUnsupported: 500,
     checkerFalseAcceptHalfWidth: half(CHECKS.falseAccept, 500), // ± 1.9 points
+    unitsWilsonAtZero: wilson(0, slices.units), // 0 of 200 errors → upper ≈ 1.9%
     humanAgreementCeiling: 0.742, // n2c2 2019 after adjudication (F30)
+    slices,
+    replayOrders,
   };
 })();
 
-/** Freshness and abstention rates (sheet §4 N7, §15.3). ESTIMATES. */
+/** Freshness, recency and abstention rates (sheet §4 N7, §15.3). ESTIMATES. */
 export const FRESHNESS = {
-  projectionP50Seconds: 30, // EHR event → patient fact store
+  projectionP50Seconds: 30, // EHR feed (HL7 v2 via the interface engine) → fact store
   projectionP95Minutes: 5,
   noteLinkedP95Minutes: 15, // signed note → linked facts
-  kbPromoteDays: 7, // vendor release → regression gate → live
-  labWindowDays: 90, // a renal-dosed drug needs an eGFR within 90 days, or the answer names it as missing (illustrative)
+  kbPromoteDays: 7, // routine vendor release → regression gate → live
+  urgentPromoteHours: 24, // pharmacist-authored local edge for a boxed warning, recall or new contraindication
+  renalRecencyInpatientHours: 48, // a renal input for an inpatient older than this is stale
+  renalRecencyOutpatientDays: 90,
+  medAdministrationWindowHours: 72,
   partialAbstainShare: 0.08, // safety questions with at least one missing or stale input, named in the answer
-  fullAbstainShare: 0.02, // drug not linkable or not in the knowledge base: rules cannot run
+  fullAbstainShare: 0.02, // drug not linkable, not mapped or not covered: rules cannot run
+  confirmTapShare: 0.03, // safety questions where the resolved drug needs a tap to confirm (low score or look-alike)
 } as const;
