@@ -834,7 +834,16 @@ function buildLatency(reasoning: number) {
     explanationText,
     writerMediumExplanation,
     decodeBreakpointExplanation,
-    stages: { generatedStages, documentStages, planText, middle },
+    stages: {
+      generatedStages,
+      documentStages,
+      planText,
+      middle,
+      // Added for the kg-semi/latency waterfall (no value changed): the encoder-slotted graph template route, and the
+      // writer's stages at this reasoning budget.
+      templateStages: [edge, routeAndMatch, slotsByEncoder, link, ...run, render],
+      writerStages: writer(reasoning),
+    },
   };
 }
 export const LATENCY = buildLatency(REASONING.low);
