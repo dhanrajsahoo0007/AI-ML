@@ -148,3 +148,26 @@ describe("gcase-kghealth: the clinical knowledge-graph assistant's numbers", () 
     expect(NETWORK.storedNotes).toBe(247_000_000);
   });
 });
+
+describe("gcase-kgsemi: the semiconductor yield assistant's numbers", () => {
+  it("keeps the fab's volumes and the question mix of the design sheet", async () => {
+    const { FAB, USERS, REASONING } = await import("@/components/diagrams/presets/gcase-kgsemi");
+    expect(FAB.wspm).toBe(40_000);
+    expect(Math.round(FAB.lotsPerDay)).toBe(53);
+    expect(FAB.tools).toBe(1_100);
+    expect(USERS.perDay).toBe(1_080);
+    expect(USERS.lookups + USERS.documents + USERS.investigations).toBe(USERS.perDay);
+    expect(REASONING).toEqual({ low: 80, medium: 300 });
+  });
+});
+
+describe("gcase-kgsemi: the candidate families after the interviewer pass", () => {
+  it("counts tool at a step and batch runs as lot-level candidates", async () => {
+    const { STATS, REVIEW_ADDS } = await import("@/components/diagrams/presets/gcase-kgsemi");
+    expect(STATS.withinLot).toBe(5_360);
+    expect(STATS.lotLevel).toBe(1_680);
+    expect(STATS.tests).toBe(7_040);
+    expect(Math.round(STATS.chanceHits)).toBe(352);
+    expect(REVIEW_ADDS.wipAtRiskStep).toBe(725);
+  });
+});

@@ -431,26 +431,31 @@ export const STATS = (() => {
   // test side (probe cards, testers, programs) 90 + reticles 150.
   // Two families (review item R2-5). Within-lot kinds vary inside a lot: chamber at step (560 × ≈ 6), chamber at any
   // step (1,200), recipe bodies (300), maintenance and state windows (500): 5,360. Lot-level kinds take one value per
-  // lot: material lots (200), test side (90), reticles (150): 440. E-test and metrology are evidence (continuous
-  // summaries), not candidates; slot and batch position are stratification covariates (review item R2-7).
+  // lot: material lots (200), test side (90), reticles (150), tool at a step (dispatch sends a lot to one tool:
+  // 560 steps × ≈ 2 tools = 1,120, illustrative) and batch-tool runs (≈ 60 batch steps × ≈ 2 tools = 120, the WET07
+  // class): 1,680 (interviewer pass B2). A tool-wide cause raises every chamber of the tool, so it shows no within-lot
+  // difference; tool at a step catches it as a lot-level candidate on residual wafers. E-test and metrology are
+  // evidence (continuous summaries), not candidates; slot and batch position are stratification covariates (R2-7).
+  const toolAtStep = FAB.processSteps * 2; // 1,120
+  const batchRuns = 60 * 2; // 120
   const withinLot = FAB.processSteps * 6 + 1_200 + 300 + 500; // 5,360
-  const lotLevel = 200 + 90 + 150; // 440
-  const tests = withinLot + lotLevel; // 5,800
+  const lotLevel = 200 + 90 + 150 + toolAtStep + batchRuns; // 1,680
+  const tests = withinLot + lotLevel; // 7,040
   const alpha = 0.05;
   const alphaWithin = 0.04; // α split across the two families (family-wise ≤ 0.05)
   const alphaLot = 0.01;
-  const chanceHits = tests * alpha; // 290 at p < 0.05 each, both families
+  const chanceHits = tests * alpha; // 352 at p < 0.05 each, both families
   const chanceHitsWithin = withinLot * alpha; // 268
-  const chanceHitsLot = lotLevel * alpha; // 22
-  const bonferroni = alpha / tests; // 8.6e-6
-  const byFactor = Math.log(tests) + 0.5772; // 9.24: Benjamini–Yekutieli's cost under arbitrary dependence
+  const chanceHitsLot = lotLevel * alpha; // 84
+  const bonferroni = alpha / tests; // 7.1e-6
+  const byFactor = Math.log(tests) + 0.5772; // 9.44: Benjamini–Yekutieli's cost under arbitrary dependence
   // Max-T (Westfall–Young): permute the signature labels within each lot 10,000 times; each candidate's adjusted p is
-  // the share of permutations whose MAXIMUM statistic over all 5,800 candidates beats its observed one. Family-wise
+  // the share of permutations whose MAXIMUM statistic over all 7,040 candidates beats its observed one. Family-wise
   // error control under any dependence between candidates; the floor is 1 ÷ 10,001.
   const permutations = 10_000;
   const permutationFloor = 1 / (permutations + 1); // ≈ 1.0e-4
   const wordsPerCandidate = Math.ceil(discovery.wafers / 64); // 12 64-bit words of a wafer bitset
-  const permutationWordOps = tests * wordsPerCandidate * permutations; // 696M AND-popcounts (≈ 0.5 s on a few cores)
+  const permutationWordOps = tests * wordsPerCandidate * permutations; // 845M AND-popcounts (≈ 0.6 s on a few cores, estimate)
   const preRegistered = 3; // top hypotheses carried to the held-out lots
   const confirmAlpha = alpha / preRegistered; // 0.0167
   // Early case (review item R2-8): confirmation needs held-out lots giving ≥ 80% power at the discovered effect; below
@@ -525,6 +530,8 @@ export const STATS = (() => {
     after,
     withinLot,
     lotLevel,
+    toolAtStep,
+    batchRuns,
     tests,
     alphaWithin,
     alphaLot,
@@ -1093,3 +1100,15 @@ export const FRESHNESS = {
   gapAfterMin: 10, // a source more than 10 minutes behind is a gap on any answer that used it
   documentsToGraphDays: 1,
 } as const;
+
+/** Values the page uses after the interviewer pass (review/kg-semiconductor-case-study-interviewer.md), with working. */
+export const REVIEW_ADDS = (() => {
+  // WIP at risk at the step: 4 ETCH04 PX7 lots a day × 6.25 B wafers × 29 days of sort lag ≈ 725 wafers.
+  const wipAtRiskStep = 4 * (FAB.lotSize / 4) * 29; // 725
+  // People premium for on-site serving: half an ML engineer at 300,000 USD a year (illustrative) ≈ 411 USD a day.
+  const peoplePremiumPerDay = (0.5 * 300_000) / 365; // 410.96
+  // Timing base rate: (3.15 + 2.1 + 1.05) events a chamber a month ≈ 0.21 a day; a ±1-day window ≈ 1 − e^−0.42.
+  const chamberEventsPerDay = (3.15 + 2.1 + 1.05) / 30; // 0.21
+  const timingCoincidence = 1 - Math.exp(-2 * chamberEventsPerDay); // ≈ 0.34
+  return { wipAtRiskStep, peoplePremiumPerDay, chamberEventsPerDay, timingCoincidence };
+})();
