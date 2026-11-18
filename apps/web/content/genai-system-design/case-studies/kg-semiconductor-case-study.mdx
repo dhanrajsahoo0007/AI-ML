@@ -26,7 +26,7 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
     "Ontology and identity resolution before the model",
     "What lives in the graph, the columnar store and the sensor store, and how they join",
     "Safe and correct generated queries over two stores",
-    "Statistics in code (dependence, multiplicity, time) with effect sizes and held-out confirmation",
+    "Statistics in code (dependence, multiplicity, time) with effect sizes and held-out replication",
     "On-site models with their reasoning tokens, and evaluation with a few hundred labelled incidents",
   ]}
   clarify={[
@@ -42,9 +42,9 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
 
 ## Overview
 
-- **Ontology and identity first.** Types follow SEMI E120 and E10 (equipment and states), E90 (wafer locations) and E164 (parameter names); one master id per tool, chamber, part, recipe body, probe card and reticle, and every literal in a question is linked to one before any query runs.
+- **Ontology and identity first.** Types follow SEMI E120 and E10 (equipment and states), E90 (wafer locations) and E164 (common EDA metadata; most sensor names stay vendor-specific and go through the identity map); one master id per tool, chamber, part, recipe body, probe card and reticle, and every literal in a question is linked to one before any query runs.
 - **Three stores, one key set, one guarded path.** The graph holds relations (≈ 62.7M nodes, ≈ 237.6M edges, ≈ 41.1 GB); the columnar store holds wafer-level rows (1.92B over 5 years); the FDC store keeps the samples (≈ 1.77 × 10¹¹ a day). The model reaches both queryable stores only through 40 templates or guarded queries under read-only scoped roles.
-- **Statistics in code that hold up.** Time-matched cohorts, within-lot comparisons, a 10,000-permutation max-T over 5,800 candidates in two ordered families, and the top 3 confirmed on 50 held-out lots. Engineers see effect sizes with lot-cluster intervals, never a raw p-value.
+- **Statistics in code that hold up.** Time-matched cohorts, within-lot comparisons, max-T over 7,040 candidates in two ordered families (wafer labels permuted within lots, then lot labels within process days), and the top 3 replicated on 50 held-out lots. Engineers see effect sizes with lot-cluster intervals, never a raw p-value.
 - **Hypotheses, not verdicts.** A ranker in code scores effect size, timing, mechanism path, sensor evidence and past cases, calibrated on replay; a "checked and not supported" list says what was ruled out and why. The model writes the explanation; the engineer records the verdict.
 - **Everything on site, reasoning tokens counted.** An open-weight reasoning model (gpt-oss-120b class, Apache 2.0) on two hosts at low effort, with 80 hidden tokens a call budgeted; encoders fill template slots so 56% of lookups need no model call before the table.
 - **Fresh, and honest about completeness.** MES track-outs reach the graph in ≈ 5 s p50; E10 state changes within 2 minutes; a downtime with no maintenance record yet is a named gap, and a late, backdated record flags the answers it would have changed.
@@ -52,15 +52,15 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
 <Numbers
   items={[
     { value: "6.0 s", label: "ranked hypotheses, p50", hint: "≈ 9.0 s p95, before the model writes (estimates)" },
-    { value: "5,800", label: "candidates in two families", hint: "290 chance hits at p below 0.05 without max-T" },
+    { value: "7,040", label: "candidates in two families", hint: "352 chance hits at p below 0.05 without max-T" },
     { value: "9,950 USD", label: "a day, all-in (estimate)", hint: "83% people, 2.4% GPUs" },
-    { value: "107 USD", label: "a day to keep models on site", hint: "1.1% of the total, against a hosted API" },
+    { value: "107 USD", label: "GPU premium a day for on-site models", hint: "1.1% of the total; ≈ 5% with the people it needs" },
   ]}
 />
 
 <KeyIdea>The graph remembers how every wafer travelled; code decides which differences are real, with effect sizes, inside the same lots and the same days; the model plans the search and explains the evidence. It proposes hypotheses for an engineer to confirm, never a root cause.</KeyIdea>
 
-- **Fab terms:** a lot is 25 wafers in a FOUP (the sealed carrier); the route is the ordered list of steps; a tool has chambers; a recipe is the logical PPID in MES and the body actually downloaded to the tool; an excursion is a yield drop beyond control limits; PM is preventive maintenance.
+- **Fab terms:** a lot is 25 wafers in a FOUP (the sealed carrier); the route is the ordered list of steps; a tool has chambers; a recipe is the MES logical recipe, mapped to a tool’s PPID (the SECS/GEM process program id), and the body actually on the tool; an excursion is a yield drop beyond control limits; PM is preventive maintenance.
 - **Fab systems:** MES (execution), FDC (sensor fault detection), SPC (statistical process control), YMS (yield management), CMMS (maintenance), RMS (recipes); wafer sort is the electrical test that gives each die a bin and each wafer a map, whose spatial pattern is a signature.
 - **Analysis terms:** commonality analysis asks what bad wafers shared that good ones did not; FMEA rows and 8D reports are the fab's written failure knowledge; Cypher is the graph query language; effect size is the difference in rates; family-wise error is the chance of any false hit among many tests.
 
@@ -72,7 +72,7 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
     { id: "F1", requirement: "Investigate “why did yield drop on these lots?” and return ranked hypotheses with evidence", notes: "Lots picked in YMS or named; metric from the semantic layer; per hypothesis: effect size with interval, lots involved, change-point, what else changed, mechanism path, sensor summary, past cases, confidence, checks, WIP at risk; a “checked and not supported” list" },
     { id: "F2", requirement: "Answer lookups over the graph and the columnar store", notes: "Templates first (28 graph, 12 cross-store); guarded Cypher or SQL second; every literal linked to a master id; the query shown with the result" },
     { id: "F3", requirement: "Answer document questions with citations", notes: "SOPs, FMEA rows, 8D reports, equipment manuals; cited to a section or row" },
-    { id: "F4", requirement: "Keep the stores current from fab systems", notes: "MES track-in and track-out, E90 locations, E10 state changes, FDC holds and indicators, SPC, work orders and part installs, recipe bodies as downloaded, APC adjustments, metrology, e-test, sort" },
+    { id: "F4", requirement: "Keep the stores current from fab systems", notes: "MES track-in and track-out, E90 locations, E10 state changes, FDC holds and indicators, SPC, work orders and part installs, recipe body verifications, APC adjustments, metrology, e-test, sort" },
     { id: "F5", requirement: "Resolve identities across systems", notes: "One node per tool, chamber, part, recipe body, probe card, reticle, lot and wafer; lot genealogy (splits, merges, rework, re-ID); FDC traces matched by context; quarantine after a 10-minute hold" },
     { id: "F6", requirement: "Record verdicts and grow the knowledge base", notes: "Confirmed, rejected or inconclusive with evidence ids, by the 8D owner, with `ranking_seen`; confirmed causes become `ExcursionCase` nodes; extracted FMEA and 8D triples enter only after approval" },
     { id: "F7", requirement: "Enforce scope, audit and reproduce", notes: "Module, product-family and recipe-detail scopes on every store; every query, answer, watermark and ontology version stored; as-of replay on bitemporal data" },
@@ -87,12 +87,12 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
   kind="non-functional"
   rows={[
     { id: "N1", property: "Investigation quality", target: "Rolling-origin replay of 270 confirmed excursions: true cause in the top 3 ≥ 70% (Wilson 64.3–75.2%), top 1 ≥ 45% (± 5.9); candidate-kind coverage ≥ 90%; beats the YMS screen on paired cases (McNemar); 2,000 seeded faults in the top 3 ≥ 90%; 1,000 null replays with a “high” hypothesis ≤ 5%", why: "Hsu et al. (paper, 2012) report that greedy commonality in industry practice “usually does not” rank the root cause first" },
-    { id: "N2", property: "Query correctness", target: "Template lookups ≥ 95% execution accuracy (300 incl. 100 cross-store, ± 2.5); generated ≥ 80% (150, ± 6.4; re-set after measuring the model); 50 misspelled names never return “no rows”; “wrong but valid” ≤ 5%; 0 of 300 bypass attempts executed", why: "On the 2024 benchmarks zero-shot Text2Cypher scored about 30% to 62%; a valid query with a wrong join returns a plausible answer" },
+    { id: "N2", property: "Query correctness", target: "Template lookups ≥ 95% execution accuracy (300 incl. 100 cross-store, ± 2.5); generated ≥ 80% (150, ± 6.4; re-set after measuring the model); 50 misspelled names never return “no rows”; “wrong but valid” ≤ 5%; 0 of 300 constructed bypass attempts executed", why: "On the 2024 benchmarks the best zero-shot execution accuracy was 61.58% (under 20% below 10B parameters) and the best model on Neo4j’s strict match ≈ 30%; a valid query with a wrong join returns a plausible answer" },
     { id: "N3", property: "Calibration and wording (safety)", target: "“High” confirmed ≥ 60% on replay with the Wilson lower bound ≥ 50% (n ≈ 100); “low” ≤ 30%; no output says “the root cause is”; every number in the text appears in the evidence; no raw p-value shown", why: "A fluent wrong cause wastes a split-lot test or inhibits a good chamber" },
     { id: "N4", property: "Identity coverage", target: "100% of process chambers mapped in MES, FDC and CMMS; true unmapped ≤ 0.1% of events a day; FDC trace context match ≥ 99.5% per tool type", why: "A split chamber loses its timing and sensor evidence" },
     { id: "N5", property: "Latency per request type (p50 / p95, reasoning included)", target: "Lookups, all routes ≤ 1.5 / 5.0 s; template routes ≤ 1.0 / 3.0 s; generated ≤ 4.0 / 7.0 s; document first verified sentence ≤ 2.0 / 4.0 s; investigation plan ≤ 2.0 / 4.0 s; ranked hypotheses ≤ 8 / 15 s; explanation ≤ 15 / 25 s", why: "A long spinner loses engineers to the YMS screen; each tail route (repaired, timed out) is gated on its own" },
     { id: "N6", property: "IP boundary and scope", target: "0 bytes of fab data or prompts leave the site; recipe values readable only within the owner module; 0 leaks on 200 prompts (≤ 1.5% at 95%); truncated traversals report “n hidden by scope”", why: "Trade secrets and controlled technology" },
-    { id: "N7", property: "Freshness, two kinds", target: "Pipeline: MES track-out → graph ≤ 5 s p50, ≤ 60 s p95; recipe downloads ≤ 5 min; sort ≤ 15 min. Source: E10 changes ≤ 2 min p95; CMMS lag measured per source and shown as a gap", why: "The PM done an hour ago may not be in CMMS yet; the equipment state change is" },
+    { id: "N7", property: "Freshness, two kinds", target: "Pipeline: MES track-out → graph ≤ 5 s p50, ≤ 60 s p95; recipe verifications ≤ 5 min; sort ≤ 15 min. Source: E10 changes ≤ 2 min p95; CMMS lag measured per source and shown as a gap", why: "The PM done an hour ago may not be in CMMS yet; the equipment state change is" },
     { id: "N8", property: "Availability", target: "99.5% in day shifts; a model outage leaves templates, statistics and the hypotheses table working", why: "Not on the production control path" },
     { id: "N9", property: "Cost", target: "Report all-in per day; size GPUs for availability, not throughput", why: "Volume is small; people dominate" },
     { id: "N10", property: "Read-only", target: "No write to MES, RMS, CMMS, FDC, YMS, the graph’s fab data or the columnar store; the only writes are verdicts, flags and audit", why: "A hold or an inhibit is an engineer’s action in the system of record" },
@@ -114,7 +114,7 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
     { quantity: "Sensor samples", assumption: "200 parameters × 10 Hz × 120 s = 240,000 a trace (rates from industry reporting) × 736,438; 10 bytes a sample; 10× compression (assumed)", result: "1.77 × 10¹¹ samples a day; 1.77 TB raw, 177 GB stored a day; ≈ 129 TB over 2 years" },
     { quantity: "Graph nodes", assumption: "Execution 2 years (runs 30.7M, sort insertions, inspections); events, genealogy, recipe bodies, material lots 5 years; 5% corrections as new versions", result: "≈ 62.7M nodes, of which ≈ 24.9M events" },
     { quantity: "Graph edges and size", assumption: "6.7 a run (lot, step, tool, recipe body, 2.5 chamber visits, 0.2 material) = 205.8M + events 24.9M + wafer, sort, holds 6.7M; 200 B a node, 120 B an edge", result: "≈ 237.6M edges, ≈ 41.1 GB: in memory on one 128 GB server (5 years of execution would be ≈ 87.4 GB)" },
-    { quantity: "What stays out of the graph", assumption: "Wafer-level chamber visits 736,438 a day × 730; samples ÷ edges", result: "537.6M edges avoided (2.3× the rest); samples are ≈ 744× the whole graph every day" },
+    { quantity: "What stays out of the graph", assumption: "Wafer-level chamber visits 736,438 a day × 730; samples ÷ edges", result: "537.6M edges avoided (2.3× the rest); samples are ≈ 744× the graph’s edge count every day (≈ 43× its bytes, raw)" },
     { quantity: "Columnar rows", assumption: "1,052,055 wafer-step rows a day × 1,826 days (the 5-year replay horizon) × 40 B; FDC indicators 30 a trace for 2 years", result: "1.92B rows ≈ 77 GB; 16.1B indicator values ≈ 64.5 GB; ≈ 2.7B metrology, e-test and APC values" },
     { quantity: "Questions", assumption: "360 engineers × 50% active × 6 a day", result: "1,080 a day: lookups 648, documents 270, investigations 162; ≈ 60 excursions a year close with a confirmed cause" },
     { quantity: "Lookup routes", assumption: "70% templates (80% of those slotted by the encoder; 40% cross-store); 30% generated; 8% of generated repaired once; 0.5% time out", result: "56% of lookups get their table with no model call before it" },
@@ -125,8 +125,8 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
     { quantity: "Licences", assumption: "Weights Apache 2.0: 0; graph database enterprise edition (role and property access control): placeholder 150,000 USD a year", result: "411 USD a day (placeholder)" },
     { quantity: "People", assumption: "2 knowledge + 4 data + 2 ML engineers + 1 yield analyst + 1 SRE = 10 × 300,000 USD ÷ 365", result: "8,219 USD a day" },
     { quantity: "Fab engineers’ time", assumption: "FMEA backlog 20,000 rows × 1 min at 150 USD an hour over 2 years (68.5) + new rows (24.7) + 10 min of verdict × 3 excursions (75) + lookup grading (49)", result: "217 USD a day" },
-    { quantity: "Per day, all-in", assumption: "1,098 + 411 + 8,219 + 49 + 168", result: "≈ 9,950 USD: people 82.6%, infrastructure 11.0% (GPUs 2.4%), licence 4.1%, engineers 2.2%; 9.21 USD a question, 0.22 of it GPU" },
-    { quantity: "Hosted model instead (rejected)", assumption: "Every generative call incl. reasoning at 2.00 in / 10.00 out per million (12.5 USD) + 2 encoder GPUs still on site (120)", result: "132.5 USD a day: on site costs ≈ 107.5 USD a day more, 1.1% of the total" },
+    { quantity: "Per day, all-in", assumption: "1,098 + 411 + 8,219 + 217 (engineers’ time, incl. 49 of grading)", result: "≈ 9,950 USD: people 82.6%, infrastructure 11.0% (GPUs 2.4%), licence 4.1%, engineers 2.2%; 9.21 USD a question, 0.22 of it GPU" },
+    { quantity: "Hosted model instead (rejected)", assumption: "Every generative call incl. reasoning at 2.00 in / 10.00 out per million (12.5 USD) + 2 encoder GPUs still on site (120)", result: "132.5 USD a day: the on-site GPU premium is ≈ 107.5 USD a day, 1.1% of the total; the people to run models on site come on top" },
     { quantity: "Value of a day (illustrative)", assumption: "IF every step on chamber B is hit like step 412: 368 wafer passes a day × 80% affected × 15% of die lost × 6,000 USD a wafer", result: "≈ 265,000 USD, 26.7× the system’s daily cost, if containment is a full day sooner (an assumption, not a measurement)" },
   ]}
   note="People are 83% of the cost and GPUs 2.4%. The design is shaped by identity, statistics and the IP boundary, not by tokens: spend goes to the ontology, mappings, connectors and evaluation, not to a larger model."
@@ -135,14 +135,14 @@ Statistics must separate a chamber from a coincidence in time, and process IP mu
 | # | Driver | For this system | What it forces |
 | --- | --- | --- | --- |
 | G1 | Quality bar and its metric | Top-3 ≥ 70% on rolling-origin replay; beat the YMS screen on paired cases | Statistics in code; templates first; replay gates without leakage |
-| G2 | Cost of a wrong answer | High: a wrong cause wastes a split-lot test or inhibits a good chamber (368 wafers a day of capacity); a missed cause lets an excursion run | Effect sizes, held-out confirmation, calibrated confidence; the engineer confirms |
+| G2 | Cost of a wrong answer | High: a wrong cause wastes a split-lot test or inhibits a good chamber (368 wafers a day of capacity); a missed cause lets an excursion run | Effect sizes, held-out replication, calibrated confidence; the engineer confirms |
 | G3 | Latency target | Hypotheses ≤ 15 s p95; template lookups ≤ 3 s p95 | Columnar counting; encoder slot-filling; evidence in parallel; the table before the writer |
 | G4 | Cost per request | Minor: 0.22 USD of GPU a question; people are 83% | Spend on ontology, mappings and statistics, not model tiers |
 | G5 | Traffic shape | Not a driver here: ≈ 0.18 questions a second and ≈ 0.65 streams at burst | Fleet sized for availability (two hosts) |
 | G6 | Knowledge source and freshness | Lot history changes every second, equipment states by the minute, CMMS by the hour (late, backdated), documents by the week | Event-fed, bitemporal graph; source-lag gaps; flags on answers that late events change |
 | G7 | Context size | One lot's history is 32,000 tokens and the schema 13,800; the writer needs 6,400 | Code selects evidence; schema subsets; templates |
 | G8 | Determinism and auditability | The same window gives the same statistics (seeded permutations); every answer replayable as of its time | Bitemporal edges, watermarks, ontology version and query text in the audit |
-| G9 | Data sensitivity and tenancy | Recipes and yields are trade secrets; process technology can be export-controlled; a foundry adds customer separation | On-site models; scoped roles on every store; no egress |
+| G9 | Data sensitivity and tenancy | Recipes and yields are trade secrets; at advanced nodes process technology is also export-controlled; a foundry adds customer separation | On-site models; scoped roles on every store; no egress |
 | G10 | Autonomy level | None on the fab: read-only | No write tools; holds and inhibits stay in MES |
 | G11 | Modalities and interface | Wafer maps (images), traces (time series), metrology as evidence; text and graph for reasoning | A wafer-map classifier; trace and metrology summaries and charts by code |
 | G12 | Availability and degradation | Off the production control path; degrade to statistics without explanation | Two hosts; graph replicas; template form when the model is down |
@@ -172,14 +172,14 @@ event: plan        data: {"intent": "investigation", "lots": 10, "wafers": 250, 
                           "cohort": "PX7 wafers that passed each candidate step in the same process days as the named lots",
                           "watermarks": {"mes": "10:42:07", "yms": "10:30:00", "cmms": "10:40:12", "fdc": "10:41:55"}}
 event: gap         data: {"kind": "untestable", "candidate_kind": "material lot (slurry)", "coverage": "58% of wafers", "floor": "80%"}
-event: hypotheses  data: {"candidates": {"within_lot": 5360, "lot_level_on_residual": 440}, "method": "permutation, max-T, 10,000 per family",
+event: hypotheses  data: {"candidates": {"within_lot": 5360, "lot_level_on_residual": 1680}, "method": "permutation, max-T, 10,000 per family",
                      "items": [{"rank": 1, "candidate": "ETCH04 path chamber B → strip 2, step 412 (M1 hard-mask etch)",
-                       "effect": "held-out lots: 80% [70–87%] of 125 wafers vs 4.0% [1.8–8.8%] of 375 sister-chamber wafers (lot-cluster intervals)",
-                       "lots_involved": "20 of 20 held-out ETCH04 lots",
+                       "effect": "held-out lots: 80% [70–87%] of 125 wafers vs 4.0% [1.8–8.8%] of 375 sister-chamber wafers (lot-cluster intervals); difference 76 points [≈ 65–84]",
+                       "lots_involved": "B above its sister chambers in 20 of 20 held-out ETCH04 lots",
                        "change_point": "4.0% before → 80% after day 0; WO-55120 (edge ring, new part revision)",
                        "mechanism": "edge-ring part → edge etch-rate shift → edge-ring signature (FMEA row 3311, approved)",
                        "sensor": "DC bias, main etch, +6.1% after the swap", "confidence": "high",
-                       "wip_at_risk": "≈ 10,700 wafer passes through ETCH04-B in the last 29 days, not yet sorted"}],
+                       "wip_at_risk": "≈ 725 PX7 wafers through ETCH04-B at step 412 in the last 29 days, not yet sorted (≈ 10,700 passes at any of B’s steps)"}],
                      "checked_not_supported": [{"candidate": "WET07 (step 414)", "why": "residual wafers 4.0% vs 4.0%"},
                        {"candidate": "resist lot PR-552", "why": "non-B wafers 4.0% vs 4.0%"},
                        {"candidate": "probe card / tester", "why": "22% of signature wafers vs 20% tested; 0 of 30 recovered on retest"}]}
@@ -201,9 +201,9 @@ event: done        data: {"answer_id": "ans_7d1", "checks": "all numbers found i
 
 | Data | Store type | Why (driver ids) | Partition or order key | Consistency | Rejected alternative and its cost |
 | --- | --- | --- | --- | --- | --- |
-| Knowledge graph: ontology below; versions, never overwrites | Property graph, enterprise edition, on site (Neo4j class): 1 primary + 2 read replicas used only by the assistant; ≈ 41.1 GB | Genealogy, "what touched this lot and chamber", "what changed on this chamber", mechanism paths (G1, G6) | None (replicated whole) | Replicas seconds behind; watermark per answer | RDF + SHACL: right if formal ontology alignment dominates; Neptune: cloud-only; Kùzu: archived in 2025; relational only: weaker as the model's query target |
-| Wafer-step rows (wafer, step, chamber, slot, times, recipe body, material lots), FDC indicators, metrology, e-test, APC adjustments | <TechIcon id="oss/clickhouse" /> Columnar database on site (ClickHouse class), `ORDER BY (product, wafer_id, step_seq)`, quarterly partitions, a projection by (chamber, step, time) | Counting 2,000-wafer cohorts in one pass with bitmap wafer sets (G3, G8) | Product, wafer | Append-only, deduplicated on (`run_id`, wafer, pass); corrections as new versions | Counting in the graph: 537.6M more edges. Monthly partitions: a cohort touches every partition |
-| Sensor traces | The fab's FDC store or historian behind a read API; Parquet on object storage for cold years | Samples by range, never by relation (G3) | Chamber, day | As FDC writes it | In the graph: ≈ 744× its size a day; a copy: 129 TB for nothing |
+| Knowledge graph: ontology below; versions, never overwrites | Property graph, enterprise edition, on site (Neo4j class): 1 primary + 2 read replicas used only by the assistant; ≈ 41.1 GB | Genealogy, "what touched this lot and chamber", "what changed on this chamber", mechanism paths (G1, G6) | None (replicated whole) | Replicas seconds behind; watermark per answer | RDF + SHACL: right if formal ontology alignment dominates; Neptune: cloud-only; Kùzu: repository archived in 2025 (news reports); relational only: weaker as the model's query target |
+| Wafer-step rows (wafer, step, chamber, slot, times, recipe body, material lots), FDC indicators, metrology, e-test, APC adjustments | <TechIcon id="oss/clickhouse" /> Columnar database on site (ClickHouse class), `ORDER BY (product, wafer_id, step_seq)`, quarterly partitions, a projection by (chamber, step, time) | Counting 2,000-wafer cohorts in one pass with bitmap wafer sets (G3, G8) | Product, wafer | Append-only, deduplicated on (`run_id`, wafer, pass); corrections as new versions | Counting in the graph: 537.6M more edges. Monthly partitions: a 5-year replay opens 60 partitions instead of 20 |
+| Sensor traces | The fab's FDC store or historian behind a read API; Parquet on object storage for cold years | Samples by range, never by relation (G3) | Chamber, day | As FDC writes it | In the graph: ≈ 744× its edge count a day; a copy: 129 TB for nothing |
 | Identity map (source name → master id, owner, valid dates) | <TechIcon id="oss/postgresql" /> PostgreSQL, owned by equipment engineering | One chamber, one node (F5, N4) | Source | Strong | Fuzzy or model matching at ingest: a wrong merge joins two chambers' histories silently |
 | Hold-and-retry, then quarantine | PostgreSQL queues | An E90 location can arrive before the MES split that explains it; it waits 10 minutes (N4) | Source, day | Strong | Quarantine at once: "early" counted as "unmapped" |
 | Semantic layer: named metrics (`sort_yield_final`, `edge_ring_signature@0.8`) | Versioned YAML owned by the yield team | One definition of yield (G1) | Metric id | Versioned | Model-written yield SQL: first-pass versus final changes the bad population |
@@ -218,7 +218,7 @@ The ontology figure draws the types and relations the templates and generated qu
 **How to read it:**
 
 - Step 1 is execution and equipment: `Run` (lot × step × tool) points to its lot, step, tool and, through `VISITED`, the chambers (2.5 a run: a cluster tool passes etch then strip); chambers are E120 modules qualified for ≈ 8 steps.
-- Step 2 adds what changes: the recipe body as downloaded (hash from the process-job record), material lots, part installs, E10 state changes, PMs, holds and SPC events, and the test side (sort insertion, probe card, tester, program).
+- Step 2 adds what changes: the recipe body version the RMS verified for the job (upload-and-compare at job start, or the last golden compare; "unverified" when stale), material lots, part installs, E10 state changes, PMs, holds and SPC events, and the test side (sort insertion, probe card, tester, program).
 - Step 3 adds approved knowledge (`FailureMechanism` with its FMEA row, approver and date; `ExcursionCase`) and the FDC trace as a reference matched by context, never as samples.
 
 **The numbers:**
@@ -227,7 +227,7 @@ The ontology figure draws the types and relations the templates and generated qu
 - Which wafer took which chamber is a columnar row: 736,438 a day × 730 days would be 537.6M edges, 2.3× every other edge.
 
 <Callout tone="red" title="What breaks">
-  Key runs on the logical recipe (PPID) and a tool-local edit becomes invisible: the body changed with no RMS version. Runs point to the body as downloaded, golden-compare mismatches are events, and APC adjustments are columnar indicators, so drift is not read as a recipe change.
+  Key runs on the MES logical recipe and a tool-local edit becomes invisible: the body changed with no RMS version. Runs point to the body version the RMS verified, golden-compare mismatches are events, and APC adjustments are columnar indicators, so drift is not read as a recipe change.
 </Callout>
 
 One graph template and one typed columnar call show the two query shapes; both take master ids from the linker, never free text.
@@ -247,13 +247,13 @@ LIMIT 200
 SELECT wafer_id, run_id, slot, track_out
 FROM wafer_step
 WHERE chamber = {chamber_id} AND step_seq = {step} AND track_out >= {from} AND track_out < {to}
-LIMIT 100000
-SETTINGS max_execution_time = 5, max_rows_to_read = 200000000;
+LIMIT 100000;
+-- max_execution_time 5 s and max_rows_to_read 200M live in the readonly=1 profile; settings constraints stop a query raising them
 ```
 
 - **Why `Run` stays in the graph:** templates traverse lot → run → chamber → event → mechanism in one pattern, and generated queries need typed relations; relational-only would leave the model writing recursive SQL for genealogy.
 - **The cost of duplication:** one ordered ingest log feeds both stores, a nightly reconciliation compares counts per day and chamber, and "data as of" on every answer is the minimum watermark over the stores it used.
-- **Chamber-first reads:** without the (chamber, step, time) projection, PX7's 5-year share (≈ 292M rows) exceeds the 200M read cap.
+- **Chamber-first reads:** without the (chamber, step, time) projection, PX7's 5-year share (8 of 52.6 lots a day × 1.92B ≈ 292M rows) exceeds the 200M read cap.
 
 ## Building the architecture, step by step
 
@@ -284,7 +284,7 @@ The baseline: the engineer's question goes through the site gateway to one on-si
 
 - **Adds:** the fab systems, the ingest log and identity resolution, the knowledge graph.
 - **Flow:**
-  1. MES, E90 locations, E10 state changes, FDC holds, SPC, CMMS, RMS bodies, YMS and the test floor publish to one ordered ingest log keyed by source id.
+  1. MES, E90 locations, E10 state changes, FDC holds, SPC, CMMS, RMS body verifications, YMS and the test floor publish to one ordered ingest log keyed by source id.
   2. Each name resolves through the identity map; an unresolved one waits 10 minutes, then goes to quarantine, never into the graph.
   3. Upserts are bitemporal: a correction is a new version with its own `recorded_at`.
 - **Why this and not that:** ground before generating (P2), and provenance on every edge (P14). Deep dive 1 shows what one missing mapping does to a hypothesis.
@@ -311,8 +311,9 @@ The baseline: the engineer's question goes through the site gateway to one on-si
 - **Flow:**
   1. The metric comes from the semantic layer; the cohort is every product wafer that passed each candidate step in the same process days.
   2. The test side is checked first (probe card, tester, retest recovery).
-  3. 5,800 candidates are tested in two ordered families with 10,000 within-lot permutations and max-T; inseparable candidates are clustered.
-  4. FDC indicators for the top cells, then trace summaries by reference; the top 3 are confirmed on 50 held-out lots.
+  3. 5,360 within-lot candidates get 10,000 within-lot permutations stratified by slot class; then 1,680 lot-level candidates are tested on residual wafers with lot labels permuted within process days; max-T in each family.
+  4. Inseparable candidates are clustered.
+  5. FDC indicators for the top cells, then trace summaries by reference; the top 3 are replicated on 50 held-out lots.
 - **Why this and not that:** cascade from cheap to expensive (P4): counts first, indicators next, traces only for the top candidates. Deep dive 3 draws the statistics.
 - **The gap:** effect sizes and a cluster are not an answer: nothing says what changed, why it would cause this signature, or how sure we are.
 
@@ -382,18 +383,18 @@ The sequence follows one typed investigation across seven lanes, at p50.
 
 <AnimatedDiagram spec="animated/kg-semi/request-sequence" stepper caption="The ranked table, with effect sizes and lot-cluster intervals, reaches the engineer at 7.1 s, before the model writes a word; the model only plans and explains." />
 
-- **How to read it:** steps 1 to 3 are the plan, the time-matched cohort and the two families of tests; step 4 is the parallel evidence; step 5 the held-out confirmation and the table; step 6 the writer and its checks.
+- **How to read it:** steps 1 to 3 are the plan, the time-matched cohort and the two families of tests; step 4 is the parallel evidence; step 5 the held-out replication and the table; step 6 the writer and its checks.
 
 "Why did yield drop on lots PX7-1022 to PX7-1031?", typed, p50 estimates; the story is invented:
 
 1. **0–50 ms:** the gateway validates the token, maps the groups to the `yield-eng/etch/PX7` roles and writes an audit record.
-2. **50–1,750 ms:** the planner (first token 300 ms, 80 reasoning tokens, a 60-token JSON plan) returns `investigation`, 10 lots, metric `edge_ring_signature@0.8`. From the YMS button this step is skipped and `plan` arrives at ≈ 0.24 s.
+2. **50–1,750 ms:** the planner (first token 300 ms, 80 reasoning tokens, a 60-token JSON plan) returns `investigation`, 10 lots, metric `edge_ring_signature@0.8`. From the YMS button this step is skipped and `plan` arrives at ≈ 0.16 s (≈ 0.24 s p50 over both routes).
 3. **1,750–1,850 ms:** the linker resolves the lots, finds two child lots from a split at step 300 and 250 wafers; `plan` with watermarks at ≈ 1.85 s.
-4. **1,850–2,350 ms:** the cohort for step 412 is every PX7 wafer that passed it in process days 0–10 after the swap (80 lots, 2,000 wafers), read alongside sort data.
-5. **2,350–3,350 ms:** the test side first (signature wafers spread across 6 probe cards in proportion; 0 of 30 recovered on retest), then 5,360 within-lot and 440 lot-level candidates with max-T. Slurry lots are known for 58% of wafers, below the 80% floor: "not testable", never "ruled out".
+4. **1,850–2,350 ms:** the cohort for step 412 is every PX7 wafer that passed it in the named lots' process days at that step, widened to 10 days (days 0–10 here; the swap is found later): 80 lots, 2,000 wafers, read alongside sort data.
+5. **2,350–3,350 ms:** the test side first (signature wafers spread across 6 probe cards in proportion; 0 of 30 recovered on retest), then 5,360 within-lot and 1,680 lot-level candidates with max-T. Slurry lots are known for 58% of wafers, below the 80% floor: "not testable", never "ruled out".
 6. **3,350–4,000 ms:** FDC indicators on the top 20 cells × 30 indicators; chamber B of ETCH04 always passes wafers to strip chamber 2, so they form one cluster.
-7. **4,000–6,745 ms:** in parallel, the slowest ≈ 2,745 ms: chamber B's change-point (4.0% before day 0, 80% after); "what else changed" (WO-55120 on day 0, resist lot PR-552 from day 1, a WET07 bath change on day 2); FMEA row 3311; DC bias +6.1%; past case EXC-2025-031; WIP at risk.
-8. **6,745–7,075 ms:** the pre-registered top 3 are confirmed on 50 held-out lots (80% [70–87%] against 4.0% [1.8–8.8%]); WET07 and PR-552 go to "checked and not supported"; the ranker says "high" and the `hypotheses` table is sent.
+7. **4,000–6,745 ms:** in parallel, the slowest ≈ 2,745 ms: chamber B's change-point (4.0% before day 0, 80% after); "what else changed" (WO-55120 on day 0, resist lot PR-552 from day 1, a WET07 bath change on day 2); FMEA row 3311; DC bias +6.1%; past case EXC-2025-031; WIP at risk (≈ 725 PX7 wafers through B at step 412, not yet sorted).
+8. **6,745–7,075 ms:** the pre-registered top 3 are replicated on 50 held-out lots (80% [70–87%] against 4.0% [1.8–8.8%]); WET07 and PR-552 go to "checked and not supported"; the ranker says "high" and the `hypotheses` table is sent.
 9. **≈ 9,795 ms:** the first hypothesis text passes its number check; **≈ 13,895 ms:** complete, with checks (the part record for WO-55120, inline edge CD, a split of the next lot across B and A). The engineer decides on an inhibit in MES; the assistant never acts.
 
 ## Component choices and why
@@ -422,36 +423,36 @@ The sequence follows one typed investigation across seven lanes, at p50.
 ### Where data lives: graph for relations, columnar for wafers, FDC store for samples
 
 - **Choice:** three stores fed by one ordered ingest log, reconciled nightly; `Run` nodes stay in the graph as the model's typed query target.
-- **Why:** samples are ≈ 744× the graph a day; wafer-level visits would add 537.6M edges; the statistics read 2,000-wafer cohorts in one columnar pass (G3, G6).
+- **Why:** samples are ≈ 744× the graph's edge count a day; wafer-level visits would add 537.6M edges; the statistics read 2,000-wafer cohorts in one columnar pass (G3, G6).
 - **Why not everything in the graph:** size and scan cost.
 - **Why not everything relational:** each hop is fine, but the model's query target loses typed relations and genealogy becomes recursive SQL.
 
 ### Graph database: an on-site property graph with role-based access
 
 - **Choice:** Neo4j Enterprise class, 1 primary and 2 assistant-only read replicas, ≈ 41.1 GB in memory.
-- **Why:** Cypher is what Text2Cypher work targets and ISO GQL (2024) converges with it; roles without WRITE and label grants exist in the enterprise edition (G9).
-- **Why not Amazon Neptune:** cloud-only. **Why not Kùzu:** archived in October 2025 after its acquisition.
+- **Why:** Cypher is what Text2Cypher work targets and ISO/IEC 39075 GQL (2024) converges with it; roles without WRITE and label grants exist in the enterprise edition (G9).
+- **Why not Amazon Neptune:** cloud-only. **Why not Kùzu:** its repository was archived in October 2025 after its acquisition (news reports).
 - **Why not RDF + SPARQL + SHACL:** right if formal alignment dominates. **Why not PostgreSQL + Apache AGE:** workable at this size; chosen against for access control and tooling (judgement).
 
 ### Queries: templates first, guarded generation second, for both stores
 
 - **Choice:** 40 templates (28 graph, 12 cross-store) cover 70% of lookups and the encoder fills 80% of their slots; the rest is generated from a schema subset and four verified examples and runs through one guard chain.
-- **Why:** on the 2024 benchmarks zero-shot Text2Cypher scored 61.58% (CypherBench, execution accuracy) down to ≈ 30% (Neo4j's dataset, strict match), and the metrics differ; the chosen model's score is unknown until measured on the fab's 500 questions (N2, G3).
+- **Why:** on CypherBench (2024) the best zero-shot execution accuracy was 61.58% and models under 10B scored below 20%, while on Neo4j's dataset (2024) the best model, fine-tuned or not, reached ≈ 30% strict match; the metrics differ, and the chosen model's score is unknown until measured on the fab's 500 questions (N2, G3).
 - **Why not free generation everywhere:** "wrong but valid" queries return plausible answers.
 - **Why not templates only:** the long tail goes back to hand-written SQL.
 
-### Statistics: time-matched, within lot, max-T, held-out confirmation
+### Statistics: time-matched, within lot, max-T, held-out replication
 
-- **Choice:** compare a chamber's wafers with other-chamber wafers of the same lots in the same process days; 10,000 within-lot permutations with the max statistic over all candidates (Westfall–Young); two ordered families; top 3 confirmed on held-out lots.
-- **Why:** lot-level factors (time, upstream route, resist, wet-bench batch, tester) cancel inside a lot; max-T controls family-wise error under any dependence (G2, G8, N1).
-- **Why not Benjamini–Hochberg on wafer-level p-values:** it assumes independence or positive dependence, these candidates are heavily dependent, Benjamini–Yekutieli would cost ≈ 9.2×, and wafer-level tests ignore lot clustering.
-- **Why not confirm on the data that selected the candidates:** selective inference controls nothing. **Why not a black-box yield model:** unexplainable, and 300 labels overfit.
+- **Choice:** compare a chamber's wafers with other-chamber wafers of the same lots in the same process days; 10,000 within-lot permutations stratified by slot class, with the maximum of standardised statistics (Westfall–Young); lot-level candidates tested on residual wafers with lot labels permuted within process days; top 3 replicated on held-out lots.
+- **Why:** lot-level factors (time, upstream tools, resist lot, wet-bench batch) cancel inside a lot, but upstream chambers and slot order do not, so chambers at other steps compete in the same max-T. Max-T accounts for the dependence between candidates, assuming wafers are exchangeable within a lot and slot class (G2, G8, N1).
+- **Why not Benjamini–Hochberg on wafer-level p-values:** it assumes independence or positive dependence, these candidates are heavily dependent, Benjamini–Yekutieli would cost ≈ 9.4×, and wafer-level tests ignore lot clustering. BH also controls a weaker target (false discoveries); family-wise control costs power, which the held-out step recovers.
+- **Why not replicate on the data that selected the candidates:** selective inference controls nothing. **Why not a black-box yield model:** unexplainable, and 300 labels overfit.
 
 ### Model: an on-site open-weight reasoning model at low effort, encoders where they suffice
 
 - **Choice:** gpt-oss-120b class (Apache 2.0, ≈ 117B total and 5.1B active parameters, one 80 GB GPU; as of November 2026) on two hosts, harmony format applied by the server, low effort, constrained JSON decoding.
-- **Why:** process IP stays on site (G9); like for like a hosted API would cost ≈ 132.5 USD a day against 240, a 107.5 USD premium (1.1%).
-- **Why not medium effort for the writer:** + 220 reasoning tokens puts the explanation at ≈ 15.0 s p50, on the target; the grader and measured token counts decide.
+- **Why:** process IP stays on site (G9); like for like a hosted API would cost ≈ 132.5 USD a day against 240, a GPU premium of 107.5 USD (1.1%).
+- **Why not medium effort for the writer:** + 220 reasoning tokens puts the explanation at ≈ 15.0 s p50 mixed, at the target, and ≈ 16.1 s typed, over it; the grader and measured token counts decide.
 - **Why not a hosted frontier model under contract:** who may see process technology and where it is processed is the fab's legal call; this design assumes "on site" and prices it.
 - **Why not a domain fine-tune first (SemiKong-style):** no published numbers to beat; fine-tune a small text-to-Cypher model from validated logs if the generated slice stays under 80%.
 
@@ -530,7 +531,7 @@ The waterfall puts a template lookup, a generated lookup and a typed investigati
 | Parse, allow-list, `EXPLAIN`, execute on a replica, render | 125 → 330 | 2,830 → 3,035 | |
 | Cohort; max-T and test side; FDC indicators and clustering | | | 1,850 → 4,000 |
 | Evidence, slowest of 6 parallel draws | | | 4,000 → 6,745 |
-| Held-out confirmation; rank → `hypotheses` | | | 6,745 → 7,075 |
+| Held-out replication; rank → `hypotheses` | | | 6,745 → 7,075 |
 | M: writer first token 600 + 80 reasoning + 540 tokens; checks | | | 7,075 → 13,895 |
 | **Result** | **≈ 330** | **≈ 3,035** | **plan 1,850; hypotheses 7,075; complete 13,895** |
 
@@ -561,16 +562,17 @@ The waterfall puts a template lookup, a generated lookup and a typed investigati
 | --- | --- | --- | --- |
 | Rolling-origin replay | 300 confirmed excursions from 5 years; first 30 only train, 270 scored | 8D reports, replayed on as-of state | hit@3 ≥ 70% (± 5.4), hit@1 ≥ 45% (± 5.9), coverage ≥ 90% |
 | Paired baseline | The same 270 | The YMS commonality screen | McNemar on paired hit@3; detectable difference ≈ 7.6 points at 20% discordant pairs |
-| Seeded faults and nulls | 2,000 seeded (500 with a benign co-occurring change); 1,000 nulls | Injected into historical data | Seeded in the top 3 ≥ 90% (± 1.3); "high" on nulls ≤ 5% (± 1.4) |
-| Query set | 500: 300 template (100 cross-store), 150 generated, 50 misspelled names | Engineer questions with gold queries on a frozen snapshot | ≥ 95% (± 2.5); ≥ 80% (± 6.4); never "no rows" |
-| Bypass and leakage | 300 bypass attempts; 200 leakage prompts | Writes, `LOAD CSV`, dynamic Cypher, planted instructions | 0 executed (≤ 1.0% at 95%); 0 leaks (≤ 1.5%) |
+| Seeded faults and nulls | 2,000 seeded (500 with a benign co-occurring change); 1,000 nulls | Injected into historical data | In the top 3 ≥ 90% (± 1.3), also gated per effect-size bin (10, 20, 40 points); "high" on nulls ≤ 5% (± 1.4) |
+| Query set | 500: 300 template (100 cross-store), 150 generated, 50 misspelled names | Engineer questions with gold queries on a frozen snapshot | ≥ 95% (± 2.5 if questions were independent; also gated per template); ≥ 80% (± 6.4); never "no rows" |
+| Bypass and leakage | 300 bypass attempts; 200 leakage prompts | Writes, `LOAD CSV`, dynamic Cypher, planted instructions | 0 executed (≤ 1.0% on this constructed set); 0 leaks (≤ 1.5%) |
 | Calibration | ≈ 100 in the "high" bin | Replay, cross-fitted | Confirmed ≥ 60% with the Wilson lower bound ≥ 50% (50.2–69.1%) |
 | Extraction | 1,000 expert-labelled triples | FMEA and 8D | Precision ≥ 0.9 (± 1.9) before a mechanism type is offered |
 
 - **No leakage in replay:** each case runs on the versions recorded before its detection time, with a ranker fitted only on cases closed before it and knowledge approved before it, so a case never sees its own 8D report.
 - **Replay fidelity:** ≈ 120 cases from the last 2 years replay exactly (hit@3 ± 8.1 on that class alone); the older 150 use columnar execution and daily sensor aggregates. A gap over 10 points between the classes is investigated before release.
 - **Metric sensitivity:** every investigation re-ranks with the signature threshold at 0.7 and 0.9; a top hypothesis that moves is shown as "sensitive to the metric definition".
-- **Exposure bias:** verdicts carry `ranking_seen`; the 8-week shadow (results computed, not shown) is the clean label set.
+- **Exposure bias:** verdicts carry `ranking_seen`; the 8-week shadow (results computed, not shown) yields only ≈ 9 confirmed cases (60 a year × 8 ÷ 52), too few to gate but enough to check that exposed verdicts agree with unexposed ones.
+- **Verification bias:** the 270 are the excursions someone solved, often with the YMS screen, so the paired test is tilted toward it and silent on unsolved ones; time from detection to confirmed cause and the share of excursions closed are the online outcome.
 - **Online and rollout:** time from detection to confirmed cause, verdict rates per confidence label, flags per 1,000 answers, quarantine size, source lag. Etch first, then all front-end modules, then the fab; a "high" rejected over 40% of the time in a month rolls the ranker back.
 
 The release gate runs every check on a candidate ranker, prompt set and ontology version.
@@ -595,7 +597,7 @@ The release gate runs every check on a candidate ranker, prompt set and ontology
 | Read outside scope | Any store | Label grants, row policies, filtered trace and document APIs; "n hidden by scope"; nightly ACL sync | Code |
 | Instructions planted in reports, FMEA cells or node properties | Documents, graph text | Quoted as data with ids; extraction schema-checked and approved; the writer may only restate evidence | Code + prompt |
 | Wrong but valid query | Generation | Templates first; query and paraphrase shown; the query-set gate | Code + product |
-| Correlation from time, chance hits, dependence | Statistics | Time-matched within-lot comparison; change-point; max-T; held-out confirmation; no raw p-value | Code |
+| Correlation from time, chance hits, dependence | Statistics | Time-matched within-lot comparison; change-point; max-T; held-out replication; no raw p-value | Code |
 | Test-floor artefact read as a process cause | Statistics | Probe card, tester and retest check first | Code |
 | Trace on the wrong wafer; recipe confusion | Ingest | Context match with a rate per tool type; recipe body per run; golden-mismatch events | Code |
 | Stale graph after maintenance | CMMS lag | E10 state events; "CMMS record pending" gap; flags on answers changed by late events | Code |
@@ -604,13 +606,14 @@ The release gate runs every check on a candidate ranker, prompt set and ontology
 
 - **Why roles, not driver modes:** a driver's READ access mode mainly controls routing (Neo4j community answers); a role without WRITE is enforcement. LangChain's Cypher chain asks for narrowly scoped credentials after CVE-2024-8309, a prompt-to-Cypher injection.
 - **Why label grants, not property rules:** property-based rules test one property each, and a DENY fails open when it cannot be evaluated (Neo4j manual, read November 2026).
-- **Export control and trade secrets (framing, not legal advice):** EAR deemed exports and the December 2024 SME technology ECCNs; the January 2025 foundry due-diligence rule; Taiwan's 2022 core-technology law. The AI diffusion rule (January 2025) was rescinded in May 2025 and did not cover open weights.
+- **Export control and trade secrets (framing, not legal advice):** EAR deemed exports, the December 2024 SME technology ECCNs, the January 2025 foundry rule (logic at 16/14 nm and below) and Taiwan's core-technology list (14 nm and below) bite at advanced nodes. At this mature node, trade-secret law and customer agreements carry the boundary.
+- **AI diffusion rule:** BIS announced in May 2025 that it would rescind the January 2025 rule and not enforce it; it did not cover open weights.
 
 ## Deep dives
 
 ### Ontology and identity: one chamber, one node
 
-- **Standards fix names:** E120 gives the equipment hierarchy, E90 the wafer locations, E164 the parameter names and E10 the six states; MES time is the clock.
+- **Standards fix names:** E120 gives the equipment hierarchy, E90 the wafer locations, E164 common EDA metadata (most sensor names stay vendor-specific) and E10 the six states; MES time is the clock.
 - **Genealogy:** splits, merges, rework, scrap, sorter moves and re-ID, with the scribe id as the wafer's identity and old ids kept as aliases.
 - **Batch and cluster tools:** a batch tool records wafer and slot positions per batch; a cluster tool records ordered chamber visits, which is why `VISITED` has a sequence.
 
@@ -651,8 +654,13 @@ The query-guard figure follows a question through the chain.
 
 ### From candidates to ranked hypotheses, and how engineers confirm them
 
-- **Sort-date populations confound time:** they compare post-change wafers with pre-change wafers, so every change that week looks significant; the cohort is defined by process time instead.
-- **Candidate kinds:** chamber at a step or at any step (re-entrant), recipe body and golden mismatches, APC drift, material lots, maintenance and state windows, reticles, slot and batch position, probe card, tester, program. A kind below 80% coverage is "not testable".
+- **Sort-date populations confound time:** wafers sorted together passed a given step weeks apart (holds, rework, hot lots), so at that step bad wafers are post-change and many good ones pre-change; the cohort is defined by process time at each step instead.
+- **Candidate kinds:** chamber at a step or at any step (re-entrant), recipe body and golden mismatches, APC drift, material lots, maintenance and state windows, reticles, tool at a step and batch-tool runs such as WET07 (both lot-level), probe card, tester, program. Slot and batch position are strata, not candidates; a kind below 80% coverage is "not testable".
+- **The assumption under the permutation:** wafers in a lot must be exchangeable, and a cluster tool that assigns chambers by slot breaks that, aliasing chamber B with a slot class (Jaccard 0.31, illustrative). Permutations are stratified by slot class, and a full alias is reported as a cluster.
+- **Tool-wide causes:** a cause on the whole tool (transfer robot, gas box) raises every chamber, so it shows no within-lot difference; tool at a step and batch runs are lot-level candidates, tested on residual wafers.
+- **Combinations:** pairs are not candidates (16,000² cells); a cause that exists only in a combination (B at 412 after chamber 3 at 300) is a known blind spot, shown as "no single-factor hypothesis", never as "nothing found".
+- **Timing is weak alone:** a chamber logs ≈ 0.21 maintenance, qualification or part events a day (illustrative), so one falls within a day of a random change-point ≈ 34% of the time (1 − e^−0.42). The ranker scores alignment against that base rate and against sister chambers' events.
+- **Held-out lots share the window:** they guard against selection on noise, not against a time confounder; the change-point and the sister chambers do that. "Replicated" is the statistic's word; "confirmed" is the 8D owner's verdict.
 
 The commonality figure shows how one chamber survives every control and a wet bench does not.
 
@@ -662,8 +670,8 @@ The commonality figure shows how one chamber survives every control and a wet be
 
 **The numbers:**
 
-- 5,360 within-lot candidates at α 0.04 and 440 lot-level at α 0.01 keep family-wise error at or below 0.05; without max-T, 268 + 22 = 290 would pass p below 0.05 by chance.
-- 10,000 permutations × 5,800 candidates × 12 words (a 750-wafer discovery set as a bitmap) is ≈ 696M 64-bit AND-popcounts, ≈ 0.5 s.
+- 5,360 within-lot candidates at α 0.04 and 1,680 lot-level at α 0.01 (material lots 200, test side 90, reticles 150, tool at a step 1,120, batch-tool runs 120; illustrative) keep family-wise error at or below 0.05; without max-T, 268 + 84 = 352 would pass p below 0.05 by chance.
+- 10,000 permutations × 7,040 candidates × 12 words (a 750-wafer discovery set as a bitmap) is ≈ 845M 64-bit AND-popcounts, ≈ 0.6 s on a few cores (estimate); each statistic is standardised against its permutation mean and spread before the maximum.
 
 The hypotheses figure shows what the engineer sees and what happens next.
 
@@ -674,7 +682,7 @@ The hypotheses figure shows what the engineer sees and what happens next.
 
 ### The site boundary and on-site models
 
-- **Why on site:** Samsung banned generative AI tools in 2023 after code was pasted into ChatGPT; Taiwan's 2022 law makes economic espionage over core technologies a crime with 5 to 12 years in prison.
+- **Why on site:** recipes and yields are trade secrets at any node, and the leak path is real (Samsung, 2023, under How real systems do it). Taiwan's 2022 law (5 to 12 years in prison) and US controls add to that only at advanced nodes.
 - **What you lose:** frontier quality and managed upgrades. The design needs little of it: encoders fill slots, code tests and ranks, and the model plans, writes queries and explains.
 
 <AnimatedDiagram spec="animated/kg-semi/site-boundary" caption="Fab data comes in, weights come in through intake, and nothing goes out; keeping the models on site costs about 107.5 USD a day, 1.1% of the system." />
@@ -684,13 +692,14 @@ The hypotheses figure shows what the engineer sees and what happens next.
 **The numbers:**
 
 - On site, 4 GPUs × 24 h × 2.5 USD = 240 USD a day; hosted like for like, 12.5 USD of tokens + 120 for the two encoder GPUs a hosted design still runs = 132.5. The premium is ≈ 107.5 USD a day, 1.1% of ≈ 9,950.
+- The people premium is larger: if serving, intake and upgrades take half an ML engineer (illustrative), that is ≈ 411 USD a day, and with the GPUs still ≈ 5% of the total.
 - A fab may also exclude models by origin as policy; the two-host fleet serves ≈ 0.65 streams at burst on either host alone.
 
 ### Worked example: the wet bench that ran most of the bad lots
 
-1. Chamber B of ETCH04 fails 80% of its held-out wafers (100 of 125) against 4.0% (15 of 375) on sister chambers A, C and D in the same 20 lots: a risk difference of 76 points, and 20 of 20 lots show it.
+1. Chamber B of ETCH04 fails 80% of its held-out wafers (100 of 125) against 4.0% (15 of 375) on sister chambers A, C and D in the same 20 lots: a risk difference of 76 points [≈ 65–84, lot-cluster, illustrative], and B is above its sisters in 20 of 20 lots.
 2. WET07, a batch wet bench at step 414, ran 28 of the 40 bad ETCH04 lots against 12 of the 40 clean ones; tested alone by lot, it would be flagged strongly, because it shares the lots, not the cause.
-3. The ordered procedure tests lot-level candidates only on residual wafers, the non-B ones: WET07's lots show 33 of 825 (4.0%) against 37 of 925 (4.0%) elsewhere, so it goes to "checked and not supported".
+3. The ordered procedure tests lot-level candidates only on residual wafers, the non-B ones: WET07's lots show 33 of 825 (4.0%) against 37 of 925 (4.0%) elsewhere (shown over the 80 cohort lots for illustration; the procedure tests on the 30 discovery lots), so it goes to "checked and not supported".
 4. Lot-cluster intervals use a design effect of 1 + (wafers a lot − 1) × 0.1 (illustrative intra-lot correlation): 6.25 B wafers a lot gives 1.525, 18.75 sister wafers gives 2.775, widening 72–86% to 70–87% and 2.4–6.5% to 1.8–8.8%.
 5. Early in an excursion one lot can be enough for a large effect (5 of 6 B wafers against 1 of 19 sister wafers), but a 10-point effect (14% against 4%) needs about 34 tool lots, so the card says "unconfirmed, k more lots expected by day d".
 
@@ -703,7 +712,7 @@ The hypotheses figure shows what the engineer sees and what happens next.
 | Identity | Model matching; owned map | Owned map, hold-and-retry, quarantine; question literals linked | N4, N2 | Mapping work per new tool | Never |
 | Where data lives | All graph; all relational; graph + columnar + FDC store | Three stores, one ingest log, reconciled nightly | G3, G6 | Three stores to keep in step | One on-site engine handles relations and 2,000-wafer cohorts |
 | Query generation | Free; templates only; templates + guarded generation | Templates (encoder slots) + guarded Cypher and SQL | N2, G3 | Long-tail lookups at ≈ 3 s | Generated accuracy ≥ 95% on the fab's set |
-| Statistics | BH on wafer p-values; time-matched within-lot max-T with held-out confirmation | The latter | G2, G8, N1 | Power on lot-level candidates; held-out lots needed | Replays show a better-powered method on tool combinations |
+| Statistics | BH on wafer p-values; time-matched within-lot max-T with held-out replication | The latter | G2, G8, N1 | Power on lot-level candidates; held-out lots needed | Replays show a better-powered method on tool combinations |
 | Ranking | Model; logistic in code | Logistic, rolling-origin calibrated | N3 | A simple model on 300 labels | Labels exceed ≈ 1,000 |
 | Model and effort | Hosted; on-site non-reasoning; on-site reasoning at low effort | On site, gpt-oss class, low effort, encoders for slots | G9, N5 | ≈ 107.5 USD a day; frontier quality | Measured accuracy or latency fails; the fab's legal answer changes |
 | Orchestration | Agent loop; fixed workflow | Fixed workflow | G3, G8 | Open-ended exploration | Engineers ask for exploration the workflow cannot express |
@@ -721,7 +730,7 @@ The hypotheses figure shows what the engineer sees and what happens next.
 | [P5 Budget latency per stage](/genai-system-design/case-studies/design-principles#p5-budget-latency-per-stage) | Reasoning tokens per call; max-of-n; table before writer; deadlines | Reasoning tokens decide whether targets hold ([Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)) |
 | [P8 Manage context deliberately](/genai-system-design/case-studies/design-principles#p8-manage-context-deliberately) | 6,400 selected tokens, not a 32,000-token history; 2,500-token schema subsets | Attention and decode time ([Context Engineering](/ai-system-design/genai-system-design/context-engineering)) |
 | [P9 Constrain the output](/genai-system-design/case-studies/design-principles#p9-constrain-the-output) | Constrained JSON; no verdict words; no p-values; numbers checked | A fluent "the root cause is" is the failure ([Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)) |
-| [P10 Enforce rules in code, not in the prompt](/genai-system-design/case-studies/design-principles#p10-enforce-rules-in-code-not-in-the-prompt) | Guard chain for both stores; max-T; held-out confirmation | A prompt cannot stop a write or a chance hit ([Text-to-SQL & Structured Data](/ai-system-design/genai-system-design/text-to-sql-and-structured-data)) |
+| [P10 Enforce rules in code, not in the prompt](/genai-system-design/case-studies/design-principles#p10-enforce-rules-in-code-not-in-the-prompt) | Guard chain for both stores; max-T; held-out replication | A prompt cannot stop a write or a chance hit ([Text-to-SQL & Structured Data](/ai-system-design/genai-system-design/text-to-sql-and-structured-data)) |
 | [P11 Run as the user](/genai-system-design/case-studies/design-principles#p11-run-as-the-user) | Scope roles on every store; "n hidden by scope" | The model must not see what the engineer cannot ([Access Control & RBAC](/ai-system-design/genai-system-design/access-control-rbac)) |
 | [P12 Bound the blast radius of actions](/genai-system-design/case-studies/design-principles#p12-bound-the-blast-radius-of-actions) | Read-only roles, assistant-only replicas, caps, no write tools | A generated query is untrusted code ([Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing)) |
 | [P13 Treat retrieved content as untrusted](/genai-system-design/case-studies/design-principles#p13-treat-retrieved-content-as-untrusted) | Reports and node text quoted as data; approved extraction | A planted instruction must not become a query ([Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)) |
@@ -775,9 +784,9 @@ The hypotheses figure shows what the engineer sees and what happens next.
 ## Interview framework
 
 1. **Minutes 0 to 5:** users, question types, what exists (MES, FDC, the YMS screen), and the constraint order: IP and scope, no false certainty, correct numbers, latency, cost.
-2. **Minutes 5 to 10:** numbers: 1,315 wafers and 42,082 runs a day, 1.77 × 10¹¹ samples; a graph of ≈ 62.7M nodes and ≈ 237.6M edges (≈ 41.1 GB); 1,080 questions a day; 5,800 candidates.
+2. **Minutes 5 to 10:** numbers: 1,315 wafers and 42,082 runs a day, 1.77 × 10¹¹ samples; a graph of ≈ 62.7M nodes and ≈ 237.6M edges (≈ 41.1 GB); 1,080 questions a day; 7,040 candidates.
 3. **Minutes 10 to 20:** steps 1 to 3: the on-site baseline and why it fails; ontology and identity; linked literals, templates and one guard chain for both stores.
-4. **Minutes 20 to 30:** steps 4 and 5: time-matched within-lot statistics with max-T and held-out confirmation; ranked hypotheses with effect sizes; the waterfall with reasoning tokens.
+4. **Minutes 20 to 30:** steps 4 and 5: time-matched within-lot statistics with max-T and held-out replication; ranked hypotheses with effect sizes; the waterfall with reasoning tokens.
 5. **Minutes 30 to 36:** steps 6 to 8: approved knowledge, verdicts, rolling-origin replay and seeded faults.
 6. **Minutes 36 to 45:** one deep dive: identity, query guards, correlation versus cause in time, or the site boundary.
 
@@ -790,7 +799,7 @@ The hypotheses figure shows what the engineer sees and what happens next.
 **Red flags:**
 
 - "The LLM finds the root cause"; sensor samples in the graph; free text-to-Cypher with a write-capable user; "we told the model not to write".
-- Lot-level commonality on a multi-chamber tool; p below 0.05 on 5,800 tests; a tiny p-value shown as proof; sort-date populations.
+- Lot-level commonality on a multi-chamber tool; p below 0.05 on 7,040 tests; a tiny p-value shown as proof; sort-date populations.
 - Budgeting a reasoning model without its reasoning tokens.
 
 ## Further reading
@@ -807,74 +816,75 @@ The hypotheses figure shows what the engineer sees and what happens next.
 <InterviewQuestions>
   <InterviewQuestion question="Why is semiconductor root-cause analysis a good fit for a knowledge graph?" category="Concepts" level="Junior">
   - Because the questions are about shared history as paths: which chamber, recipe body, part or material lot the bad wafers passed through, and what changed on it. Lot genealogy (splits, merges, rework) is a graph walk too.
-  - One pattern, lot → run → chamber → event → mechanism, replaces joins across six systems that name things differently; the graph is ≈ 62.7M nodes and ≈ 237.6M edges, ≈ 41.1 GB, in memory on one server.
+  - The identity map gives each chamber one id across six systems; the graph then makes lot → run → chamber → event → mechanism one typed pattern that templates and generated queries walk, ≈ 62.7M nodes and ≈ 237.6M edges (≈ 41.1 GB) in memory on one server. It is not GraphRAG: community summaries answer themes over a corpus, and these are exact joins over a schema the fab already knows.
   - The trade-off is that a graph is wrong for counting and for samples: wafer-level rows (1.92B over 5 years) go to a columnar store and the 1.77 × 10¹¹ samples a day stay in the FDC store, so three stores must stay in step.
-  - It fails when identity fails: two names for one chamber become two nodes and the history splits. Verify with the daily coverage report (100% of process chambers mapped) and hit@3 on the replay set.
+  - It fails when identity fails: two names for one chamber become two nodes and the hypothesis loses its timing and sensor evidence. Verify with the daily coverage report (100% of process chambers mapped, true unmapped ≤ 0.1% of events) and a seeded rename that the next coverage run catches.
   </InterviewQuestion>
-  <InterviewQuestion question="Walk through what happens when an engineer asks “why did yield drop on these lots?”" category="Architecture" level="Junior">
-  - The gateway maps the engineer's SSO groups to scope roles; the planner (or the YMS button, which skips it) names the lots and the metric, and the linker resolves child lots and 250 wafers. `plan` arrives at ≈ 1.85 s typed, ≈ 0.24 s from YMS.
-  - Code builds a time-matched cohort (80 lots, 2,000 wafers), checks the test side, tests 5,800 candidates with max-T, gathers evidence in parallel and confirms the top 3 on 50 held-out lots; the ranked table arrives at ≈ 7.1 s typed (≈ 6.0 s mixed).
+  <InterviewQuestion question="Walk through what happens when an engineer asks “why did yield drop on these lots?”" category="Architecture" level="Junior" followUps={[{ question: "The cohort works on sort data, ≈ 29 days after step 412. How would you catch this before sort?", level: "Mid", answer: "Run the same procedure on inline outcomes (edge CD at the next metrology step, defect density at inspection, e-test edge parameters), each with its own semantic-layer metric. They arrive days after step 412, not 29, at lower specificity, and they shrink the WIP exposed while the lots travel to sort." },]}>
+  - The gateway maps the engineer's SSO groups to scope roles; the planner (or the YMS button, which skips it) names the lots and the metric, and the linker resolves child lots and 250 wafers. `plan` arrives at ≈ 1.85 s typed and ≈ 0.16 s from the YMS button.
+  - Code builds a time-matched cohort (80 lots, 2,000 wafers), checks the test side, tests 7,040 candidates with max-T, gathers evidence in parallel and replicates the top 3 on 50 held-out lots; the ranked table arrives at ≈ 7.1 s typed (≈ 6.0 s mixed).
   - Only then does the model write the explanation, every number checked against the evidence; it completes at ≈ 13.9 s typed, and the engineer decides on any inhibit in MES.
-  - The trade-off is 6 to 7 seconds of statistics before any prose, in exchange for a table the model cannot change. It breaks if the reasoning budget is wrong: the typed plan misses 2.0 s at ≈ 95 reasoning tokens a call, so the gate measures them.
+  - The trade-off is 6 to 7 seconds of statistics before any prose, in exchange for a table the model cannot change. It fails quietly when an input is missing: slurry lots are known for only 58% of wafers, below the 80% floor, so the table says "not testable", never "ruled out"; and above ≈ 95 reasoning tokens a call the typed plan misses 2.0 s, so the gate measures them.
   </InterviewQuestion>
   <InterviewQuestion question="What entities and relationships would you put in the ontology?" category="Architecture" level="Mid" followUps={[{ question: "Why is “this wafer went through chamber B” not an edge?", level: "Mid", answer: "There are 736,438 wafer-chamber visits a day, 537.6M over 2 years, 2.3× every other edge in the graph. They are columnar rows the statistics count in one pass; the graph keeps `Run` → `VISITED` → `Chamber` at lot level so templates and generated queries still have typed relations." },]}>
   - Equipment (tool → chamber → part install, chamber qualified for ≈ 8 steps), process (product → route → step), material (lot genealogy, wafer by scribe id), execution (`Run` with lot, step, tool, `VISITED` chambers, recipe body, material lot), events (E10 states, PMs, qualifications, holds, SPC, golden mismatches), the test side and approved knowledge.
-  - Recipes get three identities: the logical PPID, the body as downloaded (hash from the process-job record) and APC adjustments as columnar indicators, because a tool-local edit changes the body with no RMS version.
+  - Recipes get three identities: the MES logical recipe and the tool PPID it maps to (the SECS/GEM process program id); the body version the RMS verified for that job (upload-and-compare at job start, or the last golden compare, marked "unverified" when stale); and APC adjustments as columnar indicators. A tool-local edit changes the body with no RMS version, so drift is not read as a recipe change.
   - Every event and edge is bitemporal (`valid_from`, `valid_to`, `recorded_at`, `superseded_at`) and a correction is a new version, so a replay sees what was known at the time.
-  - The trade-off is weeks of owner time for an expert-built, versioned ontology instead of an LLM-induced schema; verify by running the 500-question query set in CI against a migrated snapshot before each ontology release.
+  - The trade-off is weeks of owner time: a knowledge engineer with yield, process, equipment and test owners writes the types from E120, E10 and E90, and the model may only propose types or mappings into review. Verify by running the 500-question query set in CI against a migrated snapshot before each ontology release.
   </InterviewQuestion>
-  <InterviewQuestion question="What goes in the graph, and what stays in the time-series store?" category="Architecture" level="Mid">
+  <InterviewQuestion question="What goes in the graph, and what stays in the time-series store?" category="Architecture" level="Mid" followUps={[{ question: "Why a Neo4j-class graph and not Neptune, Kùzu or PostgreSQL with AGE?", level: "Mid", answer: "On site with role and label grants rules out Neptune (cloud-only) and Kùzu (its repository was archived in 2025). PostgreSQL with AGE is workable at ≈ 41 GB but weaker on access control and tooling (judgement); RDF with SHACL wins only if formal ontology alignment dominates." },]}>
   - The graph holds entities, relations, events and references; the FDC store keeps the samples, ≈ 1.77 × 10¹¹ a day, about 744× the graph's edges every day; the columnar store holds wafer-step rows and 30 FDC indicators per trace.
-  - They join on context: the FDC system's tool, chamber, lot, wafer or slot, recipe, step and start time are matched to (wafer, run) through the identity map, with a time tolerance.
+  - They join on context: the FDC system's tool, chamber, lot, slot (wafer id where the tool reports it), recipe, step and start time are matched to (wafer, run) through the identity map and E90 substrate tracking, with a time tolerance.
   - The statistics read indicators from the columnar store; trace summaries are read by reference only for the top candidates, with a 6 s deadline, after which the hypothesis shows "sensor evidence pending".
   - The trade-off is a cross-store join that can mismatch: a trace on the wrong wafer corrupts the sensor feature. Unmatched traces go to quarantine and the match rate is gated at ≥ 99.5% per tool type; copying samples instead would be ≈ 129 TB for nothing.
   </InterviewQuestion>
-  <InterviewQuestion question="What role should the LLM play, and what should it not do?" category="Trade-offs" level="Senior" followUps={[{ question: "Why not let an agent choose its own tools for the investigation?", level: "Senior", answer: "The procedure is known (plan, cohort, tests, evidence, confirm, rank, write), so an agent adds variance and latency with no gain, and the same window must give the same table for replay. The same typed tools could serve an agent later for open-ended exploration; SemiFA (paper, 2026) is a four-agent pipeline on 930 images, not evidence of production accuracy." },]}>
-  - It plans typed investigations, fills template slots the encoder cannot, writes guarded queries for the long tail, explains the evidence, suggests checks and proposes FMEA triples for approval.
+  <InterviewQuestion question="What role should the LLM play, and what should it not do?" category="Trade-offs" level="Senior" followUps={[{ question: "Why not let an agent choose its own tools for the investigation?", level: "Senior", answer: "The procedure is known (plan, cohort, tests, evidence, replicate, rank, write), so an agent adds variance and latency with no gain, and the same window must give the same table for replay. The same typed tools could serve an agent later for open-ended exploration; SemiFA (paper, 2026) is a four-agent pipeline on 930 images, not evidence of production accuracy." },]}>
+  - It plans typed investigations, fills template slots the encoder cannot, writes guarded queries for the long tail, explains the evidence, suggests checks and proposes FMEA triples for approval. Its one consequential choice is the plan (lots and metric), so the plan is echoed before any test runs and the metric id comes from the semantic layer, never from model-written SQL.
   - It never computes statistics, ranks, shows p-values, records verdicts or writes to a store; code renders the hypotheses table at ≈ 6.0 s before any model text, and the explanation cannot add, drop or re-rank a row.
   - That keeps the model small in the bill (GPUs are 2.4% of ≈ 9,950 USD a day) and off the path for 56% of lookups, which get their table with no model call before it.
-  - The trade-off is less open-ended exploration. The failure to watch is a fluent "the root cause is": no output may say it, every number must appear in a cited evidence item, and the grader and N3 calibration gate check it on replay.
+  - The trade-off is less open-ended exploration. The failure to watch is a fluent "the root cause is" or a number the evidence lacks: code blocks the phrase and drops any sentence whose number is not in a cited item, the independent grader samples explanations, and the N3 gate checks that "high" is confirmed ≥ 60% with a lower bound ≥ 50%.
   </InterviewQuestion>
   <InterviewQuestion question="How do you make LLM-generated graph queries safe and correct?" category="Failure modes" level="Senior" followUps={[{ question: "Why is the driver’s READ access mode not enough?", level: "Senior", answer: "It mainly controls routing to a read member of the cluster; enforcement is a role with no WRITE privilege. LangChain’s Cypher chain asks for narrowly scoped credentials after CVE-2024-8309, a prompt-to-Cypher injection, which is the same lesson: the database role, not the prompt or the client, is the boundary." },]}>
-  - Safe means it cannot write, scan or leak: a read-only scoped role, a `CALL` allow-list without `apoc.cypher.*`, `apoc.load.*` or `dbms.*`, `LOAD CSV` blocked, ≤ 4 hops, LIMIT 1,000, `EXPLAIN`, 5 s and 512 MB on assistant-only replicas; ClickHouse `readonly=1` with a 200M-row read cap.
-  - Correct is harder: templates first for 70% of lookups, every literal linked to a master id so "ETCH4-B" stops instead of returning "no rows", one repair with the error, and the query shown with a paraphrase.
-  - The benchmarks say why: on the 2024 benchmarks zero-shot Text2Cypher scored 61.58% (CypherBench execution accuracy) to ≈ 30% (Neo4j's strict match), and the metrics are not comparable.
-  - What still fails is a valid wrong join (`ON_TOOL` instead of `VISITED` returns every chamber of the tool). Verify on 500 questions: templates ≥ 95%, generated ≥ 80%, 50 misspelled names never "no rows", 0 of 300 bypass attempts executed.
+  - Safe means it cannot write, scan or leak: a read-only scoped role, a `CALL` allow-list without `apoc.cypher.*`, `apoc.load.*` or `dbms.*`, `LOAD CSV` blocked, ≤ 4 hops, LIMIT 1,000, `EXPLAIN`, 5 s and 512 MB on assistant-only replicas; a ClickHouse `readonly=1` profile with a 200M-row read cap.
+  - Correct is harder: templates first for 70% of lookups, every literal linked to a master id so "ETCH4-B" stops instead of returning "no rows", one repair with the error, and the query shown with a paraphrase. The cost is 40 templates to curate from logs and long-tail lookups at ≈ 3.0 s p50.
+  - The benchmarks say why: on CypherBench (2024) the best zero-shot execution accuracy was 61.58% and models under 10B scored below 20%; on Neo4j's dataset (2024) the best model, fine-tuned or not, reached ≈ 30% strict match. The metrics are not comparable, so the fab's own 150 generated questions decide (≥ 80%, ± 6.4).
+  - What still fails is a valid wrong join (`ON_TOOL` instead of `VISITED` returns every chamber of the tool). Verify on 500 questions: templates ≥ 95% (also per template), generated ≥ 80%, 50 misspelled names never "no rows", 0 of 300 constructed bypass attempts executed.
   </InterviewQuestion>
-  <InterviewQuestion question="Your top suspect chamber changed the same week as a resist lot and a wet-bench bath. How do you separate correlation from cause?" category="Trade-offs" level="Senior" followUps={[{ question: "Chamber B always passes its wafers to strip chamber 2. Which one is it?", level: "Senior", answer: "The data cannot say: the two wafer sets are identical, so the statistics report one cluster, “ETCH04 path B → strip 2”, separable only physically. The confirmation checks say how: the part record for the edge ring swapped in WO-55120, inline edge CD, and a split lot that routes wafers through B with another strip chamber." },]}>
-  - Compare inside the same lots and the same process days: chamber B's wafers against sister-chamber wafers of the same lots, so the resist lot and the wet-bench batch, which vary between lots, cancel. On held-out lots that is 80% [70–87%] against 4.0% [1.8–8.8%].
+  <InterviewQuestion question="Your top suspect chamber changed the same week as a resist lot and a wet-bench bath. How do you separate correlation from cause?" category="Trade-offs" level="Senior" followUps={[{ question: "Chamber B always passes its wafers to strip chamber 2. Which one is it?", level: "Senior", answer: "The data cannot say: the two wafer sets are identical, so the statistics report one cluster, “ETCH04 path B → strip 2”, separable only physically. The confirmation checks say how: the part record for the edge ring swapped in WO-55120, inline edge CD, and a split lot that routes wafers through B with another strip chamber." }, { question: "The cause is B at step 412 only on wafers that went through chamber 3 at step 300. What does your system show?", level: "Senior", answer: "No single-factor hypothesis may survive, because pairs are not candidates (16,000² cells would wreck the max-T power); the card says “no single-factor hypothesis; combinations not tested” as a gap, never “nothing found”. A targeted second pass over the top cells × upstream steps, or a Gibbs-sampler search like Hsu et al. (2012) offline, is the planned extension." },]}>
+  - Compare inside the same lots and process days, chamber B's wafers against sister-chamber wafers of the same lots, so the resist lot and the wet-bench batch cancel: 80% [70–87%] against 4.0% [1.8–8.8%] on held-out lots. Wafers in a lot are exchangeable only within slot class, because a cluster tool that assigns chambers by slot aliases B with a slot class (Jaccard 0.31, illustrative).
   - Test lot-level candidates only on the residual wafers B does not explain: WET07 ran 28 of 40 bad lots, but its residual wafers show 4.0% against 4.0%, and PR-552's non-B wafers 4.0% against 4.0%.
-  - Timing and mechanism add weight: a change-point at day 0 aligned with WO-55120 and an approved FMEA path, but the card stays a hypothesis until the engineer's physical checks (part record, edge CD, a split lot) confirm it.
-  - The trade-off is power on lot-level candidates. Verify with 500 seeded faults that come with a benign co-occurring change; the gate needs ≥ 90% in the top 3, and a candidate at 84% does not ship.
+  - Timing and mechanism add weight but are weak alone: a chamber logs ≈ 0.21 maintenance, qualification or part events a day (illustrative), so one falls within a day of a random change-point ≈ 34% of the time. The alignment with WO-55120 counts with the approved FMEA path and the +6.1% DC-bias shift, and the card stays a hypothesis until the part record, edge CD and a split lot confirm it.
+  - The trade-off is power on lot-level candidates, and a cause on all four chambers of ETCH04 shows no within-lot difference at all, so tool at a step and batch runs sit in the lot-level family, tested on residual wafers. Verify with 500 seeded faults that come with a benign co-occurring change: ≥ 90% in the top 3; a candidate at 84% does not ship.
   </InterviewQuestion>
   <InterviewQuestion question="How would you evaluate this system before rollout?" category="Evaluation" level="Senior" followUps={[{ question: "How do you stop a replayed case from seeing its own answer?", level: "Senior", answer: "Replay on the versions recorded before the case’s detection time, fit the ranker only on cases closed before it, and filter knowledge edges and past cases to approval dates before it, so its own 8D report is invisible. The first 30 cases only train; the 270 after them are scored." },]}>
   - Rolling-origin replay of 270 confirmed excursions on as-of state: hit@3 ≥ 70% (± 5.4 points), hit@1 ≥ 45%, candidate-kind coverage ≥ 90%, reported for the ≈ 120 exact recent cases and the 150 approximate older ones.
   - Paired against the YMS screen on the same cases with McNemar's test (≈ 7.6 points detectable); 2,000 seeded faults and 1,000 null replays for the statistics; 500 questions for queries; calibration with the "high" bin's lower bound ≥ 50%; 200 leakage prompts.
-  - Then an 8-week shadow on every real excursion without showing results, the clean label set, and rollout from etch to the front end to the fab.
-  - The weakness is few labels: ± 8.1 points on the exact-replay class alone, and verdicts given after seeing the ranking are biased, so they carry `ranking_seen` and the shadow labels anchor the gate.
+  - Then an 8-week shadow on every real excursion without showing results, and rollout from etch to the front end to the fab.
+  - The weakness is few and biased labels: ± 8.1 points on the exact-replay class alone, and the 270 exist because someone found the cause, often with the YMS screen, which favours the incumbent in the paired test and leaves out the excursions nobody solved. Verdicts given after seeing the ranking carry `ranking_seen`; an 8-week shadow yields only ≈ 9 confirmed cases, so it checks for exposure bias rather than anchoring the gate.
+  - The trade-off is that seeded faults, where labels are free, carry the statistics gate, and they test only the fault shapes we inject. So detection is reported by effect-size bin (10, 20 and 40 points), not as one 90%, and time from detection to confirmed cause is tracked online.
   </InterviewQuestion>
   <InterviewQuestion question="How do you handle data quality issues across fab systems?" category="Failure modes" level="Senior" followUps={[{ question: "A PM finished an hour ago but CMMS has no record yet. What does an answer say?", level: "Senior", answer: "The E10 state change reached the graph within 2 minutes, so the downtime window is known and is itself a candidate; the answer carries the gap “CMMS record pending for a downtime on ETCH04-B at 08:10”. When the work order lands, backdated, every answer in the last 30 days whose window it changes gets a `flag` event." },]}>
-  - Identity first: an owned map per source, a 10-minute hold for early events, quarantine for true unmapped (≤ 0.1% of events a day) and a daily coverage report; FDC traces matched by context at ≥ 99.5% per tool type.
+  - Identity first: an owned map per source, a 10-minute hold for early events, quarantine for true unmapped (≤ 0.1% of events a day) and a daily coverage report; FDC traces matched by context at ≥ 99.5% per tool type; rework rows carry their pass, so a wafer that ran a step twice is exposed at each pass.
   - Completeness is measured per source, not per pipeline: E10 state changes within 2 minutes, CMMS lag shown as a gap (illustrative median 3 hours), and a late, backdated record flags the answers it changes.
-  - Recipe identity per run as downloaded, golden-mismatch events and APC as indicators; coverage per candidate kind, where a kind under 80% is "not testable", never "ruled out".
+  - Recipe identity per run is the body version the RMS verified for the job, with golden-mismatch events and APC as indicators; coverage per candidate kind, where a kind under 80% is "not testable", never "ruled out".
   - The trade-off is that quarantine hides a renamed tool's events until mapped. Verify with a seeded rename caught by the next coverage run and a nightly reconciliation of counts between the graph and the columnar store.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you keep confidential process data secure in an LLM assistant?" category="Architecture" level="Mid">
+  <InterviewQuestion question="How would you keep confidential process data secure in an LLM assistant?" category="Trade-offs" level="Mid">
   - Draw the boundary first: models, stores and logs all run in the site data centre with no internet route, weights enter through software intake, and 0 bytes of fab data or prompts leave.
   - Scope by role on every store: graph label grants by product family, ClickHouse row policies, filtered trace and document APIs, and "n hidden by scope" on truncated traversals; recipe values never enter the graph and `recipe.diff` returns them only to the owner module.
-  - The reasons are concrete: Samsung's 2023 ban after code was pasted into ChatGPT, Taiwan's core-technology law and US deemed-export rules (framing, not legal advice).
-  - The trade-off is ≈ 107.5 USD a day for on-site models and label grants over property rules, because a property DENY fails open when it cannot be evaluated. Verify with 200 leakage prompts: 0 leaks bounds the rate at ≤ 1.5%.
+  - The reasons are concrete: recipes and yields are trade secrets at any node, and Samsung's 2023 ban shows the leak path. Taiwan's core-technology law (14 nm and below) and US advanced-node controls bite at the leading edge; at this mature node trade secrets and customer contracts are the binding reasons (framing, not legal advice).
+  - The trade-off is ≈ 107.5 USD a day of GPU premium for on-site models, and label grants over property rules, because a property DENY fails open when it cannot be evaluated. Verify with 200 leakage prompts: 0 leaks bounds the rate at ≤ 1.5%.
   </InterviewQuestion>
-  <InterviewQuestion question="Why run the models on site, and what does it cost you?" category="Cost" level="Senior" followUps={[{ question: "Should the writer run at medium reasoning effort?", level: "Senior", answer: "Not by default: medium adds about 220 hidden tokens a call and puts the explanation at ≈ 15.0 s p50, on the 15 s target, while low saves ≈ 2.2 s. The grader and the measured token counts decide; the reasoning channel stays in the audit store either way." },]}>
-  - Because recipes and yields are trade secrets and process technology can be export-controlled, so who may see it and where it is processed is the fab's legal question; on site answers it by construction.
-  - The price is small: 4 GPUs at 240 USD a day against ≈ 132.5 for a hosted API like for like, a premium of ≈ 107.5 USD a day, 1.1% of ≈ 9,950; people are 83% of the bill.
-  - What it really costs is frontier quality, managed upgrades and on-site MLOps, and a reasoning model whose hidden tokens must be budgeted: 80 a call at low effort, with targets breaking at ≈ 95, 135 and 163.
+  <InterviewQuestion question="Why run the models on site, and what does it cost you?" category="Cost" level="Senior" followUps={[{ question: "Should the writer run at medium reasoning effort?", level: "Senior", answer: "Not by default: medium adds about 220 hidden tokens a call and puts the explanation at ≈ 15.0 s p50 on the mixed route, at the 15 s target, and ≈ 16.1 s on the typed route, over it; low saves ≈ 2.2 s. The grader and the measured token counts decide; the reasoning channel stays in the audit store either way." },]}>
+  - Because recipes and yields are trade secrets, and at advanced nodes process technology is also export-controlled; who may see it and where it is processed is the fab's legal question, and on site answers it by construction.
+  - The GPU premium is small: 4 GPUs at 240 USD a day against ≈ 132.5 for a hosted API like for like, ≈ 107.5 USD a day, 1.1% of ≈ 9,950. The real premium is people: if serving, intake and upgrades take half an ML engineer (illustrative), that is ≈ 411 USD a day more; with the GPUs, still ≈ 5% of the total.
+  - It also costs frontier quality and managed upgrades, and a reasoning model whose hidden tokens must be budgeted: 80 a call at low effort, with targets breaking at ≈ 95, 135 and 163.
   - Verify with measured reasoning-token counts and latency per request type at the gate, and with the query set; if the generated slice stays under 80%, fine-tune a small text-to-Cypher model from validated logs.
   </InterviewQuestion>
   <InterviewQuestion question="A second fab with a different MES joins. What changes first?" category="Scaling" level="Senior" followUps={[{ question: "Can the new fab’s ranker learn from the first fab’s excursion cases?", level: "Senior", answer: "Its mechanism paths and past cases can serve as evidence where the ontology versions map, but calibration does not transfer: confidence bins come from that fab’s own replay, so the new fab shows “medium” at most until it has about 20 confirmed cases (illustrative). Scope may also forbid one site’s staff from seeing the other’s process data." },]}>
   - Integration changes first, not the models: a connector and identity map per MES, with the coverage gate (100% of chambers mapped) passed before any question runs against that fab.
   - Then the ontology: site versions, templates and schema subsets re-tested against a migrated snapshot, and per-site scopes, since one site's process may be controlled for the other's staff.
   - The statistics, guards and model stay; load is not the problem, since doubling to ≈ 0.36 questions a second at burst is still ≈ 1.3 streams, which two hosts serve.
-  - The trade-off is a second identity map and mapping work per tool. Verify with an 8-week shadow on the new fab and a per-site replay before its results are shown.
+  - The trade-off is a second identity map and mapping work per tool. Verify with a per-site replay, knowing that history loaded at connection has no true `recorded_at`, so every case before connection day replays approximately and the first fab's gate is not reused.
   </InterviewQuestion>
 </InterviewQuestions>
