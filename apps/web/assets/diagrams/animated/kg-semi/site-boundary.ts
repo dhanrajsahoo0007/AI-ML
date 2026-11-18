@@ -1,6 +1,6 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
-import { COST, FLEET, KS_PRICES } from "@/components/diagrams/presets/gcase-kgsemi";
+import { COST, FLEET, KS_PRICES, REVIEW_ADDS } from "@/components/diagrams/presets/gcase-kgsemi";
 
 // The site boundary and on-site models (kg-semiconductor-case-study, deep dive 4; design sheet §14, §10.13, §5):
 //   Fab network (MES, E90 and E10 events, FDC, SPC, CMMS, RMS, YMS, test floor, equipment): read through the message
@@ -16,10 +16,11 @@ import { COST, FLEET, KS_PRICES } from "@/components/diagrams/presets/gcase-kgse
 //   covering these servers.
 //   Nothing out: a hosted model API is the rejected option; like for like it would cost COST.hostedPerDay ≈ 132.5 USD
 //   a day (COST.hostedTokens ≈ 12.5 of tokens incl. reasoning, extraction and replays + COST.hostedEncoders 120 for the
-//   two encoder GPUs still on site), so the boundary costs COST.boundaryPremium ≈ 107.5 USD a day, COST.boundaryShare
-//   ≈ 1.1% of COST.perDay ≈ 9,950. Export control and trade secrets are the fab's legal questions (framing, not advice).
+//   two encoder GPUs still on site), so the GPU premium is COST.boundaryPremium ≈ 107.5 USD a day, COST.boundaryShare
+//   ≈ 1.1% of COST.perDay ≈ 9,950. The people premium is larger: half an ML engineer for serving, intake and upgrades,
+//   REVIEW_ADDS.peoplePremiumPerDay ≈ 411 USD a day (illustrative); both together ≈ 5% of the total. Export control and trade secrets are the fab's legal questions (framing, not advice).
 // Steps: 1 the fab network and the site data centre · 2 the model hosts · 3 software intake · 4 nothing out, and the
-// price of the boundary.
+// GPU and people premiums.
 // Layout (960 wide, the kg-health PHI boundary's frame): the fab network group x 20–220; the data centre x 260–710 with
 // two columns of 196-wide boxes at x 280 | 494, rows 80 apart from y 70; the internet group x 750–940; software intake
 // (tab "Intake", so the weights arrow at x 378 clears it) along the bottom. Every fab box joins one bus up x 240 into
@@ -86,12 +87,12 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "The site boundary: fab data in, weights in through intake, nothing out",
   width: 960,
-  height: FOOT + 72,
+  height: FOOT + 94,
   steps: [
     { title: "Fab data in through the bus and exports; nothing written back" },
     { title: "Models on site: an open-weight reasoning model on two hosts" },
     { title: "Weights, images and libraries enter through software intake" },
-    { title: `Nothing out: the boundary costs ≈ ${usd(COST.boundaryPremium)} USD a day` },
+    { title: `Nothing out: a GPU premium of ≈ ${usd(COST.boundaryPremium)} USD a day, and the people to run it` },
   ],
   groups: [
     { id: "g-fab", title: "Fab network", tone: "teal", x: 20, y: 30, w: 200, h: 380 },
@@ -177,7 +178,13 @@ const spec: LayoutSpec = {
     text(
       "foot-2",
       FOOT + 22,
-      `The boundary costs ≈ ${usd(COST.boundaryPremium)} USD a day, ${(COST.boundaryShare * 100).toFixed(1)}% of ≈ ${(Math.round(COST.perDay / 10) * 10).toLocaleString("en-GB")}. Who may see process technology is the fab's legal question.`,
+      `GPU premium ≈ ${usd(COST.boundaryPremium)} USD a day (${(COST.boundaryShare * 100).toFixed(1)}%); people ≈ ${Math.round(REVIEW_ADDS.peoplePremiumPerDay)} more (half an ML engineer, illustrative): ≈ ${Math.round(((COST.boundaryPremium + REVIEW_ADDS.peoplePremiumPerDay) / COST.perDay) * 100)}% of ≈ ${(Math.round(COST.perDay / 10) * 10).toLocaleString("en-GB")} in all.`,
+      4
+    ),
+    text(
+      "foot-3",
+      FOOT + 44,
+      "Who may see process technology, and where it is processed, is the fab's legal question.",
       4
     ),
   ],

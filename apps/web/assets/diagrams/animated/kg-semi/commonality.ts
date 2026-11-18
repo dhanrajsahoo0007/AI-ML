@@ -3,7 +3,7 @@ import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
 import { STATS } from "@/components/diagrams/presets/gcase-kgsemi";
 import { PROD_TONE, n } from "@/components/diagrams/presets/production";
 
-// From candidates to a confirmed effect (kg-semiconductor-case-study, Step 4 and deep dive 3; design sheet §9, §10.9,
+// From candidates to a replicated effect (kg-semiconductor-case-study, Step 4 and deep dive 3; design sheet §9, §10.9,
 // §10.10, §15.3). The worked investigation is INVENTED and illustrative; every number is STATS in
 // presets/gcase-kgsemi.ts:
 //   1 Change-point on chamber B at step 412 (process time, not sort date): STATS.before 10 of 250 = 4.0% [2.2–7.2%] in
@@ -11,14 +11,17 @@ import { PROD_TONE, n } from "@/components/diagrams/presets/production";
 //     prints them); sister chambers flat at 4%. Day 0 is work order WO-55120 (edge ring, new part revision, part lot
 //     PL-2291). Cohort: STATS.cohortLots 80 lots, STATS.cohortWafers 2,000 wafers.
 //   2 Two ordered families, 10,000 within-lot permutations each, max-T (Westfall–Young): STATS.withinLot 5,360 at
-//     α 0.04, then STATS.lotLevel 440 on the residual wafers at α 0.01 (family-wise error ≤ 0.05 under any dependence);
-//     without it, 268 + 22 = STATS.chanceHits 290 chance hits at p < 0.05; Benjamini–Yekutieli would cost
-//     STATS.byFactor ≈ 9.2×. The top STATS.preRegistered 3 are pre-registered for held-out confirmation at 0.05 ÷ 3.
+//     α 0.04, then STATS.lotLevel 1,680 on the residual wafers at α 0.01 (material lots 200, test side 90, reticles 150,
+//     tool at a step STATS.toolAtStep 1,120 and batch-tool runs STATS.batchRuns 120: a tool-wide cause shows no
+//     within-lot difference, so it is lot level; family-wise error ≤ 0.05 under any dependence); without it,
+//     268 + 84 = STATS.chanceHits 352 chance hits at p < 0.05 over STATS.tests 7,040. The top STATS.preRegistered 3
+//     are pre-registered for held-out replication at 0.05 ÷ 3 ("replicated" is the statistic's word; "confirmed" is
+//     the 8D owner's verdict).
 //   3 Why the order matters (review item R2-4): WET07, a batch wet bench at step 414, ran STATS.wet07.etch04Lots 28 of
 //     the 40 bad (ETCH04) lots against 12 of the 40 clean ones, so a lot-level test on its own would flag it; on the
 //     residual non-B wafers its lots show 4.0% (33 of 825) against 4.0% (37 of 925) elsewhere: checked and not
 //     supported. (Its one-sided p ≈ 3.5 × 10⁻⁴ is not printed: no p-value is evidence strength here.)
-//   4 Held-out confirmation on 50 lots that did not select it: chamber B STATS.heldOutB 100 of 125 = 80%, sister
+//   4 Held-out replication on 50 lots that did not select it: chamber B STATS.heldOutB 100 of 125 = 80%, sister
 //     chambers in the same 20 ETCH04 lots STATS.heldOutSister 15 of 375 = 4.0%; lot-cluster-adjusted intervals (design
 //     effect, illustrative intra-lot correlation STATS.icc 0.1): STATS.heldOutBCluster 70–87% and
 //     STATS.heldOutSisterCluster 1.8–8.8% (the narrower Wilson intervals are not shown); risk difference 76 points;
@@ -118,15 +121,14 @@ const otherK = Math.round(res.otherWafers * res.otherRate);
 
 const spec: LayoutSpec = {
   kind: "layout",
-  title:
-    "From 5,800 candidates to one confirmed effect: change-point, ordered max-T, held-out lots, ruled-out suspects",
+  title: `From ${n(STATS.tests)} candidates to one replicated effect: change-point, ordered max-T, held-out lots, ruled-out suspects`,
   width: 880,
   height: AXIS + 96,
   steps: [
     { title: "A change-point on chamber B, in process time" },
     { title: `Two ordered families, max-T over ${n(STATS.tests)} candidates` },
     { title: "Why the order matters: WET07 tested alone, then on the residual wafers" },
-    { title: "Held-out confirmation with lot-cluster intervals; what was ruled out" },
+    { title: "Replicated on held-out lots, with lot-cluster intervals; what was ruled out" },
   ],
   shapes: [
     // Step 1: the change-point.
@@ -217,8 +219,8 @@ const spec: LayoutSpec = {
       B2,
       300,
       64,
-      `Lot level: ${STATS.lotLevel} on residual wafers`,
-      `material lots, test side, reticles; α ${STATS.alphaLot}`,
+      `Lot level: ${n(STATS.lotLevel)} on residual wafers`,
+      `tool at a step, batch runs, materials; α ${STATS.alphaLot}`,
       GENAI_TONE.rank,
       2
     ),
@@ -271,13 +273,13 @@ const spec: LayoutSpec = {
     ),
     { id: "a-wet", type: "arrow", x: 0, y: 0, from: "wet-naive", to: "wet-residual", label: "ordered", step: 3 },
 
-    // Step 4: held-out confirmation with lot-cluster intervals.
+    // Step 4: held-out replication with lot-cluster intervals.
     text(
       "h4",
       12,
       B4,
       856,
-      `Held-out: ${ho.lots} lots that did not select it; the same ${STATS.etch04LotsWithBSignature.of} ETCH04 lots (lot-cluster intervals)`,
+      `Replicated on ${ho.lots} held-out lots that did not select it; the same ${STATS.etch04LotsWithBSignature.of} ETCH04 lots (lot-cluster intervals)`,
       4
     ),
     ...interval(

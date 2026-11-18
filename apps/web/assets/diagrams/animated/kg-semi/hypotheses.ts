@@ -1,6 +1,6 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
-import { FAB, STATS } from "@/components/diagrams/presets/gcase-kgsemi";
+import { FAB, REVIEW_ADDS, STATS } from "@/components/diagrams/presets/gcase-kgsemi";
 import { PROD_TONE, n } from "@/components/diagrams/presets/production";
 
 // Ranked hypotheses with evidence, then the engineer's confirmation (kg-semiconductor-case-study, Steps 5 and 7; design
@@ -15,9 +15,10 @@ import { PROD_TONE, n } from "@/components/diagrams/presets/production";
 //     the sheet's worked example gives no numbers for ranks 2 and 3.
 //   2 Evidence per hypothesis: mechanism path edge-ring part → edge etch-rate shift → edge-ring signature (FMEA row
 //     3311, approved); DC bias in the main etch +STATS.traceShiftPct = 6.1% after the swap; post-PM qualification (etch
-//     rate in spec, edge not measured); past case EXC-2025-031; WIP at risk STATS.wipAtRiskPasses ≈ 10,700 wafer
-//     passes through ETCH04-B in the last floor(FAB.sortLagDays) = 29 days, not yet sorted (FAB.wafersPerChamberPerDay
-//     368 × 29).
+//     rate in spec, edge not measured); past case EXC-2025-031; WIP at risk REVIEW_ADDS.wipAtRiskStep ≈ 725 PX7 wafers
+//     through ETCH04-B at step 412 in the last floor(FAB.sortLagDays) = 29 days, not yet sorted (4 ETCH04 lots a day ×
+//     6.25 B wafers × 29), and STATS.wipAtRiskPasses ≈ 10,700 passes at any of B's steps (368 a day × 29), the page's
+//     order.
 //   3 Confirmation and the loop: checks from DETECTED_BY and past cases (the part record and edge-ring height for
 //     WO-55120, inline edge CD on chamber-B wafers against sister chambers, a split of the next lot across B and A) →
 //     the 8D owner's verdict (confirmed, rejected or inconclusive, with evidence ids and ranking_seen) → an
@@ -174,12 +175,19 @@ const spec: LayoutSpec = {
       EW,
       56,
       "WIP at risk",
-      `≈ ${n(wip)} passes, ${Math.floor(FAB.sortLagDays)} days`,
+      `≈ ${n(REVIEW_ADDS.wipAtRiskStep)} wafers at step 412`,
       GENAI_TONE.user,
       2,
       {
         highlight: true,
       }
+    ),
+    text(
+      "note-2",
+      E + 66,
+      `WIP at risk: ≈ ${n(REVIEW_ADDS.wipAtRiskStep)} PX7 wafers through ETCH04-B at step 412 in the last ${Math.floor(FAB.sortLagDays)} days, not yet sorted (≈ ${n(wip)} passes at any of B's steps).`,
+      2,
+      { quiet: true }
     ),
 
     // Step 3: checks, verdict, case.

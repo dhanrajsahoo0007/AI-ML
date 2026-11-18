@@ -1112,3 +1112,7 @@ export const REVIEW_ADDS = (() => {
   const timingCoincidence = 1 - Math.exp(-2 * chamberEventsPerDay); // ≈ 0.34
   return { wipAtRiskStep, peoplePremiumPerDay, chamberEventsPerDay, timingCoincidence };
 })();
+
+/** Effect-size bins (points of signature rate) the seeded-fault gate also reports per bin (page §13; added for the
+ * kg-semi/release-gate figure, no other value changed). */
+export const SEEDED_EFFECT_BINS = [10, 20, 40] as const;

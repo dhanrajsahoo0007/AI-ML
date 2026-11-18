@@ -11,16 +11,16 @@ import { CONTEXT, LATENCY, REASONING, STATS } from "@/components/diagrams/preset
 //   and wafers 80 → `plan` at LATENCY.planTextOnly.p50 = 1,850 ms.
 //   Cohort ‖ sort data (slower ≈ 500) → 2,350; within-lot max-T ‖ test-side check (1,000) → 3,350; FDC indicators
 //   600 + cluster 50 → 4,000; evidence in parallel, slowest ≈ 2,745 (graph context, what else changed, WIP at risk ‖
-//   3 trace summaries ‖ past cases ‖ change-points) → 6,745; held-out confirmation 300 + rank 30 → `hypotheses` at
+//   3 trace summaries ‖ past cases ‖ change-points) → 6,745; held-out replication 300 + rank 30 → `hypotheses` at
 //   LATENCY.hypothesesText.p50 ≈ 7,075 ms; writer first token 600 + 80 reasoning (800) + 130 tokens (1,300) + check 20
 //   → first hypothesis text ≈ 9,795; + the other 410 tokens → complete at LATENCY.explanationText.p50 ≈ 13,895 ms.
 //   Statistics (STATS): the time-matched cohort is STATS.cohortLots 80 lots, STATS.cohortWafers 2,000 wafers that
-//   passed step 412 in process days 0–10; STATS.withinLot 5,360 + STATS.lotLevel 440 candidates, 10,000 permutations,
+//   passed step 412 in process days 0–10; STATS.withinLot 5,360 + STATS.lotLevel 1,680 candidates (tool at a step and batch-tool runs are lot level), 10,000 permutations,
 //   max-T; held-out: chamber B 80% of 125 wafers [70–87%, lot-cluster-adjusted] against 4.0% of 375 sister-chamber
 //   wafers [1.8–8.8%] in the same 20 ETCH04 lots; WET07's residual 4.0% vs 4.0%. No p-value is shown to the engineer.
 //   Test side: largest probe card 22% of signature wafers vs 20% of wafers tested; 0 of 30 recovered on retest.
-// Steps: 1 scope, then the plan · 2 the time-matched cohort, test side first · 3 within-lot max-T over 5,800
-// candidates, a coverage gap · 4 evidence in parallel · 5 held-out confirmation; the table before any text · 6 the
+// Steps: 1 scope, then the plan · 2 the time-matched cohort, test side first · 3 within-lot max-T over 7,040
+// candidates, a coverage gap · 4 evidence in parallel · 5 held-out replication; the table before any text · 6 the
 // writer explains; numbers checked.
 // Lanes (SEQUENCE_LANE, section tones only; labels ≤ 15 characters): Engineer orange, Gateway and Orchestrator
 // neutral (harness), Model green, Columnar and Graph violet (stores), Trace API teal (a tool). The statistics engine
@@ -74,7 +74,7 @@ const messages: SequenceMessage[] = [
   m("columnar", "orch", `cohort ‖ sort data by ${ms(t.cohort)}`, 2, "return"),
 
   // Step 3: within-lot max-T over two ordered families; a coverage gap.
-  m("orch", "columnar", `${n(STATS.withinLot)} within lot + ${STATS.lotLevel} lot level`, 3),
+  m("orch", "columnar", `${n(STATS.withinLot)} within lot + ${n(STATS.lotLevel)} lot level`, 3),
   m("columnar", "orch", `max-T done by ${ms(t.tests)}`, 3, "return"),
   m("orch", "gateway", "gap: slurry lot known for 58% < 80%", 3, "async"),
 
@@ -84,8 +84,8 @@ const messages: SequenceMessage[] = [
   m("graph", "orch", "WO-55120 day 0; PR-552; WET07; FMEA 3311", 4, "return"),
   m("trace", "orch", `DC bias +${STATS.traceShiftPct}% after the swap`, 4, "return"),
 
-  // Step 5: held-out confirmation; the ranked table before any text.
-  m("orch", "columnar", `top ${STATS.preRegistered} only, on 50 held-out lots`, 5),
+  // Step 5: held-out replication; the ranked table before any text.
+  m("orch", "columnar", `replicate the top ${STATS.preRegistered} on 50 held-out lots`, 5),
   m(
     "columnar",
     "orch",
@@ -131,7 +131,7 @@ const spec: SequenceSpec = {
     { title: "A time-matched cohort; the test side first" },
     { title: `Within-lot max-T over ${n(STATS.tests)} candidates; a coverage gap` },
     { title: `Evidence in parallel, done by ${ms(t.evidence)}` },
-    { title: `Held-out confirmation; the ranked table at ${ms(t.hypotheses)}, before any text` },
+    { title: `Replicated on held-out lots; the ranked table at ${ms(t.hypotheses)}, before any text` },
     { title: `The model explains; numbers checked; complete at ${ms(t.complete)}` },
   ],
   messages,

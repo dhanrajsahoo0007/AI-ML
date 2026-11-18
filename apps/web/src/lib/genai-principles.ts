@@ -43,6 +43,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/customer-support-agent`,
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -50,7 +51,11 @@ const ROWS: PrincipleRow[] = [
     name: "Ground before you generate",
     line: "Retrieve the evidence first and answer only from it; no evidence means no answer.",
     teach: concept("rag-fundamentals", "hallucination-mitigation"),
-    caseStudies: [`${CASE}/customer-support-agent`, `${CASE}/kg-healthcare-case-study`],
+    caseStudies: [
+      `${CASE}/customer-support-agent`,
+      `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
+    ],
   },
   {
     id: "P3",
@@ -76,6 +81,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -83,7 +89,12 @@ const ROWS: PrincipleRow[] = [
     name: "Budget latency per stage",
     line: "Give every stage a number, stream and overlap stages, and manage the p95, not the mean.",
     teach: concept("streaming-and-time-to-first-token", "latency-token-monitoring"),
-    caseStudies: [`${CASE}/voice-agent-call-centre`, `${CASE}/ai-answer-engine`, `${CASE}/kg-healthcare-case-study`],
+    caseStudies: [
+      `${CASE}/voice-agent-call-centre`,
+      `${CASE}/ai-answer-engine`,
+      `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
+    ],
   },
   {
     id: "P6",
@@ -114,6 +125,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -121,7 +133,11 @@ const ROWS: PrincipleRow[] = [
     name: "Constrain the output",
     line: "Schemas and constrained decoding fix the shape; validators and rules after the model check the content.",
     teach: concept("structured-output-generation", "guardrails-output-validation"),
-    caseStudies: [`${CASE}/document-extraction-pipeline`, `${CASE}/kg-healthcare-case-study`],
+    caseStudies: [
+      `${CASE}/document-extraction-pipeline`,
+      `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
+    ],
   },
   {
     id: "P10",
@@ -135,6 +151,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -147,6 +164,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -158,6 +176,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/customer-support-agent`,
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/conversational-assistant-design`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -170,6 +189,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -181,6 +201,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -192,6 +213,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/customer-support-agent`,
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -205,6 +227,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
     ],
   },
   {
@@ -212,7 +235,11 @@ const ROWS: PrincipleRow[] = [
     name: "Keep sensitive data inside a boundary",
     line: "Redact, de-identify or keep data in its region and on approved models; log only what you may keep.",
     teach: concept("data-privacy-pii-handling", "compliance-audit-logging"),
-    caseStudies: [`${CASE}/voice-agent-call-centre`, `${CASE}/kg-healthcare-case-study`],
+    caseStudies: [
+      `${CASE}/voice-agent-call-centre`,
+      `${CASE}/kg-healthcare-case-study`,
+      `${CASE}/kg-semiconductor-case-study`,
+    ],
   },
 ];
 

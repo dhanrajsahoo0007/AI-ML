@@ -1,6 +1,6 @@
 import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 import { gate, gateSize, n, PROD_TONE } from "@/components/diagrams/presets/production";
-import { EVAL } from "@/components/diagrams/presets/gcase-kgsemi";
+import { EVAL, SEEDED_EFFECT_BINS } from "@/components/diagrams/presets/gcase-kgsemi";
 
 // The release gate (kg-semiconductor-case-study, Step 8; design sheet §13): a release candidate (a ranker, prompt,
 // template or ontology version) against nine checks, one failing, so it does not ship. Thresholds from EVAL in
@@ -10,7 +10,8 @@ import { EVAL } from "@/components/diagrams/presets/gcase-kgsemi";
 //   2 candidate-kind coverage ≥ EVAL.coverageTarget 90% of confirmed causes: 93%: pass
 //   3 paired comparison with the YMS commonality screen (McNemar on the same 270 cases; detectable difference
 //     ≈ EVAL.mcnemarMdd 7.6 points at 80% power): + 12 points: pass
-//   4 seeded faults EVAL.seeded.n = 2,000, the seeded chamber in the top 3 ≥ 90% (± 1.3): 92%: pass
+//   4 seeded faults EVAL.seeded.n = 2,000, the seeded chamber in the top 3 ≥ 90% (± 1.3), also gated per effect-size
+//     bin SEEDED_EFFECT_BINS = 10, 20, 40 points: 92%: pass
 //   5 the time-confounded slice, EVAL.seeded.timeConfounded = 500 faults injected with a benign co-occurring change,
 //     ≥ 90%: 84%: FAIL (the sheet's example of a failing check)
 //   6 null replays EVAL.seeded.nulls = 1,000: a "high" hypothesis on ≤ 5%: 3.2%: pass
@@ -52,7 +53,11 @@ const checks = [
     pass: RUN.vsScreenPoints >= EVAL.mcnemarMdd * 100,
     sub: `+${RUN.vsScreenPoints} points, paired (McNemar)`,
   },
-  { label: "Seeded faults", pass: RUN.seeded >= S.detect, sub: `${pct(RUN.seeded)} in top 3 of ${n(S.n)}` },
+  {
+    label: "Seeded faults",
+    pass: RUN.seeded >= S.detect,
+    sub: `${pct(RUN.seeded)} in top 3 of ${n(S.n)}; per bin ${SEEDED_EFFECT_BINS.join(", ")} pts`,
+  },
   {
     label: "Time-confounded slice",
     pass: RUN.timeConfounded >= S.detect,

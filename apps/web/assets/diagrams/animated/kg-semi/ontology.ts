@@ -8,7 +8,8 @@ import { PROD_TONE } from "@/components/diagrams/presets/production";
 // parameter names from E164; dossier F1–F5):
 //   Execution: `Run` (lot × step × tool, track-in, track-out) -IN_LOT-> Lot, -AT_STEP-> StepDef, -ON_TOOL-> Tool,
 //   -VISITED {seq}-> Chamber (2.5 a run: a lot spreads over chambers; a cluster tool passes etch then strip),
-//   -USED_RECIPE_BODY-> RecipeBody (as downloaded: tool, chamber, PPID, body hash), -USED_MATERIAL-> MaterialLot.
+//   -USED_RECIPE_BODY-> RecipeBody (the body version the RMS verified for the job: upload-and-compare at job start,
+//   or the last golden compare; "unverified" when stale), -USED_MATERIAL-> MaterialLot.
 //   Which wafer took which chamber is a columnar row, not an edge (GRAPH.waferChamberEdges ≈ 537.6M if it were).
 //   Equipment: Tool -HAS_CHAMBER-> Chamber (qualified for FAB.stepsPerChamber ≈ 8 steps: re-entrant flow)
 //   -HAS_PART-> PartInstall (part number, revision, part lot). Events on equipment (E10 state changes, maintenance,
@@ -115,7 +116,7 @@ const spec: LayoutSpec = {
       rel("wafer", "lot", "IN_LOT", 1, { id: "wafer-inlot-lot" }),
 
       // Step 2: recipe bodies, material, events, parts, the test side.
-      box("recipe", 2, 2, "Recipe body", "as downloaded, hash", 2),
+      box("recipe", 2, 2, "Recipe body", "version the RMS verified", 2),
       box("material", 1, 2, "Material lot", "resist, slurry, gas", 2),
       box("events", 3, 3, "Equipment events", "E10 state, PM, hold, SPC", 2),
       box("part", 3, 2, "Part install", "revision, part lot", 2),

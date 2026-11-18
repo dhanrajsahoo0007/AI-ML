@@ -189,7 +189,7 @@ const spec: LayoutSpec = {
     text(
       "foot-2",
       FOOT + 20,
-      `Gates: templates ≥ 95% on ${EVAL.queries.template}, generated ≥ 80% on ${EVAL.queries.generated}, ${EVAL.queries.misspelled} misspelled names never "no rows", 0 of ${EVAL.bypass.attempts} bypasses executed.`,
+      `Gates: templates ≥ 95% (${EVAL.queries.template}), generated ≥ 80% (${EVAL.queries.generated}), ${EVAL.queries.misspelled} misspelled names never "no rows", 0 of ${EVAL.bypass.attempts} constructed bypass attempts executed.`,
       4
     ),
   ],
