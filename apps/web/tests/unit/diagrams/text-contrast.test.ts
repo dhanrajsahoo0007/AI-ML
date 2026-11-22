@@ -8,6 +8,7 @@ import { ANIMATED_SPECS } from "@/components/diagrams/animated-specs";
 import { LAYOUT_ONLY_TONES, TONES, toneText } from "@/components/diagrams/diagram-style";
 import { LayoutDiagram } from "@/components/diagrams/layout-diagram.client";
 import { SequenceDiagram } from "@/components/diagrams/sequence-diagram.client";
+import { CLOUD_PROVIDERS, specKind, type DiagramSpec } from "@/components/diagrams/types";
 
 // Tone-coloured diagram text is small (10.5 to 14 px), so WCAG AA asks 4.5:1. The strokes (`--dg-<tone>`) are
 // below that for several tones in light mode, so text uses `--dg-<tone>-text`. This guards the token values in
@@ -94,18 +95,68 @@ describe("diagram tone text contrast", () => {
 describe("diagram renderers", () => {
   // A text element (or the step bar's HTML label) painted with a bare stroke token: `fill:var(--dg-orange)`.
   const STROKE_ON_TEXT = /<(text|tspan|span)\b[^>]*style="[^"]*\b(fill|color):var\(--dg-[a-z]+\)(;|")/g;
+  // An HTML control with paper text on a solid stroke-token background (the cloud toggle).
+  const PAPER_ON_STROKE_HTML = /<[a-z]+\b[^>]*\btext-paper\b[^>]*background:var\(--dg-[a-z]+\)(;|")[^>]*>/g;
+  const SOLID_STROKE_FILL = /style="[^"]*\bfill:var\(--dg-[a-z]+\)(;|")/;
+  const PAPER_TEXT = /^<text\b[^>]*style="[^"]*\bfill:var\(--paper\)/;
 
-  it("never colour text with a stroke token, in any spec", () => {
-    const offenders: string[] = [];
-    for (const [id, spec] of Object.entries(ANIMATED_SPECS)) {
-      const html =
-        spec.kind === "sequence"
-          ? renderToStaticMarkup(createElement(SequenceDiagram, { spec }))
-          : spec.kind === "layout"
-            ? renderToStaticMarkup(createElement(LayoutDiagram, { spec }))
-            : renderToStaticMarkup(createElement(AnimatedDiagram, { spec }));
-      for (const m of html.matchAll(STROKE_ON_TEXT)) offenders.push(`${id}: ${m[0].slice(0, 120)}`);
+  /**
+   * SVG groups that hold both a solid shape filled with a stroke token and paper text, as direct children: a tab,
+   * tag, accent node or highlighted shape whose label would sit on the stroke colour (below 4.5:1 in light mode).
+   * A translucent fill (fill-opacity, such as a weighted cell or the timeout bar) carries ink text and is allowed.
+   */
+  function paperOnStrokeFills(html: string) {
+    const found: string[] = [];
+    const stack: { fills: string[]; paperText: boolean }[] = [{ fills: [], paperText: false }];
+    for (const [tag] of html.matchAll(/<\/?[a-zA-Z]+\b[^>]*>/g)) {
+      if (tag.startsWith("</g")) {
+        const frame = stack.pop()!;
+        if (frame.paperText && frame.fills.length) found.push(...frame.fills.map((f) => f.slice(0, 120)));
+      } else if (/^<g\b/.test(tag) && !tag.endsWith("/>")) {
+        stack.push({ fills: [], paperText: false });
+      } else if (/^<(rect|circle|ellipse|path|polygon)\b/.test(tag)) {
+        if (SOLID_STROKE_FILL.test(tag) && !/fill-opacity/.test(tag)) stack.at(-1)!.fills.push(tag);
+      } else if (PAPER_TEXT.test(tag)) {
+        stack.at(-1)!.paperText = true;
+      }
     }
-    expect(offenders).toEqual([]);
+    return found;
+  }
+
+  /** Every spec at its default view and at each build step, so NEW tags and step-only highlights render too. */
+  function* renders(): Generator<[string, string]> {
+    for (const [id, spec] of Object.entries(ANIMATED_SPECS)) {
+      const steps = spec.steps?.length ?? 0;
+      for (const step of [undefined, ...Array.from({ length: steps }, (_, i) => i + 1)]) {
+        const at = step === undefined ? id : `${id} step ${step}`;
+        if (spec.kind === "sequence") yield [at, renderToStaticMarkup(createElement(SequenceDiagram, { spec, step }))];
+        else if (spec.kind === "layout") yield [at, renderToStaticMarkup(createElement(LayoutDiagram, { spec, step }))];
+        else yield [at, renderToStaticMarkup(createElement(AnimatedDiagram, { spec, step }))];
+      }
+      // Specs with cloud refs also render with each provider on, so the Services toggle's active chip is checked.
+      if (specKind(spec) === "architecture" && (spec as DiagramSpec).nodes.some((n) => n.cloud)) {
+        for (const cloud of CLOUD_PROVIDERS) {
+          const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: spec as DiagramSpec, cloud }));
+          yield [`${id} cloud ${cloud}`, html];
+        }
+      }
+    }
+  }
+
+  it("never colour text with a stroke token, nor put paper text on a solid stroke fill, in any spec", () => {
+    const offenders = new Set<string>();
+    let newTags = 0;
+    let cloudChips = 0;
+    for (const [at, html] of renders()) {
+      for (const m of html.matchAll(STROKE_ON_TEXT)) offenders.add(`${at}: text ${m[0].slice(0, 120)}`);
+      for (const m of html.matchAll(PAPER_ON_STROKE_HTML)) offenders.add(`${at}: control ${m[0].slice(0, 120)}`);
+      for (const fill of paperOnStrokeFills(html)) offenders.add(`${at}: fill under paper text ${fill}`);
+      if (html.includes('data-new="true"')) newTags++;
+      if (/aria-pressed="true"[^>]*background:var\(--dg-/.test(html)) cloudChips++;
+    }
+    expect([...offenders]).toEqual([]);
+    // The step and provider renders reach the NEW tags and the toggle's active chips, so the checks cover them.
+    expect(newTags).toBeGreaterThan(0);
+    expect(cloudChips).toBeGreaterThan(0);
   });
 });
