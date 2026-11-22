@@ -74,7 +74,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 830,
       y: 380,
-      w: 170,
+      w: 190,
       h: 64,
     },
     {
