@@ -79,7 +79,7 @@ describe("premium-routes manifest", () => {
     expect(m.routes).toContain("/system-design/databases/b-trees");
     expect(m.routes).not.toContain("/system-design/databases");
     // An outline article stays free (alwaysFree: outlines).
-    expect(m.routes).not.toContain("/genai-system-design/case-studies/code-assistant");
+    expect(m.routes).not.toContain("/ml-system-design/case-studies/dynamic-pricing");
     expect(m.routes.every((r) => !r.endsWith(`/${PREVIEW_SEGMENT}`))).toBe(true);
   });
 
