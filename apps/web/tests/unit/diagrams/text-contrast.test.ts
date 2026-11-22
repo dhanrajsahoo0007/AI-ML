@@ -158,5 +158,6 @@ describe("diagram renderers", () => {
     // The step and provider renders reach the NEW tags and the toggle's active chips, so the checks cover them.
     expect(newTags).toBeGreaterThan(0);
     expect(cloudChips).toBeGreaterThan(0);
-  });
+    // Several thousand server renders: a few seconds alone, more when the whole suite runs in parallel.
+  }, 60_000);
 });
