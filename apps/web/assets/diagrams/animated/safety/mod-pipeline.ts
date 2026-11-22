@@ -48,7 +48,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 275,
       y: 70,
-      w: 150,
+      w: 166,
     },
     {
       id: "refusal",

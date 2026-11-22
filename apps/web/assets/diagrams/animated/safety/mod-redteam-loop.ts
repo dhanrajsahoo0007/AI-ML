@@ -35,7 +35,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 110,
       y: 90,
-      w: 170,
+      w: 186,
     },
     {
       id: "run",

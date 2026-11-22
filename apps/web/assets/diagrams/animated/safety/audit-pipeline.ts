@@ -70,7 +70,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 530,
       y: 170,
-      w: 150,
+      w: 170,
       step: 3,
     },
     {
@@ -118,7 +118,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 775,
       y: 300,
-      w: 150,
+      w: 164,
       step: 5,
     },
   ],
