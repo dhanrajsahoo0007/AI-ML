@@ -127,9 +127,10 @@ for (const p of POINTS) {
     // Values sit above each point, except the low middle ones, which go below the closed-book line.
     text(
       `v-${p.pos}`,
-      // Position 5's value sits up and to the right, clear of the line coming down from position 1.
-      p.pos === 5 ? px(p.pos) + 4 : px(p.pos) - 30,
-      below ? py(p.acc) + 10 : py(p.acc) - 30,
+      // Position 5's value sits up and to the right, clear of the line coming down from position 1 and under the 60%
+      // grid line.
+      p.pos === 5 ? px(p.pos) + 10 : px(p.pos) - 30,
+      below ? py(p.acc) + 10 : p.pos === 5 ? py(p.acc) - 21 : py(p.acc) - 30,
       60,
       `${p.acc.toFixed(1)}%`,
       20,

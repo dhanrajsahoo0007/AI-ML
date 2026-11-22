@@ -96,7 +96,7 @@ const shapes: LayoutShape[] = [
       },
     ],
   }),
-  ...point("d1", 1, PHASES.decode1.rows, PROD_TONE.model, "decode, batch 1", "above-right"),
+  ...point("d1", 1, PHASES.decode1.rows, PROD_TONE.model, "decode, batch 1", "below-right"),
   ...point("d32", 2, PHASES.decode32.rows, PROD_TONE.model, "decode, batch 32", "below-right"),
   ...point("pf", 3, PHASES.prefill.rows, PROD_TONE.traffic, "prefill", "below-right"),
 ];

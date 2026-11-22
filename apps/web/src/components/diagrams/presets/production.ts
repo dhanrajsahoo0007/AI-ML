@@ -1091,6 +1091,8 @@ export interface CurveMark {
   label?: string;
   tone?: LayoutTone;
   place?: MarkPlace;
+  /** Extra [dx, dy] in px on the label, to clear a line that would cross it. */
+  nudge?: [number, number];
 }
 
 export interface CurveOpts extends StepOpts {
@@ -1205,8 +1207,10 @@ export function curve(idPrefix: string, x: number, y: number, opts: CurveOpts): 
     if (m.label) {
       const w = textWidth(m.label);
       const place = m.place ?? "above";
-      const lx = place.endsWith("left") ? mx - w - 6 : place.endsWith("right") ? mx + 6 : mx - w / 2;
-      const ly = place.startsWith("above") ? my - TEXT_H - 5 : place.startsWith("below") ? my + 6 : my - TEXT_H / 2;
+      const [dx, dy] = m.nudge ?? [0, 0];
+      const lx = (place.endsWith("left") ? mx - w - 6 : place.endsWith("right") ? mx + 6 : mx - w / 2) + dx;
+      const ly =
+        (place.startsWith("above") ? my - TEXT_H - 5 : place.startsWith("below") ? my + 6 : my - TEXT_H / 2) + dy;
       out.push(
         annotation(`${p}-m${i}-label`, clampX(lx, w), Math.min(Math.max(y, ly), y + opts.height - TEXT_H), m.label, {
           tone,
