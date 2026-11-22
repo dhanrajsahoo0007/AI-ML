@@ -68,7 +68,7 @@ ROWS.forEach((r, i) => {
   shapes.push(blk(`${r.key}-place`, 20, Y(i), 170, 64, r.place, undefined, r.tone, 1));
   shapes.push(blk(`${r.key}-holds`, 210, Y(i), 230, 64, r.holds, undefined, PROD_TONE.infra, 1));
   shapes.push(blk(`${r.key}-control`, 460, Y(i), 220, 64, r.control, undefined, PROD_TONE.check, 2));
-  shapes.push(blk(`${r.key}-keep`, 700, Y(i), 160, 64, r.keep, undefined, PROD_TONE.infra, 3));
+  shapes.push(blk(`${r.key}-keep`, 700, Y(i), 168, 64, r.keep, undefined, PROD_TONE.infra, 3));
 });
 
 const spec: LayoutSpec = {

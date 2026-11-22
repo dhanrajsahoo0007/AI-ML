@@ -1,5 +1,5 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
-import { RAG_TONE } from "@/components/diagrams/presets/rag";
+import { RAG_TONE, SEMCACHE } from "@/components/diagrams/presets/rag";
 
 // The similarity threshold of a semantic cache (semantic-caching). Nine pairs of support questions, each a new
 // question and the cached question nearest to it, plotted by how similar their embeddings are. Top group: pairs that
@@ -8,7 +8,7 @@ import { RAG_TONE } from "@/components/diagrams/presets/rag";
 // miss: RESULTS in presets/rag.ts already ranks "Change your password" first for the main question.
 //
 // All similarities are illustrative (no source; the page labels them). THRESHOLD and STRICT are the two settings
-// compared; THRESHOLD = 0.92 and the 0.97 / 0.94 pairs match semcache-request-path.
+// compared; they and the 0.97 / 0.94 pairs come from SEMCACHE in presets/rag.ts, shared with semcache-request-path.
 // Working: at 0.92 the same-answer pairs at 0.97, 0.96 and 0.95 hit (3 of 5) and the different-answer pair at 0.94
 // hits too (1 false hit of 4). At 0.96 only 0.97 and 0.96 hit (2 of 5) and no different-answer pair does (0 of 4).
 // The two groups overlap between 0.87 and 0.94, so no single threshold separates them.
@@ -19,18 +19,18 @@ import { RAG_TONE } from "@/components/diagrams/presets/rag";
 // Tones (four): same-answer pairs orange (rewrites of a question), different-answer pairs neutral, the false hit red
 // (highlighted), thresholds lime.
 
-const THRESHOLD = 0.92;
-const STRICT = 0.96;
+const THRESHOLD = SEMCACHE.threshold;
+const STRICT = SEMCACHE.strict;
 
 const SAME = [
-  { pair: "how do I reset my password · how can I reset it", sim: 0.97 },
+  { pair: "how do I reset my password · how can I reset it", sim: SEMCACHE.hitSim },
   { pair: "cancel my order · how do I cancel an order", sim: 0.96 },
   { pair: "I forgot my password · reset my password", sim: 0.95 },
   { pair: "phone was stolen · lost my phone, can't sign in", sim: 0.91 },
   { pair: "where is my parcel · track my order", sim: 0.88 },
 ];
 const DIFF = [
-  { pair: "change my password · reset my password", sim: 0.94, falseHit: true },
+  { pair: "change my password · reset my password", sim: SEMCACHE.falseHitSim, falseHit: true },
   { pair: "cancel my order · cancel my subscription", sim: 0.9 },
   { pair: "refund to my card · refund as store credit", sim: 0.89 },
   { pair: "update my phone number · update my email", sim: 0.87 },

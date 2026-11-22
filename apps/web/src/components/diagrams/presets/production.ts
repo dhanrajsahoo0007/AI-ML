@@ -814,7 +814,10 @@ const GATE = { h: 44, rowGap: 12, colGap: 64, resultW: 112 } as const;
 function gateGeom(opts: GateOpts) {
   const change = typeof opts.change === "string" ? { label: opts.change } : opts.change;
   const changeW = boxWidth(change.label, 120);
-  const checkW = Math.max(...opts.checks.map((c) => boxWidth(c.label, 150)));
+  // The 11 px sub line measures about 5.9 px per character; size the column for the longer of label and sub.
+  const checkW = Math.max(
+    ...opts.checks.map((c) => Math.max(boxWidth(c.label, 150), c.sub ? Math.ceil(c.sub.length * 6) + 20 : 0))
+  );
   const resultLabel = opts.resultLabel ?? (opts.result === "promote" ? "Promote" : "Block");
   const resultW = boxWidth(resultLabel, GATE.resultW);
   const height = opts.checks.length * GATE.h + (opts.checks.length - 1) * GATE.rowGap;
@@ -1088,6 +1091,8 @@ export interface CurveMark {
   label?: string;
   tone?: LayoutTone;
   place?: MarkPlace;
+  /** Extra [dx, dy] in px on the label, to clear a line that would cross it. */
+  nudge?: [number, number];
 }
 
 export interface CurveOpts extends StepOpts {
@@ -1202,8 +1207,10 @@ export function curve(idPrefix: string, x: number, y: number, opts: CurveOpts): 
     if (m.label) {
       const w = textWidth(m.label);
       const place = m.place ?? "above";
-      const lx = place.endsWith("left") ? mx - w - 6 : place.endsWith("right") ? mx + 6 : mx - w / 2;
-      const ly = place.startsWith("above") ? my - TEXT_H - 5 : place.startsWith("below") ? my + 6 : my - TEXT_H / 2;
+      const [dx, dy] = m.nudge ?? [0, 0];
+      const lx = (place.endsWith("left") ? mx - w - 6 : place.endsWith("right") ? mx + 6 : mx - w / 2) + dx;
+      const ly =
+        (place.startsWith("above") ? my - TEXT_H - 5 : place.startsWith("below") ? my + 6 : my - TEXT_H / 2) + dy;
       out.push(
         annotation(`${p}-m${i}-label`, clampX(lx, w), Math.min(Math.max(y, ly), y + opts.height - TEXT_H), m.label, {
           tone,

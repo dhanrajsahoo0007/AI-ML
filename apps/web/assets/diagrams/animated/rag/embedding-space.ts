@@ -4,8 +4,8 @@ import { ARTICLES, QUESTIONS, RAG_TONE, scatter, type ScatterPoint } from "@/com
 // Embedding space as a 2-D sketch (the real space has 1,536 dimensions). Brightpost's help articles fall into topic
 // clusters: account and sign-in, orders and delivery, returns and refunds. Step 2: the main question lands inside the
 // sign-in cluster, next to the two articles that answer it. Step 3: a paraphrase that shares almost no words with
-// the question ("Can't log in, phone was stolen") lands in the same place, because the embedding encodes meaning, not
-// spelling. Positions are illustrative.
+// the question (QUESTIONS.paraphrase, "Can't log in, phone was stolen") lands in the same place, because the
+// embedding encodes meaning, not spelling. Positions are illustrative.
 //
 // Tones (two): chunks pink, questions orange; cluster names neutral.
 
@@ -115,7 +115,7 @@ const spec: LayoutSpec = {
       y: 200,
       w: 230,
       h: 54,
-      label: '"Can\'t log in,\nphone was stolen"',
+      label: `"${QUESTIONS.paraphrase.replace(", ", ",\n")}"`,
       tone: RAG_TONE.query,
       fill: "pastel",
       step: 3,

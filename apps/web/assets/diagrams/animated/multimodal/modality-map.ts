@@ -77,7 +77,7 @@ const spec: LayoutSpec = {
   title: "Text, image, audio and video all become tokens in one sequence",
   width: 860,
   height: 410,
-  groups: [{ id: "g-seq", title: "one token sequence", tone: PROD_TONE.infra, x: 415, y: 6, w: 230, h: 360 }],
+  groups: [{ id: "g-seq", title: "one token sequence", tone: PROD_TONE.infra, x: 415, y: 16, w: 230, h: 350 }],
   shapes,
 };
 

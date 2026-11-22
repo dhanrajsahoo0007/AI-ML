@@ -791,6 +791,9 @@ created: 2026-11-09 # YYYY-MM-DD
 Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the default). Each has a stroke and a soft fill
 (`--dg-<tone>`, `--dg-<tone>-soft`) that switch automatically in dark mode. Suggested: clients and edge `neutral` or
 `blue`, app/compute `teal`, data stores `violet`, caches and queues `orange`, failure `red`, new or healthy `green`.
+Tone-coloured text (zone titles, edge label pills, layout `text` shapes, sequence message labels) uses
+`--dg-<tone>-text` (`toneText()` in `diagram-style.ts`), which is at least 4.5:1 on paper and on every tone's soft
+fill in both themes. Never colour text with the stroke token: several strokes are below 4.5:1 in light mode.
 
 Layout specs (shapes and groups) and architecture specs (nodes, zones and edges) may also use two diagram-only tones,
 `pink` and `lime` (type `LayoutTone`), and a third, stronger value per tone, the pastel block fill `--dg-<tone>-fill`

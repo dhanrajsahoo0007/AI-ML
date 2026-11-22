@@ -109,7 +109,7 @@ function ResultCard({ id }: { id: string }) {
   const tone = FAMILY_TONE[r.primary];
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: `var(--dg-${tone})` }}>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: `var(--dg-${tone}-text)` }}>
         Recommendation
       </div>
       <div className="mt-2 flex items-start gap-3">
@@ -122,13 +122,19 @@ function ResultCard({ id }: { id: string }) {
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-green)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-green)" }}>
+          <div
+            className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+            style={{ color: "var(--dg-green-text)" }}
+          >
             Why
           </div>
           <div className="mt-1 text-sm text-ink-2">{r.why}</div>
         </div>
         <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-orange)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-orange)" }}>
+          <div
+            className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+            style={{ color: "var(--dg-orange-text)" }}
+          >
             Trade-off to say out loud
           </div>
           <div className="mt-1 text-sm text-ink-2">{r.tradeoff}</div>

@@ -26,7 +26,7 @@ export function ScenarioCard({
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]"
-          style={{ background: "var(--dg-blue-soft)", color: "var(--dg-blue)" }}
+          style={{ background: "var(--dg-blue-soft)", color: "var(--dg-blue-text)" }}
         >
           {workload}
         </span>
@@ -56,7 +56,7 @@ export function ScenarioCard({
             <div className="mt-3 rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-green)" }}>
               <div
                 className="text-[11px] font-semibold uppercase tracking-[0.08em]"
-                style={{ color: "var(--dg-green)" }}
+                style={{ color: "var(--dg-green-text)" }}
               >
                 Pick
               </div>

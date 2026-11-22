@@ -15,7 +15,7 @@ export function CapabilityHeader({ order }: { order: ProviderId[] }) {
         <span
           key={p}
           className="text-xs font-semibold uppercase tracking-[0.06em]"
-          style={{ color: `var(--dg-${PROVIDER_TONE[p]})` }}
+          style={{ color: `var(--dg-${PROVIDER_TONE[p]}-text)` }}
         >
           {PROVIDER_BY_ID[p].name}
         </span>

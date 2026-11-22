@@ -9,6 +9,8 @@ export const TONES: readonly Tone[] = ["blue", "green", "orange", "red", "violet
 export const LAYOUT_ONLY_TONES: readonly LayoutTone[] = ["pink", "lime"];
 export const stroke = (t: LayoutTone) => `var(--dg-${t})`;
 export const soft = (t: LayoutTone) => `var(--dg-${t}-soft)`;
+/** Tone-coloured text: AA-safe (4.5:1 on paper and on the soft fill). Never colour text with `stroke()`. */
+export const toneText = (t: LayoutTone) => `var(--dg-${t}-text)`;
 /** Pastel block fill (layout `fill: "pastel"`), strong enough to read as a coloured block with ink text on it. */
 export const pastel = (t: LayoutTone) => `var(--dg-${t}-fill)`;
 

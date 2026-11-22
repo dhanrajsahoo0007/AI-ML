@@ -1,5 +1,5 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
-import { CORPUS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
+import { CONTEXT_BUDGET, CORPUS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
 
 // Architecture for context-engineering: the context builder of Brightpost's support agent, the one place that decides
 // what the model sees on each turn. Built in five steps, one source of context at a time.
@@ -152,7 +152,13 @@ const spec: DiagramSpec = {
     { from: "memory", to: "builder", label: "facts", packet: true, step: 4 },
     { from: "builder", to: "history", label: "read / append", bidirectional: true, step: 4 },
     // Step 5
-    { from: "builder", to: "compactor", label: "over 80 %", dashed: true, step: 5 },
+    {
+      from: "builder",
+      to: "compactor",
+      label: `over ${Math.round(CONTEXT_BUDGET.compactAt * 100)} %`,
+      dashed: true,
+      step: 5,
+    },
     { from: "compactor", to: "history", label: "summary", packet: true, delay: 0.8, step: 5 },
   ],
 };

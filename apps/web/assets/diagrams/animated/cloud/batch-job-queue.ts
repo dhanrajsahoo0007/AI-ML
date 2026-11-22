@@ -130,7 +130,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 670,
       y: 235,
-      w: 180,
+      w: 184,
       cloud: { aws: "aws-batch", gcp: "gcp-batch", azure: "azure-batch" },
     },
 

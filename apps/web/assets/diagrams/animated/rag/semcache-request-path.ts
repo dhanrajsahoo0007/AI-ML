@@ -1,5 +1,5 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
-import { CORPUS, LATENCY_MS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
+import { CORPUS, LATENCY_MS, RAG_TONE, SEMCACHE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
 
 // The request path of a semantic cache in front of Brightpost's support assistant (semantic-caching). Top lane, every
 // question: normalise the text and build the key (tenant, prompt version) → embed it → find the nearest cached
@@ -8,7 +8,7 @@ import { CORPUS, LATENCY_MS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/
 // was built from. Step 7 is the failure: "change my password" lands above the threshold next to a cached "reset my
 // password" and gets the wrong steps.
 //
-// Illustrative numbers local to this figure (no source; the page labels them):
+// Illustrative numbers (no source; the page labels them), from SEMCACHE in presets/rag.ts:
 // - THRESHOLD = 0.92 cosine similarity between the new question and the nearest cached question.
 // - HIT_SIM = 0.97: "How do I reset my password?" against a cached "how can i reset my password".
 // - FALSE_HIT_SIM = 0.94: "change my password" against the cached "reset my password".
@@ -24,15 +24,6 @@ import { CORPUS, LATENCY_MS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/
 //
 // Colour (four tones plus neutral): the embedding model pink, the cache and retrieval violet (stores), the LLM and
 // both answers green, the false hit red; the question and the key builder neutral. The cache is the accent.
-
-// Local until the lead moves it into presets/rag.ts; semcache-threshold repeats threshold and falseHitSim.
-const SEMCACHE = {
-  threshold: 0.92,
-  hitSim: 0.97,
-  falseHitSim: 0.94,
-  lookupMs: 5,
-  ttlHours: 24,
-} as const;
 
 const HIT_MS = LATENCY_MS.embedQuery + SEMCACHE.lookupMs;
 const MISS_MS = HIT_MS + LATENCY_MS.vectorSearch + LATENCY_MS.buildPrompt + LATENCY_MS.fullAnswer;

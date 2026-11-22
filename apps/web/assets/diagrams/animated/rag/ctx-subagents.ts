@@ -1,5 +1,5 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
-import { CORPUS, RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
+import { CONTEXT_BUDGET, CORPUS, RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
 
 // "Isolating context with sub-agents" (context-engineering). A Brightpost customer disputes charges across several
 // orders; answering needs their order history, the refund policy and their past tickets.
@@ -54,7 +54,7 @@ const spec: DiagramSpec = {
     {
       id: "lead",
       label: "Lead agent",
-      sub: "32,000 budget",
+      sub: `${fmt(CONTEXT_BUDGET.window)} budget`,
       icon: "model",
       tone: RAG_TONE.answer,
       accent: true,

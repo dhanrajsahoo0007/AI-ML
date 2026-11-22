@@ -11,11 +11,11 @@ import { PCACHE_PROMPT } from "@/components/diagrams/presets/production-pcache";
 //     and every block after it miss (red) and all 2,200 tokens are processed again. A match runs from the start of the
 //     prompt and stops at the first difference.
 // Block widths are not to scale (a 15-token question would be a sliver). Rows at y 34, 148 and 262; blocks at
-// x 30 (w 150), 190 (w 230), 430 (w 270). Colours: cache violet (a store), new text orange (the prompt), a miss red.
+// x 30 (w 164), 204 (w 230), 444 (w 256). Colours: cache violet (a store), new text orange (the prompt), a miss red.
 
 const ROWS = [34, 148, 262] as const;
-const X = [30, 190, 430] as const;
-const W = [150, 230, 270] as const;
+const X = [30, 204, 444] as const;
+const W = [164, 230, 256] as const;
 
 const label = (
   id: string,

@@ -1,12 +1,12 @@
 import type { LayoutShape, LayoutSpec, LayoutTone, ShapeFill } from "@/components/diagrams/types";
-import { CORPUS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
+import { CONTEXT_BUDGET, CORPUS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag";
 
 // "Selecting, ordering and compressing context" (context-engineering). One turn of Brightpost's support agent, built
 // four ways. The conversation began with a password question ("Can't log in, phone was stolen"); twelve turns later
 // the customer writes "My kettle arrived cracked. It's order 4471. Can I get my money back?". Each build step is a
 // row: everything gathered, then select, then order, then compress.
 //
-// Token counts (illustrative unless imported; the fixed parts match ctx-budget):
+// Token counts (illustrative unless imported; the fixed parts, per-turn history and summary are CONTEXT_BUDGET):
 // - Instructions 1,200 · 4 tool definitions × 250 = 1,000 · memory 600.
 // - 5 chunks from the earlier password search: TOP_K × CORPUS.chunkTokens = 5 × 400 = 2,000 (old topic).
 // - 5 chunks from search_help("damaged item refund") = 2,000; a reranker keeps the best 3 = 1,200.
@@ -28,9 +28,9 @@ import { CORPUS, RAG_TONE, TOP_K, fmt } from "@/components/diagrams/presets/rag"
 
 const KEPT_CHUNKS = 3;
 const HISTORY_TURNS = 12;
-const PER_TURN = 300;
-const SUMMARY = 400;
-const KEEP_TURNS = 2;
+const PER_TURN = CONTEXT_BUDGET.historyPerTurn;
+const SUMMARY = CONTEXT_BUDGET.summary;
+const KEEP_TURNS = CONTEXT_BUDGET.keepTurns;
 const ORDER_RECORD = 2_000;
 const ORDER_FIELDS = 120;
 const MESSAGE = 20;
@@ -45,9 +45,9 @@ interface Block {
 }
 
 const B = {
-  instr: { key: "instr", label: "Instructions", tokens: 1_200, tone: RAG_TONE.infra },
-  tools: { key: "tools", label: "4 tools", tokens: 1_000, tone: "teal" },
-  memory: { key: "memory", label: "Memory", tokens: 600, tone: RAG_TONE.query },
+  instr: { key: "instr", label: "Instructions", tokens: CONTEXT_BUDGET.instructions, tone: RAG_TONE.infra },
+  tools: { key: "tools", label: `${CONTEXT_BUDGET.tools} tools`, tokens: CONTEXT_BUDGET.toolDefs, tone: "teal" },
+  memory: { key: "memory", label: "Memory", tokens: CONTEXT_BUDGET.memory, tone: RAG_TONE.query },
   oldChunks: { key: "old", label: "Old chunks", sub: `${TOP_K}`, tokens: SEARCH, tone: RAG_TONE.text },
   newChunks: { key: "new", label: "New chunks", sub: `${TOP_K}`, tokens: SEARCH, tone: RAG_TONE.text },
   kept: {

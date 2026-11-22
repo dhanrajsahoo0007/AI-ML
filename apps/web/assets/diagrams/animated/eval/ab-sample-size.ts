@@ -43,9 +43,9 @@ const shapes: LayoutShape[] = [
     step: 1,
     series: [{ points: ideal, tone: PROD_TONE.check }],
     marks: [
-      { x: 2, y: at(2), label: `2 points: ${n(at(2))}`, place: "above-right" },
-      { x: 5, y: at(5), label: `5 points: ${n(at(5))}`, place: "below-right" },
-      { x: 10, y: at(10), label: `10 points: ${n(at(10))}`, place: "above-left" },
+      { x: 2, y: at(2), label: `2 points: ${n(at(2))}`, place: "above-right", nudge: [40, 0] },
+      { x: 5, y: at(5), label: `5 points: ${n(at(5))}`, place: "below-left" },
+      { x: 10, y: at(10), label: `10 points: ${n(at(10))}`, place: "above-left", nudge: [0, -12] },
     ],
   }),
   ...onlyData(

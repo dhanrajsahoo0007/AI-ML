@@ -35,7 +35,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 110,
       y: 90,
-      w: 170,
+      w: 186,
     },
     {
       id: "run",
@@ -81,7 +81,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 770,
       y: 250,
-      w: 170,
+      w: 176,
       step: 5,
     },
   ],

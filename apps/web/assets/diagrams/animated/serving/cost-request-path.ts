@@ -109,7 +109,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: COL.end,
       y: ROW.top,
-      w: 130,
+      w: 136,
     },
     {
       id: "answer",

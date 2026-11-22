@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 295,
       y: 190,
-      w: 180,
+      w: 186,
       h: 64,
     },
     {
@@ -90,7 +90,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 785,
       y: 310,
-      w: 170,
+      w: 174,
     },
   ],
   edges: [
