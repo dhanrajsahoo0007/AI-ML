@@ -67,10 +67,11 @@ export function DbProfile({ id, useAvoid = true }: { id: FamilyId; useAvoid?: bo
 
 function UseList({ title, items, good = false }: { title: string; items: string[]; good?: boolean }) {
   const tone = good ? "var(--dg-green)" : "var(--dg-red)";
+  const text = good ? "var(--dg-green-text)" : "var(--dg-red-text)";
   const Icon = good ? Check : X;
   return (
     <div className={good ? "border-b border-hairline p-4 sm:border-b-0 sm:border-r sm:p-5" : "p-4 sm:p-5"}>
-      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: tone }}>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: text }}>
         {title}
       </div>
       <div className="mt-2.5 space-y-2">

@@ -11,7 +11,7 @@ import {
   Zone,
   usePlayback,
 } from "./diagram-shared.client";
-import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke } from "./diagram-style";
+import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import {
   boundsCentre,
   pathD,
@@ -102,7 +102,8 @@ const isLine = (s: LayoutShape) => s.type === "arrow" || s.type === "path";
 const LINE_H = 15;
 
 function fillOf(shape: LayoutShape, tone: LayoutTone) {
-  if (shape.highlight) return stroke(tone);
+  // A highlighted shape carries paper text, so its solid fill is the AA-safe text tone, not the stroke.
+  if (shape.highlight) return toneText(tone);
   const fill = shape.fill ?? (shape.type === "box" ? "paper" : "soft");
   return fill === "paper" ? "var(--paper)" : fill === "pastel" ? pastel(tone) : soft(tone);
 }
@@ -176,7 +177,7 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
           fontSize={shape.type === "text" ? 12.5 : 13}
           fontWeight={shape.type === "text" ? 500 : 600}
           style={{
-            fill: onDark ? "var(--paper)" : shape.type === "text" ? stroke(tone) : "var(--ink)",
+            fill: onDark ? "var(--paper)" : shape.type === "text" ? toneText(tone) : "var(--ink)",
           }}
         >
           {lines.length === 1

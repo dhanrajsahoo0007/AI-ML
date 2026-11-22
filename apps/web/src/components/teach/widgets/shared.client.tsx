@@ -13,6 +13,8 @@ const TONES: readonly Tone[] = ["blue", "green", "orange", "violet", "teal", "re
 export const toneAt = (i: number): Tone => TONES[i % TONES.length];
 export const toneColor = (tone: Tone) => `var(--dg-${tone})`;
 export const toneSoft = (tone: Tone) => `var(--dg-${tone}-soft)`;
+/** Tone-coloured text (AA-safe on paper and soft fills). Never colour text with toneColor(). */
+export const toneText = (tone: Tone) => `var(--dg-${tone}-text)`;
 
 export function WidgetFrame({
   label,

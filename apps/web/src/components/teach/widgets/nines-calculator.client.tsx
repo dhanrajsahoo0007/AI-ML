@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { NINES, NINES_LABEL, downtimeFor, downtimeRatio, ninesHint, type Nines } from "./nines";
 import { formatRatio, formatSeconds } from "./format";
-import { Segmented, WidgetFrame, toneColor, ScrollX } from "./shared.client";
+import { Segmented, WidgetFrame, toneColor, toneText, ScrollX } from "./shared.client";
 
 interface NinesCalculatorProps {
   /** Id prefix every widget island gets from its server wrapper; this one has no labelled inputs that need it. */
@@ -46,7 +46,7 @@ export function NinesCalculator({ title, a: initialA, b: initialB }: NinesCalcul
         ].map((s) => (
           <div key={s.id}>
             <div className="mb-1 text-sm font-medium text-ink">
-              Target {s.id}: <span style={{ color: toneColor(s.tone) }}>{s.v}%</span>{" "}
+              Target {s.id}: <span style={{ color: toneText(s.tone) }}>{s.v}%</span>{" "}
               <span className="font-normal text-muted-foreground">({NINES_LABEL[s.v]})</span>
             </div>
             <Segmented

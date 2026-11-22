@@ -79,7 +79,7 @@ export function BloomFilterSim({
               key={i}
               className={cx(
                 "flex aspect-square items-center justify-center rounded text-[10px] tabular-nums",
-                b ? "bg-[var(--dg-blue)] text-paper" : "bg-paper-2 text-muted-foreground",
+                b ? "bg-[var(--dg-blue-text)] text-paper" : "bg-paper-2 text-muted-foreground",
                 probed &&
                   (b
                     ? "ring-2 ring-[var(--dg-green)] ring-offset-1 ring-offset-paper"

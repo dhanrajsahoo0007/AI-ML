@@ -22,7 +22,7 @@ import {
   Zone,
   usePlayback,
 } from "./diagram-shared.client";
-import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke } from "./diagram-style";
+import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBounds, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
 import { getIconComponent } from "@/lib/icons";
@@ -158,7 +158,7 @@ function CloudToggle({ cloud, setCloud }: { cloud: CloudView; setCloud: (c: Clou
                 ? "border-transparent text-paper"
                 : "border-hairline text-muted-foreground hover:border-ink hover:text-ink"
             )}
-            style={on ? { background: v.tone ? stroke(v.tone) : "var(--ink)" } : undefined}
+            style={on ? { background: v.tone ? toneText(v.tone) : "var(--ink)" } : undefined}
           >
             {v.label}
           </button>
@@ -217,8 +217,9 @@ function CardNode({ node }: { node: DiagramNode }) {
   const anchor = hasIcon ? "start" : "middle";
   const ink = node.accent ? "var(--paper)" : "var(--ink)";
   const fill = node.fill ?? "paper";
+  // An accent node carries paper text, so its solid fill is the AA-safe text tone, not the stroke.
   const background = node.accent
-    ? stroke(tone)
+    ? toneText(tone)
     : fill === "pastel"
       ? pastel(tone)
       : fill === "soft"
