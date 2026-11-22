@@ -11,7 +11,7 @@ import {
   Zone,
   usePlayback,
 } from "./diagram-shared.client";
-import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke } from "./diagram-style";
+import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import {
   boundsCentre,
   pathD,
@@ -176,7 +176,7 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
           fontSize={shape.type === "text" ? 12.5 : 13}
           fontWeight={shape.type === "text" ? 500 : 600}
           style={{
-            fill: onDark ? "var(--paper)" : shape.type === "text" ? stroke(tone) : "var(--ink)",
+            fill: onDark ? "var(--paper)" : shape.type === "text" ? toneText(tone) : "var(--ink)",
           }}
         >
           {lines.length === 1

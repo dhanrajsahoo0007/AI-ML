@@ -2,7 +2,7 @@
 
 import type { Phase } from "./build-view";
 import { Defs, DiagramFigure, IconAt, NewRing, Packet, usePlayback } from "./diagram-shared.client";
-import { markerUrl, phaseOpacity, soft, stroke, textWidth } from "./diagram-style";
+import { markerUrl, phaseOpacity, soft, stroke, textWidth, toneText } from "./diagram-style";
 import { SEQ, layoutSequence, type LaneView, type MessageTiming } from "./sequence-layout";
 import type { SequenceMessage, SequenceNote, SequenceSpec, Tone } from "./types";
 
@@ -224,7 +224,7 @@ function Message({
             fontSize={10.5}
             fontWeight={700}
             letterSpacing={0.6}
-            style={{ fill: stroke("red") }}
+            style={{ fill: toneText("red") }}
           >
             TIMEOUT
           </text>
@@ -239,7 +239,7 @@ function Message({
             textAnchor={self ? "start" : "middle"}
             fontSize={11.5}
             fontWeight={500}
-            style={{ fill: kind === "return" ? "var(--muted-foreground)" : stroke(tone) }}
+            style={{ fill: kind === "return" ? "var(--muted-foreground)" : toneText(tone) }}
           >
             {message.label}
           </text>

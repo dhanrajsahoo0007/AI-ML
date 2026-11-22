@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
-import { TONES, phaseOpacity, pillTextWidth, soft, stroke, textWidth } from "./diagram-style";
+import { TONES, phaseOpacity, pillTextWidth, soft, stroke, textWidth, toneText } from "./diagram-style";
 import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
@@ -160,7 +160,7 @@ export function DiagramFigure({
           )}
           {current !== undefined && added.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              <span className="font-semibold" style={{ color: "var(--dg-green)" }}>
+              <span className="font-semibold" style={{ color: toneText("green") }}>
                 New:
               </span>{" "}
               {added.join(", ")}
@@ -304,7 +304,7 @@ export function Zone({ zone, phase, dim = false }: { zone: LayoutGroup; phase: P
         textAnchor="middle"
         fontSize={14}
         fontWeight={600}
-        style={{ fill: stroke(zone.tone) }}
+        style={{ fill: toneText(zone.tone) }}
       >
         {zone.title}
       </text>
@@ -335,7 +335,7 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
           fontSize={11.5}
           fontWeight={700}
           letterSpacing={0.6}
-          style={{ fill: stroke(t) }}
+          style={{ fill: toneText(t) }}
         >
           {zone.title.toUpperCase()}
         </text>
@@ -371,7 +371,7 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
         textAnchor="middle"
         fontSize={13}
         fontWeight={700}
-        style={{ fill: region ? stroke(t) : "var(--paper)" }}
+        style={{ fill: region ? toneText(t) : "var(--paper)" }}
       >
         {zone.title}
       </text>
@@ -532,7 +532,7 @@ export function LabelPill({
         textAnchor="middle"
         fontSize={11.5}
         fontWeight={bold ? 600 : 500}
-        style={{ fill: stroke(tone) }}
+        style={{ fill: toneText(tone) }}
       >
         {text}
       </text>
