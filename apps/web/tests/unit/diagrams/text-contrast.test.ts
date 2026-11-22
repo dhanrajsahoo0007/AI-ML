@@ -67,11 +67,17 @@ describe("diagram tone text contrast", () => {
     describe(theme, () => {
       const paper = resolve(vars, "--paper");
       for (const tone of ALL_TONES) {
-        it(`--dg-${tone}-text is AA on paper and on --dg-${tone}-soft`, () => {
+        it(`--dg-${tone}-text is AA on paper and on every soft fill`, () => {
           const text = resolve(vars, `--dg-${tone}-text`);
-          const soft = resolve(vars, `--dg-${tone}-soft`);
           expect(contrast(text, paper), `${theme} ${tone} text ${text} on paper ${paper}`).toBeGreaterThanOrEqual(AA);
-          expect(contrast(text, soft), `${theme} ${tone} text ${text} on soft ${soft}`).toBeGreaterThanOrEqual(AA);
+          // Its own soft fill (subnet titles) and any other tone's (a label or text shape inside another zone).
+          for (const fillTone of ALL_TONES) {
+            const soft = resolve(vars, `--dg-${fillTone}-soft`);
+            expect(
+              contrast(text, soft),
+              `${theme} ${tone} text ${text} on ${fillTone} soft ${soft}`
+            ).toBeGreaterThanOrEqual(AA);
+          }
         });
       }
     });
