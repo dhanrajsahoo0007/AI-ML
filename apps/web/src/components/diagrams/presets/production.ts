@@ -814,7 +814,10 @@ const GATE = { h: 44, rowGap: 12, colGap: 64, resultW: 112 } as const;
 function gateGeom(opts: GateOpts) {
   const change = typeof opts.change === "string" ? { label: opts.change } : opts.change;
   const changeW = boxWidth(change.label, 120);
-  const checkW = Math.max(...opts.checks.map((c) => boxWidth(c.label, 150)));
+  // The 11 px sub line measures about 5.9 px per character; size the column for the longer of label and sub.
+  const checkW = Math.max(
+    ...opts.checks.map((c) => Math.max(boxWidth(c.label, 150), c.sub ? Math.ceil(c.sub.length * 6) + 20 : 0))
+  );
   const resultLabel = opts.resultLabel ?? (opts.result === "promote" ? "Promote" : "Block");
   const resultW = boxWidth(resultLabel, GATE.resultW);
   const height = opts.checks.length * GATE.h + (opts.checks.length - 1) * GATE.rowGap;
