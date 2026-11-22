@@ -1,5 +1,5 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
-import { RAG_TONE } from "@/components/diagrams/presets/rag";
+import { RAG_TONE, SEMCACHE } from "@/components/diagrams/presets/rag";
 
 // Invalidating a semantic cache (semantic-caching). Five cache entries of the help-centre assistant, each with the
 // metadata it was stored with: the tenant, the article versions the answer was built from, and its TTL. Three events
@@ -11,7 +11,7 @@ import { RAG_TONE } from "@/components/diagrams/presets/rag";
 //   rag/tenant-isolation; Brightpost is one tenant).
 // What is left is the one entry none of the three touched.
 //
-// Versions and TTLs are illustrative (no source). The 24-hour default TTL matches semcache-request-path.
+// Versions and TTLs are illustrative (no source). The 24-hour default TTL is SEMCACHE.ttlHours (presets/rag.ts).
 //
 // Layout: a table, columns question x 20..300 | tenant 310..420 | built from 430..620 | TTL 630..700 | status
 // 710..850; rows 44 apart from y 66. Status cells appear in the step that decides them. Three event boxes under the
@@ -26,6 +26,7 @@ const COL = {
   ttl: { x: 630, w: 70 },
   status: { x: 710, w: 140 },
 } as const;
+const DEFAULT_TTL = `${SEMCACHE.ttlHours} h`;
 const ROW_Y = (i: number) => 66 + i * 44;
 const H = 36;
 
@@ -43,7 +44,7 @@ const ENTRIES: {
     q: "How do I reset my password?",
     tenant: "Brightpost",
     src: "reset v7",
-    ttl: "24 h",
+    ttl: DEFAULT_TTL,
     status: "busted: v8",
     step: 3,
     tone: RAG_TONE.text,
@@ -53,7 +54,7 @@ const ENTRIES: {
     q: "Lost phone, can't sign in",
     tenant: "Brightpost",
     src: "reset v7, 2FA v3",
-    ttl: "24 h",
+    ttl: DEFAULT_TTL,
     status: "busted: v8",
     step: 3,
     tone: RAG_TONE.text,
@@ -73,7 +74,7 @@ const ENTRIES: {
     q: "Where is my parcel?",
     tenant: "Brightpost",
     src: "parcels v5",
-    ttl: "24 h",
+    ttl: DEFAULT_TTL,
     status: "still served",
     step: 4,
     tone: RAG_TONE.answer,
@@ -83,7 +84,7 @@ const ENTRIES: {
     q: "How do I reset my password?",
     tenant: "Tenant B",
     src: "b-reset v4",
-    ttl: "24 h",
+    ttl: DEFAULT_TTL,
     status: "purged",
     step: 4,
     tone: RAG_TONE.infra,

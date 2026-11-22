@@ -74,14 +74,20 @@ export const QUESTIONS = {
   keyword: "What does error E1234 mean?",
   /** Already on advanced-rag; knowledge graphs and agentic RAG. */
   multiHop: "Which team owns the service that failed in last week's incident?",
+  /** The main question in other words, sharing almost no words with its article (embeddings, hybrid search). */
+  paraphrase: "Can't log in, phone was stolen",
 } as const;
 
-/** The two articles the main question needs. */
+/** The two articles the main question needs, and the others a figure names. */
 export const ARTICLES = {
   reset: "Reset a forgotten password",
   twoFactor: "Recover two-factor access",
   /** Only support staff may see it (access control). */
   runbook: "Runbook: unlock a locked account",
+  /** The article QUESTIONS.keyword needs: BM25 finds the exact code. */
+  errorCode: "Error E1234: session expired",
+  /** A code that looks alike to the embedding model, so vector search returns it for QUESTIONS.keyword. */
+  lookAlikeCode: "Error E1243: card declined",
 } as const;
 
 /** How many chunks the basic pipeline puts in the prompt. */
@@ -210,6 +216,42 @@ export const MULTI_HOP = {
   incident: "INC-311",
   service: "checkout-api",
   team: "Payments team",
+} as const;
+
+/**
+ * The semantic cache in front of the pipeline (semantic-caching; illustrative, no source). A cached answer is reused
+ * when the new question's cosine similarity to a cached question is at least `threshold`. "How do I reset my
+ * password?" against a cached "how can i reset my password" scores `hitSim` (a hit); "change my password" against
+ * "reset my password" scores `falseHitSim`, also over the threshold (a false hit), which the `strict` threshold
+ * rejects. A hit costs LATENCY_MS.embedQuery + `lookupMs` = 25 ms; entries expire after `ttlHours`.
+ */
+export const SEMCACHE = {
+  threshold: 0.92,
+  strict: 0.96,
+  hitSim: 0.97,
+  falseHitSim: 0.94,
+  lookupMs: 5,
+  ttlHours: 24,
+} as const;
+
+/**
+ * The support agent's context budget (context-engineering; illustrative). Working: fixed parts = 1,200 instructions +
+ * 4 tools × 250 = 1,000 tool definitions + 600 memory + PROMPT.contextTokens (2,000) chunks = 4,800 tokens; each turn
+ * adds 300 tokens of history and 1,200 of tool results, so turn n = 4,800 + 1,500 n. Compaction starts at 80 % of
+ * the 32,000-token window (25,600) and keeps a 400-token summary plus the last 2 turns verbatim.
+ */
+export const CONTEXT_BUDGET = {
+  window: 32_000,
+  instructions: 1_200,
+  tools: 4,
+  tokensPerTool: 250,
+  toolDefs: 4 * 250,
+  memory: 600,
+  historyPerTurn: 300,
+  toolResultsPerTurn: 1_200,
+  compactAt: 0.8,
+  summary: 400,
+  keepTurns: 2,
 } as const;
 
 // ── Builders ──────────────────────────────────────────────────────────────────────────────────────────────────────

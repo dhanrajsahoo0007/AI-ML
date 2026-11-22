@@ -1,11 +1,12 @@
 import type { LayoutShape, LayoutSpec, LayoutTone, ShapeFill } from "@/components/diagrams/types";
-import { PROMPT, RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
+import { CONTEXT_BUDGET, PROMPT, RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
 
 // "Context as a budget" (context-engineering). Brightpost's support agent (the kettle conversation, order 4471) fills
 // its context window turn by turn. One stacked bar per turn shows where the tokens go: the fixed parts stay the same
 // size while the conversation history and the tool results grow, until the agent must compact.
 //
-// Local constants, all illustrative:
+// Constants, all illustrative, from CONTEXT_BUDGET in presets/rag.ts (ctx-select-order-compress, ctx-subagents and
+// ctx-assembly use the same budget):
 // - WINDOW = 32,000 tokens: the budget the agent runs under (a model's window may be larger; the page explains why a
 //   team sets a lower ceiling).
 // - INSTRUCTIONS = 1,200 tokens of system instructions (refund policy, tone, escalation rules).
@@ -26,16 +27,17 @@ import { PROMPT, RAG_TONE, fmt } from "@/components/diagrams/presets/rag";
 // Tones (four plus neutral): instructions neutral; tool definitions and tool results teal (soft / pastel); memory and
 // history orange (soft / pastel: the conversation); chunks blue; the overflow red.
 
-const WINDOW = 32_000;
-const INSTRUCTIONS = 1_200;
-const TOOL_DEFS = 4 * 250;
-const MEMORY = 600;
+const WINDOW = CONTEXT_BUDGET.window;
+const INSTRUCTIONS = CONTEXT_BUDGET.instructions;
+const TOOL_DEFS = CONTEXT_BUDGET.toolDefs;
+const MEMORY = CONTEXT_BUDGET.memory;
 const CHUNKS = PROMPT.contextTokens;
-const HISTORY_PER_TURN = 300;
-const TOOL_PER_TURN = 1_200;
-const COMPACT_AT = 0.8;
-const SUMMARY = 400;
-const KEEP_TURNS = 2;
+const HISTORY_PER_TURN = CONTEXT_BUDGET.historyPerTurn;
+const TOOL_PER_TURN = CONTEXT_BUDGET.toolResultsPerTurn;
+const COMPACT_AT = CONTEXT_BUDGET.compactAt;
+const SUMMARY = CONTEXT_BUDGET.summary;
+const KEEP_TURNS = CONTEXT_BUDGET.keepTurns;
+const COMPACT_PCT = `${Math.round(COMPACT_AT * 100)} %`;
 
 const BAR_X = 130;
 const BAR_W = 560;
@@ -184,7 +186,7 @@ const spec: LayoutSpec = {
   steps: [
     { title: `Turn 1: ${fmt(total(ROWS[0].segs))} tokens, mostly fixed parts` },
     { title: `Turn 7: history and tool results grow to ${fmt(total(ROWS[1].segs))}` },
-    { title: `Turn 14: ${fmt(total(ROWS[2].segs))} tokens, past the 80 % line` },
+    { title: `Turn 14: ${fmt(total(ROWS[2].segs))} tokens, past the ${COMPACT_PCT} line` },
     { title: `Turn 19 without compaction: ${fmt(total(ROWS[3].segs))}, over the window` },
     { title: `Turn 14 after compaction: ${fmt(total(ROWS[4].segs))} tokens` },
   ],
@@ -193,7 +195,7 @@ const spec: LayoutSpec = {
     vline("window-edge", px(WINDOW), false),
     vline("compact-line", px(WINDOW * COMPACT_AT), true),
     text("window-label", px(WINDOW) - 80, LINE_BOTTOM + 4, 160, `${fmt(WINDOW)} window`),
-    text("compact-label", px(WINDOW * COMPACT_AT) - 90, LINE_BOTTOM + 4, 150, "80 %: compact"),
+    text("compact-label", px(WINDOW * COMPACT_AT) - 90, LINE_BOTTOM + 4, 150, `${COMPACT_PCT}: compact`),
     ...ROWS.flatMap((r, i): LayoutShape[] => {
       const t = total(r.segs);
       const twoLines = r.label.includes("\n");

@@ -1,5 +1,5 @@
 import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
-import { QUESTIONS, RAG_TONE, RESULTS } from "@/components/diagrams/presets/rag";
+import { ARTICLES, QUESTIONS, RAG_TONE, RESULTS } from "@/components/diagrams/presets/rag";
 
 // Which search finds which question. Three Brightpost questions, each searched by BM25 (keywords) and by vector search
 // (meaning); each cell shows the top relevant hit, or the wrong top hit.
@@ -9,18 +9,12 @@ import { QUESTIONS, RAG_TONE, RESULTS } from "@/components/diagrams/presets/rag"
 //     returns "Update your phone number"; vector search finds "Lost phone: use a backup code".
 //   3 QUESTIONS.keyword: BM25 matches the token "E1234" exactly; the embedding of a rare code is close to the
 //     embedding of any similar code, so vector search returns the article for another code.
-// The E1234 and E1243 article titles and the paraphrase are this figure's own (not yet in presets/rag.ts); which
-// article each method returns is illustrative.
+// The paraphrase (QUESTIONS.paraphrase) and the E1234 and E1243 article titles (ARTICLES.errorCode,
+// ARTICLES.lookAlikeCode) come from presets/rag.ts; which article each method returns is illustrative.
 //
 // Layout (860 wide): questions in the left column (x 20, 250 wide), BM25 results (x 290) and vector results (x 580),
 // 270 wide each; one row per step. Tones (four plus neutral): BM25 teal, vector violet, found chunks blue (pastel),
 // wrong hits red; the questions are neutral text so the figure stays at four tones.
-
-/** The paraphrase used on the embedding-space figure. */
-const PARAPHRASE = "Can't log in, phone was stolen";
-/** The article QUESTIONS.keyword needs, and the article for a code that looks like it. */
-const CODE_ARTICLE = "Error E1234: session expired";
-const NEAR_CODE = "Error E1243: card declined";
 
 const byTitle = (t: string) => RESULTS.find((r) => r.title === t)!;
 const reset = byTitle("Reset a forgotten password");
@@ -43,14 +37,14 @@ const ROWS: { question: string; bm25: Hit; vector: Hit }[] = [
     vector: { title: reset.title, verdict: `relevant, rank ${resetVectorRank}: same meaning`, found: true },
   },
   {
-    question: `"${PARAPHRASE}"\n(a paraphrase)`,
+    question: `"${QUESTIONS.paraphrase}"\n(a paraphrase)`,
     bm25: { title: byTitle("Update your phone number").title, verdict: 'wrong: shares only "phone"', found: false },
     vector: { title: byTitle("Lost phone: use a backup code").title, verdict: "relevant: same meaning", found: true },
   },
   {
     question: QUESTIONS.keyword,
-    bm25: { title: CODE_ARTICLE, verdict: "relevant, rank 1: exact code", found: true, highlight: true },
-    vector: { title: NEAR_CODE, verdict: "wrong: a code that looks alike", found: false },
+    bm25: { title: ARTICLES.errorCode, verdict: "relevant, rank 1: exact code", found: true, highlight: true },
+    vector: { title: ARTICLES.lookAlikeCode, verdict: "wrong: a code that looks alike", found: false },
   },
 ];
 

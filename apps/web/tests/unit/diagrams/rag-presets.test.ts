@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARTICLES,
+  CONTEXT_BUDGET,
   CORPUS,
+  LATENCY_MS,
   METRICS,
   PROMPT,
+  QUESTIONS,
   RAG_TONE,
   RELEVANT_RANKS,
   RESULTS,
+  SEMCACHE,
   STAGES,
   TOP_K,
   VECTOR_INDEX,
@@ -74,6 +79,43 @@ describe("RAG presets: the running example", () => {
     expect(METRICS).toEqual({ recall5: 0.67, recall10: 1, mrr: 0.5, ndcg10: 0.65 });
     // Scores fall as the rank rises.
     for (let i = 1; i < RESULTS.length; i++) expect(RESULTS[i].score).toBeLessThan(RESULTS[i - 1].score);
+  });
+
+  it("pins the shared examples: the paraphrase and the look-alike error codes", () => {
+    expect(QUESTIONS.paraphrase).toBe("Can't log in, phone was stolen");
+    expect(ARTICLES.errorCode).toBe("Error E1234: session expired");
+    expect(ARTICLES.lookAlikeCode).toBe("Error E1243: card declined");
+    expect(QUESTIONS.keyword).toContain("E1234");
+  });
+
+  it("keeps the semantic cache numbers consistent", () => {
+    expect(SEMCACHE).toEqual({
+      threshold: 0.92,
+      strict: 0.96,
+      hitSim: 0.97,
+      falseHitSim: 0.94,
+      lookupMs: 5,
+      ttlHours: 24,
+    });
+    // The hit clears both thresholds; the false hit clears only the loose one.
+    expect(SEMCACHE.hitSim).toBeGreaterThanOrEqual(SEMCACHE.strict);
+    expect(SEMCACHE.falseHitSim).toBeGreaterThanOrEqual(SEMCACHE.threshold);
+    expect(SEMCACHE.falseHitSim).toBeLessThan(SEMCACHE.strict);
+    expect(LATENCY_MS.embedQuery + SEMCACHE.lookupMs).toBe(25);
+  });
+
+  it("derives the context budget working", () => {
+    const b = CONTEXT_BUDGET;
+    expect(b.toolDefs).toBe(b.tools * b.tokensPerTool);
+    const fixed = b.instructions + b.toolDefs + b.memory + PROMPT.contextTokens;
+    expect(fixed).toBe(4_800);
+    const turn = (n: number) => fixed + n * (b.historyPerTurn + b.toolResultsPerTurn);
+    expect(turn(14)).toBe(25_800);
+    expect(turn(14)).toBeGreaterThan(b.window * b.compactAt);
+    expect(b.window * b.compactAt).toBeCloseTo(25_600);
+    expect(turn(19)).toBe(33_300);
+    expect(turn(19)).toBeGreaterThan(b.window);
+    expect(fixed + b.summary + b.keepTurns * b.historyPerTurn + b.toolResultsPerTurn).toBe(7_000);
   });
 
   it("formats numbers with thousands separators", () => {

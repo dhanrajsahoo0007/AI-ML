@@ -9,10 +9,10 @@ import { RAG_TONE } from "@/components/diagrams/presets/rag";
 // Tones (three plus neutral): entity types violet (they live in the graph store), chunks blue (text), the source
 // neutral. Relations are neutral arrows with the relation name as the pill.
 //
-// The two builders below, entityType() and relation(), take no running-example data, so the knowledge-graph case
-// studies (semiconductor, healthcare) can reuse them for their own ontologies; the lead may move them into
-// presets/rag.ts. Layout: three type boxes 180 wide at x 40 | 340 | 640 (120 apart, room for a pill) on row y 30;
-// the chunk at x 190 and the source at x 560 on row y 200.
+// The two builders below, entityType() and relation(), are used by this figure only: the knowledge-graph case
+// studies (kg-semi/, kg-health/) now draw their ontologies in the GenAI case-study style (presets/genai-case.ts), so
+// the builders stay local rather than in presets/rag.ts. Layout: three type boxes 180 wide at x 40 | 340 | 640 (120
+// apart, room for a pill) on row y 30; the chunk at x 190 and the source at x 560 on row y 200.
 
 /** An entity type: a pastel box with the type name and its key properties as the sub line. */
 function entityType(
