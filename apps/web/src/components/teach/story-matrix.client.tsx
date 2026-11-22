@@ -130,7 +130,7 @@ export function StoryMatrixClient({ views, builderHref }: { views: View[]; build
                         {gap && (
                           <span
                             className="ml-2 rounded-sm px-1.5 py-0.5 text-[11px] font-semibold"
-                            style={{ backgroundColor: "var(--dg-orange-soft)", color: "var(--dg-orange)" }}
+                            style={{ backgroundColor: "var(--dg-orange-soft)", color: "var(--dg-orange-text)" }}
                           >
                             gap
                           </span>
