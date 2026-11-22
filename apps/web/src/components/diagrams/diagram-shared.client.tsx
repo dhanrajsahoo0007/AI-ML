@@ -362,7 +362,7 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
         width={tabW}
         height={24}
         rx={6}
-        style={{ fill: region ? "var(--paper)" : stroke(t), stroke: stroke(t) }}
+        style={{ fill: region ? "var(--paper)" : toneText(t), stroke: stroke(t) }}
         strokeWidth={1.2}
       />
       <text
@@ -399,7 +399,7 @@ export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
         strokeWidth={2}
         strokeDasharray="5 4"
       />
-      <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: stroke("green") }} />
+      <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: toneText("green") }} />
       <text
         x={x + w - 20}
         y={y + 4}

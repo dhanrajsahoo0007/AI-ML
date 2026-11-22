@@ -102,7 +102,8 @@ const isLine = (s: LayoutShape) => s.type === "arrow" || s.type === "path";
 const LINE_H = 15;
 
 function fillOf(shape: LayoutShape, tone: LayoutTone) {
-  if (shape.highlight) return stroke(tone);
+  // A highlighted shape carries paper text, so its solid fill is the AA-safe text tone, not the stroke.
+  if (shape.highlight) return toneText(tone);
   const fill = shape.fill ?? (shape.type === "box" ? "paper" : "soft");
   return fill === "paper" ? "var(--paper)" : fill === "pastel" ? pastel(tone) : soft(tone);
 }
