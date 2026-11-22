@@ -171,3 +171,18 @@ describe("gcase-kgsemi: the candidate families after the interviewer pass", () =
     expect(REVIEW_ADDS.wipAtRiskStep).toBe(725);
   });
 });
+
+// Wave 3 presets are still under design review: loaded here so they are not unused files; their numbers are pinned
+// when each page lands.
+describe("Wave 3 presets under design review", () => {
+  it("load and export their top-level constants", async () => {
+    const gateway = await import("@/components/diagrams/presets/gcase-gateway");
+    const moderation = await import("@/components/diagrams/presets/gcase-moderation");
+    const chat = await import("@/components/diagrams/presets/gcase-chat");
+    const code = await import("@/components/diagrams/presets/gcase-code");
+    expect(gateway.PROVIDER_LIMITS).toBeDefined();
+    expect(moderation.PLATFORM).toBeDefined();
+    expect(chat.TRAFFIC).toBeDefined();
+    expect(code.SEATS).toBeDefined();
+  });
+});
