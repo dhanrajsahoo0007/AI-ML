@@ -31,7 +31,7 @@ const SFT: LayoutTone = "violet";
 const RL: LayoutTone = "orange";
 
 const COL = [24, 238, 452, 666];
-const W = 170;
+const W = 182;
 const H = 52;
 const cx = (c: number) => COL[c] + W / 2;
 

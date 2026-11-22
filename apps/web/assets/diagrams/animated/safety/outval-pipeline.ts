@@ -6,7 +6,7 @@ import { PROD_TONE, REFUND_CASE } from "@/components/diagrams/presets/production
 //   Step 1 the draft · 2 schema check (is it valid JSON of the right shape?) · 3 policy check (is it allowed? refunds
 //   over £30 need approval) · 4 grounding check (does the passage set support it?) · 5 three outcomes: pass, repair, block.
 // Nodes never move between steps. Layout (centres): draft x 75 | schema 235 | policy 395 | grounding 555 (w 130, y 170);
-// outcomes x 790 (w 150): pass y 70, repair y 170, block y 270. Width 880.
+// outcomes x 775 (w 180): pass y 70, repair y 170, block y 270. Width 880.
 // Colours (PROD_TONE): the draft green (the model), the checks lime, pass orange (the customer gets it), repair neutral
 // (control flow), block red. Four tones; the grounding check is the accent.
 
@@ -77,9 +77,9 @@ const spec: DiagramSpec = {
       icon: "chat",
       tone: PROD_TONE.traffic,
       fill: "pastel",
-      x: 790,
+      x: 775,
       y: 70,
-      w: 150,
+      w: 180,
       step: 5,
     },
     {
@@ -88,9 +88,9 @@ const spec: DiagramSpec = {
       sub: "send the error back",
       icon: "history",
       tone: PROD_TONE.infra,
-      x: 790,
+      x: 775,
       y: 170,
-      w: 150,
+      w: 180,
       step: 5,
     },
     {
@@ -100,9 +100,9 @@ const spec: DiagramSpec = {
       icon: "shield",
       tone: PROD_TONE.failure,
       fill: "pastel",
-      x: 790,
+      x: 775,
       y: 270,
-      w: 150,
+      w: 180,
       step: 5,
     },
   ],

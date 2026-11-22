@@ -107,22 +107,29 @@ const hug = (label: string) => Math.round(Math.max(...label.split("\n").map((l) 
 
 const shapes: LayoutShape[] = [];
 
-// Dashed GPU boundaries first, so the bars draw over them and they show between rows.
+// Dashed GPU boundaries first, so the bars draw over them and they show between rows. A boundary that a verdict line
+// would cross is broken around that line, so the text stays clear.
 for (let k = 1; k <= SCALE_GB / GPU_GB; k++) {
   const x = BAR_X + k * GPU_GB * PX_PER_GB;
-  shapes.push({
-    id: `gpu-line-${k}`,
-    type: "path",
-    x: 0,
-    y: 0,
-    points: [
-      [x, RULER_Y + 30],
-      [x, BOTTOM],
-    ],
-    tone: "neutral",
-    weight: 0.35,
-    dashed: true,
-  });
+  const gaps = ROWS.map((r, i) => ({ r, top: FIRST + i * ROW_STEP + BAR_H + 2 }))
+    .filter(({ r }) => BAR_X + hug(r.verdict) > x - 4)
+    .map(({ top }) => [top - 2, top + 22] as const);
+  const cuts = [RULER_Y + 30, ...gaps.flat(), BOTTOM];
+  for (let j = 0; j < cuts.length; j += 2) {
+    shapes.push({
+      id: j === 0 ? `gpu-line-${k}` : `gpu-line-${k}-${j / 2}`,
+      type: "path",
+      x: 0,
+      y: 0,
+      points: [
+        [x, cuts[j]],
+        [x, cuts[j + 1]],
+      ],
+      tone: "neutral",
+      weight: 0.35,
+      dashed: true,
+    });
+  }
 }
 
 // The ruler: three 80 GB GPUs on the same scale.

@@ -58,7 +58,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 440,
       y: 170,
-      w: 200,
+      w: 212,
     },
     {
       id: "ctrl",

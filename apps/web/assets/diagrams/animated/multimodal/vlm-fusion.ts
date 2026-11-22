@@ -103,8 +103,8 @@ const shapes: LayoutShape[] = [
     from: "r-res",
     to: "r-x2",
     via: [
-      [630, 218],
-      [630, 86],
+      [612, 218],
+      [612, 86],
     ],
     step: 2,
   },
@@ -118,8 +118,8 @@ const spec: LayoutSpec = {
   width: 880,
   height: 436,
   groups: [
-    { id: "g-left", title: "Projector (LLaVA)", tone: PROD_TONE.infra, x: 8, y: 8, w: 424, h: 426 },
-    { id: "g-right", title: "Cross-attention (Flamingo)", tone: PROD_TONE.infra, x: 444, y: 8, w: 428, h: 426 },
+    { id: "g-left", title: "Projector (LLaVA)", tone: PROD_TONE.infra, x: 8, y: 18, w: 424, h: 416 },
+    { id: "g-right", title: "Cross-attention (Flamingo)", tone: PROD_TONE.infra, x: 444, y: 18, w: 428, h: 416 },
   ],
   steps: [
     { title: "Projector design: image tokens join the sequence" },

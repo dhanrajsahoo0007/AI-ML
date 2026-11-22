@@ -36,9 +36,9 @@ const spec: DiagramSpec = {
       icon: "chat",
       tone: PROD_TONE.traffic,
       fill: "pastel",
-      x: 70,
+      x: 76,
       y: 90,
-      w: 130,
+      w: 144,
     },
     {
       id: "detect",
@@ -49,7 +49,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 305,
       y: 90,
-      w: 170,
+      w: 174,
       step: 2,
     },
     {
@@ -85,7 +85,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 530,
       y: 250,
-      w: 150,
+      w: 154,
       step: 5,
     },
     {
@@ -97,7 +97,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 745,
       y: 90,
-      w: 130,
+      w: 136,
       step: 6,
     },
     {

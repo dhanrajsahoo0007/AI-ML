@@ -66,7 +66,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 325,
       y: 100,
-      w: 150,
+      w: 156,
     },
     {
       id: "dataset",

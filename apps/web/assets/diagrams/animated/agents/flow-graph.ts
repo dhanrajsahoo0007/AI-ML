@@ -84,7 +84,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 430,
       y: 190,
-      w: 160,
+      w: 164,
     },
     {
       id: "join",
