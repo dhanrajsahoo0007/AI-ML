@@ -93,7 +93,10 @@ export function CloudDecisionTree({ topic }: { topic: string }) {
 
             {result && (
               <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-green)" }}>
+                <div
+                  className="text-xs font-semibold uppercase tracking-[0.08em]"
+                  style={{ color: "var(--dg-green-text)" }}
+                >
                   Recommendation
                 </div>
                 <div className="mt-1.5 font-display text-2xl font-semibold leading-tight text-ink">
@@ -104,7 +107,7 @@ export function CloudDecisionTree({ topic }: { topic: string }) {
                   <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-green)" }}>
                     <div
                       className="text-[11px] font-semibold uppercase tracking-[0.08em]"
-                      style={{ color: "var(--dg-green)" }}
+                      style={{ color: "var(--dg-green-text)" }}
                     >
                       Why
                     </div>
@@ -113,7 +116,7 @@ export function CloudDecisionTree({ topic }: { topic: string }) {
                   <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-orange)" }}>
                     <div
                       className="text-[11px] font-semibold uppercase tracking-[0.08em]"
-                      style={{ color: "var(--dg-orange)" }}
+                      style={{ color: "var(--dg-orange-text)" }}
                     >
                       Trade-off to say out loud
                     </div>

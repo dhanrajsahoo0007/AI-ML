@@ -5,10 +5,11 @@ import { OWNER_LABEL, RESPONSIBILITY_SETS, type Owner } from "@/lib/cloud-catalo
 // (right). Each set in RESPONSIBILITY_SETS brings its own layers, options, heading and caption.
 // Usage in MDX: <ResponsibilityGrid set="aws-compute" />
 
-const OWNER_STYLE: Record<Owner, { bg: string; fg: string }> = {
-  you: { bg: "var(--dg-orange-soft)", fg: "var(--dg-orange)" },
-  shared: { bg: "var(--dg-teal-soft)", fg: "var(--dg-teal)" },
-  provider: { bg: "var(--paper-2)", fg: "var(--muted-foreground)" },
+// `fg` is the swatch border; `text` is the label colour (the AA-safe tone text, never the stroke).
+const OWNER_STYLE: Record<Owner, { bg: string; fg: string; text: string }> = {
+  you: { bg: "var(--dg-orange-soft)", fg: "var(--dg-orange)", text: "var(--dg-orange-text)" },
+  shared: { bg: "var(--dg-teal-soft)", fg: "var(--dg-teal)", text: "var(--dg-teal-text)" },
+  provider: { bg: "var(--paper-2)", fg: "var(--muted-foreground)", text: "var(--muted-foreground)" },
 };
 
 export function ResponsibilityGrid({ set }: { set: string }) {
@@ -63,7 +64,7 @@ export function ResponsibilityGrid({ set }: { set: string }) {
                     key={o.id}
                     role="cell"
                     className={cn("flex h-9 items-center justify-center rounded-md px-2 text-xs font-medium")}
-                    style={{ background: st.bg, color: st.fg }}
+                    style={{ background: st.bg, color: st.text }}
                     title={`${o.label}: ${l.label}: ${OWNER_LABEL[owner]}`}
                   >
                     {owner === "you" ? "You" : owner === "shared" ? "Configure" : "Cloud"}
