@@ -225,14 +225,14 @@ const spec: DiagramSpec = {
     // Clients
     card("localidx", "Local index", "grep, symbols", "search", C.clients, ROW.a, 3, { tone: GENAI_TONE.store }),
     card("sandbox", "Local sandbox", "no network", "sandbox", C.clients, ROW.b, 7, { tone: GENAI_TONE.tool }),
-    card("plugin", "IDE plugin", "gate, scan, cache", "browser", C.clients, ROW.c, 1, {
+    card("plugin", "IDE plugin", "gate, cache", "browser", C.clients, ROW.c, 1, {
       h: 52,
       tone: GENAI_TONE.user,
     }),
     card("reviewer", "Reviewer", "reads the PR", "approval", C.clients, SVC.cloud, 7, { tone: GENAI_TONE.user }),
 
     // Edge and gateway
-    card("gateway", "Gateway", "auth, region, abort", "gateway", C.edge, ROW.c, 1, { h: 52 }),
+    card("gateway", "Gateway", "region, abort", "gateway", C.edge, ROW.c, 1, { h: 52 }),
 
     // Context and orchestration
     card("sync", "Sync service", "Merkle compare", "tree", C.core1, ROW.a, 3, { w: 156 }),
@@ -267,7 +267,7 @@ const spec: DiagramSpec = {
     }),
 
     // Offline pipelines
-    card("builder", "Snapshot builder", "clone, install, no secrets", "snapshot", C.async, ASYNC.builder, 7, {
+    card("builder", "Snapshot builder", "clone, install, no keys", "snapshot", C.async, ASYNC.builder, 7, {
       w: 180,
     }),
     card("evals", "Evaluation gate", "A/B, suites, rollout", "chart", 870, ASYNC.evals, 8, {

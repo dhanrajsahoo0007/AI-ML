@@ -291,7 +291,7 @@ const spec: DiagramSpec = {
       h: 48,
       tone: GENAI_TONE.user,
     }),
-    card("reviewApp", "Review app", "blurred, greyscale", "browser", C.clients, 572, 5, {
+    card("reviewApp", "Review app", "blur, greyscale", "browser", C.clients, 572, 5, {
       h: 48,
       tone: GENAI_TONE.user,
     }),
@@ -313,15 +313,15 @@ const spec: DiagramSpec = {
       h: CH,
       step: 1,
     },
-    card("enforcement", "Enforcement", "actions, statements", "gavel", C.left, ROW.r1, 6, { tone: GENAI_TONE.tool }),
-    card("hash", "Hash and rules", "lists, banks, terms", "fingerprint", C.right, ROW.r2, 2, {
+    card("enforcement", "Enforcement", "actions, reasons", "gavel", C.left, ROW.r1, 6, { tone: GENAI_TONE.tool }),
+    card("hash", "Hashes, rules", "banks, terms", "fingerprint", C.right, ROW.r2, 2, {
       tone: GENAI_TONE.check,
     }),
     card("classifiers", "Classifiers", "text, image, OCR", "gauge", C.right, ROW.r3, 3, {
       tone: GENAI_TONE.check,
     }),
     card("hold", "Hold and band", "sev. 0–1 held", "timer", C.right, ROW.r4, 4, { tone: GENAI_TONE.rank }),
-    card("review", "Review queues", "severity × reach", "user-check", C.left, ROW.r3, 5, { tone: GENAI_TONE.rank }),
+    card("review", "Review queue", "severity × reach", "user-check", C.left, ROW.r3, 5, { tone: GENAI_TONE.rank }),
 
     // Models and people
     service("model", "Policy model", `${millions(LLM.enforcementCalls)} calls a day`, "model", C.right, SVC.s1, 4),
@@ -343,11 +343,11 @@ const spec: DiagramSpec = {
     ),
 
     // Offline pipelines
-    card("prevalence", "Prevalence", "view samples, bins", "chart", C.async, ASYNC.prevalence, 7, {
+    card("prevalence", "Prevalence", "samples, bins", "chart", C.async, ASYNC.prevalence, 7, {
       h: 44,
       tone: GENAI_TONE.check,
     }),
-    card("redteam", "Red team", "attacks, retraining", "bug", C.async, ASYNC.redteam, 8, {
+    card("redteam", "Red team", "attacks, retrain", "bug", C.async, ASYNC.redteam, 8, {
       h: 44,
       tone: GENAI_TONE.check,
     }),

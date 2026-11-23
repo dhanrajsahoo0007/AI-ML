@@ -1,5 +1,8 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
-import { textWidth } from "@/components/diagrams/diagram-style";
+import { FONTS, measureText } from "@/components/diagrams/text-width";
+
+/** Width of a quiet text label (11.5 px), from the measured Inter widths the renderers and the spec lint share. */
+const textWidth = (text: string) => measureText(text, FONTS.pill);
 import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
 import { PROD_TONE, n } from "@/components/diagrams/presets/production";
 import { CAPACITY, DEGRADE, FAILOVER } from "@/components/diagrams/presets/gcase-chat";

@@ -269,7 +269,7 @@ const spec: DiagramSpec = {
     card("redactor", "Redactor", "dictionary, NER", "shield", C.right, ROW.r3, 5, { tone: GENAI_TONE.check }),
     card("router", "Router", "chains, breakers", "router", C.right, ROW.r4, 3, { tone: GENAI_TONE.rank }),
     card("sticky", "Stickiness", "cache lifetime", "link", C.left, ROW.r2, 4, { tone: GENAI_TONE.rank }),
-    card("relay", "Stream relay", "un-redact, cancel", "signal", C.left, ROW.r3, 6, { tone: GENAI_TONE.tool }),
+    card("relay", "Stream relay", "unredact, cancel", "signal", C.left, ROW.r3, 6, { tone: GENAI_TONE.tool }),
     card("meter", "Meter", "tokens by class", "meter", C.left, ROW.r4, 7, { tone: GENAI_TONE.data }),
 
     // Providers and models
@@ -279,7 +279,7 @@ const spec: DiagramSpec = {
     provider("s", "Self-hosted S", `${SELF_HOSTED.gpus} GPUs, labs only`, "gpu", PROV.s, 4),
 
     // Control plane and offline
-    card("recon", "Reconcile", "vs provider usage", "ledger", C.async, ASYNC.recon, 7, { tone: GENAI_TONE.check }),
+    card("recon", "Reconcile", "vs provider bills", "ledger", C.async, ASYNC.recon, 7, { tone: GENAI_TONE.check }),
     card("evals", "Evaluation", "gold sets, drills", "chart", C.async, ASYNC.evals, 8, { tone: GENAI_TONE.check }),
     card("control", "Control plane", "config repo, keys", "policy", C.async, ASYNC.control, 1, { h: 44 }),
 

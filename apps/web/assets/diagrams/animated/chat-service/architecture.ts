@@ -266,7 +266,7 @@ const spec: DiagramSpec = {
   nodes: [
     // Clients and edge
     card("user", "User", "web, apps", "users", C.clients, CORE.lane, 1, { h: 48, tone: GENAI_TONE.user }),
-    card("gateway", "API gateway", "SSE, idempotency", "gateway", C.edge, CORE.lane, 1, { h: 48 }),
+    card("gateway", "API gateway", "SSE, dedupe", "gateway", C.edge, CORE.lane, 1, { h: 48 }),
     card("limits", "Rate limiter", "tokens per 5 h", "meter", C.edge, 262, 8, { tone: GENAI_TONE.check }),
 
     // Chat orchestration
@@ -282,9 +282,9 @@ const spec: DiagramSpec = {
       h: 44,
       step: 1,
     },
-    card("safety", "Safety screens", "input, stream", "shield", C.left, CORE.top, 7, { tone: GENAI_TONE.check }),
+    card("safety", "Safety screen", "input, stream", "shield", C.left, CORE.top, 7, { tone: GENAI_TONE.check }),
     card("memory", "Memory", "saved, recall", "history", C.right, CORE.top, 6, { tone: GENAI_TONE.data }),
-    card("asm", "Assembler", "the window, folds", "prompt", C.left, CORE.low, 3, { tone: GENAI_TONE.data }),
+    card("asm", "Assembler", "the window", "prompt", C.left, CORE.low, 3, { tone: GENAI_TONE.data }),
     card("router", "Turn router", "fast or reasoning", "router", C.right, CORE.low, 5, { tone: GENAI_TONE.rank }),
 
     // Models and tools
@@ -304,7 +304,7 @@ const spec: DiagramSpec = {
     ),
     pool("fast", "Fast decode", `racks, ${POOLS.fastSpeed} tok/s`, "gpu", C.right, SVC.s3, 1),
     pool("reasoning", "Reasoning", `racks, ${POOLS.reasoningSpeed} tok/s`, "gpu", C.left, SVC.s3, 5),
-    card("tools", "Tools", "search, code, files", "tool", C.left, SVC.s4, 3, { h: SH, tone: GENAI_TONE.tool }),
+    card("tools", "Tools", "web, code, files", "tool", C.left, SVC.s4, 3, { h: SH, tone: GENAI_TONE.tool }),
 
     // Offline pipelines
     card("jobs", "Background", "folds, extraction", "workers", C.async, ASYNC.jobs, 3, { h: SH }),
