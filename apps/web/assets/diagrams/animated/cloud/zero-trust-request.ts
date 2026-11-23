@@ -207,7 +207,7 @@ const spec: DiagramSpec = {
     // Step 1: one sign-in at the VPN, then the network itself is the permission.
     { from: "staff", to: "vpn", label: "sign in once", packet: true, until: 2 },
     { from: "vpn", to: "admin", label: "any VPN address", packet: true, delay: 1.2, labelAt: 0.3, until: 2 },
-    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, until: 5 },
+    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, labelAt: 0.3, until: 5 },
 
     // Step 2: the malware rides the contractor's VPN session. The red edges lie on top of the normal path, with their
     // labels at other points along it, so the whole figure stays inside the left 480 units on a phone.
@@ -230,7 +230,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 2.4,
-      labelAt: 0.5,
+      labelAt: 0.72,
       step: 2,
       until: 2,
     },

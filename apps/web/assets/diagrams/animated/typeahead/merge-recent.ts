@@ -18,7 +18,7 @@ const spec: SequenceSpec = {
   title: "Merging the base index and the trending layer",
   lanes: [
     { id: "browser", label: "Browser", icon: "browser", tone: PATTERN_TONE.traffic },
-    { id: "svc", label: "Suggest service", icon: "api", tone: PATTERN_TONE.compute },
+    { id: "svc", label: "Suggest service", tone: PATTERN_TONE.compute },
     { id: "index", label: "Trie index", icon: "trie", tone: PATTERN_TONE.store },
     { id: "trend", label: "Trending layer", icon: "cache", tone: PATTERN_TONE.store },
     { id: "block", label: "Blocklist", icon: "shield", tone: PATTERN_TONE.pattern },

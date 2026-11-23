@@ -49,6 +49,8 @@ const spec: LayoutSpec = {
         label: `${n(GROW * 60)} waiting: ${wait(GROW * 60)} s`,
         tone: PATTERN_TONE.fail,
         place: "above-left",
+        // Clear of the y axis and the rising line.
+        nudge: [67, -22],
       },
       {
         x: 10,
@@ -56,6 +58,8 @@ const spec: LayoutSpec = {
         label: `${n(GROW * 600)} waiting: ${wait(GROW * 600)} s`,
         tone: PATTERN_TONE.fail,
         place: "below-left",
+        // Low enough to sit under the rising line along its whole width.
+        nudge: [0, 50],
       },
     ],
   }),

@@ -63,7 +63,20 @@ const shapes: LayoutShape[] = [
   }),
 
   arrow("a-tap", "idle", "authorising", "select, tap", 2),
-  arrow("a-approved", "authorising", "dispensing", "approved", 2),
+  // The approved and cancel arrows cross at their midpoints, where both pills would sit; "approved" is a text beside
+  // its arrow's lower end instead.
+  { id: "a-approved", type: "arrow", x: 0, y: 0, from: "authorising", to: "dispensing", step: 2 },
+  {
+    id: "a-approved-label",
+    type: "text",
+    x: 324,
+    y: 186,
+    w: 58,
+    h: 18,
+    label: "approved",
+    tone: PATTERN_TONE.infra,
+    step: 2,
+  },
   arrow("a-declined", "authorising", "idle", "declined", 2, { dashed: true, via: [[mid(0) + 20, R2 + H / 2]] }),
 
   arrow("a-cancel", "credit", "refunding", "cancel, 60 s", 3, { tone: PATTERN_TONE.fail }),

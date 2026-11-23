@@ -94,7 +94,7 @@ const plot = curve("c", CX, CY, {
       tone: OURS,
       place: "above-left",
     },
-    { x: list, y: three.atList, label: k(three.atList), tone: API, place: "left" },
+    { x: list, y: three.atList, label: k(three.atList), tone: API, place: "left", nudge: [0, -10] },
     { x: list, y: ours(list), label: k(ours(list)), tone: OURS, place: "below-left" },
     { x: list, y: one.atList, label: k(one.atList), tone: API1, place: "below-right" },
   ],
