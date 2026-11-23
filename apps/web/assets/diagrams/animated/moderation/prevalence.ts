@@ -290,7 +290,15 @@ const spec: LayoutSpec = {
       X,
       S2_FOOT,
       W,
-      `A one-week test would fail ${pct(Math.min(...fails))}–${pct(Math.max(...fails))} of weeks at the design's own rate (terrorism every week). Seeing a 25% rise in hate needs ≈ ${n0(Math.round(hate25 / 100) * 100)} labels a week.`,
+      `A one-week test would fail ${pct(Math.min(...fails))}–${pct(Math.max(...fails))} of weeks at the design's own rate (terrorism every week).`,
+      2
+    ),
+    text(
+      "s2-foot-2",
+      X,
+      S2_FOOT + 20,
+      W,
+      `Seeing a 25% rise in hate needs ≈ ${n0(Math.round(hate25 / 100) * 100)} labels a week.`,
       2
     ),
     text(
