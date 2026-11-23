@@ -13,13 +13,13 @@ import { PATTERN_TONE } from "@/components/diagrams/presets/patterns";
 //   180,000 ÷ 32,000/s ≈ 5.6 s more before every first token
 //   priority: paid 10,500/s first; free on the large model 32,000 − 10,500 = 21,500/s; overflow 3,000/s to a small
 //   model with 4 × the streams per replica (256): 3,000 × 10 s ÷ 256 ≈ 118 replicas
-// Layout: bars drawn to one scale, 1,000 prompts/s = 20 px, from x 150; a dashed line at the capacity, x 150 + 640 =
-// 790. Rows at y 70 (arrivals), 140 (fleet), 230 (first come, with its working under it), 330 (priority, with its
+// Layout: bars drawn to one scale, 1,000 prompts/s = 21 px, from x 150; a dashed line at the capacity, x 150 + 672 =
+// 822. Rows at y 70 (arrivals), 140 (fleet), 230 (first come, with its working under it), 330 (priority, with its
 // working). Colours (PATTERN_TONE): paid blue (data), free orange (traffic), the fleet teal (compute), the overflow
 // lane green (the design's own part), the queue's excess red.
 
 const X0 = 150;
-const S = 20 / 1000; // px per prompt/s
+const S = 21 / 1000; // px per prompt/s
 const w = (rate: number) => rate * S;
 const PAID = 10_500;
 const FREE = 24_500;

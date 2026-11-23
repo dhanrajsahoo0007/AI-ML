@@ -39,19 +39,19 @@ import { ROLE_TONE, block, vector } from "@/components/diagrams/presets/transfor
 //   Sentiment: positive 1.9, negative −1.2 → 1 / (1 + e^−3.1) = 0.957 → 0.96, 0.04
 
 // ── Geometry ─────────────────────────────────────────────────────────────────────────────────────────────────
-const PITCH = 53; // pre-training token columns
-const TOK_W = 50;
+const PITCH = 56; // pre-training token columns
+const TOK_W = 53; // fits "[MASK]" with 2 units either side
 const FT_PITCH = 44; // fine-tuning token columns
 const FT_TOK_W = 40;
 const TOK_H = 30;
 
-const PT = { x: 30, w: 566, blockX: 46, blockW: 538, cx0: 78 }; // pre-training body
-const FT = { x: 626, w: 246, blockX: 638, blockW: 222, cx0: 661 }; // fine-tuning body
+const PT = { x: 30, w: 590, blockX: 46, blockW: 562, cx0: 79.5 }; // pre-training body
+const FT = { x: 650, w: 246, blockX: 662, blockW: 222, cx0: 685 }; // fine-tuning body
 const ptCx = (i: number) => PT.cx0 + i * PITCH;
 const ftCx = (i: number) => FT.cx0 + i * FT_PITCH;
 /** x of the vertical arrows through each body; clear of the group's title tab and between two token columns. */
-const PT_LINE_X = (ptCx(4) + ptCx(5)) / 2; // 316.5, in the gap between columns 4 and 5
-const FT_LINE_X = (ftCx(3) + ftCx(4)) / 2; // 815, right of the "Encoder × 12" tab
+const PT_LINE_X = (ptCx(4) + ptCx(5)) / 2; // 331.5, in the gap between columns 4 and 5
+const FT_LINE_X = (ftCx(3) + ftCx(4)) / 2; // 839, right of the "Encoder × 12" tab
 
 const CELLS_BOTTOM = 128; // bottom of every head's probability cells
 const PCELL_H = 22;
@@ -292,7 +292,7 @@ const step1: LayoutShape[] = [
     "foot",
     16,
     664,
-    848,
+    872,
     "BERT-base: 12 layers, hidden size 768, 12 heads, about 110M parameters. Embeddings, norms and residuals are left out.",
     { quiet: true }
   ),
@@ -355,7 +355,7 @@ const step3: LayoutShape[] = [
 const spec: LayoutSpec = {
   kind: "layout",
   title: "BERT: pre-train once, fine-tune per task",
-  width: 880,
+  width: 904,
   height: 692,
   groups: [
     { id: "pt-enc", title: "Encoder × 12", tone: ROLE_TONE.block, x: PT.x, y: GROUP_Y, w: PT.w, h: GROUP_H },

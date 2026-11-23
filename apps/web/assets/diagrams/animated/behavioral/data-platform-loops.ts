@@ -12,9 +12,9 @@ const spec: LayoutSpec = {
     { title: "After the panel", covers: "Who is said to make the decision" },
   ],
   groups: [
-    { id: "db", title: "Databricks, official guide", tone: "blue", x: 20, y: 24, w: 230, h: 300 },
-    { id: "sn", title: "Snowflake, as reported", tone: "teal", x: 265, y: 24, w: 230, h: 300 },
-    { id: "dd", title: "Datadog, official and reported", tone: "violet", x: 510, y: 24, w: 230, h: 300 },
+    { id: "db", title: "Databricks, official guide", tone: "blue", x: 20, y: 24, w: 234, h: 300 },
+    { id: "sn", title: "Snowflake, as reported", tone: "teal", x: 265, y: 24, w: 234, h: 300 },
+    { id: "dd", title: "Datadog, official and reported", tone: "violet", x: 510, y: 24, w: 234, h: 300 },
   ],
   shapes: [
     {

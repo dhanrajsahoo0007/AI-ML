@@ -2,8 +2,9 @@
 
 import type { Phase } from "./build-view";
 import { Defs, DiagramFigure, IconAt, NewRing, Packet, usePlayback } from "./diagram-shared.client";
-import { markerUrl, phaseOpacity, soft, stroke, textWidth, toneText } from "./diagram-style";
+import { markerUrl, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import { SEQ, layoutSequence, type LaneView, type MessageTiming } from "./sequence-layout";
+import { FONTS, measureText } from "./text-width";
 import type { SequenceMessage, SequenceNote, SequenceSpec, Tone } from "./types";
 
 interface SequenceDiagramProps {
@@ -87,7 +88,10 @@ export function SequenceDiagram({
 
 function Lane({ lane, top, bottom }: { lane: LaneView; top: number; bottom: number }) {
   const tone = lane.tone ?? "neutral";
-  const w = Math.max(96, Math.min(150, textWidth(lane.label, 7.4) + (lane.icon ? 64 : 28)));
+  const w = Math.max(
+    SEQ.headerMinW,
+    Math.min(SEQ.headerMaxW, measureText(lane.label, FONTS.label) + (lane.icon ? 64 : 28))
+  );
   const x = lane.x - w / 2;
   const textX = lane.icon ? x + 46 : lane.x;
   return (
@@ -159,7 +163,7 @@ function Message({
   if (kind === "note") {
     const left = Math.min(x1, x2);
     const right = Math.max(x1, x2);
-    const w = self ? Math.max(120, textWidth(message.label ?? "") + 24) : right - left + 40;
+    const w = self ? Math.max(120, measureText(message.label ?? "", FONTS.note) + 24) : right - left + 40;
     const x = self ? x1 + 12 : left - 20;
     return (
       <g opacity={phaseOpacity(phase)} data-message={key} data-kind="note" data-phase={phase}>
@@ -186,7 +190,7 @@ function Message({
   const mid = (x1 + x2) / 2;
   const labelY = self ? y - 1 : y - 9;
   const moving = phase !== "old" && !!timing;
-  const labelW = message.label ? textWidth(message.label) + 12 : 0;
+  const labelW = message.label ? measureText(message.label, FONTS.message) + 12 : 0;
   // A self message's label sits right of its loop; any other label is centred over the arrow.
   const labelX = self ? x1 + 52 : mid - labelW / 2;
 
@@ -264,7 +268,7 @@ function Note({
   width: number;
 }) {
   const lx = laneX.get(note.lane) ?? 0;
-  const w = Math.max(80, textWidth(note.text) + 22);
+  const w = Math.max(80, measureText(note.text, FONTS.note) + 22);
   // Right of the lifeline, or left of it when that would run off the canvas.
   const x = lx + 14 + w <= width - 4 ? lx + 14 : Math.max(4, lx - 14 - w);
   return (

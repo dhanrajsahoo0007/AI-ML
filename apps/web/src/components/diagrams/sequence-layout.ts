@@ -8,6 +8,9 @@ export const SEQ = {
   /** Top of the lane header boxes. */
   headerY: 20,
   headerH: 56,
+  /** Lane header width range; the header grows with its label up to the maximum. */
+  headerMinW: 96,
+  headerMaxW: 156,
   /** Minimum column width per lane and the default per-lane width when the spec sets none. */
   minColW: 120,
   colW: 180,

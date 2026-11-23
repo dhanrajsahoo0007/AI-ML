@@ -174,7 +174,7 @@ const spec: DiagramSpec = {
       w: 158,
       tone: GENAI_TONE.model,
     }),
-    card("trace", "Trace read API", "summaries", "signal", C.right, ROW.s3, 4, { tone: GENAI_TONE.tool }),
+    card("trace", "Trace read API", "summaries", "signal", C.right, ROW.s3, 4, { w: 154, tone: GENAI_TONE.tool }),
 
     // Offline pipelines
     offline("extraction", "Doc extraction", "FMEA, 8D, approval", "file", ASYNC_Y.extraction, 6, GENAI_TONE.data),

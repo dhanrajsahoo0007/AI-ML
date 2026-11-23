@@ -24,7 +24,16 @@ import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
-import { TONES, phaseOpacity, pillTextWidth, soft, stroke, textWidth, toneText } from "./diagram-style";
+import {
+  TONES,
+  boundaryTabWidth,
+  phaseOpacity,
+  pillWidth,
+  soft,
+  stroke,
+  toneText,
+  zoneTabWidth,
+} from "./diagram-style";
 import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
@@ -279,7 +288,7 @@ export function Defs({ uid, tones = TONES }: { uid: string; tones?: readonly Lay
 export function Zone({ zone, phase, dim = false }: { zone: LayoutGroup; phase: Phase; dim?: boolean }) {
   const cls = dim ? "dg-dim" : undefined;
   if (zone.kind) return <BoundaryZone zone={zone} phase={phase} className={cls} />;
-  const tabW = zone.title.length * 8.2 + 28;
+  const tabW = zoneTabWidth(zone.title);
   return (
     <g opacity={phaseOpacity(phase)} className={cls} data-dim={dim || undefined}>
       <rect
@@ -348,7 +357,7 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
     );
   }
   const region = zone.kind === "region";
-  const tabW = zone.title.length * 7.6 + 24;
+  const tabW = boundaryTabWidth(zone.title);
   return (
     <g opacity={opacity} className={className}>
       <rect
@@ -519,7 +528,7 @@ export function LabelPill({
   tone: LayoutTone;
   bold?: boolean;
 }) {
-  const w = pillTextWidth(text) + 14;
+  const w = pillWidth(text, bold);
   return (
     <g>
       <rect
