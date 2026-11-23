@@ -34,7 +34,7 @@ const spec: DiagramSpec = {
       h: 64,
     },
     { id: "internet", label: "Internet", icon: "globe", tone: "blue", variant: "glyph", x: 470, y: 140 },
-    { id: "sites", label: "Other sites", sub: "news, video", icon: "server", x: 470, y: 285, w: 120 },
+    { id: "sites", label: "Other sites", sub: "news, video", icon: "server", x: 470, y: 285, w: 130 },
     {
       id: "rproxy",
       label: "Reverse proxy",
@@ -57,7 +57,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 840,
       y: 110,
-      w: 130,
+      w: 140,
     },
     {
       id: "app2",
@@ -68,7 +68,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 840,
       y: 200,
-      w: 130,
+      w: 142,
     },
     {
       id: "app3",
@@ -79,7 +79,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 840,
       y: 290,
-      w: 130,
+      w: 142,
     },
   ],
   edges: [

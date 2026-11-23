@@ -28,7 +28,7 @@ const spec: LayoutSpec = {
       type: "box",
       x: 30,
       y: 40,
-      w: 170,
+      w: 180,
       h: 70,
       label: "New listing 912",
       sub: "$480k, 3 beds, tile 12/1205/1539",

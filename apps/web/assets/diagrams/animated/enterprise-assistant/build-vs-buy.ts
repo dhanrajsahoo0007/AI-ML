@@ -73,7 +73,7 @@ const plot = curve("c", CX, CY, {
   ],
   marks: [
     { x: crossing, y: BUILD_BUY.buy, tone: BUILD, place: "above-left" },
-    { x: at9, y: BUILD_BUY.build, label: k(BUILD_BUY.build), tone: BUILD, place: "left" },
+    { x: at9, y: BUILD_BUY.build, label: k(BUILD_BUY.build), tone: BUILD, place: "left", nudge: [0, -10] },
     { x: at9, y: BUILD_BUY.buy, tone: BUY, place: "below-right" },
   ],
 }).map((s): LayoutShape => {

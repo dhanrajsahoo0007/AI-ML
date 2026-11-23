@@ -23,7 +23,7 @@ import { CLAIM, TASK_STATES } from "@/components/diagrams/presets/agents-a2a";
 // on the task-giver); completed and the artifact blue (what comes back); failed and rejected red; submitted and
 // canceled neutral. One highlight: input required.
 
-const W = 170;
+const W = 176;
 const H = 52;
 const TERM_X = 654;
 const TERM_W = 152;

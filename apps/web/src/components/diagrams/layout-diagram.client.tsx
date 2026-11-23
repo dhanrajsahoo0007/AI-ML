@@ -12,16 +12,8 @@ import {
   usePlayback,
 } from "./diagram-shared.client";
 import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
-import {
-  boundsCentre,
-  pathD,
-  pointAt,
-  routeBetween,
-  shapeBounds,
-  smoothPathD,
-  type Bounds,
-  type Point,
-} from "./geometry";
+import { arrowPoints, boundsCentre, pathD, pointAt, shapeBounds, smoothPathD, type Point } from "./geometry";
+import { layoutTags, shapeRingPad, type TagSpot } from "./new-tags";
 import type { LayoutShape, LayoutSpec, LayoutTone } from "./types";
 
 interface LayoutDiagramProps {
@@ -53,6 +45,7 @@ export function LayoutDiagram({
   const { current, uid } = playback;
   const view = layoutView(spec, current);
   const byId = new Map(view.shapes.map((v) => [v.shape.id, v.shape]));
+  const tags = layoutTags(view, spec.width, spec.height);
   const added = view.shapes.flatMap((v) =>
     v.phase === "new" && v.shape.label && !v.shape.quiet ? [v.shape.label.replace(/\n/g, " ")] : []
   );
@@ -90,7 +83,7 @@ export function LayoutDiagram({
       {view.shapes
         .filter((v) => !isLine(v.shape))
         .map((v) => (
-          <Shape key={v.shape.id} shape={v.shape} phase={v.phase} />
+          <Shape key={v.shape.id} shape={v.shape} phase={v.phase} tag={tags.get(v.shape.id)} />
         ))}
     </DiagramFigure>
   );
@@ -108,7 +101,7 @@ function fillOf(shape: LayoutShape, tone: LayoutTone) {
   return fill === "paper" ? "var(--paper)" : fill === "pastel" ? pastel(tone) : soft(tone);
 }
 
-function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
+function Shape({ shape, phase, tag }: { shape: LayoutShape; phase: Phase; tag: TagSpot | undefined }) {
   const tone = shape.tone ?? "neutral";
   const b = shapeBounds(shape);
   const [cx, cy] = boundsCentre(b);
@@ -131,7 +124,7 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
       data-hl={shape.highlight ? "true" : undefined}
     >
       {shape.highlight && <HighlightRing bounds={b} tone={tone} pad={shape.type === "cell" ? 4 : 6} rx={rx + 4} />}
-      {phase === "new" && !shape.quiet && <NewRing bounds={b} pad={shape.type === "cell" ? 4 : 7} />}
+      {phase === "new" && !shape.quiet && <NewRing bounds={b} pad={shapeRingPad(shape)} tag={tag} />}
       {shape.type === "circle" && (
         <circle
           cx={cx}
@@ -241,19 +234,6 @@ function PathLine({ shape, phase, uid }: { shape: LayoutShape; phase: Phase; uid
       />
     </g>
   );
-}
-
-const pointBounds = ([x, y]: Point): Bounds => ({ x1: x, y1: y, x2: x, y2: y });
-
-// Arrow route: between two shapes' borders, or from/to a free point (x, y) and (x + w, y + h) for the missing end.
-function arrowPoints(shape: LayoutShape, byId: Map<string, LayoutShape>): Point[] {
-  const from = shape.from ? byId.get(shape.from) : undefined;
-  const to = shape.to ? byId.get(shape.to) : undefined;
-  const via = shape.via ?? [];
-  const start: Point = [shape.x, shape.y];
-  const end: Point = [shape.x + (shape.w ?? 0), shape.y + (shape.h ?? 0)];
-  if (!from && !to) return [start, ...via, end];
-  return routeBetween(from ? shapeBounds(from) : pointBounds(start), to ? shapeBounds(to) : pointBounds(end), via);
 }
 
 function Arrow({

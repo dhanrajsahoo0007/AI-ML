@@ -106,7 +106,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: COL.edge,
       y: 450,
-      w: W,
+      w: W + 4,
     },
     {
       id: "orch",
@@ -164,7 +164,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: COL.left,
       y: ROW.core1,
-      w: W,
+      w: W + 10,
     },
 
     // Step 3: barge-in (no icon: the full name needs the card's width).

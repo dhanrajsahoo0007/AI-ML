@@ -83,6 +83,8 @@ const plot = curve("c", CX, CY, {
       label: `${pct(fused.points[1].cutoffs)} fused recogniser (Deepgram Flux)`,
       tone: FUSED,
       place: "above-right",
+      // Left of the dashed 900 ms line, which ran through "Flux)".
+      nudge: [-18, -2],
     },
   ],
   step: 1,

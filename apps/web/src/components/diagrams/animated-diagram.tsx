@@ -11,8 +11,8 @@ import {
   type Emphasis,
   type Phase,
 } from "./build-view";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import {
-  DIAGRAM_ICONS,
   Defs,
   DiagramFigure,
   HighlightRing,
@@ -25,6 +25,7 @@ import {
 import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBounds, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
+import { architectureTags, type TagSpot } from "./new-tags";
 import { getIconComponent } from "@/lib/icons";
 import {
   isCloudProvider,
@@ -107,6 +108,7 @@ export function AnimatedDiagram({
     return ref ? { ...n, label: cloudLabel(ref, cloudNames), sub: n.label } : n;
   };
   const shownNodes = view.nodes.map((v) => v.node);
+  const tags = architectureTags(view, spec.width, spec.height, display);
   // Arrow markers for the diagram-only tones, added only when an edge uses them so other diagrams keep their defs.
   const extra = LAYOUT_ONLY_TONES.filter((t) => spec.edges.some((e) => e.tone === t));
 
@@ -134,7 +136,7 @@ export function AnimatedDiagram({
         ))}
       </g>
       {view.nodes.map(({ node, phase }) => (
-        <Node key={node.id} node={display(node)} phase={phase} emphasis={emphasis} />
+        <Node key={node.id} node={display(node)} phase={phase} emphasis={emphasis} tag={tags.get(node.id)} />
       ))}
     </DiagramFigure>
   );
@@ -168,7 +170,17 @@ function CloudToggle({ cloud, setCloud }: { cloud: CloudView; setCloud: (c: Clou
   );
 }
 
-function Node({ node, phase, emphasis }: { node: DiagramNode; phase: Phase; emphasis: Emphasis | undefined }) {
+function Node({
+  node,
+  phase,
+  emphasis,
+  tag,
+}: {
+  node: DiagramNode;
+  phase: Phase;
+  emphasis: Emphasis | undefined;
+  tag: TagSpot | undefined;
+}) {
   const bright = nodeEmphasised(emphasis, node.id);
   const ringed = !!emphasis && bright;
   return (
@@ -180,7 +192,7 @@ function Node({ node, phase, emphasis }: { node: DiagramNode; phase: Phase; emph
       data-hl={ringed ? "true" : undefined}
     >
       {ringed && <HighlightRing bounds={nodeBounds(node)} tone={node.tone ?? "neutral"} />}
-      {phase === "new" && <NewRing bounds={nodeBounds(node)} />}
+      {phase === "new" && <NewRing bounds={nodeBounds(node)} tag={tag} />}
       {node.variant === "glyph" ? <GlyphNode node={node} /> : <CardNode node={node} />}
     </g>
   );

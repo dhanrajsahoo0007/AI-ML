@@ -111,7 +111,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 495,
       y: 215,
-      w: 150,
+      w: 164,
       h: 64,
       cloud: {
         aws: "aws-elasticache",

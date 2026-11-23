@@ -147,16 +147,17 @@ const spec: DiagramSpec = {
       h: 48,
       step: 1,
     },
-    core("parser", "Page parser", "render, hidden text", "file", C.left, ROW.c4, 3, { tone: GENAI_TONE.data }),
+    core("parser", "Page parser", "render, hidden text", "file", C.left, ROW.c4, 3, { w: 160, tone: GENAI_TONE.data }),
     core("router", "Router", `A ${pct(mix.A)} · B ${pct(mix.B)} · C ${pct(mix.C)}%`, "router", C.right, ROW.c4, 4, {
+      w: 158,
       tone: GENAI_TONE.rank,
     }),
 
     // Models and readers
-    card("second", "Second reader", "Textract", "model", C.left, ROW.s1, 5, { tone: GENAI_TONE.model }),
+    card("second", "Second reader", "Textract", "model", C.left, ROW.s1, 5, { w: 154, tone: GENAI_TONE.model }),
     card("model", "Extractor", "small or mid VLM", "model", C.right, ROW.s1, 1, { tone: GENAI_TONE.model }),
     card("classifier", "Page classifier", "kind, split", "model", C.left, ROW.s2, 2, { tone: GENAI_TONE.model }),
-    card("ocr", "OCR", "Azure Read, boxes", "image", C.left, ROW.s3, 3, { tone: GENAI_TONE.data }),
+    card("ocr", "OCR", "Azure Read, boxes", "image", C.left, ROW.s3, 3, { w: 160, tone: GENAI_TONE.data }),
 
     // Offline pipelines
     card("labels", "Labels, calibrator", "audits, weekly retrain", "chart", C.async, 340, 7, {

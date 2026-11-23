@@ -64,7 +64,57 @@ describe("lintSpec: architecture", () => {
         steps: [],
       })
     );
-    expect(problems.some((p) => p.includes("is wider than its 116px box"))).toBe(true);
+    // 165.8 units of text after the icon, which starts it at x + 52: 116 - 52 - 2 leaves 62.
+    expect(problems).toContain('node "a": label "A very long service name" is 104px wider than its 116px box');
+  });
+
+  it("measures labels with the text-width model: narrow letters fit where capitals and symbols do not", () => {
+    // Same 16 characters, very different widths: "illicit" letters are narrow, capitals and "%" wide.
+    const node = (id: string, label: string, x: number) => ({ id, label, icon: "server", x, y: 100, w: 160 });
+    const problems = lintSpec(
+      with_({
+        nodes: [node("a", "fill illicit list", 100), node("b", "WARM MEMORY 100%", 300)],
+        edges: [],
+        steps: [],
+      })
+    );
+    expect(problems).toEqual(['node "b": label "WARM MEMORY 100%" is 46px wider than its 160px box']);
+  });
+
+  it("starts text after the icon only when the icon draws, and checks the sub line", () => {
+    const problems = lintSpec(
+      with_({
+        nodes: [
+          // "no-such-icon" resolves to nothing, so the text is centred and has the full width.
+          { id: "a", label: "Payment service", icon: "no-such-icon", x: 100, y: 100, w: 120 },
+          { id: "b", label: "Payment service", icon: "server", x: 300, y: 100, w: 120 },
+          { id: "c", label: "Store", sub: "receipts, refunds and disputes", x: 480, y: 100, w: 110 },
+        ],
+        edges: [],
+        steps: [],
+      })
+    );
+    expect(problems).toEqual([
+      'node "b": label "Payment service" is 44px wider than its 120px box',
+      'node "c": sub "receipts, refunds and disputes" is 60px wider than its 110px box',
+    ]);
+  });
+
+  it("flags a zone title that runs past the zone", () => {
+    const zone = (id: string, title: string, w: number) => ({
+      id,
+      title,
+      tone: "blue" as const,
+      x: 20,
+      y: 40,
+      w,
+      h: 120,
+    });
+    const problems = lintSpec(
+      with_({ zones: [zone("fits", "Machines and people", 176), zone("short", "Machines and people", 170)] })
+    );
+    // The tab starts 16 in and pads its text by 14: 30 + 144.5 = 174.5.
+    expect(problems).toEqual(['zone "short": title "Machines and people" runs 5px past its 170px width']);
   });
 
   it("flags duplicate ids", () => {
@@ -113,6 +163,17 @@ describe("lintSpec: sequence", () => {
     expect(problems).toContain('note 0 ("?"): unknown lane "ghost"');
     expect(problems.some((p) => p.startsWith("lanes are 87px apart"))).toBe(true);
   });
+
+  it("flags a lane label wider than the largest header", () => {
+    // Headers grow to 156 units; after an icon the text starts at +46, leaving 108 with 2 clear of the border.
+    const lanes = [
+      { id: "gw", label: "Socket gateway", icon: "server" },
+      { id: "auth", label: "Authorization service", icon: "server" },
+    ];
+    expect(
+      lintSpec({ ...seq, width: 700, lanes, messages: [{ from: "gw", to: "auth" }], notes: [], steps: undefined })
+    ).toEqual(['lane "auth": label "Authorization service" is 33px wider than its header']);
+  });
 });
 
 describe("lintSpec: layout", () => {
@@ -142,7 +203,12 @@ describe("lintSpec: layout", () => {
 });
 
 describe("lintSpec: layout paper-figure options", () => {
-  const withShapes = (shapes: LayoutSpec["shapes"]): LayoutSpec => ({ ...paperLayout, shapes, steps: undefined });
+  const withShapes = (shapes: LayoutSpec["shapes"], groups = paperLayout.groups): LayoutSpec => ({
+    ...paperLayout,
+    shapes,
+    groups,
+    steps: undefined,
+  });
 
   it("passes the fixture that uses every option", () => {
     expect(lintSpec(paperLayout)).toEqual([]);
@@ -158,9 +224,43 @@ describe("lintSpec: layout paper-figure options", () => {
       ])
     );
     expect(problems).toEqual([
-      'shape "wide": label "Attention" is wider than its box',
+      'shape "wide": label "Attention" is 3px wider than its box',
       'shape "short": 2 label lines need a box at least 36px tall',
       'shape "many": label has 4 lines (at most 3)',
+    ]);
+  });
+
+  it("checks a box's sub line and a group's title", () => {
+    const problems = lintSpec(
+      withShapes(
+        [
+          {
+            id: "ok",
+            type: "box",
+            x: 10,
+            y: 10,
+            w: 180,
+            h: 52,
+            label: "Input required",
+            sub: "TASK_STATE_INPUT_REQUIRED",
+          },
+          {
+            id: "tight",
+            type: "box",
+            x: 10,
+            y: 80,
+            w: 170,
+            h: 52,
+            label: "Input required",
+            sub: "TASK_STATE_INPUT_REQUIRED",
+          },
+        ],
+        [{ id: "g", title: "Datadog, official and reported", tone: "violet", x: 200, y: 20, w: 230, h: 100 }]
+      )
+    );
+    expect(problems).toEqual([
+      'shape "tight": sub "TASK_STATE_INPUT_REQUIRED" is 3px wider than its box',
+      'group "g": title "Datadog, official and reported" runs 2px past its 230px width',
     ]);
   });
 

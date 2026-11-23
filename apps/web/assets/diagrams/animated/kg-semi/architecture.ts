@@ -140,13 +140,14 @@ const spec: DiagramSpec = {
     card("fab", "Fab systems", "MES, FDC, YMS", "building", C.clients, ROW.fab, 2, { tone: GENAI_TONE.tool }),
 
     // Edge and gateway
-    card("gateway", "Gateway", "SSO, scope, audit", "gateway", C.edge, ROW.c2, 1),
+    card("gateway", "Gateway", "SSO, scope, audit", "gateway", C.edge, ROW.c2, 1, { w: 154 }),
 
     // Investigation orchestration
     card("guard", "Query guard", "linker, caps", "shield", C.left, ROW.c1, 3, {
       tone: GENAI_TONE.check,
     }),
     card("evidence", "Evidence ranker", "change-points", "chart", C.right, ROW.c1, 5, {
+      w: 164,
       tone: GENAI_TONE.rank,
     }),
     {
@@ -164,10 +165,16 @@ const spec: DiagramSpec = {
     card("checks", "Checks", "numbers, words", "approval", C.right, ROW.c2, 5, { tone: GENAI_TONE.check }),
 
     // Models and analytics
-    card("model", "On-site model", "2 hosts, low effort", "model", C.left, ROW.s1, 1, { tone: GENAI_TONE.model }),
+    card("model", "On-site model", "2 hosts, low effort", "model", C.left, ROW.s1, 1, {
+      w: 156,
+      tone: GENAI_TONE.model,
+    }),
     card("stats", "Statistics", "within lot, max-T", "graph", C.left, ROW.s2, 4, { tone: GENAI_TONE.rank }),
-    card("encoders", "Encoders", "router, slots, maps", "embedder", C.left, ROW.s3, 3, { tone: GENAI_TONE.model }),
-    card("trace", "Trace read API", "summaries", "signal", C.right, ROW.s3, 4, { tone: GENAI_TONE.tool }),
+    card("encoders", "Encoders", "router, slots, maps", "embedder", C.left, ROW.s3, 3, {
+      w: 158,
+      tone: GENAI_TONE.model,
+    }),
+    card("trace", "Trace read API", "summaries", "signal", C.right, ROW.s3, 4, { w: 154, tone: GENAI_TONE.tool }),
 
     // Offline pipelines
     offline("extraction", "Doc extraction", "FMEA, 8D, approval", "file", ASYNC_Y.extraction, 6, GENAI_TONE.data),

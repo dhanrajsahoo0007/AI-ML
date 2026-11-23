@@ -16,7 +16,7 @@ const spec: SequenceSpec = {
     { from: "owner", to: "you", label: "Keep the old cache, ship early", kind: "return", step: 2 },
     { from: "you", to: "team", label: "We ship on the old cache", step: 3 },
     { from: "you", to: "team", label: "I add a cookie fallback", step: 3 },
-    { from: "team", to: "team", label: "Week 2: a cache node fails", kind: "note", step: 4 },
+    { from: "you", to: "team", label: "Week 2: a cache node fails", kind: "note", step: 4 },
     { from: "you", to: "owner", label: "99.7% of checkouts kept", step: 4 },
     { from: "owner", to: "you", label: "Lead the migration next", kind: "return", step: 5 },
   ],

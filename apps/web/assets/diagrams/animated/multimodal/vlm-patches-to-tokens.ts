@@ -96,7 +96,7 @@ const shapes: LayoutShape[] = [
   { id: "a-enc-pv", type: "arrow", x: 416, y: 112, w: 52, h: 0, step: 3 },
 
   box("proj", 470, 176, 190, 56, "Projector", `${VLM.connector} (LLaVA-1.5)`, MODALITY_TONE.model, 4, true),
-  { id: "a-pv-proj", type: "arrow", x: 520, y: 124, w: 0, h: 50, step: 4 },
+  { id: "a-pv-proj", type: "arrow", x: 520, y: 142, w: 0, h: 32, step: 4 },
   text("proj-note", 680, 190, 190, "maps each vector to the", 4),
   text("proj-note2", 680, 208, 190, "LLM's width, so it reads", 4),
   text("proj-note3", 680, 226, 190, "like a word embedding", 4),
@@ -113,7 +113,7 @@ const shapes: LayoutShape[] = [
     5
   ),
   box("q", 520, 312, 170, 50, "Question tokens", "“Is the kettle safe to use?”", MODALITY_TONE.text, 5),
-  box("llm", 724, 306, 140, 62, "LLM", "reads the whole sequence", MODALITY_TONE.model, 5, true),
+  box("llm", 724, 306, 148, 62, "LLM", "reads the whole sequence", MODALITY_TONE.model, 5, true),
   { id: "a-proj-vis", type: "arrow", x: 0, y: 0, from: "proj", to: "vis", step: 5 },
   arrow("a-vis-q", "vis", "q", 5),
   arrow("a-q-llm", "q", "llm", 5),

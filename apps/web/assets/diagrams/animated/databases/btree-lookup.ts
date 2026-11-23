@@ -18,7 +18,7 @@ const spec: DiagramSpec = {
     { id: "log", title: "Durability", tone: "orange", x: 795, y: 50, w: 145, h: 440 },
   ],
   nodes: [
-    { id: "q", label: "WHERE id = 342", sub: "point lookup", icon: "search", x: 105, y: 120, w: 150, h: 60 },
+    { id: "q", label: "WHERE id = 342", sub: "point lookup", icon: "search", x: 105, y: 120, w: 164, h: 60 },
     {
       id: "root",
       label: "Root page",

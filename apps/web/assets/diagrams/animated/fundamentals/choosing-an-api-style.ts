@@ -42,7 +42,7 @@ const spec: DiagramSpec = {
       tone: "green",
       x: 354,
       y: 240,
-      w: 170,
+      w: 174,
       step: 2,
     },
     {
@@ -66,7 +66,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 850,
       y: 240,
-      w: 150,
+      w: 156,
       step: 3,
     },
 
@@ -84,7 +84,7 @@ const spec: DiagramSpec = {
     },
 
     // Step 5: webhooks from another company.
-    { id: "processor", label: "Card processor", sub: "another company", icon: "card", x: 96, y: 460, w: 136, step: 5 },
+    { id: "processor", label: "Card processor", sub: "another company", icon: "card", x: 96, y: 460, w: 158, step: 5 },
     {
       id: "hooks",
       label: "Webhook receiver",
@@ -93,7 +93,7 @@ const spec: DiagramSpec = {
       tone: "green",
       x: 354,
       y: 460,
-      w: 170,
+      w: 176,
       step: 5,
     },
     {

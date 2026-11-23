@@ -15,6 +15,11 @@ import { InvalidProps } from "./props";
 const stickyFirst =
   "[&_tr>*:first-child]:sticky [&_tr>*:first-child]:left-0 [&_tr>*:first-child]:z-10 [&_tr>*:first-child]:bg-paper [&_tr>*:first-child]:pr-4";
 
+// The table must also be the containing block of its cells' absolutely positioned children (the sr-only "Yes" and
+// "No" under each tick and cross). Otherwise their containing block is far up the page, outside the table's scroll
+// box, so the ones in columns scrolled out of view are not clipped and widen the whole page on a phone.
+const scrollBox = "relative";
+
 function CellValue({ value }: { value: Cell }) {
   if (typeof value === "string") return <>{value}</>;
   return value ? (
@@ -39,7 +44,7 @@ export function Compare(props: z.input<typeof compareSchema>) {
   return (
     <figure className="my-8">
       {columns && rows ? (
-        <table className={cn("compare", stickyFirst)}>
+        <table className={cn("compare", scrollBox, stickyFirst)}>
           <thead>
             <tr>
               {columns.map((c, i) => (
@@ -72,7 +77,7 @@ export function Compare(props: z.input<typeof compareSchema>) {
           </tbody>
         </table>
       ) : (
-        <div className={cn("[&>table]:!my-0", stickyFirst)}>{children}</div>
+        <div className={cn("[&>table]:!my-0 [&>table]:relative", stickyFirst)}>{children}</div>
       )}
       {caption && <figcaption className="mt-2 text-sm text-muted-foreground">{caption}</figcaption>}
     </figure>

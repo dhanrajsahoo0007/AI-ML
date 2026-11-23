@@ -91,7 +91,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 550,
       y: 250,
-      w: 128,
+      w: 132,
     },
     {
       id: "dash",

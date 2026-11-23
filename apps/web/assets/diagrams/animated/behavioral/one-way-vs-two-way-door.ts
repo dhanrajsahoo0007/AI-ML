@@ -28,7 +28,7 @@ const spec: LayoutSpec = {
       type: "box",
       x: 36,
       y: 110,
-      w: 180,
+      w: 192,
       h: 110,
       label: "Technical Decision",
       sub: "Some data missing; clock is ticking",

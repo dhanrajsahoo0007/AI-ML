@@ -107,7 +107,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 85,
       y: 60,
-      w: 140,
+      w: 146,
     },
   ],
   edges: [

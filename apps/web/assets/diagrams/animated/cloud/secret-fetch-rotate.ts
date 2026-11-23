@@ -88,7 +88,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 390,
       y: 95,
-      w: 176,
+      w: 180,
       cloud: { aws: "aws-secrets-manager", gcp: "gcp-secret-manager", azure: "azure-key-vault" },
     },
     {

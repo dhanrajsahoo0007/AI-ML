@@ -158,6 +158,7 @@ const spec: DiagramSpec = {
       tone: GENAI_TONE.check,
     }),
     card("resolver", "Drug resolver", "exact first; planner", "link", C.right, ROW.order, 4, {
+      w: 160,
       h: CH,
       tone: GENAI_TONE.rank,
     }),
@@ -184,6 +185,7 @@ const spec: DiagramSpec = {
       tone: GENAI_TONE.model,
     }),
     card("cross", "Cross-encoder", "≈ 40 passages", "layers", C.right, ROW.s1, 4, {
+      w: 156,
       h: SH,
       tone: GENAI_TONE.rank,
     }),

@@ -69,7 +69,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 340,
       y: 416,
-      w: 150,
+      w: 166,
       h: 64,
     },
     {
@@ -104,7 +104,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 340,
       y: 103,
-      w: 160,
+      w: 166,
       h: 64,
     },
     {

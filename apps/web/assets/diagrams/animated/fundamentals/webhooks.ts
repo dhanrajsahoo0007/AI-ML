@@ -20,7 +20,7 @@ const spec: SequenceSpec = {
   ],
   lanes: [
     { id: "payments", label: "Payments", icon: "card", tone: "teal" },
-    { id: "sender", label: "Webhook sender", icon: "workers", tone: "orange" },
+    { id: "sender", label: "Webhook sender", tone: "orange" },
     { id: "endpoint", label: "Shop endpoint", icon: "api", tone: "green" },
     { id: "inbox", label: "Shop inbox", icon: "database", tone: "violet" },
   ],
