@@ -38,7 +38,7 @@ const processed = slots.reduce((a, s) => a + s.length, 0); // 7
 // ── Geometry ─────────────────────────────────────────────────────────────────────────────────────────────────
 const colX = (e: number) => 230 + e * 125; // expert column centres
 const GROUP_W = 110;
-const SLOT_W = 44;
+const SLOT_W = 46;
 const SLOT_GAP = 6;
 const slotX = (e: number, s: number) => colX(e) + (s === 0 ? -SLOT_GAP / 2 - SLOT_W : SLOT_GAP / 2);
 const TOKEN_W = 48;

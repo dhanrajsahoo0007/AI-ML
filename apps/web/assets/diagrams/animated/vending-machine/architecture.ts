@@ -39,7 +39,10 @@ const spec: DiagramSpec = {
     { title: "Prices: desired against reported", covers: "F4, N6" },
     { title: "Alerts and restocking", covers: "F3" },
   ],
-  zones: zoneFrame({ clients: "Machines and people", core: "Payments core" }),
+  // The clients zone is 6 units wider than the frame so its title ends inside it.
+  zones: zoneFrame({ clients: "Machines and people", core: "Payments core" }).map((z) =>
+    z.id === "clients" ? { ...z, w: 176 } : z
+  ),
   nodes: [
     {
       id: "devices",

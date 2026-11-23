@@ -1,51 +1,28 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import {
-  Activity,
-  Bell,
-  Database,
-  Globe,
-  HardDrive,
-  Layers,
-  MessagesSquare,
-  Network,
-  Pause,
-  Play,
-  Server,
-  Smartphone,
-  Users,
-  Workflow,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { getIconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import { Glyph, isGlyph } from "./glyphs";
-import { TONES, phaseOpacity, pillTextWidth, soft, stroke, textWidth, toneText } from "./diagram-style";
+import {
+  TONES,
+  boundaryTabWidth,
+  phaseOpacity,
+  pillWidth,
+  soft,
+  stroke,
+  toneText,
+  zoneTabWidth,
+} from "./diagram-style";
+import { TAG_H, TAG_W, type TagSpot } from "./new-tags";
 import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
 // play/pause, stepper, caption), zones, the NEW marker and the travelling packet.
-
-// Lucide fallbacks for icon names that have no drawn glyph.
-export const DIAGRAM_ICONS: Record<string, LucideIcon> = {
-  phone: Smartphone,
-  "load-balancer": Network,
-  chat: MessagesSquare,
-  database: Database,
-  cache: Zap,
-  bell: Bell,
-  blob: HardDrive,
-  socket: Activity,
-  queue: Layers,
-  users: Users,
-  server: Server,
-  globe: Globe,
-  workers: Workflow,
-};
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -279,7 +256,7 @@ export function Defs({ uid, tones = TONES }: { uid: string; tones?: readonly Lay
 export function Zone({ zone, phase, dim = false }: { zone: LayoutGroup; phase: Phase; dim?: boolean }) {
   const cls = dim ? "dg-dim" : undefined;
   if (zone.kind) return <BoundaryZone zone={zone} phase={phase} className={cls} />;
-  const tabW = zone.title.length * 8.2 + 28;
+  const tabW = zoneTabWidth(zone.title);
   return (
     <g opacity={phaseOpacity(phase)} className={cls} data-dim={dim || undefined}>
       <rect
@@ -348,7 +325,7 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
     );
   }
   const region = zone.kind === "region";
-  const tabW = zone.title.length * 7.6 + 24;
+  const tabW = boundaryTabWidth(zone.title);
   return (
     <g opacity={opacity} className={className}>
       <rect
@@ -384,12 +361,17 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
   );
 }
 
-/** Pulsing dashed outline and "NEW" tag around an element added in the current build step. */
-export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
+/**
+ * Pulsing dashed outline and "NEW" tag around an element added in the current build step. `tag` is where the tag
+ * goes (from placeNewTags in ./new-tags, which keeps it off neighbouring labels); without it the tag sits on the
+ * ring's top-right corner, and `null` draws the ring alone (a touching neighbour's tag covers this one).
+ */
+export function NewRing({ bounds, pad = 7, tag }: { bounds: Bounds; pad?: number; tag?: TagSpot }) {
   const x = bounds.x1 - pad;
   const y = bounds.y1 - pad;
   const w = bounds.x2 - bounds.x1 + pad * 2;
   const h = bounds.y2 - bounds.y1 + pad * 2;
+  const spot = tag === undefined ? { x: x + w - TAG_W, y: y - TAG_H / 2 } : tag;
   return (
     <g data-new="true">
       <rect
@@ -404,18 +386,30 @@ export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
         strokeWidth={2}
         strokeDasharray="5 4"
       />
-      <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: toneText("green") }} />
-      <text
-        x={x + w - 20}
-        y={y + 4}
-        textAnchor="middle"
-        fontSize={10.5}
-        fontWeight={700}
-        letterSpacing={0.6}
-        style={{ fill: "var(--paper)" }}
-      >
-        NEW
-      </text>
+      {spot && (
+        <>
+          <rect
+            x={spot.x}
+            y={spot.y}
+            width={TAG_W}
+            height={TAG_H}
+            rx={TAG_H / 2}
+            style={{ fill: toneText("green") }}
+            data-new-tag="true"
+          />
+          <text
+            x={spot.x + TAG_W / 2}
+            y={spot.y + 13}
+            textAnchor="middle"
+            fontSize={10.5}
+            fontWeight={700}
+            letterSpacing={0.6}
+            style={{ fill: "var(--paper)" }}
+          >
+            NEW
+          </text>
+        </>
+      )}
     </g>
   );
 }
@@ -519,7 +513,7 @@ export function LabelPill({
   tone: LayoutTone;
   bold?: boolean;
 }) {
-  const w = pillTextWidth(text) + 14;
+  const w = pillWidth(text, bold);
   return (
     <g>
       <rect

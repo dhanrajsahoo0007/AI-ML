@@ -2,8 +2,11 @@
 
 import type { Phase } from "./build-view";
 import { Defs, DiagramFigure, IconAt, NewRing, Packet, usePlayback } from "./diagram-shared.client";
-import { markerUrl, phaseOpacity, soft, stroke, textWidth, toneText } from "./diagram-style";
-import { SEQ, layoutSequence, type LaneView, type MessageTiming } from "./sequence-layout";
+import { markerUrl, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
+import type { Bounds } from "./geometry";
+import { placeNewTags, textBounds, type Obstacles, type TagSpot } from "./new-tags";
+import { SEQ, layoutSequence, type LaneView, type MessageTiming, type SequenceView } from "./sequence-layout";
+import { FONTS, measureText } from "./text-width";
 import type { SequenceMessage, SequenceNote, SequenceSpec, Tone } from "./types";
 
 interface SequenceDiagramProps {
@@ -34,6 +37,7 @@ export function SequenceDiagram({
   const playback = usePlayback(step, idBase);
   const { current, uid } = playback;
   const view = layoutSequence(spec, current);
+  const tags = sequenceTags(view);
   const lifelineTop = SEQ.headerY + SEQ.headerH;
   const lifelineBottom = view.height - 12;
   const added = view.rows
@@ -69,6 +73,7 @@ export function SequenceDiagram({
             timing={view.timing.get(row.index)}
             cycle={view.cycle}
             uid={uid}
+            tag={tags.get(`m${row.index}`)}
           />
         ) : (
           <Note
@@ -78,6 +83,7 @@ export function SequenceDiagram({
             phase={row.phase}
             laneX={view.laneX}
             width={view.width}
+            tag={tags.get(`n${row.index}`)}
           />
         )
       )}
@@ -85,9 +91,90 @@ export function SequenceDiagram({
   );
 }
 
+/** Header width of a lane: the label plus its icon, between SEQ.headerMinW and SEQ.headerMaxW. */
+const laneHeaderWidth = (lane: { label: string; icon?: string }) =>
+  Math.max(SEQ.headerMinW, Math.min(SEQ.headerMaxW, measureText(lane.label, FONTS.label) + (lane.icon ? 64 : 28)));
+
+/**
+ * Where a message draws: `box` is what its NEW ring surrounds (the note box for a note, else the arrow row), `label`
+ * the paper box behind its label, `text` the label's own text.
+ */
+function messageGeometry(message: SequenceMessage, y: number, laneX: Map<string, number>) {
+  const x1 = laneX.get(message.from) ?? 0;
+  const x2 = laneX.get(message.to) ?? 0;
+  const self = message.from === message.to;
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  if (message.kind === "note") {
+    const w = self ? Math.max(120, measureText(message.label ?? "", FONTS.note) + 24) : right - left + 40;
+    const x = self ? x1 + 12 : left - 20;
+    const box: Bounds = { x1: x, y1: y - 14, x2: x + w, y2: y + 14 };
+    return {
+      box,
+      label: undefined,
+      text: message.label ? [textBounds(message.label, FONTS.note, x + w / 2, y + 4)] : [],
+    };
+  }
+  const box: Bounds = { x1: left - 4, y1: y - 20, x2: right + (self ? 60 : 4), y2: y + 14 };
+  if (!message.label) return { box, label: undefined, text: [] };
+  const labelY = self ? y - 1 : y - 9;
+  const labelW = measureText(message.label, FONTS.message) + 12;
+  // A self message's label sits right of its loop; any other label is centred over the arrow.
+  const labelX = self ? x1 + 52 : (x1 + x2) / 2 - labelW / 2;
+  const label: Bounds = { x1: labelX, y1: labelY - 10, x2: labelX + labelW, y2: labelY + 8 };
+  return { box, label, text: [label] };
+}
+
+/** A note's box: right of its lifeline, or left of it when that would run off the canvas. */
+function noteBox(note: SequenceNote, y: number, laneX: Map<string, number>, width: number): Bounds {
+  const lx = laneX.get(note.lane) ?? 0;
+  const w = Math.max(80, measureText(note.text, FONTS.note) + 22);
+  const x = lx + 14 + w <= width - 4 ? lx + 14 : Math.max(4, lx - 14 - w);
+  return { x1: x, y1: y - 13, x2: x + w, y2: y + 13 };
+}
+
+/** NEW tag spots for a sequence step view, keyed m<index> (messages) and n<index> (notes). */
+function sequenceTags(view: SequenceView): Map<string, TagSpot> {
+  const fresh: { key: string; box: Bounds; text: Bounds[]; pad: number }[] = [];
+  const obstacles: Obstacles = {
+    boxes: view.lanes.map((l) => {
+      const w = laneHeaderWidth(l);
+      return { x1: l.x - w / 2, y1: SEQ.headerY, x2: l.x + w / 2, y2: SEQ.headerY + SEQ.headerH };
+    }),
+    text: [],
+  };
+  for (const row of view.rows) {
+    const g =
+      row.kind === "message"
+        ? messageGeometry(row.message, row.y, view.laneX)
+        : { box: noteBox(row.note, row.y, view.laneX, view.width), label: undefined, text: [] };
+    const solid = row.kind === "note" || row.message.kind === "note" ? [g.box] : g.label ? [g.label] : [];
+    if (row.phase === "new") {
+      const pad = row.kind === "message" && row.message.kind !== "note" ? 2 : 4;
+      fresh.push({
+        key: `${row.kind === "message" ? "m" : "n"}${row.index}`,
+        box: g.box,
+        text: [...g.text, ...solid],
+        pad,
+      });
+    } else {
+      obstacles.text.push(...solid, ...g.text);
+    }
+  }
+  if (!fresh.length) return new Map();
+  const grow = (b: Bounds, p: number) => ({ x1: b.x1 - p, y1: b.y1 - p, x2: b.x2 + p, y2: b.y2 + p });
+  const spots = placeNewTags(
+    fresh.map((f) => ({ ring: grow(f.box, f.pad), text: f.text })),
+    obstacles,
+    view.width,
+    view.height
+  );
+  return new Map(fresh.map((f, i) => [f.key, spots[i]]));
+}
+
 function Lane({ lane, top, bottom }: { lane: LaneView; top: number; bottom: number }) {
   const tone = lane.tone ?? "neutral";
-  const w = Math.max(96, Math.min(150, textWidth(lane.label, 7.4) + (lane.icon ? 64 : 28)));
+  const w = laneHeaderWidth(lane);
   const x = lane.x - w / 2;
   const textX = lane.icon ? x + 46 : lane.x;
   return (
@@ -139,6 +226,7 @@ function Message({
   timing,
   cycle,
   uid,
+  tag,
 }: {
   message: SequenceMessage;
   y: number;
@@ -147,6 +235,7 @@ function Message({
   timing: MessageTiming | undefined;
   cycle: number;
   uid: string;
+  tag: TagSpot | undefined;
 }) {
   const kind = message.kind ?? "call";
   const x1 = laneX.get(message.from) ?? 0;
@@ -156,14 +245,13 @@ function Message({
   const self = message.from === message.to;
   const key = `${message.from}>${message.to}`;
 
+  const geo = messageGeometry(message, y, laneX);
   if (kind === "note") {
-    const left = Math.min(x1, x2);
-    const right = Math.max(x1, x2);
-    const w = self ? Math.max(120, textWidth(message.label ?? "") + 24) : right - left + 40;
-    const x = self ? x1 + 12 : left - 20;
+    const { x1: x, x2 } = geo.box;
+    const w = x2 - x;
     return (
       <g opacity={phaseOpacity(phase)} data-message={key} data-kind="note" data-phase={phase}>
-        {phase === "new" && <NewRing bounds={{ x1: x, y1: y - 14, x2: x + w, y2: y + 14 }} pad={4} />}
+        {phase === "new" && <NewRing bounds={geo.box} pad={4} tag={tag} />}
         <rect
           x={x}
           y={y - 14}
@@ -186,18 +274,12 @@ function Message({
   const mid = (x1 + x2) / 2;
   const labelY = self ? y - 1 : y - 9;
   const moving = phase !== "old" && !!timing;
-  const labelW = message.label ? textWidth(message.label) + 12 : 0;
-  // A self message's label sits right of its loop; any other label is centred over the arrow.
-  const labelX = self ? x1 + 52 : mid - labelW / 2;
+  const labelX = geo.label?.x1 ?? 0;
+  const labelW = geo.label ? geo.label.x2 - geo.label.x1 : 0;
 
   return (
     <g opacity={phaseOpacity(phase)} data-message={key} data-kind={kind} data-phase={phase}>
-      {phase === "new" && (
-        <NewRing
-          bounds={{ x1: Math.min(x1, x2) - 4, y1: y - 20, x2: Math.max(x1, x2) + (self ? 60 : 4), y2: y + 14 }}
-          pad={2}
-        />
-      )}
+      {phase === "new" && <NewRing bounds={geo.box} pad={2} tag={tag} />}
       <path
         d={d}
         fill="none"
@@ -256,20 +338,21 @@ function Note({
   phase,
   laneX,
   width,
+  tag,
 }: {
   note: SequenceNote;
   y: number;
   phase: Phase;
   laneX: Map<string, number>;
   width: number;
+  tag: TagSpot | undefined;
 }) {
-  const lx = laneX.get(note.lane) ?? 0;
-  const w = Math.max(80, textWidth(note.text) + 22);
-  // Right of the lifeline, or left of it when that would run off the canvas.
-  const x = lx + 14 + w <= width - 4 ? lx + 14 : Math.max(4, lx - 14 - w);
+  const box = noteBox(note, y, laneX, width);
+  const x = box.x1;
+  const w = box.x2 - box.x1;
   return (
     <g opacity={phaseOpacity(phase)} data-note={note.lane} data-phase={phase}>
-      {phase === "new" && <NewRing bounds={{ x1: x, y1: y - 13, x2: x + w, y2: y + 13 }} pad={4} />}
+      {phase === "new" && <NewRing bounds={box} pad={4} tag={tag} />}
       <path
         d={`M${x} ${y - 13} H${x + w - 8} L${x + w} ${y - 5} V${y + 13} H${x} Z`}
         style={{ fill: soft("orange"), stroke: stroke("orange") }}

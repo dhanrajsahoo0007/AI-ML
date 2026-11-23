@@ -154,7 +154,7 @@ const spec: DiagramSpec = {
     }),
 
     // Models and readers
-    card("second", "Second reader", "Textract", "model", C.left, ROW.s1, 5, { tone: GENAI_TONE.model }),
+    card("second", "Second reader", "Textract", "model", C.left, ROW.s1, 5, { w: 154, tone: GENAI_TONE.model }),
     card("model", "Extractor", "small or mid VLM", "model", C.right, ROW.s1, 1, { tone: GENAI_TONE.model }),
     card("classifier", "Page classifier", "kind, split", "model", C.left, ROW.s2, 2, { tone: GENAI_TONE.model }),
     card("ocr", "OCR", "Azure Read, boxes", "image", C.left, ROW.s3, 3, { w: 160, tone: GENAI_TONE.data }),

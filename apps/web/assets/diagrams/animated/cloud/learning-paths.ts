@@ -9,11 +9,11 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // levels (violet), inside one dotted group. Step 1 draws the hubs and the first path, step 2 the interview path,
 // step 3 the three levels.
 //
-// Geometry: row labels are text in x 12-130. Columns start at x 140 and are 92 wide with a gap of 4, so the seventh
+// Geometry: row labels are text in x 12-130. Columns start at x 138 and are 94 wide with a gap of 2, so the seventh
 // ends at 808 (canvas 812). Headers are boxes at y 20-64. The first two rows sit at y 82 and 138 (cells 46
 // tall). The group for the three levels starts at y 206, 22 units below the interview row so its tab clears it, and
 // its rows sit 34 units lower and 56 apart (y 240, 296, 352).
-// Cell labels fit 92 - 8 = 84 px at 6.2 px per character: "Fundamentals" (12 characters) is the longest header.
+// Cell labels fit 94 - 4 = 90 px (the lint's text-width model): "Fundamentals" (about 89 px) is the longest header.
 // The cell numbers and page counts below match the ordered lists on the page.
 
 const HUBS = [
@@ -28,7 +28,7 @@ const HUBS = [
 
 type HubId = (typeof HUBS)[number]["id"];
 
-const COL_X = (i: number) => 140 + i * 96;
+const COL_X = (i: number) => 138 + i * 96;
 const COL = Object.fromEntries(HUBS.map((h, i) => [h.id, COL_X(i)])) as Record<HubId, number>;
 
 // One row per path. `cells` maps a hub to [order label, pages read in that hub].
@@ -96,7 +96,7 @@ const shapes: LayoutShape[] = [
     type: "box",
     x: COL_X(i),
     y: 20,
-    w: 92,
+    w: 94,
     h: 44,
     label: h.label,
     tone: "blue",
@@ -108,7 +108,7 @@ const shapes: LayoutShape[] = [
       type: "cell",
       x: COL[hub],
       y: r.y,
-      w: 92,
+      w: 94,
       h: 46,
       label: order,
       sub: pages === 1 ? "1 page" : `${pages} pages`,

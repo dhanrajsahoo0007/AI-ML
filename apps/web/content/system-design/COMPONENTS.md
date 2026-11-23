@@ -1101,6 +1101,17 @@ export default spec;
 
 Source: `src/components/diagrams/spec-lint.ts`. It must return no problems for every spec.
 
+Text widths. Every "fits" rule below measures text with `measureText` from `src/components/diagrams/text-width.ts`,
+the same model the renderers use to size edge-label pills, zone tabs, lane headers and sequence label boxes. It holds
+the advance width of each character of Inter (the site font) measured in Chromium, at weights 400 and 700 (500 and
+600 are interpolated), so narrow letters (i, l, t, punctuation) count for less and capitals, digits and symbols (M, W,
+%, →, ×) for more: "fill illicit list" fits a box that "WARM MEMORY 100%" overflows by 46. The model is within 0.7
+units of the browser for 99% of the labels in the specs, at full width and at 375 px. Sizes by role: node and lane
+labels 13.5 px semibold, node sub lines 11.5 px regular, layout box and cell labels 13 px semibold, layout sub lines
+11 px regular, zone titles 14 px semibold. A rough guide: a 13.5 px label averages about 7 px per character, an
+11.5 px sub line about 5.6. `tests/unit/diagrams/text-width.test.ts` pins the calibration; re-measure if the font or
+the renderer sizes change.
+
 All kinds:
 
 - Ids are unique within their list: nodes, zones, lanes, shapes and groups.
@@ -1115,9 +1126,13 @@ Architecture:
 - Every node box lies inside `width`×`height`. A card is x±w/2, y±h/2; a glyph node is ±38 wide and reaches 27 up and
   62 down.
 - No two node boxes overlap (touching is fine).
-- Labels fit: label length × 6.2 px ≤ w − 48 with an icon, or w − 16 without; the `sub` line is length × 4.8 px with
-  the same room. A default 116-wide node with an icon fits about 11 label characters, so set `w: 150` for "Session
-  registry" (16 characters).
+- Labels fit with 2 units to spare: the label's width ≤ w − 54 when the icon draws (the text starts at x + 52), or
+  w − 4 centred without one; the `sub` line gets the same room. An `icon` name that resolves to no glyph or Lucide
+  icon draws nothing, so its text is centred. A default 116-wide node with an icon holds about 62 units (8 or 9
+  characters); "Session registry" (106 units) needs `w: 162`.
+- Zone titles end inside their zone: the tab starts 16 in and pads the title by 14, so 30 + the title's width ≤ w
+  (region and VPC tabs: 26 +, subnet labels: 12 +). A 170-wide zone holds a title of about 140 units, such as
+  "Drivers and garages".
 - Card height is at least 36.
 - `fill` only on card nodes, and not together with `accent`.
 
@@ -1125,7 +1140,8 @@ Sequence:
 
 - Every message's `from`/`to` and every note's `lane` is an existing lane; there is at least one lane.
 - `duration` is greater than 0.
-- Lane labels fit the header: length × 6.2 ≤ 96 with an icon (about 15 characters), or ≤ 134 without.
+- Lane labels fit the header, which grows to 156: the label's width ≤ 108 with an icon (the text starts at +46), or
+  ≤ 152 without. "Socket gateway" (105 units) is about the longest that fits beside an icon.
 - Lanes are at least 120 apart, so a fixed `width` is at least 120 × lanes + 40.
 
 Layout:
@@ -1134,10 +1150,18 @@ Layout:
 - A path has at least two `points`.
 - Every non-arrow shape lies inside the canvas (a path: every point).
 - Box and cell shapes do not overlap each other (text, circles and paths may overlap anything).
-- Box and cell labels fit: the longest line's length × 6.2 ≤ shape width − 8.
+- Box and cell labels fit, centred with 2 units each side: the widest line ≤ shape width − 4, and the `sub` line too.
+  "[MASK]" needs a 53-wide cell, "Fundamentals" a 94-wide box.
+- Group titles end inside the group, as zone titles do.
 - A label has at most 3 lines. A box or cell with two or more lines is at least 15 × lines + 6 tall (+14 with a
   `sub`): a 44-tall box holds two lines.
 - `weight` is between 0 and 1; `symbol` only on circles; `fill` only on boxes, cells and circles.
+
+NEW tags. In a step view the renderer places each NEW tag itself (`src/components/diagrams/new-tags.ts`): the ring's
+top-right corner when that is clear, else the first clear spot among the other corners, the edge middles, the sides
+and the band above the ring, else the spot that covers least (box edges before text). New elements whose rings touch,
+such as a row of cells added together, share one tag. Nothing to set in the spec, but leave a little room around a
+new element in a crowded figure so its tag has somewhere to go.
 
 Before committing, check the diagram in the browser at desktop width, at 375 px, in dark mode and with reduced motion
 (packets are hidden, rings and dashes stop moving).

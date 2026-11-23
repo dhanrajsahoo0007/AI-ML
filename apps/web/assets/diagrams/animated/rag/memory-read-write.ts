@@ -31,7 +31,7 @@ const RECALL = 3;
 
 const X = [90, 265, 440, 615, 790] as const;
 const ROW = { chat: 95, store: 230, controls: 365, reply: 30 } as const;
-const W = 150;
+const W = 154;
 
 const spec: DiagramSpec = {
   title: "Agent memory: recall before the model call, write after it",

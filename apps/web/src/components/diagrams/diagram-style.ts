@@ -1,4 +1,5 @@
 import type { Phase } from "./build-view";
+import { FONTS, measureText } from "./text-width";
 import type { LayoutTone, Tone } from "./types";
 
 // Pure styling helpers for the diagram renderers: no React, no client code, so server modules and tests can
@@ -14,15 +15,14 @@ export const toneText = (t: LayoutTone) => `var(--dg-${t}-text)`;
 /** Pastel block fill (layout `fill: "pastel"`), strong enough to read as a coloured block with ink text on it. */
 export const pastel = (t: LayoutTone) => `var(--dg-${t}-fill)`;
 
-/** Estimated text width at the engine's label size, for pills and tabs. */
-export const textWidth = (text: string, perChar = 6.3) => text.length * perChar;
+/** Width of an edge or arrow label pill (LabelPill): the text plus 7 units of padding each side. */
+export const pillWidth = (text: string, bold = false) => measureText(text, bold ? FONTS.pillBold : FONTS.pill) + 14;
 
-/**
- * Estimated width of an edge or arrow label pill's text (11.5 px): capitals are wider than the 6.3 px average, so
- * relation names such as FROM_SOURCE or OWNED_BY stay inside their pill.
- */
-export const pillTextWidth = (text: string) =>
-  [...text].reduce((w, c) => w + (c >= "A" && c <= "Z" ? 8 : c === "_" ? 6.8 : 6.3), 0);
+/** Width of a zone's title tab (Zone): the text plus 14 units each side. */
+export const zoneTabWidth = (title: string) => measureText(title, FONTS.zoneTab) + 28;
+
+/** Width of a region or VPC title tab (BoundaryZone): the text plus 12 units each side. */
+export const boundaryTabWidth = (title: string) => measureText(title, FONTS.boundaryTab) + 24;
 
 export const markerUrl = (uid: string, tone: LayoutTone) => `url(#${uid}-arrow-${tone})`;
 

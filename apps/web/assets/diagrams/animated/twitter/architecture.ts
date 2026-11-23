@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
   zones: zoneFrame({ core: "Timeline core" }),
   nodes: [
     { id: "author", label: "Author", sub: "posts, likes", icon: "phone", fill: "pastel", x: 105, y: 170, w: 140 },
-    { id: "reader", label: "Reader", sub: "timeline, search", icon: "phone", fill: "pastel", x: 105, y: 440, w: 140 },
+    { id: "reader", label: "Reader", sub: "timeline, search", icon: "phone", fill: "pastel", x: 105, y: 440, w: 144 },
     {
       id: "cdn",
       label: "CDN",
