@@ -20,9 +20,13 @@ tables and prose tidy by hand.
 | `newsletter/<yyyy>/<slug>.mdx`  | Newsletter issues                                                                                                         |
 | `pages/`                        | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders                                                     |
 
-Docs sections today: `ai-system-design/` (one hub, `genai-system-design`, whose reading order is the `groups` list
-in `sections.yaml`), `ml-system-design/` (hubs `fundamentals` and `case-studies`), `system-design/`, `behavioral/`,
-`cloud/`. A planned GenAI page is an outline: the "Outline." callout, then the house headings with no body under them.
+Docs sections today: `ai-system-design/` (GenAI and LLM foundations: one hub, `genai-system-design`, whose reading
+order is the `groups` list in `sections.yaml`), `genai-system-design/` (one hub, `case-studies`: the eleven GenAI design
+case studies in the interview-grade format, plus "Start here" pages `design-principles`, backed by
+`src/lib/genai-principles.ts`, and `design-interview-framework`), `system-design/` (fundamentals and patterns),
+`system-design-case-studies/`, `ml-system-design/` (hubs `fundamentals` and `case-studies`), `cloud/`, `behavioral/`.
+A planned page is an outline: `status: outline`, the "Outline." callout, then the house headings with no body under
+them.
 
 ## Docs frontmatter
 

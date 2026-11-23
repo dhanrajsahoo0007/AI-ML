@@ -199,8 +199,8 @@ wrapped in `<CloudOnly>`.
 ## GenAI System Design case studies
 
 Pages in `genai-system-design/case-studies/` follow the same format, extended for GenAI (plan:
-`SYSTEM-DESIGN/plans/genai-design-plan.md` §4). `customer-support-agent.mdx` (converted) and
-`voice-agent-call-centre.mdx` (written from an outline) are the reference implementations. The fourth `describe` in
+`SYSTEM-DESIGN/plans/genai-design-plan.md` §4). All eleven pages are written to it; `customer-support-agent.mdx` and
+`voice-agent-call-centre.mdx` were the pilots, and `llm-platform-gateway.mdx` is the most recent model. The fourth `describe` in
 `tests/unit/doc-headings.test.ts` enforces it on every page in its `DONE` list, and content-check bans the retired
 headings on every page here that carries `updated:`.
 
