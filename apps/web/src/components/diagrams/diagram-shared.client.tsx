@@ -196,7 +196,7 @@ export function DiagramFigure({
             aria-label={info ? `${label}: step ${current}, ${info.title}` : label}
             data-running={running}
             data-reduced-motion={reduced || undefined}
-            className="dg h-auto w-full font-sans"
+            className="dg h-auto w-full overflow-visible font-sans"
           >
             <title>{label}</title>
             {alt && <desc>{alt}</desc>}
