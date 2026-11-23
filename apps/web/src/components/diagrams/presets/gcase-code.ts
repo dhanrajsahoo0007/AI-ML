@@ -77,51 +77,53 @@ export const COMPLETION_CONTEXT = (() => {
 })();
 
 /**
- * One completion GPU (illustrative; serving on vLLM or SGLang with chunked prefill, automatic prefix caching with a
- * per-organisation cache_salt (dossier F72), abort on cancel, sticky routing by developer).
- *   prefill 490 new tokens at 60,000 tokens/s = 8.2 ms of GPU time;
- *   decode in a batch of 64 at 6 ms a step, prompt-lookup drafting from the prefix and open files accepting 1.5
- *   tokens a step on average (model-free drafting, concept page speculative-decoding): 24 tokens = 16 steps; GPU time
- *   per request = 16 × 6 ÷ 64 = 1.5 ms. Total 9.7 ms → 104 a second at full use; run at 60% → 62 a second.
- *   Queue (M/D/1 mean wait at ρ = 0.6): ρ ÷ (2μ(1 − ρ)) = 0.6 ÷ (2 × 104 × 0.4) ≈ 7 ms.
+ * One completion GPU (illustrative; vLLM or SGLang with chunked prefill, automatic prefix caching with a
+ * per-organisation cache_salt (dossier F72), abort on cancel, sticky routing by developer). Review R2-2: at this load
+ * only a few streams decode at once, so capacity is bound by prefill compute, not by a large decode batch.
+ *   Capacity chosen: 50 arriving requests a second a GPU → prefill busy 50 × 490 ÷ 60,000 = 41%.
+ *   Decode steps run back to back at about 5 ms (memory-bound at a small batch); a step that carries a prefill chunk
+ *   takes about 8 ms, and 41% of steps do: mean step 0.41 × 8 + 0.59 × 5 ≈ 6.2 ms.
+ *   Queue: M/D/1 on prefill at ρ = 0.41, service 8.2 ms: ρ × S ÷ (2(1 − ρ)) ≈ 2.8 ms.
+ *   First line: 12 tokens ÷ 1.5 drafted tokens a step (prompt lookup) = 8 steps × 6.2 ≈ 50 ms.
+ *   Streams in flight (Little's law) are checked in COMPLETION_FLEET.
  */
 export const COMPLETION_GPU = (() => {
   const prefillTokensPerSecond = 60_000;
-  const batch = 64;
-  const stepMs = 6;
+  const arrivingPerGpu = 50;
+  const prefillMs = (COMPLETION_CONTEXT.newAvg / prefillTokensPerSecond) * 1_000; // 8.17
+  const prefillBusy = (arrivingPerGpu * prefillMs) / 1_000; // 0.408
+  const baseStepMs = 5;
+  const chunkStepMs = 8;
+  const meanStepMs = prefillBusy * chunkStepMs + (1 - prefillBusy) * baseStepMs; // ≈ 6.2
   const tokensPerStep = 1.5;
   const outputTokens = 24;
-  const prefillMs = (COMPLETION_CONTEXT.newAvg / prefillTokensPerSecond) * 1_000; // 8.17
-  const decodeGpuMs = ((outputTokens / tokensPerStep) * stepMs) / batch; // 1.5
-  const gpuMs = prefillMs + decodeGpuMs; // 9.67
-  const fullUse = 1_000 / gpuMs; // ≈ 103.5
-  const utilisation = 0.6;
-  const perGpu = fullUse * utilisation; // ≈ 62
-  const queueMs = (utilisation / (2 * fullUse * (1 - utilisation))) * 1_000; // ≈ 7.2
+  const queueMs = (prefillBusy * prefillMs) / (2 * (1 - prefillBusy)); // ≈ 2.8
+  const firstLineMs = (12 / tokensPerStep) * meanStepMs; // ≈ 50
   return {
+    prefillTokensPerSecond,
+    arrivingPerGpu,
     prefillMs,
-    decodeGpuMs,
-    gpuMs,
-    fullUse,
-    utilisation,
-    perGpu,
-    queueMs,
-    batch,
-    stepMs,
+    prefillBusy,
+    baseStepMs,
+    chunkStepMs,
+    meanStepMs,
     tokensPerStep,
     outputTokens,
+    queueMs,
+    firstLineMs,
+    stepsPerCompletion: outputTokens / tokensPerStep, // 16
   };
 })();
 
 /**
- * Completion latency, last keystroke → ghost text, ms at p50 (illustrative stages; dossier F14 has the only public split).
- *   debounce 75 + context 15 + uplink 25 + gateway 5 + queue 7 + prefill 12 (8 compute + 4 scheduling)
- *   + first line 12 tokens ÷ 1.5 a step × 6 ms = 48 + filter 5 + downlink 25 + render 10 = 227 (target 300).
- *   p95 spreads: context 20, both network legs 60 (one route), queue 15, prefill 30 (a prefix miss of 2,000 tokens,
- *   and the morning burst on freshly scaled replicas), decode 40, render 10: √(…) ≈ 83 → ≈ 310 (target 500);
- *   adding the spreads (an upper bound) gives 402.
- *   Behind a corporate secure web gateway or VPN (+40 ms at p50, spread 60, illustrative 20–100): p50 267,
- *   p95 ≈ 267 + √(83² + 60²) ≈ 369; upper bound 502, at the target.
+ * Completion latency, last keystroke → ghost text, ms at p50, for EVERY suggestion (review R2-1: one trigger timing
+ * for all keys, so there is no slower mid-identifier class; the pre-request gate in funnelAt carries the cost control).
+ *   debounce 75 + context 15 + uplink 25 + gateway 5 + queue 3 + prefill 12 (8 compute + 4 scheduling)
+ *   + first line 50 + filter 5 + downlink 25 + render 10 = 225 (target 300).
+ *   p95 spreads: context 20, both network legs 60 (one route), queue 15, prefill 30 (a prefix miss; freshly scaled
+ *   replicas), decode 40, render 10: √(…) ≈ 83 → ≈ 308 (target 500); upper bound 400.
+ *   Behind a corporate gateway or VPN (+40 ms at p50, spread 60, illustrative 20–100): p50 265, p95 ≈ 367; upper bound
+ *   500, at the target.
  */
 export const COMPLETION_BUDGET = (() => {
   const debounce = 75;
@@ -132,17 +134,12 @@ export const COMPLETION_BUDGET = (() => {
     { id: "gateway", label: "Gateway and auth", ms: 5, spread: 0 },
     { id: "queue", label: "Queue", ms: Math.round(COMPLETION_GPU.queueMs), spread: 15 },
     { id: "prefill", label: "Prefill (490 new tokens)", ms: 12, spread: 30 },
-    {
-      id: "decode",
-      label: "First line (12 tokens, drafted)",
-      ms: (12 / COMPLETION_GPU.tokensPerStep) * COMPLETION_GPU.stepMs,
-      spread: 40,
-    },
+    { id: "decode", label: "First line (12 tokens, drafted)", ms: Math.round(COMPLETION_GPU.firstLineMs), spread: 40 },
     { id: "filter", label: "Show or suppress", ms: 5, spread: 0 },
     { id: "downlink", label: "Network back", ms: 25, spread: 0 },
     { id: "render", label: "Render ghost text", ms: 10, spread: 10 },
   ] as const;
-  const p50 = sum(stages.map((s) => s.ms)); // 227
+  const p50 = sum(stages.map((s) => s.ms)); // 225
   const spread = rss(stages.map((s) => s.spread)); // ≈ 82.6
   const proxy = { ms: 40, spread: 60 };
   return {
@@ -150,16 +147,16 @@ export const COMPLETION_BUDGET = (() => {
     debounce,
     p50,
     spread,
-    p95: p50 + spread, // ≈ 310
-    p95UpperBound: p50 + sum(stages.map((s) => s.spread)), // 402
-    proxyP50: p50 + proxy.ms, // 267
-    proxyP95: p50 + proxy.ms + rss([spread, proxy.spread]), // ≈ 369
-    proxyUpperBound: p50 + proxy.ms + sum(stages.map((s) => s.spread)) + proxy.spread, // 502
-    afterDebounce: p50 - debounce, // 152: the time a request is exposed to the next keystroke
+    p95: p50 + spread, // ≈ 308
+    p95UpperBound: p50 + sum(stages.map((s) => s.spread)), // 400
+    proxyP50: p50 + proxy.ms, // 265
+    proxyP95: p50 + proxy.ms + rss([spread, proxy.spread]), // ≈ 367
+    proxyUpperBound: p50 + proxy.ms + sum(stages.map((s) => s.spread)) + proxy.spread, // 500
+    afterDebounce: p50 - debounce, // 150: the time a request is exposed to the next keystroke
     targetP50: 300,
     targetP95: 500,
     typedThroughMs: 10,
-    farUserP50: p50 + 100, // 327: a developer at 150 ms RTT; N2 is scoped to ≤ 50 ms RTT
+    farUserP50: p50 + 100, // 325: a developer at 150 ms RTT; N2 is scoped to ≤ 50 ms RTT
   };
 })();
 
@@ -188,39 +185,35 @@ export const gapSurvival = (t: number) => {
 };
 
 /**
- * Completion funnel per active developer per working day, for a debounce d (illustrative).
- *   12,000 key events (8,000 typed characters plus deletions and moves) − 1,500 typed-through (the key matches the
- *   ghost text on screen; the client trims it, no request) = 10,500.
- *   Client rule: request at once after d only at a token boundary (40%: space, punctuation, newline, a finished
- *   identifier); mid-identifier only after a 250 ms pause.
- *   sent = 10,500 × 0.4 × S(d) + 10,500 × 0.6 × S(250).
- *   A request is cancelled if the next key lands before its ghost text, d + 152 ms after the last key:
- *   cancel share = (S(d) − S(d + 152)) ÷ S(d) at a boundary, (S(250) − S(402)) ÷ S(250) mid-identifier.
- *   A cancelled request costs 40% of a full one on average: a third are cancelled before the server starts (0), a
- *   third during queue or prefill (≈ 0.5), a third mid-decode (≈ 0.7).
- *   At d = 75: sent 3,570 + 1,575 = 5,145; cancelled ≈ 2,327 + 498 = 2,825 (55%); 2,320 complete;
- *   80% suppressed by the filter → 464 shown × 30% = 139 accepted × 40 characters × 80% kept at 10 minutes.
+ * Completion funnel per active developer per working day, for a debounce d (illustrative; review R2-1 and R2-3).
+ *   12,000 key events − 1,500 typed-through (the key matches the ghost text on screen; trimmed, no request) = 10,500.
+ *   Every key waits the same d, so every suggestion has the same latency. Triggers = 10,500 × S(d).
+ *   Pre-request gate on the client (cheap features: position in the token, language, the last accept or reject, time
+ *   since the last suggestion, cursor at a line end): keeps 60% of triggers and 95% of the suggestions that would have
+ *   been shown, because what it drops is mostly what the post-generation filter would have suppressed.
+ *   Cancelled if the next key lands before the ghost text, d + 150 ms after the last key: (S(d) − S(d + 150)) ÷ S(d).
+ *   A cancel costs 0.4 of a full request: a third before the server (0), a third in queue or prefill (≈ 0.5), a third
+ *   mid-decode (≈ 0.7).
+ *   At d = 75: triggers 8,925 → sent 5,355 → cancelled 65% = 3,465 → 1,890 complete;
+ *   shown = (ungated completions 8,925 × 0.353 = 3,150) × 20% × 95% ≈ 599 → 30% accepted ≈ 180 × 40 characters × 80%.
  */
 export const funnelAt = (debounce: number) => {
   const keyEvents = 12_000;
   const typedThrough = 1_500;
   const rest = keyEvents - typedThrough; // 10,500
-  const boundaryShare = 0.4;
-  const midPause = 250;
-  const exposed = COMPLETION_BUDGET.afterDebounce; // 152
-  const sBoundary = gapSurvival(debounce);
-  const sMid = gapSurvival(Math.max(midPause, debounce));
-  const sentBoundary = rest * boundaryShare * sBoundary;
-  const sentMid = rest * (1 - boundaryShare) * sMid;
-  const cancelBoundary = (sBoundary - gapSurvival(debounce + exposed)) / sBoundary;
-  const cancelMid = (sMid - gapSurvival(Math.max(midPause, debounce) + exposed)) / sMid;
-  const sent = sentBoundary + sentMid;
-  const cancelled = sentBoundary * cancelBoundary + sentMid * cancelMid;
+  const gateKeep = 0.6;
+  const gateKeepsShown = 0.95;
+  const exposed = COMPLETION_BUDGET.afterDebounce; // 150
+  const triggers = rest * gapSurvival(debounce);
+  const sent = triggers * gateKeep;
+  const cancelShare = (gapSurvival(debounce) - gapSurvival(debounce + exposed)) / gapSurvival(debounce);
+  const cancelled = sent * cancelShare;
   const cancelCost = 0.4;
-  const equivalents = sent - cancelled * (1 - cancelCost); // full-request equivalents of GPU work
+  const equivalents = sent - cancelled * (1 - cancelCost);
   const completed = sent - cancelled;
-  const suppressShare = 0.8;
-  const shown = completed * (1 - suppressShare);
+  const arriving = sent - cancelled / 3; // a third of cancels never reach the server
+  const decoding = completed + cancelled / 3; // completions and mid-decode cancels
+  const shown = triggers * (1 - cancelShare) * 0.2 * gateKeepsShown;
   const acceptRate = 0.3; // Cody "as high as 30%", Google 37% (dossier F13, F16)
   const accepted = shown * acceptRate;
   const charsPerAccept = 40;
@@ -231,16 +224,17 @@ export const funnelAt = (debounce: number) => {
     debounce,
     keyEvents,
     typedThrough,
-    sentBoundary,
-    sentMid,
+    triggers,
+    gateKeep,
     sent,
-    cancelBoundary,
-    cancelMid,
+    cancelShare,
     cancelled,
-    cancelShare: cancelled / sent,
     equivalents,
     completed,
+    arriving,
+    decoding,
     shown,
+    suppressShare: 1 - shown / completed,
     accepted,
     acceptedChars,
     retainedChars,
@@ -269,35 +263,50 @@ export const AB_EXAMPLE = (() => {
 })();
 
 /**
- * Completion fleet, sized per region from its own daily curve (review item 12).
- *   equivalents a day = 70,000 × 3,450 ≈ 242 M; mean over 24 h ≈ 2,795 a second.
- *   Regions carry 40%, 35% and 25% of daily volume; each peaks at 4 × its own 24-hour mean (its working hours).
- *   GPUs per region = ceil(share × 2,795 × 4 ÷ 62 × 1.3): 94 + 82 + 59 = 235.
- *   Autoscaled per region (weekday 10 peak hours + 14 at 40%; weekends 30%) = 235 × 392.4 GPU-hours, plus a
- *   pre-scale 30 minutes before each morning ramp (60% of the fleet × 0.5 h × 21 days).
+ * Completion fleet, sized per region from its own daily curve on ARRIVING requests (prefill-bound, review R2-2).
+ *   arriving a day = 70,000 × 4,200 = 294 M; mean over 24 h ≈ 3,403 a second.
+ *   Regions (named, review R2-8): US 40%, EU 35%, Asia-Pacific 25% of daily volume; each peaks at 4 × its own 24-hour
+ *   mean. GPUs = ceil(share × 3,403 × 4 ÷ 50 × 1.3): 142 + 124 + 89 = 355.
+ *   Little's law check: requests reaching decode a GPU = 50 × 3,045 ÷ 4,200 ≈ 36 a second, each ≈ 13 steps on average
+ *   (completions 16, mid-decode cancels 8) × 6.2 ms ≈ 81 ms → ≈ 3 streams in flight: a small batch, as assumed.
+ *   GPU-hours: weekdays 10 peak hours + 14 at 40%, weekends 30% = 392.4, + 6.3 of pre-scaling = 398.7 a GPU.
+ *   EU spans two zones; losing one, the gate keeps 30% instead of 60% so half the fleet carries the load (completion
+ *   degrades; EU-pinned organisations never fail over outside the EU).
  */
 export const COMPLETION_FLEET = (() => {
-  const equivalentsPerDay = SEATS.dau * FUNNEL.equivalents;
-  const meanPerSecond = equivalentsPerDay / 86_400;
-  const regionShares = [0.4, 0.35, 0.25];
+  const arrivingPerDay = SEATS.dau * FUNNEL.arriving;
+  const meanPerSecond = arrivingPerDay / 86_400;
+  const regions = [
+    { id: "us", share: 0.4 },
+    { id: "eu", share: 0.35 },
+    { id: "apac", share: 0.25 },
+  ] as const;
   const regionPeakFactor = 4;
   const headroom = PRICES.gpuHeadroom; // 1.3
-  const perRegion = regionShares.map((s) =>
-    Math.ceil(((s * meanPerSecond * regionPeakFactor) / COMPLETION_GPU.perGpu) * headroom)
+  const perRegion = regions.map((r) =>
+    Math.ceil(((r.share * meanPerSecond * regionPeakFactor) / COMPLETION_GPU.arrivingPerGpu) * headroom)
   );
   const gpus = sum(perRegion);
+  const decodingPerGpu = (COMPLETION_GPU.arrivingPerGpu * FUNNEL.decoding) / FUNNEL.arriving;
+  const decodeSeconds =
+    ((FUNNEL.completed * COMPLETION_GPU.stepsPerCompletion +
+      (FUNNEL.cancelled / 3) * (COMPLETION_GPU.stepsPerCompletion / 2)) /
+      FUNNEL.decoding) *
+    (COMPLETION_GPU.meanStepMs / 1_000);
   const hoursPerGpu =
     SEATS.workingDaysPerMonth * (10 + 14 * 0.4) + (SEATS.daysPerMonth - SEATS.workingDaysPerMonth) * 24 * 0.3; // 392.4
   const prescaleHours = 0.6 * 0.5 * SEATS.workingDaysPerMonth; // 6.3 a GPU
   const gpuHoursPerMonth = gpus * (hoursPerGpu + prescaleHours);
   const gpuUsdPerMonth = gpuHoursPerMonth * PRICES.gpuHour;
   return {
-    sentPerDay: SEATS.dau * FUNNEL.sent, // ≈ 360 M
-    equivalentsPerDay,
+    sentPerDay: SEATS.dau * FUNNEL.sent, // ≈ 375 M
+    arrivingPerDay,
     meanPerSecond,
-    regionShares,
+    regions,
     perRegion,
     gpus,
+    streamsInFlight: decodingPerGpu * decodeSeconds, // ≈ 3
+    euZoneLossGateKeep: 0.3,
     gpuHoursPerMonth,
     gpuUsdPerMonth,
     gpuPerSeat: gpuUsdPerMonth / SEATS.seats,
@@ -305,29 +314,29 @@ export const COMPLETION_FLEET = (() => {
 })();
 
 /**
- * Three ways to serve the completion model (review item 11), per seat a month, at 100,000 seats.
- *   (a) self-host an open-weight FIM model we fine-tune (Qwen2.5-Coder class, dossier F76): GPUs at 2.5 USD an hour
- *       + a 6-person model and serving team (25,000 USD a month each, loaded) + fine-tuning compute 6,400 GPU-hours.
+ * Three ways to serve the completion model (review item 11, R2-6), per seat a month, at 100,000 seats.
+ *   (a) self-host an open-weight FIM model we fine-tune (Qwen2.5-Coder class, Apache-2.0, dossier F76, F80): GPUs at
+ *       2.5 USD an hour + a 6-person model and serving team (25,000 USD a month each, loaded) + 6,400 GPU-hours of
+ *       fine-tuning.
  *   (b) the same model on a dedicated deployment at an inference provider: 4.0 USD a GPU-hour (illustrative 1.6×),
- *       a 2-person team, the same fine-tuning.
- *   (c) a per-token hosted FIM API (a Codestral-class endpoint exists, dossier F75; its price is not in PRICES, so the
- *       small-model list price stands in): every sent request billed, 1,510 cached × 0.01 + 490 × 0.10 + 24 × 0.50.
+ *       2 people, the same fine-tuning.
+ *   (c) a per-token FIM API at Codestral 25.08's list price (0.3 in / 0.9 out per million, no cached-input price,
+ *       dossier F79): every sent request billed, 2,000 × 0.3 + 24 × 0.9 per million.
  *   Crossover of (a) and (b): fixed difference 100,000 USD a month ÷ variable difference (1.5 USD × GPU-hours a seat).
  */
 export const SERVING_OPTIONS = (() => {
-  const gpuHoursPerSeat = COMPLETION_FLEET.gpuHoursPerMonth / SEATS.seats; // ≈ 0.95
+  const gpuHoursPerSeat = COMPLETION_FLEET.gpuHoursPerMonth / SEATS.seats;
   const fineTuneUsd = 6_400 * PRICES.gpuHour; // 16,000
   const person = 25_000;
+  const team = (6 * person + fineTuneUsd) / SEATS.seats; // 1.66
   const selfHost = (COMPLETION_FLEET.gpuUsdPerMonth + 6 * person + fineTuneUsd) / SEATS.seats;
   const providerGpuHour = 4.0;
   const dedicated = (COMPLETION_FLEET.gpuHoursPerMonth * providerGpuHour + 2 * person + fineTuneUsd) / SEATS.seats;
-  const perRequest =
-    usd(COMPLETION_CONTEXT.reusedAvg, PRICES.small.cached) +
-    usd(COMPLETION_CONTEXT.newAvg, PRICES.small.input) +
-    usd(COMPLETION_GPU.outputTokens, PRICES.small.output); // ≈ 0.0000761
+  const fimApi = { input: 0.3, output: 0.9 }; // Codestral 25.08, as of November 2026
+  const perRequest = usd(COMPLETION_CONTEXT.total, fimApi.input) + usd(COMPLETION_GPU.outputTokens, fimApi.output); // 0.0006216
   const hostedApi = (perRequest * COMPLETION_FLEET.sentPerDay * SEATS.workingDaysPerMonth) / SEATS.seats;
   const crossoverSeats = (4 * person) / (gpuHoursPerSeat * (providerGpuHour - PRICES.gpuHour));
-  return { gpuHoursPerSeat, selfHost, dedicated, perRequest, hostedApi, crossoverSeats };
+  return { gpuHoursPerSeat, team, selfHost, dedicated, perRequest, hostedApi, crossoverSeats };
 })();
 
 // ── Chat ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -363,11 +372,13 @@ export const CHAT = (() => {
 /**
  * Chat first token, ms at p50 (illustrative). Default retrieval is local grep and symbols; the embeddings arm adds a
  * server vector search in parallel (max of the two).
- *   context 30 + retrieval 100 + candidate upload 25 + fusion 5 + rerank 80 (35 candidates × 400 tokens = 14,000 ÷
- *   200,000 tokens/s = 70 ms + 10) + assemble 10 + provider hop 40 + first token 700 (400 + 6,000 uncached tokens
- *   beyond 2,000 at 20,000 tokens/s of provider prefill) + downlink 25 = 1,015 (target 1,200).
+ *   context 30 + retrieval 100 + candidate upload 25 + fusion 5 + rerank queue 20 + rerank 80 (35 candidates × 400
+ *   tokens = 14,000 ÷ 200,000 tokens/s = 70 ms + 10) + assemble 10 + provider hop 40 + first token 700 (400 + 6,000
+ *   uncached tokens beyond 2,000 at 20,000 tokens/s of provider prefill) + downlink 25 = 1,035 (target 1,200).
+ *   Rerank queue (review R2-4): two encoders a region; the busiest region peaks at 0.4 × 4 × 6.4 chats a second
+ *   = 10.2 a second × 70 ms = 72% of one GPU, 36% of two; M/D/1 wait 0.36 × 70 ÷ (2 × 0.64) ≈ 20 ms.
  *   p95 spreads: network 60, retrieval 50, rerank 30, provider hop 20, first token 600 (queueing on long prompts):
- *   √(…) ≈ 606 → ≈ 1,621 (target 2,500); upper bound 1,775.
+ *   rerank queue 20: √(…) ≈ 607 → ≈ 1,642 (target 2,500); upper bound 1,815.
  */
 export const CHAT_BUDGET = (() => {
   const rerankCandidates = 35;
@@ -375,11 +386,12 @@ export const CHAT_BUDGET = (() => {
   const firstToken = LATENCY.firstTokenMs + ((CHAT.uncached - 2_000) / 20_000) * 1_000; // 700
   const localGrep = 100;
   const serverVector = 50 + 20 + 30 + 5; // 105 (embeddings arm)
-  const rest = 30 + 25 + 5 + rerankMs + 10 + 40 + firstToken + 25;
-  const p50 = rest + localGrep; // 1,015
-  const p50Embeddings = rest + Math.max(localGrep, serverVector); // 1,020
-  const spreads = [60, 50, 30, 20, 600];
-  const p95 = p50 + rss(spreads); // ≈ 1,621
+  const rerankQueue = 20;
+  const rest = 30 + 25 + 5 + rerankQueue + rerankMs + 10 + 40 + firstToken + 25;
+  const p50 = rest + localGrep; // 1,035
+  const p50Embeddings = rest + Math.max(localGrep, serverVector); // 1,040
+  const spreads = [60, 50, 30, 20, 20, 600];
+  const p95 = p50 + rss(spreads); // ≈ 1,642
   return {
     rerankCandidates,
     rerankMs,
@@ -387,7 +399,7 @@ export const CHAT_BUDGET = (() => {
     p50,
     p50Embeddings,
     p95,
-    p95UpperBound: p50 + sum(spreads), // 1,775
+    p95UpperBound: p50 + sum(spreads), // 1,815
     targetP50: 1_200,
     targetP95: 2_500,
     firstStatusMs: 300, // "searching 3 files…" shown while retrieval runs
@@ -504,6 +516,7 @@ export const AGENT = (() => {
     price: PRICES.mid,
     compactAt,
   });
+  // Explore runs start at 3,000: the small model's own instructions and tools (2,000, hot) + the question and pointers.
   const explore = simulateRun({
     steps: 6,
     start: 3_000,
@@ -634,7 +647,7 @@ export const AGENT = (() => {
     resumeMiss,
     perTask,
     perTaskNoCache,
-    cachingSaving: 1 - (main.usd + exploreRuns * exploreRun) / perTaskNoCache, // caching alone
+    cachingSaving: 1 - perTask / perTaskNoCache, // ≈ 73%, resume misses included
     routingSaving: exploreRuns * (exploreOnMid - exploreRun), // USD a task saved by exploring on the small model
     perTaskP95,
     p95Compactions: p95Main.compactions,
@@ -770,15 +783,16 @@ export const INDEX = (() => {
 // ── Seat economics ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Cost per seat a month on the MEAN seat, with a heavy-user tail (review item 3). Active seats split (illustrative):
- * light 60% (1 agent task, 4 chats a day), median 30% (4 tasks, 10 chats), heavy 10% (12 tasks at twice the median
- * cost, 25 chats). Usage on 14.7 active days a seat-month.
+ * Cost and margin per seat a month on the MEAN seat, with a heavy-user tail (review items 3, R2-5). Active seats split
+ * (illustrative): light 60% (1 agent task, 4 chats a day), median 30% (4 tasks, 10 chats), heavy 10% (12 tasks at twice
+ * the median cost, 25 chats). Usage on 14.7 active days a seat-month.
  *   Fixed per seat: completion (self-host, team and fine-tuning included) + cloud snapshots + apply floor + rerank
- *   floor (one encoder GPU a region: 3 × 720 × 2.5 ÷ 100,000 = 0.054) + index 0.05.
+ *   (two encoder GPUs a region: 3 × 2 × 720 × 2.5 ÷ 100,000 = 0.108) + index 0.05.
  *   Usage: agent and chat at list prices, plus cloud VMs for 25% of tasks.
- *   Pricing control: each seat brings a 20 USD pooled usage allowance to its organisation (the Copilot pattern of pooled
- *   credits, dossier F58); usage above the pool is billed to the organisation per credit. Included cost per seat =
- *   fixed + min(mean usage, 20).
+ *   Pricing (illustrative): 39 USD a seat, which brings a 20 USD pooled usage allowance to the organisation (the
+ *   Copilot pattern of pooled credits, dossier F58); usage above the pool is billed at list price × 1.25.
+ *   Gross margin = 1 − cost ÷ revenue. As usage grows without bound the margin tends to 1 − 1 ÷ 1.25 = 20%, so N5
+ *   (≥ 20% on every organisation mix) holds by the mark-up, and the seat price carries the fixed cost.
  */
 export const COST = (() => {
   const segments = [
@@ -786,33 +800,43 @@ export const COST = (() => {
     { id: "median", share: 0.3, tasks: 4, taskCostFactor: 1, chats: 10 },
     { id: "heavy", share: 0.1, tasks: 12, taskCostFactor: 2, chats: 25 },
   ] as const;
-  const rerankFloor = (3 * 720 * PRICES.gpuHour) / SEATS.seats; // 0.054
-  const fixed = SERVING_OPTIONS.selfHost + CLOUD.snapshotsPerSeat + APPLY.perSeat + rerankFloor + INDEX.perSeat;
+  const rerank = (3 * 2 * 720 * PRICES.gpuHour) / SEATS.seats; // 0.108
+  const fixed = SERVING_OPTIONS.selfHost + CLOUD.snapshotsPerSeat + APPLY.perSeat + rerank + INDEX.perSeat;
   const usageOf = (s: (typeof segments)[number]) =>
     SEATS.usageDays *
     (s.tasks * s.taskCostFactor * AGENT.perTask + s.chats * CHAT.perChat + CLOUD.share * s.tasks * CLOUD.perTask);
-  const bySegment = segments.map((s) => ({ id: s.id, share: s.share, usage: usageOf(s), total: fixed + usageOf(s) }));
-  const meanUsage = sum(bySegment.map((s) => s.share * s.usage));
-  const meanSeat = fixed + meanUsage;
+  const seatPrice = 39;
   const pool = 20;
-  const included = fixed + Math.min(meanUsage, pool);
+  const markup = 1.25;
+  const economics = (usage: number) => {
+    const cost = fixed + usage;
+    const revenue = seatPrice + markup * Math.max(0, usage - pool);
+    return { usage, cost, revenue, margin: 1 - cost / revenue };
+  };
+  const bySegment = segments.map((s) => ({ id: s.id, share: s.share, ...economics(usageOf(s)) }));
+  const meanUsage = sum(bySegment.map((s) => s.share * s.usage));
+  const mean = economics(meanUsage);
   const agentMean = SEATS.usageDays * sum(segments.map((s) => s.share * s.tasks * s.taskCostFactor * AGENT.perTask));
   return {
     segments,
     fixed,
     completion: SERVING_OPTIONS.selfHost,
-    rerankFloor,
-    bySegment,
+    rerank,
+    bySegment, // an organisation of only light, only median or only heavy users
     meanUsage,
-    meanSeat, // ≈ 29.7
+    meanSeat: mean.cost, // ≈ 31.4 USD at list prices
+    meanRevenue: mean.revenue,
+    meanMargin: mean.margin, // ≈ 32%
     agentMean,
-    agentShareOfMean: agentMean / meanSeat,
-    p90Seat: bySegment[1].total, // the 90th percentile seat sits at the top of the median segment
-    heavySeat: bySegment[2].total,
+    agentShareOfMean: agentMean / mean.cost,
+    heavySeat: bySegment[2].cost, // the heavy decile
+    seatPrice,
     pool,
-    included, // ≈ 24.5 ≤ 25
-    overagePerSeat: Math.max(0, meanUsage - pool), // billed to the organisation
-    target: 25,
+    markup,
+    marginFloor: 1 - 1 / markup, // 20%
+    included: fixed + Math.min(meanUsage, pool), // cost carried by the seat price on the mean organisation
+    overagePerSeat: Math.max(0, meanUsage - pool),
+    targetMargin: 0.2,
   };
 })();
 
@@ -822,6 +846,10 @@ export const COST = (() => {
  * Evaluation sizes (illustrative). Online A/B: a 10% arm (7,000 developers) against the other 90% (63,000), per-user
  * CV 1.0: MDE ≈ 2.8 × √(1/7,000 + 1/63,000) ≈ 3.5%; with organisation clustering (design effect 1.5, illustrative)
  * × √1.5 ≈ 4.3%. A 25% arm: 2.8 × √(1/17,500 + 1/52,500) × √1.5 ≈ 3.0%.
+ * Embeddings arm (review R2-7), randomised by TASK inside organisations whose index is built: 300 such organisations
+ * × 140 agent tasks a working day (≈ 47 active developers × 3 tasks) × 10 working days = 420,000 tasks, 210,000 an arm;
+ * kept lines per task CV 1.5, design effect 2 for developer clustering: 2.8 × √(2 ÷ 210,000) × 1.5 × √2 ≈ 1.8%, under
+ * the 2.6% Cursor reported (dossier F28). Randomising 150 organisations an arm instead: 2.8 × √(2 ÷ 150) × 0.3 ≈ 9.7%.
  * Offline: 300 past issues × 3 runs; at a 60% solve rate one run's 95% interval is ± 5.5 points, so releases are
  * compared paired, per task. SWE-bench Verified floor: 59.4% of the 138 hardest audited tasks = 82 tasks = 16.4% of 500.
  */
@@ -830,6 +858,7 @@ export const EVAL = (() => {
   const arm10 = SEATS.dau * 0.1;
   const arm25 = SEATS.dau * 0.25;
   const designEffect = 1.5;
+  const armTasks = (300 * 140 * 10) / 2; // 210,000
   return {
     arm10,
     mde10: mde(arm10, SEATS.dau - arm10), // ≈ 0.0353
@@ -844,6 +873,12 @@ export const EVAL = (() => {
     swebenchFlawedOfAudited: 0.594,
     swebenchFloor: r3((0.594 * 138) / 500), // 0.164 (Epoch's floor, dossier F55)
     swebenchProBroken: 0.3, // dossier F53
-    embeddingsArm: { orgsPerArm: 150, weeks: 4 }, // MDE set at launch from the observed intra-organisation correlation
+    embeddingsArm: {
+      unit: "task",
+      tasksPerArm: armTasks,
+      days: 10,
+      mde: mde(armTasks, armTasks, 2) * 1.5, // ≈ 0.018
+      mdeByOrganisation: 2.8 * Math.sqrt(2 / 150) * 0.3, // ≈ 0.097
+    },
   };
 })();
