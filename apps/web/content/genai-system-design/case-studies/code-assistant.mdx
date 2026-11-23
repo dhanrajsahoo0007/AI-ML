@@ -4,7 +4,6 @@ description: "A coding assistant: sub-300 ms inline completion, chat over a repo
 icon: code2
 logo: systems/code-assistant
 updated: 2026-11-23
-status: outline
 ---
 
 A code assistant is one product with two clocks: inline completion must appear before the next keystroke, and an agent works for minutes on a task.
@@ -13,8 +12,9 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
 
 - Interviewers use this question to see whether you split the paths by budget, treat cancellation as capacity, keep search fresh, fence an agent's commands, network and packages, and pick a metric that cannot be gamed.
 - **Running example:** an illustrative IDE assistant sold per seat to companies. The running customer is Brightpost's engineering team (400 developers), whose repo `brightpost-orders` and CSV bug come from the [Coding Agents](/ai-system-design/genai-system-design/coding-agents) page.
-- **Labels:** model prices are list prices as of November 2026: a mid-size hosted model 2.00 USD per million input tokens, 0.10 cached, 2.50 to write the 5-minute cache, 10.00 output; a small one 0.10, 0.01, 0.125 and 0.50. Every volume, rate, throughput, GPU price and salary is illustrative.
-- **Terms:** *FIM* (fill in the middle) is a completion that sees the code before and after the cursor; *ghost text* is the grey suggestion Tab accepts; a *next-edit suggestion* proposes an edit elsewhere in the file. *Typed-through* means the developer types the characters the ghost text already shows. *Retained characters* are accepted characters still in the file 10 minutes later.
+- **Labels:** model prices are list prices as of November 2026: a mid-size hosted model 2.00 USD per million input tokens, 0.10 cached, 2.50 to write the 5-minute cache, 10.00 output; a small one 0.10, 0.01, 0.125 and 0.50. Every volume, rate, throughput, latency, model speed, GPU price and salary is illustrative.
+- **Terms:** *FIM* (fill in the middle) is a completion that sees the code before and after the cursor; *ghost text* is the grey suggestion Tab accepts; a *next-edit suggestion* proposes an edit elsewhere in the file.
+- **More terms:** *typed-through* means the developer types the characters the ghost text already shows; *retained characters* are accepted characters still in the file 10 minutes later.
 
 ## The interview question
 
@@ -26,8 +26,7 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
   tests={[
     "A per-stage completion budget at p50 and p95, behind a corporate proxy too",
     "Triggering and cancellation as capacity, not only as latency",
-    "Repository search that stays fresh without shipping the code to a server",
-    "Context assembly per path, and applying edits fast and in the right place",
+    "Repository search that stays fresh without shipping the code to a server, and context assembled per path",
     "Sandboxing an agent’s commands, network, packages and tools",
     "Seat economics with heavy users, and a metric that is not raw acceptance",
   ]}
@@ -90,7 +89,7 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
     { id: "N4", property: "Agent time and spend (cost per request)", target: "Median task ≤ 5 minutes, p95 ≤ 20; first streamed text ≤ 1 s; first tool call ≤ 3 s locally (cloud adds 1 minute of setup on a snapshot hit). Caps per task in binding order: 2 USD, 6M input tokens, 120 steps, 30 minutes", why: "The agent is judged on minutes and money" },
     { id: "N5", property: "Cost and margin", target: "Gross margin ≥ 20% on every organisation mix and ≈ 32% on the mean organisation, at an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25", why: "A heavy decile costs ≈ 144 USD a seat; a cost cap the pool makes true by construction would say nothing" },
     { id: "N6", property: "Search freshness", target: "Local grep and symbols ≤ 1 s after a save; first query on a new 50,000-file clone ≤ 10 s (ripgrep until the ≈ 8 s build ends); embeddings arm ≤ 2 minutes at p95", why: "An agent that cannot find text it wrote a minute ago chases a false negative" },
-    { id: "N7", property: "Safety", target: "No agent connection outside the mode’s allow-list; no push outside its task branch or to a public repository; no merge or deploy; no write to IDE, harness, MCP or hook configuration; no known-pattern secret in any prompt or tool result sent to a model", why: "Anything the agent reads can carry instructions" },
+    { id: "N7", property: "Safety", target: "No agent connection outside the mode’s allow-list; no push outside its task branch; a task on a public repository pushes only to that repository, with a token scoped to it and no organisation data or MCP servers; no push from a private repository to a public one; no merge or deploy; no write to IDE, harness, MCP or hook configuration; no known-pattern secret in any prompt or tool result sent to a model", why: "Anything the agent reads can carry instructions" },
     { id: "N8", property: "Privacy mode", target: "The privacy-mode table under Safety and guardrails is the only statement of what is stored; no training on privacy-mode code; model providers under zero data retention by contract, with their stated exceptions", why: "Enterprise buyers read it line by line" },
     { id: "N9", property: "Availability and residency", target: "Completion fails silent (no ghost text, never an error); 99.9% of chat and agent requests served; regions US, EU (two zones) and Asia-Pacific; EU-pinned organisations never fail over outside the EU", why: "A missing suggestion costs nothing; code leaving the EU costs the contract" },
   ]}
@@ -152,7 +151,7 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
 | `POST /v1/chat` (SSE) | IDE plugin | A chat turn; the client attaches its local grep and symbol candidates |
 | `POST /v1/agent/sessions`, `POST /v1/agent/sessions/{id}/steps` | Plugin (local) or task runner (cloud) | Start a task; each model step returns tool calls that the client's policy engine checks before running |
 | `POST /v1/apply` (stream) | Plugin | Apply a sketch edit to a region; returns the rewritten region |
-| `POST /v1/cloud-tasks` | Plugin, or the issue tracker for organisation members only | A background task in a microVM, ending in a pull request on `agent/<task_id>` in the same private repository |
+| `POST /v1/cloud-tasks` | Plugin, or the issue tracker for organisation members only | A background task in a microVM, ending in a pull request on `agent/<task_id>` in the same repository; a private repository's task never pushes to a public one |
 | `GET /v1/orgs/{org}/policy`, `GET /v1/orgs/{org}/audit` | Plugin; admins | Load the managed policy (never from the workspace); export the audit log |
 
 A completion request carries its predecessor's id, so the server can abort the request it replaces.
@@ -200,7 +199,7 @@ The organisation policy object (F6), as the admin console stores it:
 | --- | --- | --- | --- | --- | --- |
 | Local index: sparse n-gram grep index, symbol table (tree-sitter tags, language-server definitions), Merkle tree | On the developer's machine, anchored to the git commit with a dirty-file overlay | Sub-second search with no upload (G3, G6, G9) | workspace | Strong for the local copy | A server-only index: every search pays a round trip, and the server holds the code |
 | Server Merkle tree (hashes, HMAC-keyed paths) | Key-value store | Upload only changed files, for cloud tasks and the embeddings arm (G6) | `workspace_id` | Last write wins per workspace | Re-upload the tree: 3.2 MB a sync for 50,000 files |
-| Chunk-embedding cache and embeddings index (arm only) | Key-value store keyed by `sha256(chunk)` per organisation; a vector database, one namespace per organisation, int8 HNSW, encrypted with the organisation's key | Never re-embed an unchanged chunk (G4) | `org_id` | Eventual (≤ 2 minutes) | One index across organisations: one filter bug leaks code |
+| Chunk-embedding cache and embeddings index (arm only) | Key-value store keyed by HMAC(organisation key, chunk); a vector database, one namespace per organisation, int8 HNSW, encrypted with the organisation's key | Never re-embed an unchanged chunk (G4) | `org_id` | Eventual (≤ 2 minutes) | One index across organisations: one filter bug leaks code |
 | Agent checkpoints | Locally, hidden git refs on the developer's machine; in the cloud, the task's microVM disk, deleted 24 h after the task | Undo and audit (G8) | session | Strong per session | A server checkpoint store: code at rest on our side |
 | Agent sessions | <TechIcon id="oss/postgresql" /> PostgreSQL: steps, tokens, cost, outcome, pull request URL, no code; transcripts per the privacy table | Billing, caps, audit (G8) | `session_id` | Strong | Full transcripts always: breaks N8 |
 | Environment snapshots | Object storage per repository, rebuilt on a lockfile change, encrypted per organisation | Cloud setup in 1 minute (G5) | `repo_id` | Versioned by lockfile hash | Clone and install per task: 8 minutes and a fresh supply-chain exposure each time |
@@ -215,7 +214,7 @@ CREATE TABLE completion_events (           -- ClickHouse; no code, no paths
   day Date, org_id UInt32, user_hash UInt64, request_id String, model_version LowCardinality(String),
   kind LowCardinality(String),             -- 'cursor' | 'next_edit'
   shown UInt8, accepted UInt8, accepted_chars UInt16, retained_chars_10m UInt16, suggestion_chars UInt16,
-  latency_ms UInt16, cancelled UInt8, cancel_stage LowCardinality(String), cache_hit UInt8
+  latency_ms UInt16, cancelled UInt8, cancel_stage LowCardinality(String), cache_hit UInt8, cache_hit_tokens UInt16
 ) ENGINE = MergeTree ORDER BY (day, org_id, model_version);
 
 CREATE TABLE audit_events (                -- append-only, per organisation
@@ -316,14 +315,14 @@ A saved file changes one path of hashes from leaf to root, so the client finds i
 
 The concept page's CSV fix runs on this loop unchanged: same repository, issue, file and 18 tests.
 
-<AnimatedDiagram spec="animated/agents/coding-agent-trace" stepper caption="The model proposed six of the nine steps, including both edits; the harness ran, allowed and checked each one, and caught the first fix’s gap." />
+<AnimatedDiagram spec="animated/agents/coding-agent-trace" stepper caption="The model proposed six of the nine steps, including both edits; the harness ran, allowed and checked each one, and caught the first fix's gap." />
 
 - **How to read it:** each row is one step, the call the model proposed on the left and what the harness did on the right. Row 5 is the failing test the first fix missed; row 6 feeds the error back as data; row 9 hands a summary to a person, who opens the pull request.
 
 **The numbers:**
 
 - On this product the run is 9 mid-model steps (2 edits, 3 checks, 4 searches or reads), context 5,300 → 25,500 tokens, ≈ 0.13 USD and ≈ 1.5 minutes. Both edits are exact `str_replace` calls of about 40 tokens.
-- Where the trace says "container", this product's local agent uses the OS sandbox of Step 7; a cloud task uses a microVM.
+- Two rows differ on this product: where row 4 says "in the container", the local agent runs the tests in the OS sandbox of Step 7 (a cloud task uses a microVM); where row 9 says the harness opened a pull request, here the developer reviews the diff and opens it (a cloud task's harness opens its own).
 
 ### Step 6: Apply edits fast and exactly (F4)
 
@@ -347,7 +346,7 @@ Rewriting a region is fast because most of its tokens are already in the origina
 
 - Search-and-replace: one edit step of 400 ms + (60 + 800 thinking) tokens × 4.4 ms + 10 ms in the harness ≈ 4.2 s.
 - Sketch and region apply: (400 + 950 × 4.4) + 50 network + 10 prefill + 30 first token + 400 tokens at 1,000 a second ≈ 5.1 s.
-- The agent model rewriting a whole 400-line file takes ≈ 21.5 s, a 2,000-line file ≈ 92 s; rewriting 2,000 lines with speculative edits would take 20 s against 260 s without.
+- The agent model rewriting a whole 400-line file takes ≈ 21.5 s, a 2,000-line file ≈ 92 s; our apply model rewriting 2,000 lines with speculative edits would take 20 s against 260 s without (the vendor's 13×).
 - The apply fleet is a floor of 3 regions × 2 replicas × 720 hours = 4,320 GPU-hours a month (use is ≈ 510), 0.108 USD a seat.
 
 ### Step 7: Sandbox, permission tiers, packages, MCP and cloud tasks (F3, F6, N7)
@@ -358,7 +357,7 @@ Rewriting a region is fast because most of its tokens are already in the origina
 - **Flow:**
   1. Each tool call meets the policy engine: deny rules first, then ask, then allow, loaded from managed settings outside the workspace.
   2. Reads and workspace edits run; commands run in the sandbox with no network and no credentials.
-  3. `install` asks the developer, then fetches through the read-only mirror with install scripts off.
+  3. `install` is checked by the read-only mirror first (it must exist and pass the age rule), then asks the developer; install scripts stay off.
   4. MCP tools come from the organisation's allow-list; read tools run, write tools ask.
   5. A cloud task starts from an environment snapshot, sees only the mirror, and pushes through the git proxy to `agent/<task>`; a reviewer reads the pull request.
 - **Why this and not that:** bound the blast radius (P12); enforce rules in code (P10), because an injected README can talk a model out of a rule; treat what the agent reads as untrusted (P13).
@@ -378,7 +377,7 @@ Rewriting a region is fast because most of its tokens are already in the origina
 
 ## Final architecture
 
-<AnimatedDiagram spec="animated/code-assistant/architecture" stepper caption="Two clocks share one plugin: completion runs on our own small model in milliseconds, while chat and the agent run on hosted models inside a sandbox, with search kept on the developer’s machine." />
+<AnimatedDiagram spec="animated/code-assistant/architecture" stepper caption="Two clocks share one plugin: completion runs on our own small model in milliseconds, while chat and the agent run on hosted models behind a policy engine and a sandbox, with search kept on the developer's machine." />
 
 | Group | Components | Responsibility |
 | --- | --- | --- |
@@ -391,7 +390,7 @@ Rewriting a region is fast because most of its tokens are already in the origina
 
 The walk-through follows one Brightpost developer in the EU, privacy mode on, through all three paths:
 
-1. **Completion:** they type `for (let i = 0; ` in `src/parser.ts`. 75 ms after the `;` the gate passes the request, and 2,000 tokens go to the EU region (490 new on average); `i < lines.length; i++) {` appears at ≈ 225 ms, and Tab accepts it.
+1. **Completion:** they type `for (let i = 0; ` in `src/parser.ts`. 75 ms after the space that follows `;`, the gate passes the request, and 2,000 tokens go to the EU region (490 new on average); `i < lines.length; i++) {` appears at ≈ 225 ms, and Tab accepts it.
 2. **Retention:** 10 minutes later the 24 accepted characters are still there, so they count as retained.
 3. **Chat:** they ask "where do we import order CSVs?"; "searching" shows at once; local grep and symbols find `src/import.ts` and `parseCsv`; the first token arrives at ≈ 1.0 s, with file citations.
 4. **Agent:** they hand the agent the issue; it searches, reads 3,200 tokens, edits the loop bound, runs 18 tests, sees 1 fail ("parses an empty file"), edits again, and all pass.
@@ -405,8 +404,8 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 
 ### Completion model: a small open-weight FIM model, fine-tuned and served by us
 
-- **Choice:** a Qwen2.5-Coder-class model (Apache-2.0, FIM use stated on its model card), fine-tuned weekly, FP8, on reserved GPUs in three regions. Training data is permissively licensed public code and opt-in data from users outside privacy mode, never privacy-mode code.
-- **Why:** chat models do FIM badly, and FIM training costs nothing in left-to-right quality; our own serving gives abort on cancel, a cache salt per organisation, sticky KV reuse and regional pinning (G3, G9, N2). It costs 5.20 USD a seat with the team included.
+- **Choice:** a Qwen2.5-Coder-7B-class model (Apache-2.0 and FIM use stated on the 7B model card, as of November 2026; licences differ by size, so the card of the size we ship is checked), fine-tuned weekly, FP8, on GPUs rented by the hour in three regions. Training data is permissively licensed public code and opt-in data from users outside privacy mode, never privacy-mode code.
+- **Why:** chat models do FIM badly, and FIM training did not harm left-to-right quality in Bavarian et al. (2022); our own serving gives abort on cancel, a cache salt per organisation, sticky KV reuse and regional pinning (G3, G9, N2). It costs 5.20 USD a seat with the team included.
 - **Why not a dedicated deployment at an inference provider:** 6.32 USD a seat with 2 people instead of 6; the right call below ≈ 47,000 seats, where the team's fixed cost dominates. At 100,000 seats it is close, and control decides.
 - **Why not a per-token FIM API:** at Codestral 25.08's list price (0.3 USD per million input, 0.9 output, no cached-input price, as of November 2026) every 2,000-token request costs ≈ 0.0006 USD, cancelled or not: ≈ 48.9 USD a seat.
 - **Why not a hosted chat model:** worse at FIM, and a 400 ms first token alone exceeds the budget.
@@ -415,11 +414,11 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 ### Triggering: one 75 ms debounce, a pre-request gate, a typed-through cache, abort by `supersedes`
 
 - **Choice:** every key waits the same 75 ms; a gate on cheap client features keeps 60% of triggers; a key matching the ghost text trims it with no request; each request names the one it supersedes, which the server aborts.
-- **Why:** one wait for every key gives every suggestion the same 225 ms, so N2 holds for all of them; from 10,500 possible triggers 5,355 are sent and 65% cancelled, worth 3,276 full requests a developer-day (G4, G5).
-- **Why not a longer wait mid-word:** it moves latency onto the suggestions people see most; a 250 ms mid-identifier rule put 46% of suggestions at 402 ms.
-- **Why not 50 ms:** 11% more GPU work (3,641 against 3,276 equivalents) for 25 ms.
-- **Why not 150 ms:** 40% less GPU work, but p50 300 ms at the limit and 340 behind a proxy.
-- **Why not without the gate:** 8,925 sent a developer-day instead of 5,355.
+- **Why:** one wait for every key gives every suggestion the same 225 ms, so N2 holds for all of them; from 10,500 possible triggers 5,355 are sent, 65% are cancelled, and 4,200 reach a GPU (G4, G5).
+- **Why not a longer wait mid-word:** it moves latency onto the suggestions people see most; an earlier draft's 250 ms mid-identifier wait put about half of all suggestions near 400 ms at p50, over N2.
+- **Why not 50 ms:** 389 GPUs instead of 355 (+10%) for 25 ms.
+- **Why not 150 ms:** 200 GPUs instead of 355 (−44%), but p50 300 ms at the limit and 340 behind a proxy.
+- **Why not without the gate:** 8,925 sent a developer-day instead of 5,355, and 591 GPUs instead of 355.
 
 ### Show or suppress: a gate before the request, a filter after it
 
@@ -430,7 +429,7 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 ### Repository search: local grep, symbols and an `explore` subagent; embeddings as an A/B arm
 
 - **Choice:** a local sparse n-gram grep index and symbol table serve completion, chat and the agent; `explore` runs open questions on the small model; a server embeddings index is offered as `semantic_search` in an arm on repositories over 1,000 files.
-- **Why:** the 2026 evidence leans towards grep for agents (How real systems do it), but a vendor A/B found +2.6% code retention with embeddings on large codebases in 2025 (G1, G6). The arm decides for our users at a minimum detectable change of ≈ 1.8% on kept lines.
+- **Why:** in 2026 one vendor moved its agent to a local grep index and another never shipped one, while a third still ships embeddings (How real systems do it); a vendor A/B found +2.6% code retention with embeddings on large codebases in 2025 (G1, G6). The arm decides for our users at a minimum detectable change of ≈ 1.8% on kept lines.
 - **Why not embeddings by default:** a second index to run and secure, and embeddings can be inverted back towards the text (G9).
 - **Why not grep only, with no arm:** we would never learn whether large repositories need more.
 - **Why not a server-only index:** a round trip on every search, and the server holds every customer's code.
@@ -455,12 +454,12 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 - **Why:** ≈ 4.2 s and ≈ 5.1 s end to end, against ≈ 21.5 s for the agent model rewriting a 400-line file and ≈ 92 s for 2,000 lines (F4, G3).
 - **Why not unified diffs with line numbers:** they drift, and models count lines badly.
 - **Why not a hosted fast-apply API:** a good start, but another sub-processor under privacy mode; our floor costs 0.108 USD a seat.
-- **Why not predicted outputs on a hosted model:** rejected tokens are billed and tool calls are unsupported.
+- **Why not predicted outputs on a hosted model:** rejected tokens are billed and tool calls are unsupported (as of November 2026).
 
 ### Sandbox: OS-level locally, a microVM per cloud task
 
 - **Choice:** bubblewrap on Linux, Seatbelt on macOS, a native Windows sandbox where available; a microVM with its own kernel for each cloud task.
-- **Why:** an OS sandbox fences the command and every subprocess with no container to start (G2, N7). Cloud tasks install untrusted dependencies, so they get their own kernel; containers are fine for your own repositories.
+- **Why:** an OS sandbox fences the command and every subprocess with no container to start (G2, N7). Cloud tasks of many organisations share our hosts and run dependencies nobody reviewed, so each gets its own kernel; a container would make one kernel bug a cross-tenant breach.
 - **Why not a container on the laptop:** Docker is not on every machine and conflicts with the OS sandbox.
 - **Why not permission prompts alone:** people approve on autopilot; a sandbox removes most prompts, so the ones left get read.
 - **Why not WSL2 only on Windows:** cross-file-system I/O is slow for Windows-side repositories, so WSL2 or the cloud is the fallback.
@@ -485,7 +484,7 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 | --- | --- | --- | --- |
 | Completion | Path and language; signatures from the language server | 50 + 200 | KV prefix (session; frozen on file focus) |
 | | Snippets from open tabs (similarity-ranked windows); recent edits | 350 + 150 | KV prefix, frozen and refreshed every 30 s |
-| | Code before the cursor; code after it (FIM suffix, PSM order) | 950 + 300 | Prefix reused up to the last request (≈ 10 new tokens); suffix recomputed |
+| | Code before the cursor; code after it (FIM suffix, PSM order) | 950 + 300 | Window start anchored to a line and moved only on the 30 s refresh, so the prefix grows (≈ 10 new tokens); an edit above the cursor breaks it there; suffix recomputed |
 | | **Total** | **2,000** | 310 new between refreshes, 1,750 on a refresh (1 in 8): **490 on average** |
 | Chat (turn 1) | Instructions and tools; repo rules (`AGENTS.md`, trusted repositories only) | 3,200 + 800 | Prompt cache (30% of turns miss after 5 idle minutes) |
 | | Open file; retrieved code (35 reranked); question and selection | 2,000 + 5,400 + 600 | Not cached |
@@ -496,7 +495,7 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 
 Each path's window is drawn to scale, so the share that is reused or cached is visible.
 
-<AnimatedDiagram spec="animated/code-assistant/context-layout" stepper caption="Each path has its own budget: 2,000 tokens for a completion with the stable blocks first, 12,000 for a chat turn, and 5,300 at an agent’s first step that grows 2,500 a step." />
+<AnimatedDiagram spec="animated/code-assistant/context-layout" stepper caption="Each path has its own budget: 2,000 tokens for a completion with the stable blocks first, 12,000 for a chat turn, and 5,300 at an agent's first step that grows 2,500 a step." />
 
 - **How to read it:** step 1 is the completion window, with the 1,510 reused tokens apart from the 490 new; step 2 the chat turn with its 4,000-token cached prefix; step 3 the agent's first step with its 3,500-token hot prefix, the growth per step and the compaction line at 100,000.
 
@@ -520,7 +519,7 @@ Each path's window is drawn to scale, so the share that is reused or cached is v
 | Show or suppress | Logistic-regression-class filter | Microseconds; trained on counts, not code |
 | Chat, agent plans and edits | Hosted mid-size model, thinking budget per step type | Reasoning and tool use |
 | Exploration | Hosted small model | 0.0038 USD a run |
-| Fast apply | 7B-class merge model, self-hosted, speculative edits | 1,000 tokens a second held as the design point at a batch of 8 or less, and measured |
+| Fast apply | 7B-class merge model, self-hosted, speculative edits | 1,000 tokens a second, a vendor's 2024 figure for a 70B model, held as our design point at a batch of 8 or less until measured |
 | Rerank | Small cross-encoder over 35 candidates | 14,000 tokens ÷ 200,000 a second = 70 ms + 10 |
 | Chunking, symbols, diagnostics | tree-sitter grammars; language servers | Syntactic chunks; signatures for completion; `diagnostics` before tests |
 | Embeddings (arm only) | Code embedding model, 512 dimensions, int8 | 128 MB for 250,000 chunks |
@@ -530,9 +529,9 @@ Each path's window is drawn to scale, so the share that is reused or cached is v
 
 The completion budget is ten stages from the last key to ghost text, with a spread per stage for p95.
 
-<AnimatedDiagram spec="animated/code-assistant/completion-budget" stepper caption="Every suggestion waits the same 75 ms and lands at 225 ms (≈ 308 at p95); a proxy adds 40 ms and the p95 stays under 500, while a longer debounce saves GPU work only by spending p50." />
+<AnimatedDiagram spec="animated/code-assistant/completion-budget" stepper caption="Every suggestion waits the same 75 ms and lands at 225 ms (≈ 308 at p95); a proxy adds 40 ms and p95 stays under 500, while a longer debounce saves GPU work only by spending p50." />
 
-- **How to read it:** step 1 is the direct path with p95 ticks; step 2 adds a corporate proxy's 40 ms; step 3 a typed-through hit (≈ 10 ms) and a developer 150 ms from a region (325 ms, outside N2's scope); step 4 the debounce curve, p50 against GPU work.
+- **How to read it:** step 1 is the ten stages with each one's p95 spread; step 2 the direct and proxy bars against the 300 and 500 ms target lines; step 3 a typed-through hit (≈ 10 ms) and a developer 150 ms from a region (325 ms, outside N2's scope); step 4 the debounce curve, p50 against GPU work.
 
 **The numbers (ms, illustrative stage values):**
 
@@ -569,10 +568,10 @@ The seat cost is shown on the mean seat, because the heavy decile sets the margi
 | Lever | Saves | Costs you |
 | --- | --- | --- |
 | Pre-request gate + typed-through cache | 12,000 key events → 8,925 triggers → 5,355 sent | 5% of would-be-shown suggestions dropped; a gate model to train |
-| Cancellation by `supersedes` | 60% of the cost of 3,465 cancels a day (5,355 → 3,276 equivalents) | Clean aborts mid-batch |
+| Cancellation by `supersedes` (cancels dropped at the client) | 4,200 of 5,355 reach a GPU (452 → 355 GPUs); aborts free decode (3,276 equivalents) | Clean aborts mid-batch |
 | Frozen volatile blocks + KV reuse | Prefill 2,000 → 490 tokens on average | Snippets up to 30 s old |
 | Prompt-lookup drafting | First line ≈ 75 → 50 ms (8 steps instead of 12) | Less gain at larger batches |
-| Per-region sizing and autoscaling | 392 of 720 hours a GPU paid | Pre-scaling 30 minutes before each morning ramp |
+| Per-region sizing and autoscaling | ≈ 399 of 720 hours a GPU paid (392 + 6.3 of pre-scaling) | Pre-scaling 30 minutes before each morning ramp |
 | Prompt caching | Agent task 1.35 → 0.36 USD (73%, resume misses included) | Byte-stable prefixes; a 5-minute lifetime |
 | Small-model exploration and thinking budgets | 0.20 USD, and 0.65 → 0.36 USD with 6.0 → 3.9 minutes a task | A second model to evaluate; hard steps may need more thinking |
 | Pooled allowance + 1.25 mark-up | Margin ≥ 20% on any organisation | Organisations see a usage bill |
@@ -585,12 +584,12 @@ The seat cost is shown on the mean seat, because the heavy decile sets the margi
 | --- | --- | --- |
 | Retained characters (online, primary) | Accepted characters still present after 10 minutes, by edit distance on the client, per active developer-day | Retained AI share ≥ 25% (≈ 38% predicted); a 10% arm rolls back on a 5% drop |
 | Guardrails against gaming | Acceptance, shown rate, length of shown suggestions, retained characters per shown suggestion, reverts within 14 days, undo within 10 s | No guardrail worse than control beyond its noise |
-| Kept agent lines (online) | Agent-written lines in accepted diffs still present after 7 days; merged ÷ opened pull requests; tasks capped; test files the agent changed (flagged) | ≥ 70% kept |
+| Kept agent lines (online) | Agent-written lines in accepted diffs still present after 7 days (lines normalised for whitespace, matched on the default branch by the client or the git host's webhook, missing measurements reported as missing; human-written lines in the same files as the baseline); merged ÷ opened pull requests; tasks capped; test files the agent changed (flagged) | ≥ 70% kept |
 | FIM set (offline) | Held-out repositories and commits after the model's cut-off: exact match and execution pass on single-line, multi-line and random-span infilling; latency replay | Not below the current release |
 | Chat questions (offline) | 300 questions with gold files and line ranges: recall at 10, citation validity, an answer judge calibrated on 100 staff-graded answers | Not below the current release |
-| Agent suite (offline) | 300 past issues from our own and consenting customers' repositories, reset before the fix, graded FAIL_TO_PASS and PASS_TO_PASS, 3 runs each (≈ 327 USD a run of the suite) | Paired per task; pass^3 per task not lower |
-| Red-team set | Injected READMEs and issues, poisoned test output, invisible-Unicode rules files, config-write attempts, typo-squatted packages | 0 allow-list escapes, 0 secrets leaked |
-| Latency | p95 per stage per region in the 1% arm | No 50 ms p95 regression; completion p95 ≤ 500 ms in every region |
+| Agent suite (offline) | 300 past issues from our own and consenting customers' repositories, reset before the fix, graded FAIL_TO_PASS and PASS_TO_PASS, 3 runs each (≈ 327 USD a run of the suite) | Paired per task; pass^3 (all 3 runs pass) per task not lower |
+| Red-team set | Injected READMEs and issues, poisoned test output, invisible-Unicode rules files, config-write attempts, typo-squatted packages: 300 cases (illustrative) | 0 escapes and 0 leaks, so ≤ 1% at 95% (3 ÷ 300) |
+| Latency | p95 per stage per region in the 1% arm, and the share of triggers whose ghost text arrived before the next key (it falls when latency rises, which N2's exclusion of cancels hides) | No 50 ms p95 regression; completion p95 ≤ 500 ms in every region |
 
 The A/B below shows why acceptance cannot be the gate: the model that wins on acceptance keeps less code.
 
@@ -605,8 +604,8 @@ The A/B below shows why acceptance cannot be the gate: the model that wins on ac
 - Power: a 10% arm (7,000 developers) against 90%, per-user CV 1.0, gives a minimum detectable change of 2.8 × √(1/7,000 + 1/63,000) ≈ 3.5%, ≈ 4.3% with clustering by organisation, hence the 5% rollback line; a 25% arm sees ≈ 3.0%.
 - Agent suite: at a 60% solve rate one run's 95% interval is ± 5.5 points, so releases are compared paired, per task.
 
-- **Why not raw acceptance, honestly:** Ziegler et al. (2022) found acceptance best predicts how productive developers feel, so it stays on the dashboard. But METR (2025) measured experienced developers 19% slower with AI while they believed they were 20% faster, and its 2026 follow-up was inconclusive.
-- **Public benchmarks only shortlist:** OpenAI's February 2026 audit of the 138 SWE-bench Verified tasks o3 failed most often found flawed tests in at least 59.4% of them, a floor of 82 of 500 tasks (16.4%). In July 2026 OpenAI estimated about 30% of SWE-bench Pro tasks broken and withdrew its recommendation of it.
+- **Why not raw acceptance, honestly:** Ziegler et al. (2022) found acceptance best predicts how productive developers feel, so it stays on the dashboard. But METR (2025) measured experienced developers 19% slower with AI while they believed they were 20% faster, and its 2026 follow-up found no clear effect and called its own sample a poor proxy.
+- **Public benchmarks only shortlist:** OpenAI's February 2026 audit of the 138 SWE-bench Verified tasks o3 did not reliably solve found flawed tests in at least 59.4% of them, a floor of 82 of 500 tasks (16.4%). In July 2026 OpenAI estimated about 30% of SWE-bench Pro tasks broken and withdrew its recommendation of it.
 - **The embeddings arm:** in ≈ 300 organisations with an index built, each agent task is randomly offered `semantic_search` or not: 210,000 tasks an arm over 10 working days, minimum detectable change 2.8 × √(2 ÷ 210,000) × 1.5 × √2 ≈ 1.8% on kept lines. Randomising 150 organisations an arm could only see ≈ 9.7%.
 - **Rollout:** internal dogfood → 1% → 10% for a week → 50% → 100%, per model and prompt version. Organisations that pin models get 14 days' notice and opt in.
 - **Outcomes for buyers:** cycle time, merged pull requests per developer and change failure rate, quarterly by organisation, read as trends against matched teams, never as proof of speed-up.
@@ -621,7 +620,7 @@ The network policy is the one statement of what the agent can reach (N7):
 | Local agent, `install` (ask tier) | The organisation's registry mirror, read-only | Install scripts off; the mirror refuses publishes itself, because a proxy that does not inspect TLS cannot tell a GET from a PUT |
 | Local agent, `web_fetch` | Domains approved per organisation; a new domain asks | GET only through our fetch service; query strings stripped for unapproved domains |
 | Cloud setup phase (snapshot builder) | The git host (fetch) and the mirror | No secrets present; the git proxy supplies a read-only credential for that one repository |
-| Cloud agent phase | The mirror, read-only; git through the git proxy | Pushes only to `agent/<task>` in the same private repository; never to a public one |
+| Cloud agent phase | The mirror, read-only; git through the git proxy | Pushes only to `agent/<task>` in the same repository; a private repository's task never pushes to a public one |
 
 - **What still leaves through an allowed host:** a package name or URL path to the mirror can encode data, and lands in the company's own mirror logs. The mirror fetches upstream only packages that pass its existence, age and download checks, which bounds the channel but does not close it; pull request text stays in the same private repository.
 
@@ -642,21 +641,21 @@ Privacy mode, the one statement of what is stored (N8):
 | Merkle hashes and HMAC-keyed paths | Yes | Our key-value store, until the workspace is deleted |
 | Embeddings (arm only, opt-in) | Yes, encrypted with the organisation's key and treated as code | Deleted with the workspace |
 | Agent checkpoints; cloud task workspace and snapshot | Local only; cloud encrypted per organisation | Hidden git refs cleaned after 30 days; task disk deleted 24 h after the task; snapshots until the lockfile changes or 30 days unused |
-| Agent session transcripts | 7 days, encrypted, for the developer to review; 0 days for zero-retention organisations | Our database |
+| Agent session transcripts | 7 days, encrypted, for the developer to review; 0 days for zero-retention organisations | An encrypted object store per organisation, keyed to the session row |
 | Telemetry; training | Counts and timings only, no code or paths, 13 months; never trained on privacy-mode code | ClickHouse |
 
 | Threat | Where it enters | Control | Code or prompt |
 | --- | --- | --- | --- |
 | Prompt injection in a README, issue, dependency, web page or test output | Anything the agent reads | No command network; credentials denied in the sandbox; writes only in the workspace; tool output marked as data; a trifecta leg cut per mode | Code |
-| The agent raises its own permissions by writing config | `.vscode/settings.json`, `.cursor/mcp.json`, harness settings, `.git/hooks`, MCP definitions | Write-deny rules on those files; policy only from managed settings; diffs of `package.json` scripts and `Makefile` targets shown before a person runs them outside the sandbox (the 2025 CVEs under How real systems do it took these routes) | Code |
+| The agent raises its own permissions by writing config | `.vscode/settings.json`, `.cursor/mcp.json`, harness settings, `.git/hooks`, MCP definitions | Write-deny rules on those files; policy only from managed settings; diffs of `package.json` scripts and `Makefile` targets shown before a person runs them outside the sandbox (2025 CVEs under How real systems do it took routes through agent-written configuration and MCP files) | Code |
 | Poisoned rules files | `AGENTS.md` and rules files in cloned repositories | Loaded only for trusted repositories; invisible Unicode stripped and shown | Code |
-| Hallucinated, typo-squatted or malicious packages | `install` and package managers | Ask tier; the package must exist, be older than 14 days and pass a download floor; scripts off; mirror only; lockfile diffs flagged. Code models hallucinate package names at 5.2–21.7% on average (Spracklen et al., 2025) | Code |
+| Hallucinated, typo-squatted or malicious packages | `install` and package managers | Ask tier; the version must exist and be older than 14 days, and the package must pass a download floor; scripts off; mirror only; lockfile diffs flagged. Code models hallucinate package names (at least 5.2% for commercial models, 21.7% for open-source ones, Spracklen et al., 2025) | Code |
 | Malware that drives the developer's own agent CLI | A compromised dependency on the laptop | Agent CLIs run sandboxed too, never with permission-skipping modes outside a VM | Code |
 | MCP tools | Allow-listed servers | Pinned versions with hashed tool descriptions (a change needs re-approval); a narrow credential per server; read tools run, write tools ask | Code |
 | Destructive command (`rm -rf src/`, `git reset --hard`) | Agent commands | Snapshot before every `run`; history-rewriting git commands ask; protected paths deny | Code |
 | The sandbox falls back to unsandboxed | Harness | Unsandboxed commands disabled in managed settings; Docker and similar only as named exceptions that ask | Code |
 | Secrets in the repository or in tool output | Prompts, chunks, a `cat` of a config, test logs | Client scanner on prompts, chunks and every tool result; placeholders substituted only inside the sandbox; `.env*`, `~/.ssh`, `~/.aws` denied | Code |
-| Cross-tenant cache timing | KV and prompt caches | `cache_salt` per organisation on our servers; providers isolate caches per organisation | Code |
+| Cross-tenant cache timing | KV and prompt caches | `cache_salt` per organisation on our servers; a model provider is enabled only if its terms state per-organisation cache isolation (one does, as of November 2026) | Code |
 | The agent games the tests | Agent edits | Test changes flagged; CI runs the original tests; held-back tests in the suite | Code + prompt |
 | Runaway cost; data leaving its region | The agent; failover | Caps (2 USD, 6M tokens, 120 steps, 30 minutes) and a repeated-call detector; residency-pinned organisations fail over only inside their geography | Code |
 
@@ -664,8 +663,9 @@ Privacy mode, the one statement of what is stored (N8):
 
 ### The completion request: trigger, cancel, reuse
 
-- **Why cancellation is the main capacity lever:** 65% of sent requests are cancelled. If a cancel cost a full request, the fleet would size on 5,355 a developer-day; aborted early, it sizes on 3,276 equivalents, 39% less.
-- **Why the debounce is not:** 150 ms instead of 75 saves 40% of GPU work (3,276 → 1,981 equivalents) but adds 75 ms to the p50 of every suggestion, putting it at the 300 ms limit; the gate cuts cost without touching latency.
+- **Why cancellation matters, and where:** 65% of sent requests are cancelled. A third die before a GPU, so the fleet sizes on 4,200 arriving a developer-day (355 GPUs) instead of 5,355 (452), 22% fewer.
+- **What an abort buys:** the rest still pay prefill, the binding resource, so aborting them frees decode (5,355 → 3,276 equivalents), not GPUs; their KV blocks seed the superseding request's prefix, so an abort stops decoding and keeps the blocks.
+- **Why the gate, not a longer debounce:** the gate takes the fleet from 591 GPUs to 355 at no latency cost; 150 ms instead of 75 would need 200 GPUs instead of 355 (−44%) but adds 75 ms to the p50 of every suggestion, putting it at the 300 ms limit.
 
 <AnimatedDiagram spec="animated/code-assistant/completion-sequence" stepper caption="The second keystroke cancels the first request mid-prefill; the next request reuses 1,510 of its 2,000 tokens from the KV prefix, and the ghost text lands at 225 ms." />
 
@@ -687,13 +687,13 @@ Privacy mode, the one statement of what is stored (N8):
 
 - **The rule:** the model proposes, the policy engine decides in code, the sandbox enforces. Deny → ask → allow, from managed settings only, so a broad deny cannot be overridden by a narrower allow.
 
-<AnimatedDiagram spec="animated/code-assistant/agent-step" stepper caption="Three tool calls, three outcomes decided in code: the test run is allowed with no network, a typo-squatted package fails the mirror’s checks, and a write to the IDE’s settings is denied." />
+<AnimatedDiagram spec="animated/code-assistant/agent-step" stepper caption="Three tool calls, three outcomes decided in code: the test run is allowed with no network, a typo-squatted package fails the mirror's checks, and a write to the IDE's settings is denied." />
 
-- **How to read it:** step 1 is `run("npm test")`, allowed without a prompt; a test helper's call to an outside host is refused, and the failure goes back to the model as data. Step 2 is `install("left-padd")`, which fails the existence and age check; step 3 is a write to `.vscode/settings.json`, denied by rule.
+- **How to read it:** step 1 is `run("npm test")`, allowed without a prompt; a test helper's call to an outside host is refused, and the failure goes back to the model as data. Step 2 is `install("left-padd")`: the mirror finds no such package, so the developer is never asked; step 3 is a write to `.vscode/settings.json`, denied by rule.
 
 **The numbers:**
 
-- The three calls cost the developer at most one prompt (the install) and the attacker everything: no outside host was reached, no package landed, no setting changed.
+- The three calls cost the developer no prompt at all (the install failed the mirror's check before the ask tier) and the attacker everything: no outside host was reached, no package landed, no setting changed.
 - A sandbox cut permission prompts by 84% in one vendor's internal use (How real systems do it), which is the point: people read the few prompts that remain.
 - Caps bind in order: on a long task at the average thinking mix, 2 USD at step 99 (≈ 16.8 minutes), before 6M input tokens at step 117.
 
@@ -713,7 +713,7 @@ Privacy mode, the one statement of what is stored (N8):
 
 | Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
 | --- | --- | --- | --- | --- | --- |
-| Completion serving | Self-host; dedicated provider deployment; per-token FIM API; on-device | Self-host a fine-tuned open-weight FIM model at 100,000 seats; a dedicated deployment below ≈ 47,000 | G3, G4, G9 | A model and serving team (1.66 USD a seat) | A provider offers abort, a per-organisation salt and weekly fine-tunes at our price |
+| Completion serving | Self-host; dedicated provider deployment; per-token FIM API; on-device | Self-host a fine-tuned open-weight FIM model at 100,000 seats; a dedicated deployment below ≈ 47,000 | G3, G4, G9 | A model and serving team with its fine-tuning runs (1.66 USD a seat) | A provider offers abort, a per-organisation salt and weekly fine-tunes at our price |
 | Triggering | Every key; per-class waits; one debounce + a gate | 75 ms for every key, pre-request gate, typed-through cache, abort | N2, G5 | 5% of would-be-shown suggestions dropped; a gate model to train | Cancel share above 75%, or the gate drops more than 10% of what would be shown |
 | Repository search | Grep only; embeddings by default; grep by default + an embeddings arm | Grep, symbols and `explore`; embeddings as an arm on large repositories | G1, G6, G9 | A second index for organisations in the arm | The arm shows no gain on kept lines (then remove it) |
 | Edit application | Whole file; diff; search-and-replace; fast apply | Search-and-replace, then region fast apply | F4, G3 | A self-hosted apply model (0.108 USD a seat) | Agent models land exact edits more than 99% of the time |
@@ -746,7 +746,7 @@ Privacy mode, the one statement of what is stored (N8):
 
 | Pattern | Where in this design | Why it is needed here |
 | --- | --- | --- |
-| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) | A p95 budget per stage; completion fails silent; a hedge to the next region in the same geography | A late suggestion is worth nothing |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) | A p95 budget per stage; completion fails silent; chat and agent calls fail over at a task boundary | A late suggestion is worth nothing |
 | [Caching](/system-design/patterns/caching) | Typed-through cache, KV prefix, prompt cache, chunk-hash cache | Prefill and agent cost both depend on reuse |
 | [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) | Fleets sized per region; failover bound by residency | EU code must stay in the EU |
 | [Idempotency](/system-design/patterns/idempotency) | Exact-match edits, superseded requests, snapshots before commands | A retried step must not apply an edit twice |
@@ -780,7 +780,7 @@ Privacy mode, the one statement of what is stored (N8):
 - **The model games the metric** (shorter, safer or long boilerplate suggestions): acceptance or length rises while retained characters per developer stay flat; the length and revert guardrails block the release.
 - **The agent loops or overthinks:** cost per task climbs; the caps and the repeated-call detector stop it with a summary at 2 USD at most.
 - **A poisoned dependency or injected README:** the agent tries to install, write config or send data; mirror checks, config deny rules and no command network refuse it, and the attempt is logged in the audit log and shown.
-- **A region outage:** client health checks stop sending there; completion hedges to the next region in the same geography at the p95 deadline or fails silent, with no error dialog.
+- **A region or zone outage:** client health checks stop sending there; EU traffic moves to the other EU zone (the gate keeps 30% of triggers); with no healthy zone in the geography, completion fails silent, with no error dialog.
 - **A provider outage for chat or the agent:** fail over at a task boundary to a second provider with the same retention terms; a running task pauses at its snapshot instead of switching models mid-task.
 
 ## Interview framework
@@ -812,43 +812,43 @@ Privacy mode, the one statement of what is stored (N8):
 - Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Coding Agents](/ai-system-design/genai-system-design/coding-agents) · [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding) · [Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [LLM platform gateway](/genai-system-design/case-studies/llm-platform-gateway)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Design a code assistant: repo indexing, context assembly, edit application and evaluation." category="Architecture" level="Senior" followUps={[{ question: "Where does the index live, and why not on your servers?", level: "Senior", answer: "On the laptop: a sparse n-gram grep index and a symbol table anchored to the git commit with dirty files as an overlay, 120 MB built in ≈ 8 s for 50,000 files. A server index adds a round trip to every search and puts every customer’s code at rest with us; Merkle sync uploads only changed files, and only for cloud tasks and the embeddings arm." }, { question: "With a team of four, what do you build first?", level: "Senior", answer: "Completion on a dedicated provider deployment (6.32 USD a seat with 2 people), grep and symbols, search-and-replace edits and the OS sandbox. Self-hosting the FIM model, the fast-apply model and the embeddings arm wait until volume (≈ 47,000 seats) or evidence pays for them." },]}>
+  <InterviewQuestion question="Design a code assistant: repo indexing, context assembly, edit application and evaluation." category="Architecture" level="Senior" followUps={[{ question: "Where does the index live, and why not on your servers?", level: "Senior", answer: "On the laptop: a sparse n-gram grep index and a symbol table anchored to the git commit with dirty files as an overlay, 120 MB built in ≈ 8 s for 50,000 files. A server index adds a round trip to every search and puts every customer’s code at rest with us; Merkle sync uploads only changed files, and only for cloud tasks and the embeddings arm." }, { question: "With a team of four, what do you build first?", level: "Senior", answer: "Completion on a dedicated provider deployment (2 people; 6.32 USD a seat at 100,000 seats, more at small scale, where a few replicas a region are the floor), grep and symbols, search-and-replace edits and the OS sandbox. Self-hosting, fast apply and the embeddings arm wait until volume (≈ 47,000 seats) or evidence pays for them." },]}>
   - Two paths sharing a plugin and an index: completion on our own small FIM model behind a debounce, a pre-request gate and cancellation; chat and the agent on hosted models. Context is assembled per path from a local grep and symbol index; edits land by exact search-and-replace, then region fast apply; the agent runs in an OS sandbox under a policy engine.
   - Size it first: 375M completion requests a working day on 355 GPUs at 225 ms p50 and ≈ 308 p95; a median agent task ≈ 0.36 USD and 3.9 minutes; a mean seat ≈ 31.3 USD a month at list prices.
-  - The trade-off is ownership: self-hosting the completion and apply models buys abort, a cache salt per organisation and regional pinning, at the price of a 6-person team (1.66 USD a seat).
-  - Verify with retained characters (≥ 25%, ≈ 38% predicted) and agent lines still present after 7 days (≥ 70%) online, and a FIM set, 300 chat questions and 300 past issues × 3 offline; public benchmarks only shortlist.
+  - The trade-off is ownership: self-hosting the completion and apply models buys abort on cancel, a cache salt per organisation and regional pinning, at the price of a 6-person team and its fine-tuning runs (1.66 USD a seat); below ≈ 47,000 seats a dedicated provider deployment is cheaper.
+  - Verify with retained characters (≥ 25%, ≈ 38% predicted) and agent lines still present after 7 days (≥ 70%) online, and a FIM set, 300 chat questions and 300 past issues × 3 offline. The first thing to break is completion latency: a slower model or a proxy shows as falling retained characters, so any 50 ms p95 regression rolls back.
   </InterviewQuestion>
   <InterviewQuestion question="Walk through the latency budget of one inline completion, at p50 and p95." category="Scaling" level="Senior" followUps={[{ question: "Why add the spreads as a root-sum-square and not sum them?", level: "Senior", answer: "The stages vary mostly independently, so their p95s rarely land on the same request; the root-sum-square gives ≈ 83 ms. The plain sum (400 ms direct, 500 behind a proxy) is kept as an upper bound, and it still meets the 500 ms target." }, { question: "What about a developer 150 ms from the nearest region?", level: "Senior", answer: "Their p50 is ≈ 325 ms, outside N2, which is scoped to developers within 50 ms RTT. The fix is a nearer region or the on-device fallback, not a shorter debounce, which would add GPU work without removing the network time." },]}>
   - 75 debounce + 15 client context + 25 network + 5 gateway + 3 queue + 12 prefill + 50 first line + 5 filter + 25 back + 10 render = 225 ms at p50, the same for every suggestion.
   - p95 adds the root-sum-square of the stage spreads (20, 60, 15, 30, 40, 10) ≈ 83 ms, so ≈ 308; behind a proxy adding 40 ms it is 265 and ≈ 367, with an upper bound of 500.
-  - The trade-off is the debounce, a third of p50: 150 ms would save 40% of GPU work but put every suggestion at 300 ms, so the pre-request gate cuts cost instead.
-  - It fails on a KV-prefix miss (+30 ms at p95), on cold replicas in the morning and behind proxies that re-handshake TLS. Verify with p95 per stage per organisation and a rollback on any 50 ms p95 regression.
+  - The trade-off is the debounce, a third of p50: 150 ms would need 200 GPUs instead of 355 but put every suggestion at 300 ms, so the pre-request gate cuts cost instead.
+  - It fails on a KV-prefix miss (+30 ms at p95), on cold replicas in the morning ramp and behind proxies that re-handshake TLS, and these arrive together, so the root-sum-square is optimistic in the ramp. Verify with p95 per stage per organisation, a rollback on any 50 ms p95 regression, and the share of triggers whose ghost text beat the next key, because N2 excludes cancelled requests and the slow ones are the ones cancelled.
   </InterviewQuestion>
   <InterviewQuestion question="Why not use the strongest chat model for inline completions?" category="Trade-offs" level="Mid">
   - Latency and shape: a hosted model's 400 ms first token alone exceeds the 300 ms p50 target before the debounce and the network, and chat models insert badly at a cursor (duplicated prefixes, overwritten suffixes).
-  - Cost: 375M requests a working day; even a per-token FIM API at its list price is ≈ 48.9 USD a seat a month, against 5.20 for our self-hosted small model with the team included.
+  - Cost: on the mid-size model at list price a 2,000-token request is ≈ 0.0042 USD, ≈ 334 USD a seat a month at 375M requests a working day (≈ 127 even with prompt caching). Even a per-token FIM API is ≈ 48.9, against 5.20 for our self-hosted small model with the team included.
   - The trade-off is weaker multi-line code from a small model, so hard work goes to chat and the agent on the mid model, and completion gets language-server signatures and recent edits as context.
   - Verify any bigger candidate on the FIM set (exact match and execution pass) and in an A/B on retained characters per developer-day, with latency per stage watched.
   </InterviewQuestion>
-  <InterviewQuestion question="Developers type a key every 150 ms. How many completion requests do you send, and what does cancellation do to your GPU count?" category="Scaling" level="Senior" followUps={[{ question: "Is the fleet bound by decode batch or by prefill?", level: "Senior", answer: "By prefill: 50 arriving requests a second × 490 new tokens ÷ 60,000 tokens a second keeps a GPU 41% busy, while Little’s law gives only ≈ 3 streams decoding at once. A batch of 64 is never reached, so the fleet is sized on arriving requests, not on decode throughput." },]}>
+  <InterviewQuestion question="Developers type a key every 150 ms. How many completion requests do you send, and what does cancellation do to your GPU count?" category="Scaling" level="Senior" followUps={[{ question: "Is the fleet bound by decode batch or by prefill?", level: "Senior", answer: "By prefill: 50 arriving requests a second × 490 new tokens ÷ 60,000 tokens a second keeps a GPU 41% busy, while Little’s law gives only ≈ 3 streams decoding at once. A batch of 64 is never reached, so the fleet is sized on arriving requests, not on decode throughput." }, { question: "You lose one of the two EU zones at 10:00. What happens to completion and to EU-pinned organisations?", level: "Senior", answer: "The gate keeps 30% of triggers instead of 60%, so half the EU fleet carries the load and fewer suggestions are sent; latency holds for what is sent. EU-pinned organisations never fail over to the US; if both zones go, their completion fails silent with no error, and chat and agent tasks pause at a checkpoint rather than switch region. Pre-scaling 30 minutes before the morning ramp is what makes a 10:00 loss survivable." },]}>
   - From 12,000 key events a developer-day: 1,500 are typed-through, 10,500 × 85% of gaps over 75 ms = 8,925 triggers, and the gate keeps 60%, so 5,355 are sent. With keys about 150 ms apart, 65% are cancelled by the next key.
-  - A cancel costs 0.4 of a request on average (before the server, in prefill or mid-decode), so the work is 3,276 full-request equivalents; 4,200 reach a server, 294M a day, 3,403 a second, sized to 355 GPUs across three regions.
-  - The trade-off is that cancellation must abort mid-batch and keep the KV prefix warm on a sticky replica, which is one reason we serve the model ourselves; the debounce is the other lever, and it costs p50.
+  - Cancellation changes the GPU count only through requests that never reach a GPU: a third of cancels die on the client or at the gateway, so 4,200 a developer-day arrive, 294M a day and 3,403 a second, sized to 355 GPUs in three regions; if every sent request arrived it would be 452. The rest still pay prefill, and prefill is what binds (41% busy, ≈ 3 streams decoding), so an abort saves decode time (5,355 → 3,276 full-request equivalents), not GPUs.
+  - The trade-off: the gate, not the abort, is the big lever (8,925 → 5,355 sent; 591 → 355 GPUs), at the cost of 5% of would-be-shown suggestions. The abort must still be clean mid-batch and leave the KV prefix on a sticky replica, because the superseding request reuses it.
   - Watch the `cancel_stage` field in telemetry: revisit the rule if the cancel share passes 75% or the gate drops more than 10% of what would have been shown.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you keep repository search fresh as the developer edits and switches branches?" category="Architecture" level="Senior" followUps={[{ question: "What does the Merkle tree still do if you drop embeddings?", level: "Senior", answer: "It uploads only changed files when a cloud task starts from a developer’s uncommitted work, and it feeds the embeddings arm. When nothing changed, one root comparison ends the sync; one changed file costs ≈ 5.1 KB in 4 round trips." },]}>
+  <InterviewQuestion question="How do you keep repository search fresh as the developer edits and switches branches?" category="Failure modes" level="Senior" followUps={[{ question: "What does the Merkle tree still do if you drop embeddings?", level: "Senior", answer: "It uploads only changed files when a cloud task starts from a developer’s uncommitted work, and it feeds the embeddings arm. When nothing changed, one root comparison ends the sync; one changed file costs ≈ 5.1 KB in 4 round trips." }, { question: "A buyer’s security team asks what of their code your servers ever hold. What do you answer?", level: "Senior", answer: "Read them the privacy-mode table: completion prompts live in memory and in a KV cache salted per organisation, evicted in minutes; chat and agent prompts go to providers under zero-retention contracts with their stated exceptions. We keep Merkle hashes with HMAC-keyed paths, embeddings only for organisations in the arm (encrypted with their key and treated as code), transcripts for 7 days or 0, and counts with no code or paths for 13 months; nothing in privacy mode is trained on, and EU-pinned organisations never leave the EU." },]}>
   - On the laptop: the grep and symbol indexes update within 1 s of a save, anchored to the git commit with dirty files as an overlay; open and dirty files are read live, never from the index.
   - A branch switch re-anchors the index to the new HEAD; a new 50,000-file clone builds in ≈ 8 s with ripgrep answering meanwhile; Merkle sync runs 30 s after the last save.
   - The trade-off is laptop disk and CPU (120 MB for 50,000 files), which does not stretch to a 1M-file monorepo (2.4 GB, 160 s): index the checked-out scopes locally and search the rest on a server index the git host builds per commit.
-  - It fails when the index commit and HEAD drift, so the agent reads text that changed; alert on that mismatch, and hold the embeddings arm to 2 minutes at p95.
+  - It fails when the index misses changes made outside the editor (a `git pull`, a code generator, the agent's own `run`), so the agent reads stale text. The harness re-scans the paths a command touched before the next search, re-anchors when the index commit differs from HEAD, and counts grep hits that no longer match the live file; the embeddings arm is held to 2 minutes at p95.
   </InterviewQuestion>
-  <InterviewQuestion question="Embeddings or grep for finding code?" category="Trade-offs" level="Senior" followUps={[{ question: "Why randomise the arm per task and not per organisation?", level: "Senior", answer: "Per organisation, 150 an arm at an organisation-level CV of 0.3 can only see a change of ≈ 9.7%, far above the 2.6% one vendor reported. Per task inside organisations whose index is built, 210,000 tasks an arm see ≈ 1.8% with a design effect of 2 for developer clustering." },]}>
+  <InterviewQuestion question="Embeddings or grep for finding code?" category="Trade-offs" level="Senior" followUps={[{ question: "Why randomise the arm per task and not per organisation?", level: "Senior", answer: "Per organisation, 150 an arm at an organisation-level CV of 0.3 can only see a change of ≈ 9.7%, far above the 2.6% one vendor reported on its own retention metric (a different measure, so only a sense of scale). Per task inside organisations whose index is built, 210,000 tasks an arm see ≈ 1.8% with a design effect of 2 for developer clustering." },]}>
   - Grep and symbols by default, with an `explore` subagent for open questions; embeddings as an A/B arm on repositories over 1,000 files, not a default.
-  - The evidence moved: in 2026 vendors leaned towards grep for agents, while a 2025 vendor A/B found +2.6% code retention with embeddings on large codebases. Our arm has 210,000 tasks a side and a minimum detectable change of ≈ 1.8% on kept lines.
+  - The evidence is split: in 2026 one vendor moved its agent to a local grep index and another never shipped an index, while a third still ships an embedding index; a 2025 vendor A/B found +2.6% code retention with embeddings on codebases over 1,000 files. Our arm has 210,000 tasks a side and a minimum detectable change of ≈ 1.8% on kept lines.
   - The trade-off: embeddings are a second index to run and secure and must be treated as code, because vectors can be inverted towards the text; grep misses conceptual questions ("where do we handle retries?"), which `explore` covers with several searches.
-  - Decide on kept lines per task, with tokens per task and the chat follow-up rate as guardrails; remove the arm if it shows no gain.
+  - Decide on kept lines per task, with tokens per task and the chat follow-up rate as guardrails, and remove the arm if it shows no gain. The arm runs only in organisations that opted in, so a win is a win for them, not proof for everyone.
   </InterviewQuestion>
-  <InterviewQuestion question="What goes into the prompt for a completion, a chat question and an agent step?" category="Concepts" level="Junior">
+  <InterviewQuestion question="What goes into the prompt for a completion, a chat question and an agent step?" category="Concepts" level="Junior" followUps={[{ question: "The repository has a .gitignore and an ignore file for the assistant. Does that keep secrets out of the prompt?", level: "Mid", answer: "No. Ignore files keep files out of completion context and search, but they are not a security boundary: a shell command the agent runs can still cat an ignored .env. So the client scanner runs on every prompt, chunk and tool result before it reaches a model, masked values become placeholders the harness substitutes only inside the sandbox, and .env*, ~/.ssh and ~/.aws are read-denied in the sandbox itself." },]}>
   - A completion, 2,000 tokens with the stable blocks first: path and language, signatures from the language server, snippets from open tabs, recent edits, the code before the cursor, then the code after it.
   - A chat turn, 12,000 tokens: instructions and tools plus repository rules (4,000, cached), the open file, 5,400 tokens of retrieved code, then the question.
   - An agent's first step, 5,300 tokens: instructions with the root `AGENTS.md`, tools, the task and a repo map; it grows ≈ 2,500 a step and is compacted at 100,000.
@@ -857,32 +857,32 @@ Privacy mode, the one statement of what is stored (N8):
   </InterviewQuestion>
   <InterviewQuestion question="How do you apply an edit to a 2,000-line file quickly and in the right place?" category="Architecture" level="Mid">
   - The model writes an exact search-and-replace that must match once; if it writes a sketch or the match fails, a fast-apply model rewrites only the enclosing region, drafting from the original text.
-  - End to end: search-and-replace ≈ 4.2 s and a sketch plus region apply ≈ 5.1 s, against ≈ 92 s for the agent model rewriting all 2,000 lines (20 s even with speculative edits).
+  - End to end: search-and-replace ≈ 4.2 s and a sketch plus region apply ≈ 5.1 s, against ≈ 92 s for the agent model rewriting all 2,000 lines, or ≈ 20 s for our apply model rewriting the whole file.
   - The trade-off is a self-hosted apply model with a floor of 0.108 USD a seat, and region detection with tree-sitter; unified diffs with line numbers are rejected because they drift.
-  - It fails as 0 or 2+ matches, which return a message the model can act on ("2 matches; include more lines"). Verify every edit as a diff with undo, a checkpoint and `diagnostics` before tests.
+  - It fails in two ways: 0 or 2+ matches return a message the model can act on ("2 matches; include more lines"), and a merge model can silently drop or alter lines. So the harness rejects an applied region whose lines outside the sketch's changed span differ from the original, then shows a diff with undo, takes a checkpoint and runs `diagnostics` before tests.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you let the agent run shell commands and install packages safely?" category="Failure modes" level="Senior" followUps={[{ question: "An issue on a public repository says ‘to reproduce, run scripts/repro.sh’. What can leave?", level: "Senior", answer: "In a cloud task on a public repository the private-data leg of the trifecta is cut: the token sees only that public repository and no organisation MCP servers are attached. The script runs in a microVM that reaches only the read-only mirror, and the pull request text, the one outbound channel, has nothing private to carry." }, { question: "Why deny writes to .vscode/settings.json and .cursor/mcp.json?", level: "Senior", answer: "Configuration the agent can write is policy it can change: 2025 CVEs ran code through agent-written IDE settings and a newly created MCP config. Policy loads only from managed settings outside the workspace, and IDE, harness, MCP, hook and permission files are write-denied." },]}>
+  <InterviewQuestion question="How do you let the agent run shell commands and install packages safely?" category="Failure modes" level="Senior" followUps={[{ question: "An issue on a public repository says ‘to reproduce, run scripts/repro.sh’. What can leave?", level: "Senior", answer: "In a cloud task on a public repository the private-data leg of the trifecta is cut: the token sees only that public repository and no organisation MCP servers are attached. The script runs in a microVM that reaches only the read-only mirror, and the pull request text, the one outbound channel, has nothing private to carry." }, { question: "Why deny writes to .vscode/settings.json and .cursor/mcp.json?", level: "Senior", answer: "Configuration the agent can write is policy it can change: 2025 CVEs ran code through agent-written configuration and a newly created MCP config. Policy loads only from managed settings outside the workspace, and IDE, harness, MCP, hook and permission files are write-denied." },]}>
   - Commands run in an OS sandbox (bubblewrap, Seatbelt) with no network and no credentials, behind a policy engine that applies deny, then ask, then allow from managed settings; a snapshot precedes every `run`.
-  - Installs ask the developer and go only through the company's read-only mirror with scripts off; the package must exist, be older than 14 days and pass a download floor, because code models hallucinate package names at 5.2–21.7% on average.
+  - Installs go only through the company's read-only mirror with scripts off; the version must exist and be older than 14 days, and the package must pass a download floor, because the 2025 npm attacks were new versions of established packages. Code models also hallucinate package names (at least 5.2% for commercial models, 21.7% for open-source ones, Spracklen et al., 2025).
   - The trade-off is slower dependency changes and named exceptions for tools such as Docker; a runaway task still stops at 2 USD.
-  - An allowed host is still a channel (a package name lands in the mirror's logs), so state it rather than claim zero. Verify with the red-team set: 0 allow-list escapes and 0 secrets leaked before any release.
+  - An allowed host is still a channel (a package name lands in the mirror's logs), so state it rather than claim zero. Verify with a red-team set of 300 cases (illustrative) before any release: 0 escapes in 300 bounds the escape rate at 3 ÷ 300 = 1% (95%).
   </InterviewQuestion>
-  <InterviewQuestion question="What is your online success metric for completions, and why not acceptance rate?" category="Evaluation" level="Senior" followUps={[{ question: "A buyer asks whether it makes their developers faster. What do you say?", level: "Senior", answer: "That nobody can promise it: METR measured experienced developers 19% slower with AI in 2025 while they believed they were 20% faster, and its 2026 follow-up was inconclusive. Offer their own trends (cycle time, merged pull requests, change failure rate) against matched teams, quarterly." },]}>
+  <InterviewQuestion question="What is your online success metric for completions, and why not acceptance rate?" category="Evaluation" level="Senior" followUps={[{ question: "A buyer asks whether it makes their developers faster. What do you say?", level: "Senior", answer: "That nobody can promise it: METR measured experienced developers 19% slower with AI in 2025 while they believed they were 20% faster, and its 2026 follow-up found no clear effect and called its own sample a poor proxy. Offer their own trends (cycle time, merged pull requests, change failure rate) against matched teams, quarterly." },]}>
   - Retained characters: accepted characters still in the file after 10 minutes, and the retained AI share (≥ 25%, ≈ 38% predicted).
-  - Acceptance rises when a model shows less: in the page's illustration model B wins on acceptance (36% against 30%) but keeps ≈ 2,938 characters against A's 3,840.
-  - The trade-off is a slower metric and one that long boilerplate could inflate, so length, reverts within 14 days and undo within 10 s are guardrails; acceptance stays visible because it best predicts how productive developers feel (Ziegler et al., 2022).
-  - Verify with power: a 10% arm detects ≈ 4.3% with organisation clustering, so it rolls back on a 5% drop in retained characters; a 25% arm sees ≈ 3.0%.
+  - Acceptance rises when a model shows less: in an illustrative A/B, model B wins on acceptance (36% against 30%) but keeps ≈ 2,938 characters against A's 3,840.
+  - The trade-off is a slower metric that long boilerplate could inflate, so length, reverts within 14 days and undo within 10 s are guardrails, and edit distance ignores whitespace so a formatter is not a deletion. Acceptance stays visible because it best predicts how productive developers feel (Ziegler et al., 2022).
+  - Verify with power: a 10% arm for a week detects ≈ 4.3% with organisation clustering, so it rolls back on a 5% drop and a smaller true drop can pass; a 25% arm sees ≈ 3.0%.
   </InterviewQuestion>
   <InterviewQuestion question="A model tops SWE-bench Verified. Do you switch your agent to it?" category="Evaluation" level="Mid">
   - Not on that alone: it goes on the shortlist, then runs our 300 past issues × 3, paired per task with the current model, then a 1% → 10% arm on kept lines.
-  - The public number is weak evidence: a 2026 audit found flawed tests in at least 16.4% of the 500 tasks, models can reproduce some original fixes, and about 30% of SWE-bench Pro tasks were estimated broken.
+  - The public number is weak evidence: a February 2026 audit put a floor of 82 of the 500 Verified tasks (16.4%) on flawed tests and found models could reproduce some original fixes, and in July 2026 the same lab estimated about 30% of SWE-bench Pro tasks broken and withdrew its recommendation of it. The score also comes from another team's scaffold, not our harness.
   - The trade-off is time and money: ≈ 327 USD a run of our suite and a week in the 10% arm, so a real gain ships later.
-  - At a 60% solve rate one run's 95% interval is ± 5.5 points, so compare paired per task and report pass^3; also watch cost and minutes per task against the 2 USD cap.
+  - At a 60% solve rate one run's 95% interval is ± 5.5 points, so compare paired per task and require pass^3 (all 3 runs pass) per task not to fall; also watch cost and minutes per task against the 2 USD cap.
   </InterviewQuestion>
   <InterviewQuestion question="What does a seat cost to serve, and what do you do about heavy users?" category="Cost" level="Junior">
   - The mean seat costs ≈ 31.3 USD a month at list prices: 5.55 fixed (completion 5.20) plus 25.80 of usage, 71% of it the agent.
-  - Heavy users set the margin: the top 10% run 12 agent tasks a day at twice the median cost, ≈ 144 USD a seat a month.
-  - Price as an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25: ≈ 32% margin on the mean organisation, 23% for an all-heavy one, never below 20%. The trade-off is a usage bill; a 30 USD seat would leave ≈ 16%.
+  - Heavy users set the mean cost: the top 10% run 12 agent tasks a day at twice the median cost, ≈ 144 USD a seat a month and 46% of the mean seat's cost, while a light seat costs ≈ 12.6.
+  - Price as an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25: ≈ 32% margin on the mean organisation, 23% for an all-heavy one, never below 20%. The trade-off is a usage bill; a 30 USD seat with the same pool would leave ≈ 16%.
   - Verify margin per organisation monthly and revisit if the mean falls below 25%; per-task caps (2 USD) and thinking budgets bound the tail.
   </InterviewQuestion>
 </InterviewQuestions>

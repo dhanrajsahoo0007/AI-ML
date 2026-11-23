@@ -1,5 +1,5 @@
 // Constants and arithmetic for the "Design a Code Assistant" case study (/genai-system-design/case-studies/
-// code-assistant; design sheet SYSTEM-DESIGN/plans/genai-design/design/code-assistant.md v2, dossier
+// code-assistant; design sheet SYSTEM-DESIGN/plans/genai-design/design/code-assistant.md v3, dossier
 // research/code-assistant.md, cited as "dossier F12"; review review/code-assistant-design.md). Specs in
 // assets/diagrams/animated/code-assistant/ import from here, so the page, the figures and the tests share one set of
 // numbers.
@@ -824,7 +824,7 @@ export const COST = (() => {
     rerank,
     bySegment, // an organisation of only light, only median or only heavy users
     meanUsage,
-    meanSeat: mean.cost, // ≈ 31.4 USD at list prices
+    meanSeat: mean.cost, // ≈ 31.35 USD at list prices
     meanRevenue: mean.revenue,
     meanMargin: mean.margin, // ≈ 32%
     agentMean,
@@ -880,5 +880,47 @@ export const EVAL = (() => {
       mde: mde(armTasks, armTasks, 2) * 1.5, // ≈ 0.018
       mdeByOrganisation: 2.8 * Math.sqrt(2 / 150) * 0.3, // ≈ 0.097
     },
+  };
+})();
+
+// ── Values the page states (coordinator, after the interviewer pass) ─────────────────────────────────────────────
+
+/**
+ * Completion fleet for a funnel (same sizing as COMPLETION_FLEET): every sent request arriving (no client-side
+ * cancel), no pre-request gate, and each debounce on the curve. Chat model on the completion path at list price
+ * (PRICES.mid; the cached 1,510-token prefix read at 0.10, the other 490 written at 2.50). A 30 USD seat on the mean organisation.
+ * The heavy decile's share of the mean seat's cost. The red-team set (illustrative): 0 escapes in 300 → ≤ 3 ÷ 300.
+ */
+export const PAGE_ADDS = (() => {
+  const fleetFor = (arrivingPerDeveloperDay: number) => {
+    const meanPerSecond = (SEATS.dau * arrivingPerDeveloperDay) / 86_400;
+    return sum(
+      COMPLETION_FLEET.regions.map((r) =>
+        Math.ceil(((r.share * meanPerSecond * 4) / COMPLETION_GPU.arrivingPerGpu) * PRICES.gpuHeadroom)
+      )
+    );
+  };
+  const noGate = funnelAt(COMPLETION_BUDGET.debounce);
+  const ungatedArriving = noGate.triggers - (noGate.triggers * noGate.cancelShare) / 3;
+  const requestsPerSeat = (COMPLETION_FLEET.sentPerDay * SEATS.workingDaysPerMonth) / SEATS.seats;
+  const mid = PRICES.mid; // 2.00 in, 0.10 cached, 2.50 cache write, 10.00 out per million (as of November 2026)
+  const chatModel =
+    requestsPerSeat * (usd(COMPLETION_CONTEXT.total, mid.input) + usd(COMPLETION_GPU.outputTokens, mid.output)); // ≈ 334
+  const chatModelCached =
+    requestsPerSeat *
+    (usd(1_510, mid.cached) +
+      usd(COMPLETION_CONTEXT.total - 1_510, mid.cacheWrite) +
+      usd(COMPLETION_GPU.outputTokens, mid.output)); // ≈ 127: the 490 changing tokens are written each request
+  const revenue30 = 30 + COST.markup * Math.max(0, COST.meanUsage - COST.pool);
+  return {
+    gpusIfAllSentArrive: fleetFor(FUNNEL.sent),
+    gpusWithoutGate: fleetFor(ungatedArriving),
+    curveGpus: DEBOUNCE_CURVE.map((f) => ({ debounce: f.debounce, gpus: fleetFor(f.arriving) })),
+    chatModel,
+    chatModelCached,
+    margin30: 1 - COST.meanSeat / revenue30,
+    heavyShareOfMean: (COST.segments[2].share * COST.bySegment[2].cost) / COST.meanSeat,
+    redTeamCases: 300,
+    redTeamBound: 3 / 300,
   };
 })();

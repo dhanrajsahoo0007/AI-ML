@@ -178,10 +178,8 @@ describe("Wave 3 presets under design review", () => {
   it("load and export their top-level constants", async () => {
     const moderation = await import("@/components/diagrams/presets/gcase-moderation");
     const chat = await import("@/components/diagrams/presets/gcase-chat");
-    const code = await import("@/components/diagrams/presets/gcase-code");
     expect(moderation.PLATFORM).toBeDefined();
     expect(chat.TRAFFIC).toBeDefined();
-    expect(code.SEATS).toBeDefined();
   });
 });
 
@@ -192,5 +190,22 @@ describe("gcase-gateway: the LLM platform gateway's numbers", () => {
     expect(PAGE_ADDS.smallInterimShareOfScale).toBeCloseTo(0.58, 2);
     expect(SELF_HOSTED.gpus).toBe(2);
     expect(CANARIES.perDay).toBe(7_200);
+  });
+});
+
+describe("gcase-code: the code assistant's numbers", () => {
+  it("keeps the completion fleet, the cancellation saving and the seat economics", async () => {
+    const { COMPLETION_FLEET, FUNNEL, COST, PAGE_ADDS } = await import("@/components/diagrams/presets/gcase-code");
+    expect(COMPLETION_FLEET.gpus).toBe(355);
+    expect(FUNNEL.sent).toBeCloseTo(5_355, 0);
+    expect(FUNNEL.arriving).toBeCloseTo(4_200, 0);
+    expect(PAGE_ADDS.gpusIfAllSentArrive).toBe(452);
+    expect(PAGE_ADDS.gpusWithoutGate).toBe(591);
+    expect(PAGE_ADDS.curveGpus.map((c) => c.gpus)).toEqual([389, 355, 200, 120]);
+    expect(PAGE_ADDS.chatModel).toBeCloseTo(334, 0);
+    expect(PAGE_ADDS.chatModelCached).toBeCloseTo(127, 0);
+    expect(COST.meanSeat).toBeCloseTo(31.35, 1);
+    expect(PAGE_ADDS.margin30).toBeCloseTo(0.158, 2);
+    expect(PAGE_ADDS.heavyShareOfMean).toBeCloseTo(0.46, 2);
   });
 });

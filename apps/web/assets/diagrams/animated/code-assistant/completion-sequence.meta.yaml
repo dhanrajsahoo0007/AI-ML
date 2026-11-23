@@ -1,0 +1,18 @@
+title: One completion request, cancelled and reused
+alt: >-
+  A sequence diagram with four lanes: an orange developer, a teal IDE plugin, a neutral gateway and a green FIM
+  server, built in three steps. Step 1: the developer types a semicolon; after 75 milliseconds of quiet, the plugin
+  finds the key is not typed-through and the pre-request gate passes, so request c_30 leaves with 2,000 tokens, 490 of
+  them new, and the gateway sends it to the EU region, sticky to the same server. Step 2: the developer types a space
+  120 milliseconds after the semicolon; the plugin sends c_31 marked as superseding c_30; the gateway aborts c_30
+  mid-prefill, which costs about half a request, the way 65% of sent requests end; c_31 reuses 1,510 of its 2,000
+  tokens from the KV prefix, salted per organisation. Step 3: the server drafts the first line from the prefix and
+  streams it back; the filter scores it 0.62 and shows it; ghost text appears 225 milliseconds after the space; the
+  developer types "i", which matches the ghost text, so the plugin trims it on screen with no request; Tab accepts 24
+  characters, and the plugin sends the shown and accepted events in a batch.
+caption: >-
+  The second keystroke cancels the first request mid-prefill; the next request reuses 1,510 of its 2,000 tokens from
+  the KV prefix, and the ghost text lands at 225 ms.
+tags: [genai, code-assistant, sequence, completion, cancellation, case-study]
+source: original
+created: 2026-11-23
