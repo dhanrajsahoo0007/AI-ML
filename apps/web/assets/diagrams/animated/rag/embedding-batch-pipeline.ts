@@ -97,6 +97,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: X[2],
       y: ROW.bottom,
+      w: 122,
       w: W,
     },
     {
