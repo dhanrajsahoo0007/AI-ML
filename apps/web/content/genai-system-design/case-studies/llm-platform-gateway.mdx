@@ -3,7 +3,6 @@ title: "Design an LLM Platform and Gateway"
 description: "Brightpost's internal gateway for every team's model calls: budgets that cannot overspend, safe fallback, cache-aware routing, redaction and cells."
 icon: server
 logo: systems/llm-gateway
-status: outline
 updated: 2026-11-23
 ---
 
@@ -579,7 +578,7 @@ The waterfall puts the gateway's own spans on a millisecond scale, then the fall
 | Drill | Production, monthly, 05:00: one T0 alias 100% on B for 10 minutes at a known load | SLI ≥ 99% good calls; B's headroom recorded |
 | Reconcile | Metered cost per provider workspace against the provider's usage, daily | Gap ≤ 1% |
 
-<AnimatedDiagram spec="animated/llm-gateway/release-gate" caption="The release passes seven checks and fails determinism: a tracing build put the request id into the prompt on half the replicas, so the same input stopped producing the same bytes." />
+<AnimatedDiagram spec="animated/llm-gateway/release-gate" caption="The release fails determinism, and the cache replay with it: a tracing build put the request id into the prompt on half the replicas, so the same input stopped producing the same bytes." />
 
 - **How to read it:** the candidate fans out to eight checks; lime passes and red fails; one red feeds the Block box. The failing check is determinism: a tracing build on half the replicas put the request id into the system prompt, and the replay's cache-read share fell.
 
@@ -660,13 +659,13 @@ The waterfall puts the gateway's own spans on a millisecond scale, then the fall
 
 The breaker is what turns 3,450 ms calls into 550 ms ones.
 
-<AnimatedDiagram spec="animated/serving/route-circuit-breaker" stepper caption="The breaker spends a few failed calls to learn that a provider is down, then stops sending it traffic. After 30 seconds it tests the provider with three probes before trusting it again." />
+<AnimatedDiagram spec="animated/llm-gateway/breaker" stepper caption="The breaker opens on failures and on T0 calls slower than the 800 ms SLI line, so a brownout moves traffic too; one team's workspace 429 never opens it for everyone." />
 
-- **How to read it:** closed counts the last 20 outcomes; 10 failures open it and calls skip A for 30 s; then 3 probes decide whether A is trusted again. The figure's 12 a second counts customer messages, which is 19.8 support agent calls a second here.
+- **How to read it:** closed counts the last 20 outcomes; 10 failures open it and calls skip A for 30 s; then 3 probes decide whether A is trusted again. The figure's 19.8 a second counts support agent calls at peak, so ten failures arrive in about a second.
 
 **The numbers:**
 
-- this page's classifier differs from the concept figure in two ways: a workspace 429 never counts (only that tenant falls back), and a T0 first token later than 800 ms does, with a second trip when slow-or-failed calls pass 10% of a rolling minute.
+- It differs from the concept page's breaker in two ways: a workspace 429 never counts (only that tenant falls back), and a T0 first token later than 800 ms does, with a second trip when slow-or-failed calls pass 10% of a rolling minute.
 
 ### Worked example: 11:00 on sale day, provider A sheds load
 

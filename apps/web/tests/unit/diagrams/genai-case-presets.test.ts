@@ -176,13 +176,21 @@ describe("gcase-kgsemi: the candidate families after the interviewer pass", () =
 // when each page lands.
 describe("Wave 3 presets under design review", () => {
   it("load and export their top-level constants", async () => {
-    const gateway = await import("@/components/diagrams/presets/gcase-gateway");
     const moderation = await import("@/components/diagrams/presets/gcase-moderation");
     const chat = await import("@/components/diagrams/presets/gcase-chat");
     const code = await import("@/components/diagrams/presets/gcase-code");
-    expect(gateway.PROVIDER_LIMITS).toBeDefined();
     expect(moderation.PLATFORM).toBeDefined();
     expect(chat.TRAFFIC).toBeDefined();
     expect(code.SEATS).toBeDefined();
+  });
+});
+
+describe("gcase-gateway: the LLM platform gateway's numbers", () => {
+  it("keeps the canary bound and the interim small-model guarantee", async () => {
+    const { PAGE_ADDS, SELF_HOSTED, CANARIES } = await import("@/components/diagrams/presets/gcase-gateway");
+    expect(PAGE_ADDS.canaryDetectablePoints).toBeCloseTo(5.88, 1);
+    expect(PAGE_ADDS.smallInterimShareOfScale).toBeCloseTo(0.58, 2);
+    expect(SELF_HOSTED.gpus).toBe(2);
+    expect(CANARIES.perDay).toBe(7_200);
   });
 });

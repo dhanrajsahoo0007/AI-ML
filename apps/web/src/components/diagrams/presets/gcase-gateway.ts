@@ -1002,3 +1002,106 @@ export const WALKTHROUGH = (() => {
 
 /** Self-hosted pool S: 2 GPUs, London, open-weights 8B class on vLLM behind an endpoint picker (F33); charged to labs. */
 export const SELF_HOSTED = { gpus: 2, monthlyUsd: 2 * PRICES.gpuHour * 720, region: "London" } as const;
+
+/**
+ * The support agent's first call as the gateway sees it (sheet §11; figure llm-gateway/request-layout), in the order
+ * the Anthropic API caches it (tools → system → messages): the 2,700 stable tokens end at the cache breakpoint and are
+ * never touched; the changing 2,300 (average; evidence comes on half of calls: 2,000 × 0.5 = 1,000) are redacted by
+ * regex and the dictionary; the name scanner reads only the new message, 50 tokens ≈ 200 characters of ≈ 20,000.
+ */
+export const REQUEST_LAYOUT = (() => {
+  const tok = (id: string) => SUP_CONTEXT.blocks.find((b) => b.id === id)?.tokens ?? 0;
+  const evidence = SUP_CONTEXT.averageChanging - (tok("case") + tok("turns") + tok("tool-results") + tok("message")); // 1,000
+  const blocks = [
+    {
+      id: "tools",
+      label: "Tool definitions",
+      tokens: tok("tools"),
+      stable: true,
+      action: "passed through, never re-serialised",
+    },
+    { id: "instructions", label: "Instructions", tokens: tok("instructions"), stable: true, action: "untouched" },
+    {
+      id: "procedure",
+      label: "Procedure",
+      tokens: tok("procedure"),
+      stable: true,
+      action: "untouched; cache breakpoint",
+    },
+    {
+      id: "case",
+      label: "Case state",
+      tokens: tok("case"),
+      stable: false,
+      action: "regex + dictionary, notes included",
+    },
+    {
+      id: "evidence",
+      label: "Evidence",
+      tokens: evidence,
+      stable: false,
+      action: "regex + dictionary (nothing matches)",
+    },
+    {
+      id: "turns",
+      label: "Recent turns",
+      tokens: tok("turns"),
+      stable: false,
+      action: "dictionary: “Hi Sarah Collins” → “Hi [PERSON_7f3a9c]”",
+    },
+    {
+      id: "tool-results",
+      label: "Tool results",
+      tokens: tok("tool-results"),
+      stable: false,
+      action: "dictionary + field rules",
+    },
+    {
+      id: "message",
+      label: "New message",
+      tokens: tok("message"),
+      stable: false,
+      action: "pre-scanned: regex + CPU name scan",
+    },
+  ] as const;
+  const total = sum(blocks.map((b) => b.tokens)); // 5,000
+  const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 2,700
+  return {
+    blocks,
+    total,
+    stable,
+    changing: total - stable, // 2,300
+    bytes: total * RESERVE.bytesPerToken, // ≈ 20,000
+    nerTokens: tok("message"), // 50
+    nerChars: tok("message") * RESERVE.bytesPerToken, // ≈ 200
+    minCacheable: 512, // F27
+  };
+})();
+
+/**
+ * Values the page uses after its interviewer pass (review/llm-platform-gateway-interviewer.md; page-agent notes in
+ * build/llm-platform-gateway/PAGE-NOTES.md), with working.
+ */
+export const PAGE_ADDS = (() => {
+  // Small-model interim guarantee on A until the requested 15M ITPM is granted: 1.2 × the guaranteed need.
+  const smallInterimGuarantee = 5.8e6; // 1.2 × ≈ 4.83M guaranteed small need = 5.80M, 58% of the 10M Scale tier
+  const smallInterimShareOfScale = smallInterimGuarantee / 10e6; // 0.58
+  // Canary detection: 100 prompts at a 90% pass rate, 95% two-sided: 1.96 × √(0.9 × 0.1 ÷ 100) ≈ 0.059 → ≈ 5.9 points.
+  const canaryDetectablePoints = 1.96 * Math.sqrt((0.9 * 0.1) / 100) * 100; // 5.88
+  // Release-gate pass counts (Wilson lower bounds at the gate thresholds; illustrative suite sizes).
+  const gatePassCounts = [
+    { passes: 997, of: 1_000 },
+    { passes: 773, of: 800 },
+  ] as const;
+  // One cold cell's scanner cores beside the steady 18.8 (support ≈ 10.2, voice ≈ 8.6).
+  const coldCellScannerCores = { support: 10.2, voice: 8.6, steady: 18.8 } as const;
+  const returnStepPerMinute = 0.25; // traffic returned to A per minute after a good probe (illustrative)
+  return {
+    smallInterimGuarantee,
+    smallInterimShareOfScale,
+    canaryDetectablePoints,
+    gatePassCounts,
+    coldCellScannerCores,
+    returnStepPerMinute,
+  };
+})();
