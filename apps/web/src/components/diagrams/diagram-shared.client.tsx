@@ -1,28 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import {
-  Activity,
-  Bell,
-  Database,
-  Globe,
-  HardDrive,
-  Layers,
-  MessagesSquare,
-  Network,
-  Pause,
-  Play,
-  Server,
-  Smartphone,
-  Users,
-  Workflow,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { getIconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import { Glyph, isGlyph } from "./glyphs";
 import {
   TONES,
@@ -39,23 +23,6 @@ import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
 // play/pause, stepper, caption), zones, the NEW marker and the travelling packet.
-
-// Lucide fallbacks for icon names that have no drawn glyph.
-export const DIAGRAM_ICONS: Record<string, LucideIcon> = {
-  phone: Smartphone,
-  "load-balancer": Network,
-  chat: MessagesSquare,
-  database: Database,
-  cache: Zap,
-  bell: Bell,
-  blob: HardDrive,
-  socket: Activity,
-  queue: Layers,
-  users: Users,
-  server: Server,
-  globe: Globe,
-  workers: Workflow,
-};
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(false);

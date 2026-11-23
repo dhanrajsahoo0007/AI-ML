@@ -3,7 +3,7 @@
 
 import { SERVICE_BY_ID } from "@/lib/cloud-catalog";
 import { getIconComponent } from "@/lib/icons";
-import { DIAGRAM_ICONS } from "./diagram-shared.client";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import { boundaryTabWidth, zoneTabWidth } from "./diagram-style";
 import { NODE_H, NODE_W, boundsOverlap, nodeBounds, shapeBounds, type Bounds } from "./geometry";
 import { isGlyph } from "./glyphs";

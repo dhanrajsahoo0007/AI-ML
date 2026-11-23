@@ -11,8 +11,8 @@ import {
   type Emphasis,
   type Phase,
 } from "./build-view";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import {
-  DIAGRAM_ICONS,
   Defs,
   DiagramFigure,
   HighlightRing,
