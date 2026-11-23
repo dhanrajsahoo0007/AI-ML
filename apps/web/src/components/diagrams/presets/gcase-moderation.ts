@@ -1,6 +1,6 @@
 // Constants and arithmetic for the "Design a Content Moderation System" case study (/genai-system-design/case-studies/
-// content-moderation-system; design sheet SYSTEM-DESIGN/plans/genai-design/design/content-moderation-system.md v2, after
-// design review round 1; dossier research/content-moderation-system.md, cited as "dossier F12"; review
+// content-moderation-system; design sheet SYSTEM-DESIGN/plans/genai-design/design/content-moderation-system.md v3, after
+// design review rounds 1 and 2; dossier research/content-moderation-system.md, cited as "dossier F12"; review
 // review/content-moderation-system-design.md). Specs in assets/diagrams/animated/moderation/ import from here, so the
 // page, the figures and the tests share one set of numbers.
 //
@@ -414,6 +414,7 @@ export type Flow = {
   accountFp: number;
   accountFn: number;
   toPeople: number; // items a person decides (holds, positives, escalations, disagreements, vetted matches)
+  held: number; // distinct units held out of view (severity 0–1: band + above the release line), counted once
   peopleTp: number;
   peopleFp: number;
   peopleFn: number;
@@ -482,6 +483,7 @@ export function flow(
     accountFp: 0,
     accountFn: 0,
     toPeople: vettedToPeople,
+    held: 0,
     peopleTp: 0,
     peopleFp: 0,
     peopleFn: 0,
@@ -540,6 +542,7 @@ export function flow(
     r.exposedViews += r.modelTp * V * EXPOSURE.model;
   } else {
     // Severity 0–1: held. ≥ pHi to a person; [pLo, pHi) to the model if any.
+    r.held = highV + highG + bandV + bandG;
     peopleV += highV;
     peopleG += highG;
     if (llm) {
@@ -652,22 +655,30 @@ export const CASCADE = (() => {
     vetted: tot((x) => x.all.vettedExact + x.all.vettedToPeople),
     own: tot((x) => x.all.ownTp + x.all.ownFp),
     autoAct: tot((x) => x.all.autoTp + x.all.autoFp),
-    held: tot((x) => (x.sev < 2 ? x.all.toModel + x.all.toPeople - x.all.vettedToPeople : 0)),
+    held: tot((x) => x.all.held), // distinct units (review R2-11)
     prevalence: tot((x) => x.prevalence),
   };
 })();
 export const cascadeOf = (id: FamilyId) => CASCADE.per.find((p) => p.id === id)!;
 
 /**
- * Local law (review 2): a geo-scoped decision, separate from the global terms of service. Content that Kestrel's
- * terms allow but a market's law forbids (illustrative: hate-adjacent text illegal under national law in EU states,
- * the UK and India: 0.01%, 0.003%, 0.005% of that market's text units) is WITHHELD in that market only, with the legal
- * ground in the statement. The hate head scores it (d = 3.2); a withhold is still a speech restriction (cfp 6) and
- * a miss costs the market's legal exposure (cfn 12 EU, 9 UK and India). The same model call carries the market
- * addendum, so a unit already in the hate band needs no extra call; 50% of the local band is outside it (assumption).
+ * Local law (review 2, R2-2): a geo-scoped decision, separate from the global terms of service. The withhold applies
+ * where the law applies: to content accessible in the market that the law defines as illegal there. Proactive scope:
+ * units posted by users in the market, plus units from elsewhere once they pass 1,000 views (RECHECK_REACH.shareUnits;
+ * a reach proxy for material local audience); everything else accessible in the market is covered by notices from it
+ * (Art. 16 illegality notices → the legal queue). Content Kestrel's terms allow but the market's law forbids
+ * (illustrative: 0.01% of EU text units, 0.003% UK, 0.005% India) is scored by the hate head (d = 3.2); cfp 6 (a speech
+ * restriction with a legal-ground statement), cfn 12 (EU) or 9. The model returns `local_illegal[]` in the same call.
+ * A statement that a post is illegal under national law (Art. 17(3)(d)) must be right, so an automated withhold needs a
+ * posterior ≥ 0.8 after the model's "yes": at fpr 3%, fnr 8% that is a classifier P ≥ 0.115 (0.92p ÷ (0.92p + 0.03(1 − p))
+ * = 0.8). Model "yes" between the band's lower edge and 0.115 goes to the legal queue (legal reviewers: 2% / 4%).
+ * 50% of the local band is outside the hate band, so half its calls are extra (assumption).
  */
 export const LOCAL_LAW = (() => {
   const hate = familyById("hate");
+  const llm = hate.llm!;
+  const autoPosterior = 0.8;
+  const split = (autoPosterior * llm.fpr) / ((1 - llm.fnr) * (1 - autoPosterior) + autoPosterior * llm.fpr); // ≈ 0.115
   const markets = [
     { id: "EU" as const, rate: 1e-4, cfn: 12 },
     { id: "UK" as const, rate: 3e-5, cfn: 9 },
@@ -675,31 +686,43 @@ export const LOCAL_LAW = (() => {
   ];
   const rows = markets.map((m) => {
     const share = MARKETS.find((x) => x.id === m.id)!.share;
+    const scope = share + (1 - share) * RECHECK_REACH.shareUnits; // local posters + far-reaching units from elsewhere
     const f: Family = { ...hate, text: { rate: m.rate, d: 3.2, vetted: 0, own: 0 }, image: null, cfp: 6, cfn: m.cfn };
     const e = edges(f);
-    const fl = flow(f, "text")!;
-    const k = share; // the flow ran on all text units; scale to the market
+    const hi = flow(f, "text", { pLo: Math.max(split, e.pLo) })!; // automated part: [split, ∞)
+    const lo = flow(f, "text", { pLo: e.pLo, pHi: Math.max(split, e.pLo) })!; // legal-queue part: model "yes" in [pLo, split)
+    const autoTp = hi.autoTp + hi.modelTp;
+    const autoFp = hi.autoFp + hi.modelFp;
+    const legalItems = lo.modelTp + lo.modelFp + lo.toPeople;
+    const legalTp = (lo.modelTp + (lo.toPeople * lo.violating) / Math.max(1, lo.units)) * (1 - HUMAN.fnr);
+    const legalFp = lo.modelFp * HUMAN.fpr;
+    const peopleTp = hi.peopleTp;
+    const peopleFp = hi.peopleFp;
+    const k = scope;
     return {
       market: m.id,
       tau: e.tau,
       pLo: e.pLo,
       pHi: e.pHi,
-      violating: fl.violating * k,
-      withheldTp: fl.actionedTp * k,
-      withheldFp: fl.actionedFp * k,
-      missed: fl.missed * k,
-      extraCalls: fl.toModel * k * 0.5,
-      toPeople: fl.toPeople * k,
+      split,
+      scope,
+      violating: hi.violating * k,
+      autoTp: autoTp * k,
+      autoFp: autoFp * k,
+      autoPrecision: autoTp / (autoTp + autoFp),
+      legalItems: (legalItems + hi.toPeople) * k,
+      withheldTp: (autoTp + legalTp + peopleTp) * k,
+      withheldFp: (autoFp + legalFp + peopleFp) * k,
+      extraCalls: (lo.toModel + hi.toModel) * k * 0.5,
     };
   });
-  // Art. 16 notices that claim illegality: 5% of EU reports; the model with the market addendum screens them, and the
-  // 20% it finds plausible go to the legal queue (jurisdiction grounds, 90 s).
   const euNotices = PLATFORM.reportedItems * 0.3 * 0.05;
   return {
+    split,
     rows,
     withheld: sum(rows.map((r) => r.withheldTp + r.withheldFp)),
     extraCalls: sum(rows.map((r) => r.extraCalls)),
-    toPeople: sum(rows.map((r) => r.toPeople)),
+    toPeople: sum(rows.map((r) => r.legalItems)),
     euNotices,
     legalQueue: euNotices * 0.2,
   };
@@ -763,8 +786,8 @@ export const REPORTS = (() => {
     peopleGeneral,
     actionsTp,
     actionsFp,
-    notifierNotices: items,
-    notifierNoticesEu: items * 0.3,
+    notifierNotices: PLATFORM.reports, // one per report, deduplicated per (unit, reporter) (review R2-12)
+    notifierNoticesEu: PLATFORM.reports * 0.3,
     notifierAppeals: noAction * 0.01,
     trusted: PLATFORM.trustedFlaggerNotices,
   };
@@ -981,20 +1004,45 @@ export const FALLBACK = (() => {
 // ── Calibration in the tails (sheet §13; review 3) ───────────────────────────────────────────────────────────────
 
 /**
- * Calibration sample: live traffic, stratified by classifier-score bin, so the bins at each operating edge (pLo, tau,
- * pHi) get labels at live base rates. To estimate P ≈ 0.02 within ± 50% (relative) at 95% a bin needs
- * z²(1 − p) ÷ (p · 0.5²) ≈ 753 labels. Per quarter: 3 edges × 753 × 7 families × 13 calibrated language groups,
- * labelled by experts at 30 s, inverse-inclusion weighted. The model's confusion (fpr, fnr) is measured per score bin
- * on the same labels, so the band edges use measured values per bin, not constants. Drift monitors: score PSI per
- * family × language daily, band volume, model–classifier disagreement rate. A language group needs ≥ 753 labels at
- * each edge before automated final actions are allowed in it (LANGUAGES.auto).
+ * Calibration sample (review 3, R2-1): live traffic, stratified by classifier-score bin, so the bin at each operating
+ * edge of each family (pLo, tau, pHi; CSEA and NCII images have no pHi) gets labels at live base rates. Per edge,
+ * n(p) = z²(1 − p) ÷ (p · 0.5²) labels estimate P within ± 50% (relative) at 95%: hate pLo 0.0417 → 354, threats pLo
+ * 0.005 → 3,058, terrorism 0.003 → 5,107, CSEA 0.002 → 7,668. Slices: text streams per language group (13 for hate and
+ * spam; 3 pooled groups for the rare families, whose labels would otherwise take years: EN, other Latin-script, Indic
+ * and Arabic scripts); images one group per family (language means nothing for an image). Per quarter. CSEA and NCII
+ * bins (text and images) are labelled ONLY by specialists (120 s), never in the general pool (N5); the rest by general
+ * experts (30 s). The same labels measure the model's confusion per score bin. Drift monitors: score PSI per family ×
+ * language daily, band volume, model–classifier disagreement. A language group needs n(pLo) labels at its family's lower
+ * edge before automated final actions run in it.
  */
+const nAt = (p: number) => Math.ceil((Z975 * Z975 * (1 - p)) / (p * 0.25));
 export const CALIBRATION = (() => {
-  const perBin = Math.ceil((Z975 * Z975 * (1 - 0.02)) / (0.02 * 0.5 * 0.5)); // 753
-  const groups = LANGUAGES.filter((l) => l.auto).length; // 13
-  const perQuarter = 3 * perBin * FAMILIES.length * groups;
-  const perDay = perQuarter / 91;
-  return { perBin, groups, perQuarter, perDay, hoursPerDay: (perDay * 30) / 3_600, minLabelsForAuto: perBin };
+  const commonGroups = LANGUAGES.filter((l) => l.auto).length; // 13
+  const rareGroups = 3;
+  const rows = FAMILIES.map((f) => {
+    const e = edges(f);
+    const te = f.llmText ? edges(f, f.llmText) : e;
+    const textEdges = f.text ? [te.pLo, te.tau, ...(te.pHi > te.pLo ? [te.pHi] : [])] : [];
+    const imageEdges = f.image ? [e.pLo, e.tau, ...(e.pHi > e.pLo ? [e.pHi] : [])] : [];
+    const groups = f.sev >= 2 ? commonGroups : rareGroups;
+    const textLabels = sum(textEdges.map(nAt)) * groups;
+    const imageLabels = sum(imageEdges.map(nAt));
+    const specialist = f.id === "csea" || f.id === "ncii";
+    return { id: f.id, nLo: nAt(e.pLo), textLabels, imageLabels, perQuarter: textLabels + imageLabels, specialist };
+  });
+  const perQuarter = sum(rows.map((r) => r.perQuarter));
+  const specialistPerDay = sum(rows.filter((r) => r.specialist).map((r) => r.perQuarter)) / 91;
+  const generalPerDay = sum(rows.filter((r) => !r.specialist).map((r) => r.perQuarter)) / 91;
+  return {
+    rows,
+    perQuarter,
+    perDay: perQuarter / 91,
+    specialistPerDay,
+    generalPerDay,
+    specialistHoursPerDay: (specialistPerDay * 120) / 3_600,
+    generalHoursPerDay: (generalPerDay * 30) / 3_600,
+    minLabelsForAuto: Object.fromEntries(rows.map((r) => [r.id, r.nLo])),
+  };
 })();
 
 // ── Measuring what was missed: prevalence (sheet §13, deep dive 4; review 4, 29) ─────────────────────────────────
@@ -1005,9 +1053,13 @@ export const CALIBRATION = (() => {
  * StopNCII and request re-scans). Views are sampled uniformly from the impression log, the content is snapshotted at
  * sample time and stamped with the policy version in force, and every sampled image passes the hash and CSEA classifier
  * first (a hit goes to a specialist, never on).
- * Labeller: the MID model with a measurement prompt (the family's policy text, no classifier scores, no account
- * signals), so it is not the model that made the decisions for hate, graphic and spam (small). For terrorism and threats
- * (enforced by the mid model) independence is partial: a different prompt and inputs, and a doubled human audit.
+ * Labeller (review R2-3): a DIFFERENT MODEL FAMILY from the enforcer: a self-hosted open-weight multimodal model
+ * (Llama 4 class, illustrative) with a measurement prompt (the family's policy text, no classifier scores, no account
+ * signals), so its errors are less correlated with the Claude-class enforcers. Not independent: both read the same
+ * policy text, LLMs share blind spots on new coded terms, and the confirmer is a person from the same review workforce.
+ * Remaining bias, stated: sensitivity is measured on positives found by other routes, which are easier than what slips
+ * past everything, so sensitivity is biased high and prevalence low; the panel is weighted toward misses (later reports
+ * on allowed units, positives from the negative audit), and each family shows N1 at a sensitivity of 0.75.
  * People confirm every labeller positive (so the labeller's false positives are removed) and audit 1% of its
  * negatives (2% for terrorism and threats). Sensitivity is measured each week on live positives found by OTHER routes
  * (confirmed reports, trusted flaggers, upheld appeals; 1,000 a week per family, 200 for terrorism), not on the
@@ -1054,11 +1106,15 @@ export const PREVALENCE = (() => {
     const n4 = nWeek * 4;
     const expected = p * det * n4; // confirmed positives expected in a window
     const ub = poissonUpper95(Math.round(expected)) / (n4 * detLo);
+    const ubAt075v = poissonUpper95(Math.round(expected)) / (n4 * 0.75 * (1 - HUMAN.fnr));
     const lo =
       Math.round(expected) > 0 ? bisect((l) => poissonAtLeast(Math.round(expected), l), 0.025, 0, 1e6) / (n4 * det) : 0;
     const mde = (Z975 + Z80) * Math.sqrt(2 / Math.max(1e-9, expected)); // relative, between two windows
     const nFor25 = nWeek * (mde / 0.25) ** 2; // labels a week for a 25% rise at 80% power
     const audit = id === "terror" || id === "safety" ? 0.02 : 0.01;
+    // Bias row: the same reported count, if true sensitivity were 0.75 instead of 0.90: the true rate is p × 0.90 ÷ 0.75
+    // and the honest 4-week upper bound is the reported one × detLo ÷ (0.75 × 0.96).
+    const pAt075 = (p * sensPoint) / 0.75;
     const humanPerWeek = nWeek * (p * sensPoint + 0.001) + nWeek * audit;
     return {
       id,
@@ -1072,19 +1128,25 @@ export const PREVALENCE = (() => {
       lo4w: lo,
       mde,
       nFor25,
+      pAt075,
+      ubAt075: ubAt075v,
+      within075: pAt075 <= target,
       sensLo,
       humanPerWeek,
     };
   });
   const labelsPerWeek = sum(rows.map((r) => r.nWeek));
   const labelsPerDay = labelsPerWeek / 7;
-  const priceMid = 0.85 * UNIT.midText + 0.15 * UNIT.midImage;
+  // Self-hosted labeller: ≈ 20,700 calls a day × 2,264 tokens ≈ 0.54 tokens a second per call-second; 2 GPUs (one a
+  // region) cover it with room: 2 × 24 × 30 × 2.5 USD a month.
+  const labellerGpus = 2;
   return {
     rows,
     det,
     labelsPerWeek,
     labelsPerDay,
-    modelCostPerDay: labelsPerDay * priceMid,
+    labellerGpus,
+    modelCostPerDay: labellerGpus * 24 * MODEL.gpuHour, // GPU-days, not tokens
     humanLabelsPerDay: sum(rows.map((r) => r.humanPerWeek)) / 7,
   };
 })();
@@ -1145,7 +1207,8 @@ function roster(severeInQueue: number) {
     { id: "notifier appeals", items: APPEALS.notifierAppeals, s: 45, severe: false },
     { id: "QA", items: qaItems * 1.2, s: 30 + (0.1 * 60) / 1.2, severe: false }, // 10% of QA adjudicated (60 s)
     { id: "prevalence", items: PREVALENCE.humanLabelsPerDay, s: 20, severe: false },
-    { id: "calibration", items: CALIBRATION.perDay, s: 30, severe: false },
+    { id: "calibration", items: CALIBRATION.generalPerDay, s: 30, severe: false },
+    { id: "calibration (CSEA, NCII; specialists)", items: CALIBRATION.specialistPerDay, s: 120, severe: true },
   ];
   const hours = (q: { items: number; s: number }) => (q.items * q.s) / 3_600;
   const w = (h: number) => 1 + 0.75 * Math.cos((2 * Math.PI * (h - 20)) / 24);
@@ -1318,6 +1381,15 @@ export const LATENCY = (() => {
   const retry = { p50: modelText.p50, p95: 10_000 + fallback.p95 }; // timeout at 10 s, then the fallback
   // A held threats unit released by the model: visible to others after the pre-publish check + the mid model.
   const heldRelease = { p50: textPre.p50 + modelMid.p50, p95: textPre.p95 + modelMid.p95 };
+  // Held images on the mid model (review R2-14): first token 700 / 1,500 ms with the image.
+  const midImage = gen({ p50: 700, p95: 1_500 }, 70, 45);
+  const heldReleaseImage = {
+    p50: imagePre.p50 + path([enqueue, queueWait, midImage, act]).p50,
+    p95: imagePre.p95 + path([enqueue, queueWait, midImage, act]).p95,
+  };
+  // Held units use a 4 s provider timeout (not 10 s), then the fallback (text) or a person (images), so the held path
+  // stays inside 10 s at p95 on the timeout tail too.
+  const heldRetry = { p95: textPre.p95 + 4_000 + fallback.p95 };
   return {
     stages: {
       hop,
@@ -1351,6 +1423,28 @@ export const LATENCY = (() => {
     fallback,
     retry,
     heldRelease,
+    heldReleaseImage,
+    heldRetry,
+  };
+})();
+
+/**
+ * PhotoDNA degraded mode (review R2-8): while PhotoDNA is down or timing out, the CSEA image band's lower edge drops to
+ * pLo ÷ 10 (0.0002), so re-encoded known images the local exact lists miss but the classifier scores low are held, not
+ * published; after recovery every image from the window is re-checked within 15 minutes, highest-view first. Extra
+ * held images an hour of outage (all go to CSEA specialists, mostly fine images):
+ */
+export const DEGRADED = (() => {
+  const f = familyById("csea");
+  const s = f.image!;
+  const g = PLATFORM.images * (1 - s.rate);
+  const sLo = scoreAt(edges(f).pLo, s.rate, s.d);
+  const sLow = scoreAt(edges(f).pLo / 10, s.rate, s.d);
+  const extraPerDay = g * (phi(sLo) - phi(sLow));
+  return {
+    lowEdge: edges(f).pLo / 10,
+    extraHeldPerHour: extraPerDay / 24,
+    specialistHoursPerOutageHour: ((extraPerDay / 24) * 60) / 3_600,
   };
 })();
 
@@ -1444,6 +1538,13 @@ export const POLICY_CHANGE = (() => {
     backfillMatches,
     backfillCostUsd: backfillMatches * UNIT.smallText,
     backfillActions: backfillMatches * 0.6, // illustrative: 60% of matches violate under the new rule
+    // Backfill load (review R2-5): no strikes for retroactive removals (the statement names the policy and its date);
+    // spread over 7 days, highest-reach first, so its appeals fit the appeal pool. Appeals: 8% of right removals and 25%
+    // of wrong ones (the model's fpr 3% on the ≈ 160,000 fine matches ≈ 4,800, of which 25% appeal); 60 s each.
+    backfillDays: 7,
+    backfillAppeals: backfillMatches * 0.6 * 0.08 + backfillMatches * 0.4 * 0.03 * 0.25,
+    backfillAppealHoursPerDay: ((backfillMatches * 0.6 * 0.08 + backfillMatches * 0.4 * 0.03 * 0.25) * 60) / 3_600 / 7,
+    backfillEuStatements: (backfillMatches * 0.6 + backfillMatches * 0.4 * 0.03) * 0.3,
     canaryQa,
     canaryPrecision,
     steps,
@@ -1464,7 +1565,7 @@ export const POLICY_CHANGE = (() => {
  * slices are warnings (a point drop > 5 points), not gates. Precision is reported reweighted to live band mix.
  * Live guard: per family × market × language × rule, on ratios (QA disagreement in a boosted sample, overturn rate,
  * the newest version's share of actions) with limits from historical variance (overdispersed, × 3 Poisson variance),
- * and a REPLAY of 5,000 known-fine units each hour through the new version: ≥ 4 actions on it in an hour rolls back.
+ * and a REPLAY of 200,000 known-fine units each hour through the live version (threshold below); a trip rolls back.
  */
 export const GATES = (() => {
   const perSide = 500;
@@ -1474,15 +1575,26 @@ export const GATES = (() => {
   const zEach = bisect(phi, 0.9 ** (1 / metrics), -8, 8);
   const margin = (Z95 + zEach) * se;
   const catchProb = (drop: number) => phi((drop - margin) / se + Z95);
+  // Ratchet (review R2-6): P(an equal-or-worse release passes) at true drops of 1, 2, 3 points; so the gate also compares
+  // with a fixed ANCHOR release (reset quarterly with the hold-out refresh): the cumulative drop vs the anchor must also
+  // stay inside the margin. The margin is a function of measured discordance (first shadow per family).
+  const passAtDrop = (drop: number) => 1 - catchProb(drop);
+  const marginAt = (d: number) => (Z95 + zEach) * Math.sqrt(d / perSide);
   // Count guard for comparison (why counts alone fail): hate in Germany ≈ 9% of hate actions.
   const hateHourly = (cascadeOf("hate").actionedTp + cascadeOf("hate").actionedFp) / 24;
   const deHourly = hateHourly * 0.09;
   const deSdOver = Math.sqrt(deHourly * 3);
   const fpShare = cascadeOf("hate").actionedFp / (cascadeOf("hate").actionedTp + cascadeOf("hate").actionedFp);
-  // Replay: 5,000 known-fine units an hour; today's false-action rate on them ≈ 0.01% → Poisson(0.5); ≥ 4 trips
-  // (a false trip ≈ once in 23 days); a bug that raises the rate 10× (Poisson(5)) trips within the hour ≈ 73%.
-  const replayFalseTrip = poissonAtLeast(4, 5_000 * 0.0001);
-  const replayCatchDouble = poissonAtLeast(4, 5_000 * 0.001);
+  // Replay (review R2-9): 200,000 known-fine units an hour through the live version (most stop at the classifier; ≈ 2.6%
+  // reach the model, ≈ 0.5 USD an hour); today's false-action rate on them ≈ 0.01% → Poisson(20). Trip at the smallest k
+  // with a false trip ≤ 0.2% of hours; a 2× bug (Meta's "over 100%", dossier F29) is Poisson(40).
+  const replayUnits = 200_000;
+  const base = replayUnits * 0.0001;
+  let replayK = 1;
+  while (poissonAtLeast(replayK, base) > 0.002) replayK++;
+  const replayFalseTrip = poissonAtLeast(replayK, base);
+  const replayCatchDouble = poissonAtLeast(replayK, base * 2);
+  const replayCatch10x = poissonAtLeast(replayK, base * 10);
   return {
     perSide,
     discordant,
@@ -1491,12 +1603,20 @@ export const GATES = (() => {
     margin,
     catch3: catchProb(0.03),
     catch5: catchProb(0.05),
+    passAt1: passAtDrop(0.01),
+    passAt2: passAtDrop(0.02),
+    passAt3: passAtDrop(0.03),
+    marginAt5: marginAt(0.05),
+    marginAt8: marginAt(0.08),
     hateHourly,
     deHourly,
     deDoublingShare: fpShare, // a doubling of FP adds this share in DE too
     deGuardShare: (4 * deSdOver) / deHourly, // what a 4-sd count guard needs to see
+    replayUnits,
+    replayK,
     replayFalseTrip,
-    replayCatch10x: replayCatchDouble,
+    replayCatch2x: replayCatchDouble,
+    replayCatch10x,
   };
 })();
 
@@ -1569,7 +1689,7 @@ export const LEGAL = (() => {
   const eu = MARKETS.find((m) => m.id === "EU")!.share;
   const euActions = actions * eu;
   const euDemotionsWorstCase = sum(CASCADE.per.filter((p) => p.sev >= 2).map((p) => p.all.toModel)) * eu;
-  const euHoldsWorstCase = sum(CASCADE.per.filter((p) => p.sev < 2).map((p) => p.all.toModel + p.all.toPeople)) * eu;
+  const euHoldsWorstCase = CASCADE.held * eu; // distinct held units (review R2-11)
   return {
     cseaUnitsPerDay: cs.actionedTp,
     cseaReportsPerDay: cs.actionedTp / 1.5, // bundled per upload event (F8)
@@ -1783,5 +1903,19 @@ export const CSEA_TEXT_EDGES = edges(familyById("csea"), familyById("csea").llmT
 /** Extra prevalence-labeller cost a day for hate to see a 25% rise (≈ 137,500 labels a week instead of 35,000). */
 export const PREVALENCE_HATE_25 = (() => {
   const r = prevalenceOf("hate");
-  return { extraPerDay: ((r.nFor25 - r.nWeek) / 7) * (0.85 * UNIT.midText + 0.15 * UNIT.midImage) };
+  // One labeller GPU handles ≈ 100,000 calls a day (illustrative); the 4× hate sample adds ≈ 14,600 a day: no new GPU.
+  const extraPerDay = (r.nFor25 - r.nWeek) / 7;
+  return {
+    extraPerDay,
+    labelsPerDayAfter: PREVALENCE.labelsPerDay + extraPerDay,
+    gpusNeeded: Math.ceil((PREVALENCE.labelsPerDay + extraPerDay) / 100_000),
+  };
 })();
+
+/** Hate's appeal overturn rate against the right-action appeal propensity (review round 2, argued items). */
+export const APPEALS_SENS = [0.04, 0.08, 0.12].map((rightRate) => {
+  const h = cascadeOf("hate");
+  const wrong = h.actionedFp * 0.25;
+  const right = h.actionedTp * rightRate;
+  return { rightRate, overturnRate: (wrong * (1 - HUMAN.fpr) + right * HUMAN.fnr) / (wrong + right) };
+});
