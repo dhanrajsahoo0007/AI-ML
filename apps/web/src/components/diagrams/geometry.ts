@@ -96,6 +96,19 @@ export function routeBetween(from: Bounds, to: Bounds, via: Point[]): Point[] {
   return [start, ...via, end];
 }
 
+const pointBounds = ([x, y]: Point): Bounds => ({ x1: x, y1: y, x2: x, y2: y });
+
+// Arrow route: between two shapes' borders, or from/to a free point (x, y) and (x + w, y + h) for the missing end.
+export function arrowPoints(shape: LayoutShape, byId: Map<string, LayoutShape>): Point[] {
+  const from = shape.from ? byId.get(shape.from) : undefined;
+  const to = shape.to ? byId.get(shape.to) : undefined;
+  const via = shape.via ?? [];
+  const start: Point = [shape.x, shape.y];
+  const end: Point = [shape.x + (shape.w ?? 0), shape.y + (shape.h ?? 0)];
+  if (!from && !to) return [start, ...via, end];
+  return routeBetween(from ? shapeBounds(from) : pointBounds(start), to ? shapeBounds(to) : pointBounds(end), via);
+}
+
 export function pathD(points: Point[]) {
   return points.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
 }

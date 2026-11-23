@@ -34,6 +34,7 @@ import {
   toneText,
   zoneTabWidth,
 } from "./diagram-style";
+import { TAG_H, TAG_W, type TagSpot } from "./new-tags";
 import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
@@ -393,12 +394,17 @@ function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Ph
   );
 }
 
-/** Pulsing dashed outline and "NEW" tag around an element added in the current build step. */
-export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
+/**
+ * Pulsing dashed outline and "NEW" tag around an element added in the current build step. `tag` is where the tag
+ * goes (from placeNewTags in ./new-tags, which keeps it off neighbouring labels); without it the tag sits on the
+ * ring's top-right corner, and `null` draws the ring alone (a touching neighbour's tag covers this one).
+ */
+export function NewRing({ bounds, pad = 7, tag }: { bounds: Bounds; pad?: number; tag?: TagSpot }) {
   const x = bounds.x1 - pad;
   const y = bounds.y1 - pad;
   const w = bounds.x2 - bounds.x1 + pad * 2;
   const h = bounds.y2 - bounds.y1 + pad * 2;
+  const spot = tag === undefined ? { x: x + w - TAG_W, y: y - TAG_H / 2 } : tag;
   return (
     <g data-new="true">
       <rect
@@ -413,18 +419,30 @@ export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
         strokeWidth={2}
         strokeDasharray="5 4"
       />
-      <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: toneText("green") }} />
-      <text
-        x={x + w - 20}
-        y={y + 4}
-        textAnchor="middle"
-        fontSize={10.5}
-        fontWeight={700}
-        letterSpacing={0.6}
-        style={{ fill: "var(--paper)" }}
-      >
-        NEW
-      </text>
+      {spot && (
+        <>
+          <rect
+            x={spot.x}
+            y={spot.y}
+            width={TAG_W}
+            height={TAG_H}
+            rx={TAG_H / 2}
+            style={{ fill: toneText("green") }}
+            data-new-tag="true"
+          />
+          <text
+            x={spot.x + TAG_W / 2}
+            y={spot.y + 13}
+            textAnchor="middle"
+            fontSize={10.5}
+            fontWeight={700}
+            letterSpacing={0.6}
+            style={{ fill: "var(--paper)" }}
+          >
+            NEW
+          </text>
+        </>
+      )}
     </g>
   );
 }

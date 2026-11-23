@@ -37,7 +37,7 @@ export interface MessageTiming {
   duration: number;
 }
 
-interface SequenceView {
+export interface SequenceView {
   width: number;
   height: number;
   lanes: LaneView[];

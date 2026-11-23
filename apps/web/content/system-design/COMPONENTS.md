@@ -1157,6 +1157,12 @@ Layout:
   `sub`): a 44-tall box holds two lines.
 - `weight` is between 0 and 1; `symbol` only on circles; `fill` only on boxes, cells and circles.
 
+NEW tags. In a step view the renderer places each NEW tag itself (`src/components/diagrams/new-tags.ts`): the ring's
+top-right corner when that is clear, else the first clear spot among the other corners, the edge middles, the sides
+and the band above the ring, else the spot that covers least (box edges before text). New elements whose rings touch,
+such as a row of cells added together, share one tag. Nothing to set in the spec, but leave a little room around a
+new element in a crowded figure so its tag has somewhere to go.
+
 Before committing, check the diagram in the browser at desktop width, at 375 px, in dark mode and with reduced motion
 (packets are hidden, rings and dashes stop moving).
 
