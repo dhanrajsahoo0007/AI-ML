@@ -46,6 +46,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -71,6 +72,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -85,6 +87,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -99,6 +102,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -119,6 +123,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -145,6 +150,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -162,6 +168,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -202,6 +209,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -215,6 +223,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -227,6 +236,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -243,6 +253,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -256,6 +267,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
 ];

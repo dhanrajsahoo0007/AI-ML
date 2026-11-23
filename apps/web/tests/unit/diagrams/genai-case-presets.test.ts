@@ -176,9 +176,7 @@ describe("gcase-kgsemi: the candidate families after the interviewer pass", () =
 // when each page lands.
 describe("Wave 3 presets under design review", () => {
   it("load and export their top-level constants", async () => {
-    const moderation = await import("@/components/diagrams/presets/gcase-moderation");
     const chat = await import("@/components/diagrams/presets/gcase-chat");
-    expect(moderation.PLATFORM).toBeDefined();
     expect(chat.TRAFFIC).toBeDefined();
   });
 });
@@ -207,5 +205,22 @@ describe("gcase-code: the code assistant's numbers", () => {
     expect(COST.meanSeat).toBeCloseTo(31.35, 1);
     expect(PAGE_ADDS.margin30).toBeCloseTo(0.158, 2);
     expect(PAGE_ADDS.heavyShareOfMean).toBeCloseTo(0.46, 2);
+  });
+});
+
+describe("gcase-moderation: the content moderation system's numbers", () => {
+  it("keeps the staffing, the prevalence bounds and the per-slice replay", async () => {
+    const { PEOPLE, PREVALENCE_BOUNDS, PREVALENCE_WEEKLY, REPLAY_SLICE } =
+      await import("@/components/diagrams/presets/gcase-moderation");
+    expect(PEOPLE.fte).toBeCloseTo(1_492, 0);
+    expect(PEOPLE.perMonth / 1e6).toBeCloseTo(6.76, 2);
+    const hate = PREVALENCE_BOUNDS.find((r) => r.id === "hate")!;
+    expect(hate.upper95).toBeCloseTo(6.59, 2);
+    expect(hate.twoSided95.lo).toBeCloseTo(4.03, 2);
+    expect(hate.twoSided95.hi).toBeCloseTo(6.83, 2);
+    expect(PREVALENCE_WEEKLY.find((r) => r.id === "hate")!.weeklyFail).toBeCloseTo(0.53, 2);
+    expect(REPLAY_SLICE.k).toBe(84);
+    expect(REPLAY_SLICE.globalDeOnly2x).toBeCloseTo(0.0056, 4);
+    expect(REPLAY_SLICE.catch2x).toBeGreaterThan(0.999);
   });
 });

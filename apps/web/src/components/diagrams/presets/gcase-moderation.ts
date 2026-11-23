@@ -1919,3 +1919,105 @@ export const APPEALS_SENS = [0.04, 0.08, 0.12].map((rightRate) => {
   const right = h.actionedTp * rightRate;
   return { rightRate, overturnRate: (wrong * (1 - HUMAN.fpr) + right * HUMAN.fnr) / (wrong + right) };
 });
+
+// ── Exports added after the interviewer pass (review/content-moderation-system-interviewer.md B1–B4) ─────────────
+
+/**
+ * B1: a WEEKLY N1 test at the design's own rate, by the same method as PREVALENCE.passProb (exact Poisson upper bound
+ * on the confirmed count ÷ (n × detection's lower bound) against the N1 bound), on one week of labels instead of four.
+ * It fails in 53–68% of weeks (terrorism can never pass), which is why N1 is judged on 4-week windows.
+ */
+export const PREVALENCE_WEEKLY = PREVALENCE.rows.map((r) => {
+  const panel4 = (r.id === "terror" ? 200 : 1_000) * 4;
+  const detLo = wilson(0.9 * panel4, panel4).lo * (1 - HUMAN.fnr);
+  let kMax = -1;
+  while (poissonUpper95(kMax + 1) / (r.nWeek * detLo) <= r.target) kMax++;
+  const weeklyPass = kMax < 0 ? 0 : poissonCdf(kMax, r.prevalence * PREVALENCE.det * r.nWeek);
+  return {
+    id: r.id,
+    expectedPositivesWeek: r.prevalence * PREVALENCE.det * r.nWeek,
+    weeklyPass,
+    weeklyFail: 1 - weeklyPass,
+  };
+});
+
+/**
+ * B2: the 4-week bounds, named for what they are (per 10,000 views). `upper95` is a ONE-SIDED 95% upper bound (exact
+ * Poisson on the expected confirmed count, over n × detection at its lower bound ≈ 0.855): the N1 test. `lower2_5` is a
+ * 2.5% lower bound over n × the point detection 0.864. Together they are NOT one interval. `twoSided95` is a two-sided
+ * 95% interval: Poisson 2.5% and 97.5% bounds over n × detection at its upper and lower Wilson bounds.
+ */
+export const PREVALENCE_BOUNDS = PREVALENCE.rows.map((r) => {
+  const panel4 = (r.id === "terror" ? 200 : 1_000) * 4;
+  const w = wilson(0.9 * panel4, panel4);
+  const detLo = w.lo * (1 - HUMAN.fnr);
+  const detHi = w.hi * (1 - HUMAN.fnr);
+  const n4 = r.nWeek * 4;
+  const k = Math.round(r.expectedPositives4w);
+  const lowerPoisson = (q: number) => (k > 0 ? bisect((l) => poissonAtLeast(k, l), q, 0, 1e6) : 0);
+  const upper975 = bisect((l) => -poissonCdf(k, l), -0.025, 0, 1e6);
+  return {
+    id: r.id,
+    confirmed4w: k,
+    detLo,
+    detHi,
+    upper95: (poissonUpper95(k) / (n4 * detLo)) * 1e4,
+    lower2_5: (lowerPoisson(0.025) / (n4 * PREVALENCE.det)) * 1e4,
+    twoSided95: { lo: (lowerPoisson(0.025) / (n4 * detHi)) * 1e4, hi: (upper975 / (n4 * detLo)) * 1e4 },
+  };
+});
+
+/**
+ * B3: OpenAI's multi-policy metric (dossier F17) is JOINT: a sample counts only if every included policy's label is
+ * right, so it falls as policies are added even when each policy's own accuracy is unchanged. It is not a per-policy
+ * degradation figure; the per-policy cost of sharing a prompt is "small but meaningful" with no number published
+ * (dossier F19). Illustration: k independent policies at per-policy accuracy a give a joint accuracy of a^k.
+ */
+export const MULTI_POLICY = {
+  jointAllCorrect: { safeguard120b: 0.463, safeguard20b: 0.436, internalSafetyReasoner: 0.522, gpt5Thinking: 0.432 },
+  perPolicyDegradation: null, // not published; F19: "small but meaningful"
+  jointFromPerPolicy: (a: number, k: number) => a ** k,
+  example: { perPolicy: 0.9, policies: 7, joint: 0.9 ** 7 }, // ≈ 0.478 with no per-policy loss at all
+} as const;
+
+/**
+ * B4: the global replay (GATES.replay*) is for classifier and edge bugs. A one-market bug barely moves it: a 2×
+ * false-positive bug confined to German hate (≈ 9% of hate actions, GATES.deHourly ÷ hateHourly) moves Poisson(20) to
+ * ≈ 21.8 and trips ≈ 0.6% of hours. And ≈ 97.4% of known-fine units stop at the classifier, so a prompt or model bug
+ * touches only the ≈ 2.6% the model judges. Per-slice replay: 2,000 known-fine NEAR-MISS band units an hour per market
+ * × model family (5 × 5 = 25 slices) through the model; at its 3% false-alarm rate that is Poisson(60); trip at the
+ * smallest k with ≤ 0.2% false trips a slice-hour; family-wise, 25 slices give ≈ 25 × that an hour, so a trip needs two
+ * consecutive hours (or a higher k, shown). Cost: 25 × 2,000 small-model calls an hour.
+ */
+export const REPLAY_SLICE = (() => {
+  const deShare = GATES.deHourly / GATES.hateHourly; // 0.09
+  const globalBase = GATES.replayUnits * 0.0001;
+  const globalDeOnly2x = poissonAtLeast(GATES.replayK, globalBase * (1 + deShare));
+  const units = 2_000;
+  const slices = MARKETS.length * 5; // 5 families with a model: terror, safety, hate, graphic, spam
+  const base = units * 0.03;
+  let k = 1;
+  while (poissonAtLeast(k, base) > 0.002) k++;
+  let kStrict = k;
+  while (poissonAtLeast(kStrict, base) > 0.0001) kStrict++;
+  const falseTrip = poissonAtLeast(k, base);
+  const familyWisePerHour = 1 - (1 - falseTrip) ** slices;
+  const twoHours = falseTrip * falseTrip; // a slice trips two consecutive hours by chance
+  return {
+    globalDeOnly2x,
+    units,
+    slices,
+    base,
+    k,
+    falseTrip,
+    catch2x: poissonAtLeast(k, base * 2),
+    catch15x: poissonAtLeast(k, base * 1.5),
+    familyWisePerHour,
+    familyWiseTwoHoursPerDay: 1 - (1 - twoHours) ** (slices * 24),
+    catch2xTwoHours: poissonAtLeast(k, base * 2) ** 2,
+    kStrict,
+    falseTripStrict: poissonAtLeast(kStrict, base),
+    catch2xStrict: poissonAtLeast(kStrict, base * 2),
+    usdPerHour: slices * units * UNIT.smallText,
+  };
+})();
