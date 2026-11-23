@@ -1,22 +1,24 @@
 // Constants and arithmetic for the "Design an LLM Platform and Gateway" case study (/genai-system-design/case-studies/
-// llm-platform-gateway; design sheet SYSTEM-DESIGN/plans/genai-design/design/llm-platform-gateway.md v1, dossier
-// research/llm-platform-gateway.md, cited as "dossier F12"). Specs in assets/diagrams/animated/llm-gateway/ import
-// from here, so the page, the figures and the tests share one set of numbers.
+// llm-platform-gateway; design sheet SYSTEM-DESIGN/plans/genai-design/design/llm-platform-gateway.md v2, dossier
+// research/llm-platform-gateway.md, cited as "dossier F12"; review review/llm-platform-gateway-design.md). Specs in
+// assets/diagrams/animated/llm-gateway/ import from here, so the page, the figures and the tests share one set of numbers.
 //
-// Running example: Brightpost's platform team runs ONE internal gateway that every team's model calls go through. The
-// tenants are the Brightpost systems of the other case studies, with THEIR numbers imported from their presets (one
-// value per fact per system): the support agent (gcase-support), the voice agent (gcase-voice), the employee assistant
-// (gcase-enterprise), accounts-payable extraction (gcase-docextract), plus the concept page's catalogue writer and labs
-// keys (production-gateway TEAM_KEYS). The concept pages' single-call support assistant (2,200 in / 250 out) is the
-// simplified version of the same team; this page uses the support agent's own call shapes.
+// Running example: Brightpost's platform team runs ONE internal gateway that every Brightpost model call goes through
+// (the platform rule: no team holds a provider key). The tenants are the Brightpost systems of the other case studies,
+// with THEIR numbers imported from their presets (one value per fact per system): the support agent (gcase-support),
+// the voice agent (gcase-voice), the employee assistant (gcase-enterprise), accounts-payable extraction
+// (gcase-docextract), plus the concept page's catalogue writer and labs keys (production-gateway TEAM_KEYS).
 //
-// Model prices: list prices as of November 2026 from presets/gcase-answer.ts PRICES (mid-size Claude Sonnet 5.5 class
-// 2.00 input / 0.10 cache read / 2.50 5-minute write / 10.00 output USD per million; small Claude Haiku 5.5 class
-// 0.10 / 0.01 / 0.125 / 0.50). Provider limits: Anthropic Scale tier, Sonnet 5.5 and Haiku 5.5 each 13,000 RPM,
-// 10,000,000 ITPM (uncached input + cache writes only), 2,000,000 OTPM; monthly spend cap 200,000 USD (dossier F10–F13).
-// Everything else (shares, durations, gateway spans, pod and GPU sizes, headcount) is ILLUSTRATIVE unless a comment
-// names a dossier fact. p95 of a path = p50 + root-sum-square of stage spreads (independent tails); the stage-sum bound
-// is given beside it.
+// Model prices: list prices as of November 2026 from presets/gcase-answer.ts PRICES (mid Claude Sonnet 5.5 class 2.00
+// input / 0.10 cache read / 2.50 5-minute write / 10.00 output USD per million; small Claude Haiku 5.5 class 0.10 /
+// 0.01 / 0.125 / 0.50). Provider A limits: Anthropic Scale tier, Sonnet 5.5 and Haiku 5.5 each 13,000 RPM, 10M ITPM
+// (uncached input + cache writes only), 2M OTPM; spend cap 200,000 USD a month (dossier F10–F13). Provider B quota
+// model: Bedrock deducts input + max_tokens at the start of a request and settles input + cache writes + output ×
+// burndown; cache reads do not count; one TPM bucket for input and output (dossier F56). Sonnet 5.5's and Haiku 5.5's
+// burndown is not listed (5× for ≤ 4.7, 10× for Opus 5.5 and Sonnet 5): this file uses 10× and shows 5×.
+// Everything else (shares, durations, spans, bytes per token, pods, headcount, availability inputs) is ILLUSTRATIVE
+// unless a comment names a dossier fact. p95 of a path = p50 + root-sum-square of stage spreads; the stage-sum bound is
+// given beside it.
 
 import { PRICES } from "./gcase-answer";
 import {
@@ -48,29 +50,33 @@ const sum = (xs: readonly number[]) => xs.reduce((s, x) => s + x, 0);
 const rss = (xs: readonly number[]) => Math.sqrt(sum(xs.map((x) => x * x)));
 const M = 1_000_000;
 
-// ── Provider limits (dossier F12, F13) ──────────────────────────────────────────────────────────────────────────────
+// ── Provider limits ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Anthropic Scale tier, per model class (Sonnet 5.5 = mid, Haiku 5.5 = small), as of November 2026. */
+/** A: Anthropic Scale tier per model class (F12, F13). B: Bedrock's quota model (F56); the granted quota is an input. */
 export const PROVIDER_LIMITS = {
   mid: { rpm: 13_000, itpm: 10_000_000, otpm: 2_000_000 },
-  small: { rpm: 13_000, itpm: 10_000_000, otpm: 2_000_000 },
-  monthlySpendCapUsd: 200_000, // Scale tier; at the cap every request gets a 429 with no retry-after (F13)
-  /** Guaranteed quotas may add up to at most this share of a provider limit; the rest is the shared burst pool. */
+  /** Haiku 5.5 on A: Scale tier 10M ITPM; the design REQUESTS 15M (Custom tier, F12), because guaranteed small quotas need 7.3M. */
+  small: { rpm: 13_000, itpm: 10_000_000, otpm: 2_000_000, itpmRequested: 15_000_000 },
+  monthlySpendCapUsd: 200_000,
   guaranteedShareMax: 0.6,
+  bedrock: { burndown: 10, burndownLow: 5 },
 } as const;
 
 // ── Tenants: each team's own numbers, imported ──────────────────────────────────────────────────────────────────────
 
 /**
- * Support agent (gcase-support). Per customer message, 1.65 mid calls in three shapes (50% no tool, 35% one, 15% two):
- *   uncached-or-written input (counts toward ITPM, F10): no tool 2,300; one tool 2,300 + 300 = 2,600; two tools 2,900
- *     → 0.5 × 2,300 + 0.35 × 2,600 + 0.15 × 2,900 = 2,495 a message;
- *   cache reads: no tool 2,700; one tool 2,700 + 5,000; two tools 2,700 + 5,300 + 5,600
- *     → 1,350 + 2,695 + 2,040 = 6,085 a message (all input = 8,580);
- *   output: 120; 30 + 120; 30 + 30 + 120 → 60 + 52.5 + 27 = 139.5 a message (84.5 a call).
- * Small calls through the gateway: the router (600 in, 50 out) and the supervisor (2,800 in, 40 out), 2 a message.
- * (The bad-actor classifier runs inside the support service, not through the gateway.)
- * Peak: 12 messages a second (TRAFFIC.peakPerSecond, a sale day) → 19.8 mid + 24 small calls a second.
+ * Support agent (gcase-support). Per customer message, 1.65 mid agent calls in three shapes (50% no tool, 35% one, 15%
+ * two):
+ *   uncached input 2,300 a message on every shape's first call + 300 a follow-up; the first call of a one- or two-tool
+ *   message WRITES its 2,300 (cache_creation, billed 2.50, counted toward ITPM) so the follow-ups can read them;
+ *   counted ITPM (input + writes) = 0.5 × 2,300 + 0.35 × 2,600 + 0.15 × 2,900 = 2,495 a message;
+ *   cache reads 0.5 × 2,700 + 0.35 × (2,700 + 5,000) + 0.15 × (2,700 + 5,300 + 5,600) = 6,085 (all input 8,580);
+ *   output 0.5 × 120 + 0.35 × 150 + 0.15 × 180 = 139.5 a message (84.5 a call).
+ * Other model calls (all through the gateway): router and supervisor (small, 600 and 2,800 in, 50 and 40 out), the
+ * bad-actor classifier (small, 600 in, 10 out, illustrative, 0.0001 USD in its sheet), hand-off summaries (mid,
+ * 0.32 a conversation = 0.08 a message, 2,500 in + 100 out, illustrative, 0.006 USD), the conversation judge (small,
+ * 0.25 a message, DEFERRED to an off-peak batch alias).
+ * Peak 12 messages a second: on-path calls 12 × (1.65 + 2 + 1 + 0.08) = 56.76 a second.
  */
 export const SUPPORT = (() => {
   const sh = SUP_VOLUME.shapes;
@@ -78,185 +84,208 @@ export const SUPPORT = (() => {
   const followNew = SUP_OUTPUT.followUpNewTokens; // 300
   const stable = SUP_CONTEXT.stable; // 2,700
   const total = SUP_CONTEXT.averageTotal; // 5,000
-  const uncachedPerMessage = sh.none * changing + sh.one * (changing + followNew) + sh.two * (changing + 2 * followNew); // 2,495
+  const uncachedPerMessage = sh.none * changing + sh.one * (changing + followNew) + sh.two * (changing + 2 * followNew);
   const cachedPerMessage =
-    sh.none * stable + sh.one * (stable + total) + sh.two * (stable + (total + followNew) + (total + 2 * followNew)); // 6,085
+    sh.none * stable + sh.one * (stable + total) + sh.two * (stable + (total + followNew) + (total + 2 * followNew));
   const outputPerMessage =
     sh.none * SUP_OUTPUT.reply +
     sh.one * (SUP_OUTPUT.toolCall + SUP_OUTPUT.reply) +
-    sh.two * (2 * SUP_OUTPUT.toolCall + SUP_OUTPUT.reply); // 139.5
+    sh.two * (2 * SUP_OUTPUT.toolCall + SUP_OUTPUT.reply);
   const midCallsPerMessage = SUP_VOLUME.modelCallsPerMessage; // 1.65
   const peakMessagesPerSecond = TRAFFIC.peakPerSecond; // 12
-  const small = { calls: 2, inputPerMessage: 600 + 2_800, outputPerMessage: 50 + 40 };
+  const perMessage = { router: 1, supervisor: 1, badActor: 1, handoff: 0.08, judge: 0.25 };
+  const onPathPerMessage =
+    midCallsPerMessage + perMessage.router + perMessage.supervisor + perMessage.badActor + perMessage.handoff; // 4.73
+  const small = { inputPerMessage: 600 + 2_800 + 600, outputPerMessage: 50 + 40 + 10 }; // 4,000 / 100
+  const messagesPerDay = SUP_VOLUME.messagesPerDay; // 200,000
   return {
-    uncachedPerMessage,
-    cachedPerMessage,
+    uncachedPerMessage, // 2,495
+    cachedPerMessage, // 6,085
     inputPerMessage: uncachedPerMessage + cachedPerMessage, // 8,580
-    outputPerMessage,
+    inputPerCall: (uncachedPerMessage + cachedPerMessage) / midCallsPerMessage, // 5,200
+    outputPerMessage, // 139.5
     outputPerCall: outputPerMessage / midCallsPerMessage, // 84.5
     midCallsPerMessage,
     peakMessagesPerSecond,
+    perMessage,
+    onPathPerMessage,
     peakMidCallsPerSecond: peakMessagesPerSecond * midCallsPerMessage, // 19.8
-    peakSmallCallsPerSecond: peakMessagesPerSecond * small.calls, // 24
+    peakOnPathPerSecond: peakMessagesPerSecond * onPathPerMessage, // 56.76
     small,
-    midCallsPerDay: SUP_VOLUME.modelCallsPerDay, // 330,000
-    smallCallsPerDay: SUP_VOLUME.messagesPerDay * small.calls, // 400,000
-    spendPerDay: SUP_COST.perDay, // ≈ 1,801 USD
+    callsPerDay: messagesPerDay * (onPathPerMessage + perMessage.judge), // 996,000
+    deferredPerDay: messagesPerDay * perMessage.judge, // 50,000
+    spendPerDay: SUP_COST.perDay, // ≈ 1,801 USD (its own sheet; includes every call above)
     agentPerMessage: SUP_COST.agentPerMessage, // 0.00759 USD
   };
 })();
 
 /**
- * Voice agent (gcase-voice). 7.2 model calls a call-minute, 30% mid and 70% small (its COST.blended). Each call:
- * 2,000 cached + 1,600 changing input, 25 out. Peak = a sale day's 192 concurrent calls → 192 × 7.2 ÷ 60 = 23.04
- * calls a second (6.91 mid, 16.13 small). Model spend a day = (agent 0.00885 + other 0.00235) × 32,000 min ≈ 358.5.
+ * Voice agent (gcase-voice). Per call-minute: 7.2 agent calls (of which 0.6 × 4 = 2.4 are speculative pre-emptive
+ * generations, many cancelled), 30% mid; plus a turn detector 4 a minute (small, 300 in, illustrative), a judge 4 a
+ * minute (DEFERRED), a briefing 0.5 a call = 0.125 a minute (mid), hedges 0.1 × 0.3 × 7.2 = 0.216 a minute (mid; the
+ * gateway runs them, §15.2). Each agent call: 2,000 cached + 1,600 changing input, 25 out.
+ * Peak = a sale day's 192 concurrent calls: on-path 192 × (7.2 + 4 + 0.125 + 0.216) ÷ 60 = 36.93 a second.
  */
 export const VOICE = (() => {
   const callsPerMinute = VOICE_TURNS.callsPerMinute; // 7.2
   const midShare = 0.3;
-  const peakCallsPerSecond = (VOICE_CALLS.salesDayConcurrent * callsPerMinute) / 60; // 23.04
+  const conc = VOICE_CALLS.salesDayConcurrent; // 192
+  const other = {
+    detector: 4,
+    judge: 4,
+    briefing: 0.5 / VOICE_CALLS.minutesPerCall,
+    hedge: 0.1 * 0.3 * callsPerMinute,
+  };
+  const onPathPerMinute = callsPerMinute + other.detector + other.briefing + other.hedge; // 11.541
+  const speculativePerMinute = 0.6 * VOICE_TURNS.perMinute; // 2.4
+  const minutes = VOICE_CALLS.minutesPerDay; // 32,000
   return {
     callsPerMinute,
     midShare,
-    peakCallsPerSecond,
-    peakMidCallsPerSecond: peakCallsPerSecond * midShare, // 6.912
-    peakSmallCallsPerSecond: peakCallsPerSecond * (1 - midShare), // 16.128
+    other,
+    peakAgentCallsPerSecond: (conc * callsPerMinute) / 60, // 23.04
+    peakMidCallsPerSecond: (conc * callsPerMinute * midShare) / 60, // 6.912
+    peakSmallAgentCallsPerSecond: (conc * callsPerMinute * (1 - midShare)) / 60, // 16.128
+    peakOnPathPerSecond: (conc * onPathPerMinute) / 60, // 36.93
+    peakSpeculativePerSecond: (conc * speculativePerMinute) / 60, // 7.68
     uncachedPerCall: VOICE_CONTEXT.changing, // 1,600
     cachedPerCall: VOICE_CONTEXT.stable, // 2,000
     outputPerCall: VOICE_TURNS.replyTokens, // 25
-    callsPerDay: callsPerMinute * VOICE_CALLS.minutesPerDay, // 230,400
-    spendPerDay: (VOICE_COST.agentModel + VOICE_COST.otherModel) * VOICE_CALLS.minutesPerDay, // ≈ 358.5
-    firstTokenMs: 400, // the voice budget's model first token (gcase-voice BUDGET.firstToken)
+    detectorInput: 300,
+    callsPerDay: (onPathPerMinute + other.judge) * minutes, // 497,312
+    deferredPerDay: other.judge * minutes, // 128,000
+    spendPerDay: (VOICE_COST.agentModel + VOICE_COST.otherModel + VOICE_COST.hedges) * minutes, // ≈ 384
+    firstTokenMs: 400,
   };
 })();
 
 /**
- * Employee assistant (gcase-enterprise). Calls a turn by type (answer 65%, lookup 15%, write 8%, agent 5%, other 7%):
- *   mid: 0.65 × 1 + 0.15 × 2 + 0.08 × 1 + 0.05 × 6 = 1.33;
- *   small: router 1 + checks (0.65 + 0.05) + other 0.07 + memory 1/3 = 2.103.
- * Uncached-or-written mid input a turn: 0.65 × 4,390 + 0.15 × (870 + 60 + 800) + 0.08 × 870 + 0.05 × Σ agent newIn
- * (870 + 1,840 + 860 + 860 + 1,840 + 860 = 7,130) = 2,853.5 + 259.5 + 69.6 + 356.5 = 3,539.1.
- * Output a turn (mid): 0.65 × 250 + 0.15 × (60 + 200) + 0.08 × 120 + 0.05 × 560 = 162.5 + 39 + 9.6 + 28 = 239.1.
- * Peak 0.757 turns a second (its COMPANY.peakPerSecond).
+ * Employee assistant (gcase-enterprise), on a WEEKDAY basis (calls and spend alike):
+ *   mid calls a turn 0.65 × 1 + 0.15 × 2 + 0.08 × 1 + 0.05 × 6 = 1.33; small 1 + 0.65 + 0.05 + 0.07 + 1/3 = 2.103;
+ *   counted mid input a turn 0.65 × 4,390 + 0.15 × 1,730 + 0.08 × 870 + 0.05 × 7,130 = 3,539; output 239.1;
+ *   cold mid input a turn (no cache) 0.65 × 7,876 + 0.15 × 23,706 + 0.08 × 11,423 + 0.05 × 48,896 ≈ 12,034;
+ *   counted small input a turn: router 300 (its 800-token prefix is cached) + checks 0.70 × 4,070 + other 0.07 × 1,500 +
+ *   memory 2,000 ÷ 3 ≈ 3,921.
+ * Spend a weekday = 14,430 × 0.0110 + 964 ÷ 30 ≈ 191 USD.
  */
 export const ASSISTANT = (() => {
   const mix = ENT_COST.mix;
-  const midCallsPerTurn = mix.answer * 1 + mix.lookup * 2 + mix.write * 1 + mix.agent * ENT_AGENT.calls.length; // 1.33
-  const smallCallsPerTurn = 1 + mix.answer + mix.agent + mix.other + 1 / ENT_COMPANY.turnsPerConversation; // 2.103
+  const midCallsPerTurn = mix.answer * 1 + mix.lookup * 2 + mix.write * 1 + mix.agent * ENT_AGENT.calls.length;
+  const smallCallsPerTurn = 1 + mix.answer + mix.agent + mix.other + 1 / ENT_COMPANY.turnsPerConversation;
   const agentNew = sum(ENT_AGENT.calls.map((c) => c.newIn));
+  const agentAll = sum(ENT_AGENT.calls.map((c) => c.newIn + c.cachedIn));
   const c = ENT_CONTEXT;
+  const lookupAll = 2 * (10_553 + c.turnState) + c.toolCallOut + c.toolResult; // 23,706 (its CAPACITY.lookupIn)
   const uncachedPerTurn =
     mix.answer * c.changing +
     mix.lookup * (c.turnState + c.toolCallOut + c.toolResult) +
     mix.write * c.turnState +
-    mix.agent * agentNew; // ≈ 3,539
+    mix.agent * agentNew;
+  const coldPerTurn =
+    mix.answer * c.total + mix.lookup * lookupAll + mix.write * (10_553 + c.turnState) + mix.agent * agentAll;
   const outputPerTurn =
     mix.answer * c.answerOut +
     mix.lookup * (c.toolCallOut + c.lookupReplyOut) +
     mix.write * c.writeArgsOut +
-    mix.agent * sum(ENT_AGENT.calls.map((x) => x.out)); // ≈ 239
+    mix.agent * sum(ENT_AGENT.calls.map((x) => x.out));
+  const smallInputPerTurn =
+    300 + (mix.answer + mix.agent) * (300 + c.evidence + c.answerOut) + mix.other * 1_500 + 2_000 / 3;
   const peakTurnsPerSecond = ENT_COMPANY.peakPerSecond; // 0.757
   return {
     midCallsPerTurn,
     smallCallsPerTurn,
-    uncachedPerTurn,
-    outputPerTurn,
+    uncachedPerTurn, // ≈ 3,539
+    coldPerTurn, // ≈ 12,034
+    outputPerTurn, // ≈ 239
+    smallInputPerTurn, // ≈ 3,921
     peakTurnsPerSecond,
-    peakCallsPerSecond: peakTurnsPerSecond * (midCallsPerTurn + smallCallsPerTurn), // ≈ 2.60
-    callsPerWeekday: ENT_COMPANY.weekdayTurns * (midCallsPerTurn + smallCallsPerTurn), // ≈ 49,540
-    spendPerDay: ENT_COST.perMonth / 30, // ≈ 159 USD (≈ 4,777 a month)
+    peakOnPathPerSecond: peakTurnsPerSecond * (midCallsPerTurn + smallCallsPerTurn), // ≈ 2.60
+    callsPerDay: ENT_COMPANY.weekdayTurns * (midCallsPerTurn + smallCallsPerTurn), // ≈ 49,540
+    spendPerDay: ENT_COMPANY.weekdayTurns * ENT_COST.blended + ENT_COST.prefixWritesPerMonth / 30, // ≈ 191
+    spendPerMonth: ENT_COST.perMonth, // ≈ 4,777
   };
 })();
 
 /**
- * Accounts-payable extraction (gcase-docextract). EU-only: its models run through Bedrock's EU geographic profile
- * (its sheet; dossier F34). Calls a document: 2 page-classifier calls + 1 extraction = 3 for an invoice; a receipt 2
- * (classifier + receipt read). Normal day 1,625 invoices + 1,428.6 receipts → 4,875 + 2,857 = 7,732 calls. Peak 0.176
- * documents a second × 3 ≈ 0.53 calls a second. Model spend 854.6 USD a month ≈ 28.5 a day.
+ * AP extraction (gcase-docextract): UK or EU processing (Bedrock London's EU geographic profile; bank details masked by
+ * AP before any model call). Normal day 1,625 invoices × 3 + 1,428.6 receipts × 2 = 7,732 calls; peak 0.176 documents
+ * a second × 3 ≈ 0.53 calls a second; 854.6 USD a month ≈ 28.5 a day.
  */
-export const AP = (() => {
-  const callsPerDay = AP_VOLUME.normalDayInvoices * 3 + AP_VOLUME.receiptsPerDay * 2; // ≈ 7,732
-  return {
-    callsPerDay,
-    peakCallsPerSecond: AP_VOLUME.peakDocsPerSecond * 3, // ≈ 0.53
-    spendPerDay: AP_COST.modelsMonthly / 30, // ≈ 28.5
-    residency: "eu" as const,
-  };
-})();
+export const AP = (() => ({
+  callsPerDay: AP_VOLUME.normalDayInvoices * 3 + AP_VOLUME.receiptsPerDay * 2,
+  peakOnPathPerSecond: AP_VOLUME.peakDocsPerSecond * 3,
+  spendPerDay: AP_COST.modelsMonthly / 30,
+  spendPerMonth: AP_COST.modelsMonthly,
+  residency: "uk-or-eu" as const,
+}))();
 
-/**
- * Catalogue writer (concept page, illustrative): 20,000 descriptions a night × 800 in + 400 out on the small model
- * through the Batch API (−50%, AP_PRICES.batchDiscount): 20,000 × (800 × 0.10 + 400 × 0.50) ÷ 1M × 0.5 = 2.80 USD.
- * Runs 01:00–05:00, never at the day peak. Batch keeps data 29 days and is not ZDR-eligible (F45): its tag allows it.
- */
+/** Catalogue writer: 20,000 × (800 in, 400 out) small, Batch API −50%: 2.80 USD a night; never at the day peak. */
 export const CATALOGUE = (() => {
   const items = 20_000;
   const input = (TEAM_KEYS.catalogue.inputM * M) / items; // 800
   const output = (TEAM_KEYS.catalogue.outputM * M) / items; // 400
-  return {
-    items,
-    input,
-    output,
-    callsPerDay: items,
-    spendPerDay: items * (usd(input, PRICES.small.input) + usd(output, PRICES.small.output)) * AP_PRICES.batchDiscount, // 2.80
-    budgetTokensPerDay: TEAM_KEYS.catalogue.budgetM * M, // 40M
-  };
+  const spendPerDay =
+    items * (usd(input, PRICES.small.input) + usd(output, PRICES.small.output)) * AP_PRICES.batchDiscount;
+  return { items, input, output, callsPerDay: items, spendPerDay, spendPerMonth: spendPerDay * 30 };
 })();
 
 /**
- * Labs (concept page): 30M tokens a day of the mid model, its own key, at most 20 requests in flight, prompts capped
- * at 32,000 tokens (the rate-limiting page's per-prompt cap) and max_tokens capped at 2,048.
- * A worst-case request: 32,000 + 2,048 = 34,048 tokens; 32,000 × 2.00 + 2,048 × 10.00 per million = 0.0845 USD.
- * Duration of a worst-case request ≈ 600 ms prefill + 2,048 × 12.5 ms = 26.2 s, so 20 in flight ≈ 0.76 a second.
- * Calls a day ≈ 30M ÷ 5,000 tokens on a typical call (illustrative) = 6,000. Spend ≤ 30M at 90% in / 10% out
- * = 27M × 2.00 + 3M × 10.00 = 84 USD a day.
+ * Labs: 30M mid tokens a day ≈ 84 USD (27M in × 2.00 + 3M out × 10.00), held as an 84 USD daily budget; ≤ 20 in
+ * flight; prompts ≤ 32,000 tokens; max_tokens ≤ 2,048; ITPM cap 200,000. A worst request lasts 0.6 + 2,048 × 12.5 ms =
+ * 26.2 s. Under its own ITPM cap at most ⌊200,000 ÷ 32,000⌋ = 6 worst-case prompts are admitted in a minute (review
+ * item 35); the charge-after comparison below assumes 20 because those products also count ITPM after the call.
+ * S (self-hosted, 2 GPUs, 3,600 USD a month) is charged to labs: 120 USD a day.
  */
 export const LABS = (() => {
   const budgetTokens = TEAM_KEYS.labs.budgetM * M; // 30M
+  const budgetUsd = usd(0.9 * budgetTokens, PRICES.mid.input) + usd(0.1 * budgetTokens, PRICES.mid.output); // 84
   const maxParallel = 20;
   const promptCap = 32_000;
   const maxTokensCap = 2_048;
+  const itpmCap = 200_000;
   const worstTokens = promptCap + maxTokensCap; // 34,048
-  const worstUsd = usd(promptCap, PRICES.mid.input) + usd(maxTokensCap, PRICES.mid.output); // 0.08448
   const worstDurationS = 0.6 + (maxTokensCap * 12.5) / 1_000; // 26.2
   return {
     budgetTokens,
+    budgetUsd,
     maxParallel,
     promptCap,
     maxTokensCap,
+    itpmCap,
     worstTokens,
-    worstUsd,
     worstDurationS,
-    peakCallsPerSecond: maxParallel / worstDurationS, // 0.763
+    worstPerMinuteUnderCap: Math.floor(itpmCap / promptCap), // 6
+    peakOnPathPerSecond: maxParallel / worstDurationS, // 0.763
     callsPerDay: budgetTokens / 5_000, // 6,000
-    spendPerDayMax: usd(0.9 * budgetTokens, PRICES.mid.input) + usd(0.1 * budgetTokens, PRICES.mid.output), // 84
+    spendPerDay: budgetUsd,
+    selfHostedPerDay: (2 * PRICES.gpuHour * 720) / 30, // 120
   };
 })();
 
 // ── Traffic at the gateway ──────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Calls a day: support 330,000 + 400,000; voice 230,400; assistant ≈ 49,540 (weekday); AP ≈ 7,732; catalogue 20,000;
- * labs 6,000 → ≈ 1.04M. Peak (sale day, daytime): support 19.8 + 24 = 43.8; voice 23.04; assistant 2.60; AP 0.53;
- * labs 0.76; catalogue 0 (night) → ≈ 70.7 calls a second. Model spend ≈ 1,801 + 358.5 + 159 + 28.5 + 2.8 + 84
- * ≈ 2,434 USD a day ≈ 73,000 a month (labs at its cap), 37% of the Scale-tier spend cap (Bedrock spend separate).
+ * Calls a day (all model calls; judges deferred to the night): support 996,000; voice 497,312; assistant ≈ 49,540;
+ * AP ≈ 7,732; catalogue 20,000; labs 6,000 → ≈ 1.58M. On-path peak: support 56.76 + voice 36.93 + assistant 2.60 +
+ * AP 0.53 + labs 0.76 ≈ 97.6 a second. Model spend a weekday ≈ 1,801 + 384 + 191 + 28.5 + 2.80 + 84 ≈ 2,491 USD; a
+ * month ≈ 54,036 + 11,513 + 4,777 + 855 + 84 + 2,520 ≈ 73,800 (A's share 72,900 = 36.5% of the spend cap).
  */
 export const TRAFFIC_GW = (() => {
   const perDay = {
-    support: SUPPORT.midCallsPerDay + SUPPORT.smallCallsPerDay,
+    support: SUPPORT.callsPerDay,
     voice: VOICE.callsPerDay,
-    assistant: ASSISTANT.callsPerWeekday,
+    assistant: ASSISTANT.callsPerDay,
     ap: AP.callsPerDay,
     catalogue: CATALOGUE.callsPerDay,
     labs: LABS.callsPerDay,
   };
   const peak = {
-    support: SUPPORT.peakMidCallsPerSecond + SUPPORT.peakSmallCallsPerSecond,
-    voice: VOICE.peakCallsPerSecond,
-    assistant: ASSISTANT.peakCallsPerSecond,
-    ap: AP.peakCallsPerSecond,
+    support: SUPPORT.peakOnPathPerSecond,
+    voice: VOICE.peakOnPathPerSecond,
+    assistant: ASSISTANT.peakOnPathPerSecond,
+    ap: AP.peakOnPathPerSecond,
     catalogue: 0,
-    labs: LABS.peakCallsPerSecond,
+    labs: LABS.peakOnPathPerSecond,
   };
   const spendPerDay = {
     support: SUPPORT.spendPerDay,
@@ -264,187 +293,213 @@ export const TRAFFIC_GW = (() => {
     assistant: ASSISTANT.spendPerDay,
     ap: AP.spendPerDay,
     catalogue: CATALOGUE.spendPerDay,
-    labs: LABS.spendPerDayMax,
+    labs: LABS.spendPerDay,
   };
-  const callsPerDay = sum(Object.values(perDay)); // ≈ 1,043,700
-  const peakPerSecond = sum(Object.values(peak)); // ≈ 70.7
-  const spend = sum(Object.values(spendPerDay)); // ≈ 2,434
-  const anthropicSpendPerMonth = (spend - AP.spendPerDay) * 30; // AP runs on Bedrock
+  const spendPerMonth =
+    SUPPORT.spendPerDay * 30 +
+    VOICE.spendPerDay * 30 +
+    ASSISTANT.spendPerMonth +
+    AP.spendPerMonth +
+    CATALOGUE.spendPerMonth +
+    LABS.spendPerDay * 30;
+  const anthropicPerMonth = spendPerMonth - AP.spendPerMonth;
   return {
     perDay,
     peak,
     spendPerDay,
-    callsPerDay,
-    peakPerSecond,
-    spend,
-    spendPerMonth: spend * 30, // ≈ 73,000
-    anthropicSpendPerMonth, // ≈ 72,200
-    capShare: anthropicSpendPerMonth / PROVIDER_LIMITS.monthlySpendCapUsd, // ≈ 0.36
-    t0Peak: peak.support + peak.voice, // ≈ 66.8 (cell T0)
-    otherPeak: peak.assistant + peak.ap + peak.labs, // ≈ 3.9 (cell T1–T3)
+    callsPerDay: sum(Object.values(perDay)), // ≈ 1,576,600
+    deferredPerDay: SUPPORT.deferredPerDay + VOICE.deferredPerDay, // 178,000
+    peakPerSecond: sum(Object.values(peak)), // ≈ 97.6
+    spend: sum(Object.values(spendPerDay)), // ≈ 2,491 a weekday
+    spendPerMonth, // ≈ 73,800
+    anthropicPerMonth, // ≈ 72,900
+    capShare: anthropicPerMonth / PROVIDER_LIMITS.monthlySpendCapUsd, // ≈ 0.365
+    cells: { support: peak.support, voice: peak.voice, other: peak.assistant + peak.ap + peak.labs }, // 56.8 / 36.9 / 3.9
   };
 })();
 
-// ── Quotas in tokens per minute, per model class ───────────────────────────────────────────────────────────────────
+// ── Quotas in tokens per minute, per model class (provider A) ───────────────────────────────────────────────────────
 
 /**
- * Peak need per tenant on the mid model (uncached-or-written input and output a minute, F10, F11):
- *   support:   720 messages × 2,495 = 1,796,400 ITPM; 720 × 139.5 = 100,440 OTPM; 1,188 RPM.
- *   voice:     6.912 × 60 = 414.7 calls × 1,600 = 663,552 ITPM; × 25 = 10,368 OTPM; 415 RPM.
- *   assistant: 0.757 × 60 = 45.4 turns × 3,539 = 160,700 ITPM; × 239.1 = 10,860 OTPM; 60 RPM.
- *   labs:      its own cap: 200,000 ITPM, 20,000 OTPM (illustrative).
- * Guaranteed quota = 1.5 × peak need (labs at its cap); sum ITPM ≈ 2.69 + 1.00 + 0.24 + 0.20 = 4.13M = 41% of 10M,
- * under the 60% guaranteed share; the rest is a shared burst pool lent by tier (T0 first).
- * Small model: support 720 × 3,400 = 2,448,000 ITPM; voice 16.128 × 60 × 1,600 = 1,548,288 ITPM.
+ * Mid, peak need (counted input = uncached + writes; output):
+ *   support 720 × 2,495 = 1,796,400 ITPM, 720 × 139.5 = 100,440 OTPM; hand-offs 57.6 a minute × 2,500 = 144,000 ITPM
+ *   and × 100 = 5,760 OTPM;
+ *   voice 414.7 × 1,600 = 663,552 ITPM; × 25 = 10,368 OTPM; briefings and hedges 192 × 0.341 = 65.5 a minute ×
+ *   1,600 = 104,800 ITPM (illustrative sizes);
+ *   assistant 45.4 × 3,539 = 160,700 ITPM; 10,860 OTPM; labs cap 200,000 / 20,000.
+ *   → 3.07M ITPM at peak (31%); guaranteed 1.5 × need for uncapped keys + labs at its cap ≈ 4.50M (45%, under
+ *   the 60% rule); burst pool 5.50M.
+ * Small, peak need: support 720 × 4,000 = 2,880,000; voice agent 967.7 × 1,600 = 1,548,288 + detector 768 × 300 =
+ *   230,400; assistant 45.4 × 3,921 = 178,000 → 4.84M; guaranteed 1.5 × = 7.26M = 73% of 10M, over the 60% rule:
+ *   the design requests 15M (48%).
  */
 export const QUOTAS = (() => {
   const headroom = 1.5;
+  const m = SUPPORT.peakMessagesPerSecond * 60; // 720
+  const voiceMidPerMin = VOICE.peakMidCallsPerSecond * 60; // 414.7
+  const voiceExtraMidPerMin = VOICE_CALLS.salesDayConcurrent * (VOICE.other.briefing + VOICE.other.hedge); // 65.5
+  const turnsPerMin = ASSISTANT.peakTurnsPerSecond * 60; // 45.4
   const need = {
     support: {
-      itpm: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.uncachedPerMessage,
-      otpm: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.outputPerMessage,
-      rpm: SUPPORT.peakMidCallsPerSecond * 60,
+      itpm: m * SUPPORT.uncachedPerMessage + m * SUPPORT.perMessage.handoff * 2_500,
+      otpm: m * SUPPORT.outputPerMessage + m * SUPPORT.perMessage.handoff * 100,
     },
     voice: {
-      itpm: VOICE.peakMidCallsPerSecond * 60 * VOICE.uncachedPerCall,
-      otpm: VOICE.peakMidCallsPerSecond * 60 * VOICE.outputPerCall,
-      rpm: VOICE.peakMidCallsPerSecond * 60,
+      itpm: voiceMidPerMin * VOICE.uncachedPerCall + voiceExtraMidPerMin * 1_600,
+      otpm: voiceMidPerMin * VOICE.outputPerCall + voiceExtraMidPerMin * 25,
     },
-    assistant: {
-      itpm: ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.uncachedPerTurn,
-      otpm: ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.outputPerTurn,
-      rpm: ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.midCallsPerTurn,
-    },
+    assistant: { itpm: turnsPerMin * ASSISTANT.uncachedPerTurn, otpm: turnsPerMin * ASSISTANT.outputPerTurn },
+    labs: { itpm: LABS.itpmCap, otpm: 20_000 },
   };
-  const labs = { itpm: 200_000, otpm: 20_000, rpm: 120 };
-  const guaranteed = {
-    support: { itpm: need.support.itpm * headroom, otpm: need.support.otpm * headroom },
-    voice: { itpm: need.voice.itpm * headroom, otpm: need.voice.otpm * headroom },
-    assistant: { itpm: need.assistant.itpm * headroom, otpm: need.assistant.otpm * headroom },
-    labs,
+  const peakItpm = sum(Object.values(need).map((n) => n.itpm));
+  const peakOtpm = sum(Object.values(need).map((n) => n.otpm));
+  // Capped keys (labs) are guaranteed their cap, not 1.5 × it (review R2-13): 1.5 × 2,869,453 + 200,000 = 4.50M.
+  const guaranteedItpm = headroom * (peakItpm - need.labs.itpm) + need.labs.itpm;
+  const smallNeed = {
+    support: m * SUPPORT.small.inputPerMessage, // 2,880,000
+    voice:
+      VOICE.peakSmallAgentCallsPerSecond * 60 * VOICE.uncachedPerCall +
+      VOICE_CALLS.salesDayConcurrent * VOICE.other.detector * VOICE.detectorInput,
+    assistant: turnsPerMin * ASSISTANT.smallInputPerTurn,
   };
-  const sumItpm = sum(Object.values(guaranteed).map((g) => g.itpm));
-  const sumOtpm = sum(Object.values(guaranteed).map((g) => g.otpm));
-  const peakItpm = need.support.itpm + need.voice.itpm + need.assistant.itpm + labs.itpm;
-  const peakRpm = need.support.rpm + need.voice.rpm + need.assistant.rpm + labs.rpm;
-  const peakOtpm = need.support.otpm + need.voice.otpm + need.assistant.otpm + labs.otpm; // ≈ 141,700
-  const smallItpm = {
-    support: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.small.inputPerMessage, // 2,448,000
-    voice: VOICE.peakSmallCallsPerSecond * 60 * VOICE.uncachedPerCall, // 1,548,288
-  };
+  const smallPeak = sum(Object.values(smallNeed));
   return {
     headroom,
     need,
-    guaranteed,
-    sumItpm, // ≈ 4.13M
-    sumOtpm, // ≈ 0.20M
-    guaranteedItpmShare: sumItpm / PROVIDER_LIMITS.mid.itpm, // ≈ 0.41
-    guaranteedOtpmShare: sumOtpm / PROVIDER_LIMITS.mid.otpm, // ≈ 0.10
-    peakItpm, // ≈ 2.82M
-    peakOtpm,
-    peakOtpmShare: peakOtpm / PROVIDER_LIMITS.mid.otpm, // ≈ 0.071
-    peakItpmShare: peakItpm / PROVIDER_LIMITS.mid.itpm, // ≈ 0.28
-    peakRpm, // ≈ 1,783
-    peakRpmShare: peakRpm / PROVIDER_LIMITS.mid.rpm, // ≈ 0.14
-    smallItpm,
-    smallItpmShare: (smallItpm.support + smallItpm.voice) / PROVIDER_LIMITS.small.itpm, // ≈ 0.40
+    peakItpm, // ≈ 3.07M
+    peakItpmShare: peakItpm / PROVIDER_LIMITS.mid.itpm, // ≈ 0.31
+    peakOtpm, // ≈ 0.15M
+    peakOtpmShare: peakOtpm / PROVIDER_LIMITS.mid.otpm,
+    guaranteedItpm, // ≈ 4.50M (45%)
+    guaranteedShare: guaranteedItpm / PROVIDER_LIMITS.mid.itpm,
+    supportGuaranteedItpm: headroom * need.support.itpm, // ≈ 2.91M
+    supportGuaranteedOtpm: headroom * need.support.otpm, // ≈ 159,300
+    burstPool: PROVIDER_LIMITS.mid.itpm - guaranteedItpm, // ≈ 5.50M
+    smallNeed,
+    smallPeak, // ≈ 4.84M
+    smallGuaranteedShare: (headroom * smallPeak) / PROVIDER_LIMITS.small.itpm, // ≈ 0.73 → request 15M
+    smallGuaranteedShareRequested: (headroom * smallPeak) / PROVIDER_LIMITS.small.itpmRequested, // ≈ 0.48
+    adaptive: { remainingFloor: 0.2, t0QueueMs: 200 },
   };
 })();
 
 // ── Reserve, then settle ────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Admission reserves: counted input split by the prefix registry into expected-cached (the bytes up to the request's
- * last cache breakpoint, seen on this provider and workspace within the TTL) and expected-uncached, plus max_tokens of
- * output. Settlement replaces it with the usage the provider reports (cumulative message_delta counts, F47), or the
- * gateway's own count when a stream ends without usage (F48).
- *
- * Held-back output in flight, support mid calls at peak: a call lasts 400 ms + 84.5 tokens × 12.5 ms = 1,456 ms, so
- * 19.8 × 1.457 = 28.8 are in flight. With max_tokens 512: 28.85 × (512 − 84.5) = 12,330 output tokens held = 8.2% of
- * support's 150,660 OTPM quota. With an unset 4,096: 28.85 × 4,011.5 = 115,700 = 77%, so the gateway caps max_tokens per
- * alias (512 for support).
- *
- * Overshoot bound for one key (labs, 20 in flight, worst request 34,048 tokens):
- *   charge after the response (no reservation; Envoy/Agent Router, Kong, Cloudflare, F23, F24, F46):
- *     ≤ in-flight × worst = 20 × 34,048 = 680,960 tokens = 2.27% of 30M;
- *     + a check that reads a store L = 20 s behind (F21's dashboard lag): 0.763 a second × 20 s × 34,048 ≈ 519,800
- *       more → ≈ 1.20M = 4.0%;
- *   reserve then settle: output ≤ max_tokens (the provider stops there), so only the input estimate can be short:
- *     ≤ in-flight × ε × prompt = 20 × 2% × 32,000 = 12,800 tokens = 0.043% (ε illustrative; counts are estimates, F50).
- * The cost of the reservation is the held-back budget above, not money.
+ * Two reservations, two purposes:
+ *   MONEY (budgets): an UPPER BOUND, so a budget cannot be overspent. Input is reserved as UTF-8 bytes (a byte-level
+ *   tokenizer never makes more tokens than bytes; images reserved from their dimensions; + 50 tokens a message and
+ *   600 a tool definition of overhead), priced at the highest input price the alias can be billed (the 5-minute write,
+ *   2.50; 4.00 if the alias uses the 1-hour TTL), plus max_tokens × output. Server-side `fallbacks` and server tools are
+ *   stripped (422 if an alias has not declared them), so no call can bill more than one attempt.
+ *   → overshoot = 0 by construction. Held per support call ≈ 5,200 tokens × 4 bytes (illustrative) × 2.50 + 512 ×
+ *   10.00 per million = 0.0520 + 0.00512 = 0.0571 USD; 28.85 in flight hold 1.65 USD of a ≈ 54,000 USD month.
+ *   RATE (per-minute buckets): an ESTIMATE, as the provider's own ITPM is (F10): characters ÷ 4, cached span included
+ *   (the registry forecasts, it does not admit), + max_tokens of OTPM; corrected at settlement. Rate overshoot is
+ *   bounded by the burst pool and the provider's own limit, not by the budget.
+ *   Held at peak: ITPM 28.85 × 5,200 = 150,000 (5.2% of support's 2.91M a minute); OTPM 28.85 × (512 − 84.5) =
+ *   12,330 (7.7% of 159,300). With max_tokens unset at 4,096: 115,700 (73%).
+ * Comparison on labs' day (84 USD): charge-after products overshoot by everything in flight, 20 × 0.0845 = 1.69 USD
+ * (2.0%; 680,960 tokens = 2.27% of 30M), and more if their check is stale (+ 0.763 × 20 s × 0.0845 = 1.29 USD → 3.5%,
+ * illustrative 20 s).
  */
 export const RESERVE = (() => {
+  const bytesPerToken = 4; // illustrative for English text; the reservation uses the real byte count
   const supportCallMs = LATENCY.firstTokenMs + SUPPORT.outputPerCall * 12.5; // 1,456.8
-  const inFlight = (SUPPORT.peakMidCallsPerSecond * supportCallMs) / 1_000; // 28.8
+  const inFlight = (SUPPORT.peakMidCallsPerSecond * supportCallMs) / 1_000; // 28.85
   const maxTokens = 512;
   const unsetMaxTokens = 4_096;
-  const heldAt = (cap: number) => inFlight * (cap - SUPPORT.outputPerCall);
-  const supportOtpmQuota = QUOTAS.guaranteed.support.otpm; // 150,660
-  const epsilon = 0.02;
+  const maxInputPrice = PRICES.mid.cacheWrite; // 2.50 (5-minute TTL aliases)
+  const heldMoneyPerCall = usd(SUPPORT.inputPerCall * bytesPerToken, maxInputPrice) + usd(maxTokens, PRICES.mid.output);
+  const heldOtpm = (cap: number) => inFlight * (cap - SUPPORT.outputPerCall);
+  const worstUsd = usd(LABS.promptCap, PRICES.mid.input) + usd(LABS.maxTokensCap, PRICES.mid.output); // 0.08448
+  const chargeAfterUsd = LABS.maxParallel * worstUsd; // 1.69
   const lagS = 20;
-  const chargeAfter = LABS.maxParallel * LABS.worstTokens; // 680,960
-  const lagExtra = LABS.peakCallsPerSecond * lagS * LABS.worstTokens; // ≈ 519,800
-  const reserved = LABS.maxParallel * epsilon * LABS.promptCap; // 12,800
+  const lagUsd = LABS.peakOnPathPerSecond * lagS * worstUsd; // 1.29
+  const labsHeldPerCall =
+    usd(LABS.promptCap * bytesPerToken, maxInputPrice) + usd(LABS.maxTokensCap, PRICES.mid.output); // 0.3405
   return {
+    bytesPerToken,
     supportCallMs,
     inFlight,
     maxTokens,
-    unsetMaxTokens,
-    held: heldAt(maxTokens), // ≈ 12,330
-    heldShare: heldAt(maxTokens) / supportOtpmQuota, // ≈ 0.082
-    heldUnset: heldAt(unsetMaxTokens), // ≈ 115,700
-    heldUnsetShare: heldAt(unsetMaxTokens) / supportOtpmQuota, // ≈ 0.77
-    epsilon,
-    lagS,
+    maxInputPrice,
+    heldMoneyPerCall, // 0.0571
+    heldMoneyInFlight: inFlight * heldMoneyPerCall, // 1.65
+    heldItpm: inFlight * SUPPORT.inputPerCall, // 150,000
+    heldItpmShare: (inFlight * SUPPORT.inputPerCall) / QUOTAS.supportGuaranteedItpm, // ≈ 0.052
+    heldOtpm: heldOtpm(maxTokens), // ≈ 12,330
+    heldOtpmShare: heldOtpm(maxTokens) / QUOTAS.supportGuaranteedOtpm, // ≈ 0.077
+    heldOtpmUnset: heldOtpm(unsetMaxTokens), // ≈ 115,700
+    heldOtpmUnsetShare: heldOtpm(unsetMaxTokens) / QUOTAS.supportGuaranteedOtpm, // ≈ 0.73
     overshoot: {
-      chargeAfter,
-      chargeAfterShare: chargeAfter / LABS.budgetTokens, // 0.0227
-      chargeAfterLagged: chargeAfter + lagExtra, // ≈ 1.20M
-      chargeAfterLaggedShare: (chargeAfter + lagExtra) / LABS.budgetTokens, // ≈ 0.040
-      reserved,
-      reservedShare: reserved / LABS.budgetTokens, // 0.00043
+      reserved: 0,
+      chargeAfterUsd,
+      chargeAfterShare: chargeAfterUsd / LABS.budgetUsd, // 0.020
+      chargeAfterTokens: LABS.maxParallel * LABS.worstTokens, // 680,960
+      chargeAfterTokenShare: (LABS.maxParallel * LABS.worstTokens) / LABS.budgetTokens, // 0.0227
+      chargeAfterLaggedUsd: chargeAfterUsd + lagUsd, // 2.98
+      chargeAfterLaggedShare: (chargeAfterUsd + lagUsd) / LABS.budgetUsd, // 0.035
+      lagS,
     },
-    /** The labs loop of the concept page: 45M asked for against 30M; reserve-then-settle refuses the last 15M. */
-    labsAskedTokens: (TEAM_KEYS.labs.inputM + TEAM_KEYS.labs.outputM) * M,
+    labsHeldPerCall, // 0.34 USD
+    labsHeldMax: LABS.maxParallel * labsHeldPerCall, // 6.81 USD = 8.1% of labs' day, refused early, then released
+    labsHeldShare: (LABS.maxParallel * labsHeldPerCall) / LABS.budgetUsd, // 0.081
     /**
-     * The general bound: overshoot ≤ ε × the input reserved in flight, so a key's parallel cap keeps in-flight input
-     * ≤ 5% of its budget (ε 2% → ≤ 0.1%, N3). Labs: 20 × 32,000 = 640,000 = 2.1% of 30M.
-     * A predicted cache read that misses adds (input − read price) on those tokens and counts toward ITPM: support at
-     * peak, 28.85 calls × 2,700 = 77,890 tokens over its 2.69M-a-minute bucket (2.9%) during a mass miss (a deploy),
-     * and 28.85 × 2,700 × 1.90 per million ≈ 0.148 USD of its month.
+     * Batch (review R2-2): the upper bound is HELD until each result settles, not released at submission.
+     * Catalogue: 20,000 × (3,200 bytes × 0.125 + 400 × 0.50) ÷ 1M × 0.5 = 6.00 USD held against 2.80 billed (2.1×).
      */
-    labsInFlightShare: (LABS.maxParallel * LABS.promptCap) / LABS.budgetTokens, // 0.0213
-    missExcessTokens: inFlight * SUP_CONTEXT.stable, // ≈ 77,890
-    missExcessShare: (inFlight * SUP_CONTEXT.stable) / QUOTAS.guaranteed.support.itpm, // ≈ 0.029
-    missExcessUsd: usd(inFlight * SUP_CONTEXT.stable, PRICES.mid.input - PRICES.mid.cached), // ≈ 0.148
+    catalogueBatchHeld:
+      CATALOGUE.items *
+      (usd(CATALOGUE.input * 4, PRICES.small.cacheWrite) + usd(CATALOGUE.output, PRICES.small.output)) *
+      AP_PRICES.batchDiscount,
+    /** T0 ledger fails open with a page (R2-10): support spends 1,801.2 ÷ 1,440 ≈ 1.25 USD a minute → ≈ 18.8 USD in 15 min. */
+    ledgerOpenUsdPerMin: SUPPORT.spendPerDay / 1_440,
+    ledgerOpen15MinUsd: (15 * SUPPORT.spendPerDay) / 1_440,
+    /**
+     * A mass cache miss (a deploy) as a RATE: every support call counts its full input, 720 × 8,580 = 6.18M a minute
+     * against its guaranteed 2.91M; the 3.27M excess comes from the 5.50M burst pool (T0 borrows first), leaving 2.23M.
+     */
+    massMissItpm: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage, // 6,177,600
+    massMissExcess: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage - QUOTAS.supportGuaranteedItpm,
+    labsAskedTokens: (TEAM_KEYS.labs.inputM + TEAM_KEYS.labs.outputM) * M, // 45M
+    massMissPoolLeft:
+      QUOTAS.burstPool - (SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage - QUOTAS.supportGuaranteedItpm), // ≈ 2.23M
+    /**
+     * Large-ceiling aliases (thinking): incremental reservation in 4,096-token chunks, EXTENDED when 75% of a chunk is
+     * used (R2-9): the next 1,024 tokens cover the cut-to-stop latency (0.3 s × 80 tokens a second ≈ 24), so overshoot
+     * stays 0.
+     */
+    incrementalChunk: 4_096,
+    extendAt: 0.75,
+    abortResidueTokens: 0.3 * 80, // 24, inside the unused quarter of the chunk
   };
 })();
 
-// ── Gateway overhead budget (illustrative spans; dossier F5–F7, F40, F41 for scale) ─────────────────────────────────
+// ── Gateway overhead budget (targets to be measured; dossier F5–F7, F41 for scale) ─────────────────────────────────
 
 /**
- * Spans before the request leaves for the provider, p50 and spread (p95 − p50), ms:
- *   hop app → gateway (same Region) 0.5 / 1; auth and key (in memory) 1 / 1; reserve (one Redis script) 2 / 3;
- *   regex scan 0.2 / 0.3 (F41: 0.20 ms median); NER on the new text only (≈ 200 characters, GPU + ONNX) 20 / 25
- *   (F40 measured 38 / 86 ms at 317 characters: a load test must confirm 20 / 45 on the shorter text); route and
- *   translate 1 / 1.
- *   Plain path: 0.5 + 1 + 2 + 0.2 + 1 = 4.7 ms p50; p95 = 4.7 + √(1 + 1 + 9 + 0.09 + 1) = 8.2 (stage sum 11.0).
- *   NER path: 24.7 ms p50; p95 = 24.7 + √(12.09 + 625) = 49.9 (stage sum 56.0).
- * Targets (N1): plain p50 ≤ 5, p95 ≤ 15; NER p50 ≤ 30, p95 ≤ 60. Both met at p50 and p95, both ways.
- * The tenants' sheets measure the model's first token at their own service (400 ms for support and voice), so the
- * gateway's span is part of it: the provider's share is 400 − 4.7 = 395.3 ms on the plain path.
- * Pre-scan: the support service sends each new customer message to /v1/scan while it loads the case (its 30 ms
- * stage, gcase-support LATENCY_MS.gateway); NER (20 ms p50) finishes inside it, so the router and agent calls hit the
- * scan cache and take the plain path. At p95 the scan (45 ms) can outlast the 30 ms stage: the first call waits ≤ 15 ms. Settle and the metering row are written after the
- * stream, off the user's path.
+ * Spans before the request leaves for the provider, p50 / spread (p95 − p50), ms, illustrative:
+ *   hop app → cell router 0.5 / 1; cell router → replica 0.5 / 1; auth (workload identity, cached) 1 / 1; parse body,
+ *   count bytes, hash the prefix 0.3 / 0.5 (support's ≈ 20 KB; labs' 128 KB ≈ 2 ms); reserve (one Redis script) 2 / 3;
+ *   regex + dictionary pass 0.3 / 0.3; route and translate 1 / 1.
+ *   Plain: 5.6 p50; p95 5.6 + √(1 + 1 + 1 + 0.25 + 9 + 0.09 + 1) = 9.3 (stage sum 13.4).
+ *   CPU name scan (spaCy-class NER called directly; F41 median 13.5 ms on 523 characters, hardware not stated):
+ *   13.5 / 16.5 → NER path 19.1 p50; p95 19.1 + √(13.34 + 272.25) = 36.0 (stage sum 43.4).
+ * Targets (N1): plain p50 ≤ 8, p95 ≤ 20; NER p50 ≤ 30, p95 ≤ 60. Both rules met. Measured for comparison: LiteLLM 2–12
+ * ms p50 by instance count with Redis off (F5, F6), 47 ms p99 a pod at 100 RPS with Redis on (F7).
+ * The tenants' 400 ms first token is measured at their service, so it includes these spans: A's share is 394.4 ms.
+ * Support pre-scans each new message during its own 30 ms case-load stage: NER 13.5 p50, 30 p95 → hidden at both.
  */
 export const OVERHEAD = (() => {
   const spans = [
-    { id: "hop", label: "Hop to the gateway", p50: 0.5, spread: 1, ner: false },
-    { id: "auth", label: "Auth and key", p50: 1, spread: 1, ner: false },
+    { id: "hop", label: "Hop to the cell router", p50: 0.5, spread: 1, ner: false },
+    { id: "cell", label: "Cell router to replica", p50: 0.5, spread: 1, ner: false },
+    { id: "auth", label: "Workload identity", p50: 1, spread: 1, ner: false },
+    { id: "parse", label: "Parse, count bytes, hash", p50: 0.3, spread: 0.5, ner: false },
     { id: "reserve", label: "Reserve (Redis)", p50: 2, spread: 3, ner: false },
-    { id: "regex", label: "Regex scan", p50: 0.2, spread: 0.3, ner: false },
-    { id: "ner", label: "Name scan (NER)", p50: 20, spread: 25, ner: true },
+    { id: "regex", label: "Regex and dictionary", p50: 0.3, spread: 0.3, ner: false },
+    { id: "ner", label: "Name scan (CPU NER)", p50: 13.5, spread: 16.5, ner: true },
     { id: "route", label: "Route and translate", p50: 1, spread: 1, ner: false },
   ] as const;
   const path = (withNer: boolean) => {
@@ -454,79 +509,178 @@ export const OVERHEAD = (() => {
   };
   const plain = path(false);
   const ner = path(true);
-  const targets = { plain: { p50: 5, p95: 15 }, ner: { p50: 30, p95: 60 } };
+  const targets = { plain: { p50: 8, p95: 20 }, ner: { p50: 30, p95: 60 } };
   return {
     spans,
-    plain, // 4.7 / 8.2 / 11.0
-    ner, // 24.7 / 49.9 / 56.0
+    plain, // 5.6 / 9.3 / 13.4
+    ner, // 19.1 / 36.0 / 43.4
     targets,
     meets:
       plain.p50 <= targets.plain.p50 &&
       plain.stageSum <= targets.plain.p95 &&
       ner.p50 <= targets.ner.p50 &&
       ner.stageSum <= targets.ner.p95,
-    providerShareMs: LATENCY.firstTokenMs - plain.p50, // 395.3
+    providerShareMs: LATENCY.firstTokenMs - plain.p50, // 394.4
+    /**
+     * Support's pre-scan (review R2-7): /v1/scan hop 1 ms + scanner queue 2 ms (illustrative) + NER 13.5 p50 / 30 p95
+     * (the p95 is assumed: F41 gives a median only) = 16.5 / 33 ms against support's 30 ms case-load stage: hidden at
+     * p50, ≤ 3 ms exposed on the first call at p95. With the GPU fallback (F40, 38 / 86 ms): 41 / 89 → 11 / 59 ms exposed.
+     * Voice scans each partial transcript's new words before a speculative call leaves, so the scan sits on its speak
+     * path: no-tool turn 1,100 + 13.5 = 1,113.5 ms p50 (≤ 1,200) and 1,494 + 30 = 1,524 ms p95 by stage sum (≤ 1,600).
+     */
     prescan: {
-      overlapMs: SUP_LATENCY.gateway, // 30
-      hiddenAtP50: 20 <= SUP_LATENCY.gateway,
-      exposedAtP95Ms: Math.max(0, 20 + 25 - SUP_LATENCY.gateway), // 15
+      overlapMs: SUP_LATENCY.gateway,
+      hopMs: 1,
+      queueMs: 2,
+      nerP50: 13.5,
+      nerP95: 30,
+      totalP50: 16.5,
+      totalP95: 33,
+      exposedP50: Math.max(0, 16.5 - SUP_LATENCY.gateway), // 0
+      exposedP95: Math.max(0, 33 - SUP_LATENCY.gateway), // 3
+      gpuExposed: { p50: Math.max(0, 38 + 3 - SUP_LATENCY.gateway), p95: Math.max(0, 86 + 3 - SUP_LATENCY.gateway) }, // 11 / 59
     },
-    measured: { litellm4: { p50: 2, p95: 8, p99: 13 }, litellm2: { p50: 12, p95: 29, p99: 43 } }, // F5, F6
-    podKneeRps: 100, // per-pod p99 47 ms at 100 RPS, 651 ms at 200 (F7)
-    podDesignRps: 50, // size at half the knee
-    unredactHoldChars: 20, // longest placeholder, e.g. "[PERSON_7f3a9c]" plus margin
-    unredactHoldMs: 5 * 12.5, // ≤ 5 tokens held at 12.5 ms a token = 62.5 ms, only on tokens that open a placeholder
+    voiceScanOnPath: { p50: 1_100 + 13.5, p95StageSum: 1_494 + 30, targets: { p50: 1_200, p95: 1_600 } },
+    measured: { litellm4: { p50: 2, p95: 8, p99: 13 }, litellm2: { p50: 12, p95: 29, p99: 43 }, podP99At100: 47 },
+    gpuNerRef: { chars: 317, avg: 38.11, p95: 86.47 }, // F40, the rejected GPU option
+    podKneeRps: 100,
+    podDesignRps: 50,
+    holdChars: 20,
+    holdMs: 5 * 12.5, // only after "[" + an upper-case placeholder type, only on aliases with redaction
   };
 })();
 
-// ── Fallback and what it breaks ─────────────────────────────────────────────────────────────────────────────────────
+// ── Fallback, B's quota, what the warm share buys ───────────────────────────────────────────────────────────────────
 
 /**
- * The first unlucky support request before the breaker opens: 429 at 50 ms, retry-after 1 s, retry, no first token by
- * the 2 s deadline, then provider B: 50 + 1,000 + 2,000 + 400 = 3,450 ms (production-gateway FALLBACK). The breaker
- * (production-routing BREAKER) trips at 10 failures in 20 calls and stays open 30 s; while open, calls go straight to
- * B: first token 400 + a cold-cache penalty of 150 ms (illustrative) = 550 ms. Voice does not wait: its deadline is
- * 2 × 400 = 800 ms; a 429 or 529 goes to B at once (50 + 400 + 150 = 600 ms), a silent A costs 800 + 400 + 150 = 1,350.
- *
- * Cold caches on B (caches live per organisation or workspace and on the serving machine, F28, F31, F36):
- *   counted input per support message rises from 2,495 to 8,580 = ×3.44, which is what B's limiter and any ramp limit
- *   (F14) see; cost per message, fully cold (all input at 2.00, output at 10.00): 8,580 × 2.00 + 139.5 × 10.00 per
- *   million = 0.01856 against 0.00759 warm = ×2.44 (an upper bound: B's cache warms within minutes).
- * Warm share: 5% of T0 traffic always runs on B (illustrative) so its caches, quotas and code path stay alive.
+ * B's TPM need if it carries T0 cold at the sale-day peak (Bedrock: input + cache writes + output × burndown; input +
+ * max_tokens deducted at the start, F56). Mid:
+ *   support 720 × 8,580 = 6,177,600 input + 100,440 × 10 = 1,004,400 → 7.18M (6.68M at 5×); start deductions 1,188 ×
+ *   (5,200 + 512) = 6.79M, lower than the settled count;
+ *   voice 414.7 × 3,600 = 1,492,992 + 10,368 × 10 = 103,680 → 1.60M (1.54M at 5×);
+ *   support hand-offs 57.6 × (2,500 + 1,000) = 201,600; voice briefings and hedges 65.5 × (3,600 + 250) = 252,000;
+ *   → T0 mid ≈ 9.23M TPM (8.65M at 5×). The assistant (≈ 0.55M cold) goes to C instead, to keep B for T0.
+ * Small: support 2,880,000 + 72,000 × 10 = 3.60M; voice 967.7 × 3,600 + 24,192 × 10 + detector 230,400 = 3.95M →
+ *   ≈ 7.56M TPM.
+ * Quota to request (1.2 × need): mid 11.1M TPM, small 9.1M TPM on the EU geographic profile, + a TPD of ≈ 4.03B
+ * (a 4-hour outage). Until granted,
+ * B carries voice first and support up to its quota; the rest of support hands off to people (its own path).
+ * Cold cost per support message: no cache 8,580 × 2.00 + 139.5 × 10 = 0.01856 (× 2.44); every call writing 8,580 ×
+ * 2.50 + 1,395 = 0.02285 (× 3.01) of 0.00759; B's own price unverified.
+ * Warm share 5%: buys a live code path, connection pools, quota in use and a measured B quality canary; it does NOT
+ * keep B's caches warm (Bedrock caches per serving machine and the EU profile spreads Regions, F36), so cold numbers
+ * above are the plan.
  */
 export const FAILOVER = (() => {
-  const coldPenaltyMs = 150;
-  const voiceDeadlineMs = 2 * VOICE.firstTokenMs; // 800
-  const coldCountedRatio = SUPPORT.inputPerMessage / SUPPORT.uncachedPerMessage; // 3.44
-  const coldMessageUsd =
-    usd(SUPPORT.inputPerMessage, PRICES.mid.input) + usd(SUPPORT.outputPerMessage, PRICES.mid.output); // 0.01856
+  const bd = PROVIDER_LIMITS.bedrock.burndown;
+  const bdLow = PROVIDER_LIMITS.bedrock.burndownLow;
+  const m = SUPPORT.peakMessagesPerSecond * 60;
+  const voiceMid = VOICE.peakMidCallsPerSecond * 60;
+  const voiceSmall = VOICE.peakSmallAgentCallsPerSecond * 60;
+  const voiceIn = VOICE.uncachedPerCall + VOICE.cachedPerCall; // 3,600
+  const supportMid = (b: number) => m * SUPPORT.inputPerMessage + m * SUPPORT.outputPerMessage * b;
+  const voiceMidNeed = (b: number) => voiceMid * voiceIn + voiceMid * VOICE.outputPerCall * b;
+  // T0's other mid calls (review R2-6): support hand-offs 57.6 a minute × (2,500 + 100 × b); voice briefings and hedges
+  // 65.5 a minute × (3,600 + 25 × b).
+  const handoffs = (b: number) => m * SUPPORT.perMessage.handoff * (2_500 + 100 * b); // 201,600 at 10×
+  const voiceExtra = (b: number) =>
+    VOICE_CALLS.salesDayConcurrent * (VOICE.other.briefing + VOICE.other.hedge) * (voiceIn + VOICE.outputPerCall * b); // 252,000
+  const midNeed = supportMid(bd) + voiceMidNeed(bd) + handoffs(bd) + voiceExtra(bd); // ≈ 9.23M
+  const midNeedLow = supportMid(bdLow) + voiceMidNeed(bdLow) + handoffs(bdLow) + voiceExtra(bdLow); // ≈ 8.65M
+  const smallNeed =
+    m * SUPPORT.small.inputPerMessage +
+    m * SUPPORT.small.outputPerMessage * bd +
+    voiceSmall * voiceIn +
+    voiceSmall * VOICE.outputPerCall * bd +
+    VOICE_CALLS.salesDayConcurrent * VOICE.other.detector * VOICE.detectorInput; // ≈ 7.56M
+  const coldNoCache = usd(SUPPORT.inputPerMessage, PRICES.mid.input) + usd(SUPPORT.outputPerMessage, PRICES.mid.output);
+  const coldWrites =
+    usd(SUPPORT.inputPerMessage, PRICES.mid.cacheWrite) + usd(SUPPORT.outputPerMessage, PRICES.mid.output);
   return {
     firstUnluckyMs: CONCEPT_FALLBACK.userFirstTokenMs, // 3,450
     breaker: { window: BREAKER.window, trips: BREAKER.failuresToTrip, openS: BREAKER.openS, probes: BREAKER.probes },
-    openPathMs: LATENCY.firstTokenMs + coldPenaltyMs, // 550
-    voiceDeadlineMs,
-    voiceFast429Ms: 50 + VOICE.firstTokenMs + coldPenaltyMs, // 600
-    voiceSilentMs: voiceDeadlineMs + VOICE.firstTokenMs + coldPenaltyMs, // 1,350
-    coldPenaltyMs,
-    coldCountedRatio,
-    coldItpmSupport: QUOTAS.need.support.itpm * coldCountedRatio, // ≈ 6.18M counted a minute on B
-    coldMessageUsd,
-    coldCostRatio: coldMessageUsd / SUPPORT.agentPerMessage, // ≈ 2.44
+    /** T0 also trips on latency (review R2-1): slow = first token > 800 ms; open when slow-or-failed > 10% of a minute. */
+    slowTrip: { slowMs: 2 * LATENCY.firstTokenMs, share: 0.1, minCalls: 20 },
+    openPathMs: LATENCY.firstTokenMs + 150, // 550 (150 ms cold penalty, illustrative)
+    voiceFast429Ms: 50 + VOICE.firstTokenMs + 150, // 600
+    voiceSilentMs: 2 * VOICE.firstTokenMs + VOICE.firstTokenMs + 150, // 1,350
+    supportStartDeduction: SUPPORT.peakMidCallsPerSecond * 60 * (SUPPORT.inputPerCall + RESERVE.maxTokens), // ≈ 6.79M
+    midNeed,
+    midNeedLow,
+    smallNeed,
+    midRequest: 1.2 * midNeed, // ≈ 11.1M
+    /** TPD to request: a 4-hour peak-hour outage of A on B = (9.23 + 7.56)M × 240 ≈ 4.03B tokens. */
+    tpdFor4h: (midNeed + smallNeed) * 240,
+    smallRequest: 1.2 * smallNeed, // ≈ 9.1M
+    assistantColdMid: ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.coldPerTurn, // ≈ 0.55M (+ output)
+    coldCountedRatio: SUPPORT.inputPerMessage / SUPPORT.uncachedPerMessage, // 3.44
+    coldNoCacheUsd: coldNoCache, // 0.01856
+    coldWritesUsd: coldWrites, // 0.02285
+    coldCostRatio: { low: coldNoCache / SUPPORT.agentPerMessage, high: coldWrites / SUPPORT.agentPerMessage }, // 2.44 / 3.01
     warmShare: 0.05,
-    /** One provider alone: OpenAI's 11 Dec 2024 outage, 15:16–19:38 PST = 262 min (F38) = 0.61% of a 30-day month. */
-    outageMinutes: 262,
-    outageMonthShare: 262 / (30 * 24 * 60), // 0.00606 → 99.39% for that month
+    returnStepPerMinute: 0.25, // to be sized from A's ramp rule (F14) once measured
   };
 })();
 
 /**
- * Fallback chain per alias, with the tags a target must match. A = Anthropic API (global inference, F35); B = the same
- * models on Bedrock's EU geographic profile (F34); C = a second model family's own API; S = self-hosted pool (London).
+ * Availability of T0 (sheet §4 N2, §15.5). SLI: share of T0 calls whose first content token reaches the tenant within
+ * 800 ms without a 5xx, per 5-minute window. Inputs illustrative; the arithmetic is the point. Bad minutes a month:
+ *   gateway cells 2
+ *   + A down 43.2 (99.9%) × P(B unusable | A down) 0.2 = 8.64
+ *   + detection of hard failures 2 incidents × 0.5 min = 1
+ *   + brownouts (review R2-1): a T0 call whose first token is later than 800 ms counts as a "slow" failure, and the
+ *     breaker opens when slow-or-failed calls exceed 10% of a rolling minute (≥ 20 calls). Full brownouts (A slow on
+ *     most calls): 3 a month × 0.5 min to trip and move = 1.5; partial brownouts under the 10% trip: 120 min a month ×
+ *     5% of calls slow = 6 → 7.5
+ *   + name scanner beyond its pre-signed 4-hour regex-and-dictionary exception: 0.1
+ *   = 19.24 bad minutes → 99.955%. Target 99.9% (43.2 minutes), so the margin is 24 minutes; 99.95% (21.6) is met only
+ *   if brownouts stay as assumed (one more 30-minute partial brownout at 10% slow adds 3). An F38-sized month (262 min
+ *   on A): 2 + 52.4 + 1 + 7.5 + 0.1 = 63.0 → 99.85%, a miss.
  */
+export const AVAILABILITY = (() => {
+  const monthMin = 30 * 24 * 60; // 43,200
+  const gatewayMin = 2;
+  const aDownMin = 43.2;
+  const pBGivenA = 0.2;
+  const incidents = 2;
+  const detectMin = 0.5;
+  const brownout = { full: 3, tripMin: 0.5, partialMin: 120, partialSlowShare: 0.05, tripShare: 0.1 };
+  const brownoutMin = brownout.full * brownout.tripMin + brownout.partialMin * brownout.partialSlowShare; // 7.5
+  const scannerMin = 0.1;
+  const fixed = gatewayMin + incidents * detectMin + brownoutMin + scannerMin; // 10.6
+  const badMin = fixed + aDownMin * pBGivenA; // 19.24
+  const target = 0.999;
+  const budget = monthMin * (1 - target); // 43.2
+  const stretch = monthMin * (1 - 0.9995); // 21.6
+  const badMonth = fixed + 262 * pBGivenA; // 63.0
+  return {
+    monthMin,
+    gatewayMin,
+    aDownMin,
+    pBGivenA,
+    incidents,
+    detectMin,
+    brownout,
+    brownoutMin,
+    scannerMin,
+    badMin, // 19.24
+    availability: 1 - badMin / monthMin, // 0.99955
+    target, // 99.9%
+    budget, // 43.2
+    stretch, // 21.6 (99.95%)
+    v2BadMin: gatewayMin + aDownMin * pBGivenA + incidents * detectMin, // 11.64, the v2 sum without brownouts
+    badMonthMin: badMonth, // 63.0 in an F38-sized month
+    badMonthAvailability: 1 - badMonth / monthMin, // 0.99854
+    sliThresholdMs: 2 * LATENCY.firstTokenMs, // 800
+    slowMs: 2 * LATENCY.firstTokenMs, // a T0 call slower than this counts toward the breaker
+  };
+})();
+
+/** Fallback chain per alias, with tags. A Anthropic API; B Bedrock EU profile; C a second family; S self-hosted. */
 export const CHAINS = [
   {
     alias: "support-agent",
-    tier: "T0",
+    cell: "support",
     residency: "any",
     schema: "strict-tools",
     chain: ["A", "B"],
@@ -534,89 +688,91 @@ export const CHAINS = [
   },
   {
     alias: "voice-agent",
-    tier: "T0",
+    cell: "voice",
     residency: "any",
     schema: "strict-tools",
     chain: ["A", "B"],
-    last: "voice agent's apology and transfer",
+    last: "apology and transfer (voice's own path)",
   },
   {
     alias: "assistant-answer",
-    tier: "T1",
+    cell: "other",
     residency: "any",
     schema: "tools",
-    chain: ["A", "B", "C"],
+    chain: ["A", "C"],
     last: "'answers are slower than usual' banner",
   },
   {
     alias: "ap-extract",
-    tier: "T2",
-    residency: "eu",
+    cell: "other",
+    residency: "uk-or-eu",
     schema: "json-schema",
     chain: ["B"],
-    last: "queue and wait (never leaves the EU)",
+    last: "queue and wait (never leaves the UK or EU)",
   },
   {
     alias: "catalogue-batch",
-    tier: "T2",
+    cell: "other",
     residency: "any",
     schema: "none",
-    chain: ["A-batch", "S"],
+    chain: ["A-batch"],
     last: "run the next night",
   },
-  { alias: "labs", tier: "T3", residency: "any", schema: "none", chain: ["A"], last: "fail with 503" },
+  { alias: "labs", cell: "other", residency: "any", schema: "none", chain: ["A", "S"], last: "fail with 503" },
 ] as const;
 
 // ── Prompt-cache-aware routing ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What a gateway change that breaks support's prefix would cost: every cached token (6,085 a message) is paid at the
- * input price instead of the cache-read price, less the write premiums no longer paid (one tool 2,300 × 0.50, two
- * tools 2,600 × 0.50 per million):
- *   6,085 × (2.00 − 0.10) ÷ 1M − (0.35 × 2,300 + 0.15 × 2,600) × 0.50 ÷ 1M = 0.011562 − 0.000598 = 0.010964 USD a
- *   message → × 200,000 = ≈ 2,193 USD a day, more than support's whole model bill (≈ 1,801).
- * Sticky keys for providers that route by prefix hash + key with ≈ 15 requests a minute per combination (F30):
- * support's 19.8 mid calls a second = 1,188 a minute over one prefix → ⌈1,188 ÷ 15⌉ = 80 key buckets
- * (bucket = hash(conversation id) mod 80, so a conversation stays on one bucket).
+ * What breaks support's prefix costs, per message, on its 6,085 cached tokens:
+ *   caching switched off (no breakpoints): 6,085 × (2.00 − 0.10) − the write premiums no longer paid (0.35 × 2,300 +
+ *   0.15 × 2,600) × 0.50 = 0.011562 − 0.000598 = 0.010964 → × 200,000 ≈ 2,193 USD a day;
+ *   a NON-DETERMINISTIC change with breakpoints in place (a per-request id before the breakpoint): every call writes
+ *   at 2.50 instead of reading at 0.10: 6,085 × 2.40 = 0.014604 → ≈ 2,921 USD a day (1.6 × support's whole bill).
+ *   A DETERMINISTIC change (sorted JSON keys on every replica) costs one write per prefix per workspace per TTL.
+ * Key buckets for an OpenAI-class provider before GPT-5.6 (≈ 15 requests a minute per prefix and key, F30): only the
+ * assistant's answers on C use one: 45.4 turns × 1.33 = 60.4 mid calls a minute → ⌈60.4 ÷ 15⌉ = 5 buckets.
  */
 export const STICKY = (() => {
-  const writePremium = PRICES.mid.cacheWrite - PRICES.mid.input; // 0.50
   const sh = SUP_VOLUME.shapes;
-  const perMessage =
+  const writePremium = PRICES.mid.cacheWrite - PRICES.mid.input; // 0.50
+  const off =
     usd(SUPPORT.cachedPerMessage, PRICES.mid.input - PRICES.mid.cached) -
     usd(
       sh.one * SUP_CONTEXT.averageChanging + sh.two * (SUP_CONTEXT.averageChanging + SUP_OUTPUT.followUpNewTokens),
       writePremium
     );
-  const rpmPerKey = 15;
-  const supportRpm = SUPPORT.peakMidCallsPerSecond * 60; // 1,188
+  const writes = usd(SUPPORT.cachedPerMessage, PRICES.mid.cacheWrite - PRICES.mid.cached);
+  const assistantRpm = ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.midCallsPerTurn; // 60.4
   return {
-    brokenPrefixPerMessage: perMessage, // ≈ 0.010964
-    brokenPrefixPerDay: perMessage * SUP_VOLUME.messagesPerDay, // ≈ 2,193
-    rpmPerKey,
-    supportRpm,
-    buckets: Math.ceil(supportRpm / rpmPerKey), // 80
-    stickyIdleMinutes: 60, // OpenRouter's pattern (F32)
+    offPerMessage: off, // 0.010964
+    offPerDay: off * SUP_VOLUME.messagesPerDay, // ≈ 2,193
+    writesPerMessage: writes, // 0.014604
+    writesPerDay: writes * SUP_VOLUME.messagesPerDay, // ≈ 2,921
+    rpmPerKey: 15,
+    assistantRpm,
+    assistantBuckets: Math.ceil(assistantRpm / 15), // 5
+    idleMinutes: { fiveMinuteTtl: 5, oneHourTtl: 60 },
   };
 })();
 
-// ── Redaction policy per tenant ─────────────────────────────────────────────────────────────────────────────────────
+// ── Redaction ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Data class, what runs inline, what happens when the scanner is down. */
+/** Per-tenant policy. "Dictionary" = the per-conversation value → placeholder map applied to all outgoing text. */
 export const REDACTION = [
   {
     tenant: "Support agent",
     data: "customer PII",
-    inline: "regex + NER on new text",
+    inline: "regex + dictionary on all text; NER on unseen text (pre-scanned)",
     cards: "block",
-    onScannerDown: "regex only, alert (DPA covers names)",
+    onScannerDown: "regex + dictionary up to 4 h (pre-signed exception), then hand-offs",
   },
   {
     tenant: "Voice agent",
     data: "customer PII (spoken)",
-    inline: "regex only",
+    inline: "regex + dictionary; NER on unseen text, pre-scanned as each turn is transcribed",
     cards: "block",
-    onScannerDown: "n/a; NER runs later on the log copy",
+    onScannerDown: "regex + dictionary up to 4 h (pre-signed exception), then transfer",
   },
   {
     tenant: "Employee assistant",
@@ -627,12 +783,12 @@ export const REDACTION = [
   },
   {
     tenant: "AP extraction",
-    data: "supplier and bank details",
-    inline: "none (EU route + DPA)",
-    cards: "n/a (images)",
+    data: "supplier details (bank details masked by AP)",
+    inline: "card regex on text",
+    cards: "block",
     onScannerDown: "n/a",
   },
-  { tenant: "Catalogue", data: "public product text", inline: "none", cards: "block", onScannerDown: "n/a" },
+  { tenant: "Catalogue", data: "public product text", inline: "card regex", cards: "block", onScannerDown: "n/a" },
   {
     tenant: "Labs",
     data: "no customer data allowed",
@@ -642,139 +798,310 @@ export const REDACTION = [
   },
 ] as const;
 
-/** Redaction gate sizes and margins (95%, normal approximation). */
+/** Redaction gates (95%, normal approximation; pass on the LOWER bound) and the dictionary's cost. */
 export const REDACTION_EVAL = (() => {
-  const structured = { n: 1_000, target: 0.99 };
-  const names = { n: 800, target: 0.95 };
   const margin = (p: number, n: number) => 1.96 * Math.sqrt((p * (1 - p)) / n);
   return {
-    structured: { ...structured, margin: margin(structured.target, structured.n) }, // ± 0.0062
-    names: { ...names, margin: margin(names.target, names.n) }, // ± 0.0151
-    nerRefMs: { charsTested: 317, gpuOnnx: { avg: 38.11, p95: 86.47, p99: 99.26 }, cpu: { avg: 177.13, p95: 294.57 } }, // F40
-    regexMedianMs: 0.2, // F41
-    presidioMedianMs: 37.59, // F41
+    structured: { n: 1_000, target: 0.99, margin: margin(0.99, 1_000) }, // ± 0.0062
+    names: { n: 800, target: 0.95, margin: margin(0.95, 800) }, // ± 0.0151
+    cards: { n: 1_000, upperIfZero: 3 / 1_000 }, // 0 of 1,000 → ≤ 0.3% at 95%
+    carryOver: { conversations: 500, turns: 4 }, // 0 raw values from earlier turns in later calls
+    dictionaryMs: 0.1, // exact-match (Aho–Corasick) over ≈ 20 KB
+    dictionaryTtl: "idle + 1 h; support and voice idle + 24 h (resumed conversations, night judges)",
+    /**
+     * Miss path (review R2-3): with no dictionary (Redis loss, idle expiry) the whole prompt must be scanned once.
+     * CPU NER rate from F41: 523 characters in 13.5 ms ≈ 38,700 characters a second a core. Support's 20,000 characters:
+     * serial 516 ms (400 + 516 > 800: bad by the SLI), so the scan is split into 10 chunks of 2,000 on 10 cores:
+     * 2,000 ÷ 38,700 ≈ 52 ms + 5 ms fan-out ≈ 57 ms on that first call only (first token 457 ms, good).
+     * A whole cold cell at peak: support 19.8 calls × 20,000 + voice 23.04 × 14,400 = 396,000 + 331,800 = 727,800
+     * characters a second ≈ 18.8 cores for the minutes until dictionaries refill.
+     */
+    nerCharsPerCoreSecond: 523 / 0.0135, // 38,741
+    fullRescanSerialMs: (20_000 / 523) * 13.5, // 516
+    fullRescanChunkedMs: (2_000 / 523) * 13.5 + 5, // ≈ 56.6
+    coldCellCores: (SUPPORT.peakMidCallsPerSecond * 20_000 + VOICE.peakAgentCallsPerSecond * 14_400) / (523 / 0.0135), // ≈ 18.8
+    cpuNerMs: 13.5,
+    gpuNerMs: 38.11,
+    regexMs: 0.2,
   };
 })();
 
-// ── Capacity, cells and platform cost ───────────────────────────────────────────────────────────────────────────────
+/**
+ * Night judges (review R2-4): support's 50,000 conversation judges and voice's 128,000 turn judges run 01:00–05:00 on
+ * A's real-time API (not the Batch API, which keeps data 29 days and is not ZDR-eligible, F45), under aliases
+ * `support-judge` and `voice-judge` with the same redaction policy as their tenants. Their dictionaries are kept until
+ * the judge has run (≤ 24 h), so the normal path is the dictionary pass. Worst case, no dictionary: full NER at night,
+ * support ≈ 28,000 characters (7,000 tokens) ÷ 38,741 = 0.723 s a call; voice ≈ 4,000 characters (1,000 tokens,
+ * illustrative) = 0.103 s → 50,000 × 0.723 + 128,000 × 0.103 ≈ 49,370 s ≈ 13.7 CPU-hours ≈ 3.4 cores over 4 hours,
+ * inside the scanner fleet at night.
+ */
+export const JUDGES = (() => {
+  const rate = 523 / 0.0135;
+  const support = { calls: SUPPORT.deferredPerDay, chars: 28_000 };
+  const voice = { calls: VOICE.deferredPerDay, chars: 4_000 };
+  const cpuSeconds = (support.calls * support.chars + voice.calls * voice.chars) / rate;
+  return { support, voice, windowHours: 4, cpuHours: cpuSeconds / 3_600, cores: cpuSeconds / (4 * 3_600) };
+})();
+
+// ── Capacity, cells, platform cost ──────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Two cells (T0: support and voice; T1–T3: the rest), each active-active in London and Ireland; each Region sized to
- * carry its cell alone at 1.5 × peak. T0: 66.84 × 1.5 = 100.3 RPS ÷ 50 a pod → 3 pods + 1 spare = 4 a Region. T1–T3:
- * 3.9 × 1.5 = 5.8 RPS → 1 pod + 1 spare = 2 a Region. 12 pods in all.
- * Counter store: one Redis per cell per Region (4), 2 calls a request (reserve, settle) + 1 per 10 s of stream ≈ 150
- * operations a second at peak.
- * Metering: ≈ 1.04M rows a day × 1 KB ≈ 1.04 GB a day; 400 days ≈ 417 GB raw (columnar compression shrinks it).
- * Platform cost a month (illustrative): pods 12 × 0.20 × 720 = 1,728; Redis 4 × 150 = 600; NER GPUs 2 × 2.50 × 720 =
- * 3,600; metering store 900 → 6,828; team 2 engineers × 400,000 ÷ 12 = 66,667 → ≈ 73,500 a month, about the model
- * spend it carries (≈ 73,000): ≈ 0.0023 USD a call.
+ * Three cells (support, voice, T1–T3), each active-active in London and Ireland; each Region carries its cell alone at
+ * 1.5 × peak, 50 RPS a pod, + 1 spare: support 56.76 × 1.5 = 85.1 → 2 + 1 = 3; voice 36.93 × 1.5 = 55.4 → 2 + 1 = 3;
+ * other 3.9 × 1.5 = 5.8 → 1 + 1 = 2 → 8 a Region, 16 pods. CPU name-scanner pods 3 a Region (4 vCPU each, 12 cores),
+ * autoscaled to 6 (24 cores) for a cold cell (≈ 18.8 cores, REDACTION_EVAL).
+ * Infra a month (illustrative): pods 16 × 0.20 × 720 = 2,304; scanner pods 6 × 0.20 × 720 = 864; counter Redis 6 × 150
+ * = 900; dictionary Redis (separate, persistence off) 6 × 150 = 900; metering 900; canaries 2,679 → 8,546. Team 4 engineers (on-call shared with SRE) × 400,000 ÷ 12 = 133,333.
+ * → ≈ 141,900 a month ≈ 0.0030 USD a call (model ≈ 0.0016 a call); ≈ 1.9 × the model spend it carries.
+ * Canaries: 50 prompts × 144 runs = 7,200 a day a target; mid ≈ 1,000 in + 200 out = 0.004 USD → 28.8 a day; three mid
+ * targets (A, B, C at mid prices, illustrative) + two small (A, B: 0.0002 → 1.44) ≈ 89.3 a day ≈ 2,679 a month.
  */
 export const CAPACITY = (() => {
-  const designRps = OVERHEAD.podDesignRps;
-  const podsFor = (peak: number) => Math.ceil((peak * 1.5) / designRps) + 1;
-  const t0PerRegion = podsFor(TRAFFIC_GW.t0Peak); // 4
-  const otherPerRegion = podsFor(TRAFFIC_GW.otherPeak); // 2
-  const regions = 2;
-  const pods = regions * (t0PerRegion + otherPerRegion); // 12
-  const infra = {
-    pods: pods * 0.2 * 720,
-    redis: 4 * 150,
-    nerGpus: 2 * PRICES.gpuHour * 720,
-    metering: 900,
+  const design = OVERHEAD.podDesignRps;
+  const pods = (peak: number) => Math.ceil((peak * 1.5) / design) + 1;
+  const perRegion = {
+    support: pods(TRAFFIC_GW.cells.support),
+    voice: pods(TRAFFIC_GW.cells.voice),
+    other: pods(TRAFFIC_GW.cells.other),
   };
-  const infraMonthly = sum(Object.values(infra)); // 6,828
-  const teamMonthly = (2 * 400_000) / 12; // 66,667
-  const platformMonthly = infraMonthly + teamMonthly;
+  const regions = 2;
+  const gatewayPods = regions * sum(Object.values(perRegion)); // 16
+  const scannerPods = regions * 3;
+  const canaryMid = 7_200 * (usd(1_000, PRICES.mid.input) + usd(200, PRICES.mid.output)); // 28.8
+  const canarySmall = 7_200 * (usd(1_000, PRICES.small.input) + usd(200, PRICES.small.output)); // 1.44
+  const canariesMonthly = (3 * canaryMid + 2 * canarySmall) * 30; // 2,679
+  const infra = {
+    gatewayPods: gatewayPods * 0.2 * 720,
+    scannerPods: scannerPods * 0.2 * 720,
+    redis: regions * 3 * 150,
+    dictionaryRedis: regions * 3 * 150,
+    metering: 900,
+    canaries: canariesMonthly,
+  };
+  const infraMonthly = sum(Object.values(infra)); // ≈ 8,546
+  const teamMonthly = (4 * 400_000) / 12; // 133,333
+  const platformMonthly = infraMonthly + teamMonthly; // ≈ 141,900
   return {
-    t0PerRegion,
-    otherPerRegion,
+    perRegion,
     regions,
-    pods,
-    redisOpsPerSecond: TRAFFIC_GW.peakPerSecond * 2 + 10, // ≈ 150 (streams add ≈ 10)
-    meteringGbPerDay: TRAFFIC_GW.callsPerDay / 1_000_000, // ≈ 1.04
-    meteringGb400Days: (TRAFFIC_GW.callsPerDay * 400) / 1_000_000, // ≈ 417
+    gatewayPods,
+    scannerPods,
+    canariesPerDayPerTarget: 7_200,
+    canaryMidPerDay: canaryMid,
+    canariesMonthly,
     infra,
     infraMonthly,
     teamMonthly,
-    platformMonthly, // ≈ 73,500
-    perCallUsd: platformMonthly / (TRAFFIC_GW.callsPerDay * 30), // ≈ 0.0023
-    modelPerCallUsd: TRAFFIC_GW.spend / TRAFFIC_GW.callsPerDay, // ≈ 0.0023
+    platformMonthly,
+    platformPerCall: platformMonthly / (TRAFFIC_GW.callsPerDay * 30), // ≈ 0.0030
+    modelPerCall: TRAFFIC_GW.spendPerMonth / (TRAFFIC_GW.callsPerDay * 30), // ≈ 0.0016
+    platformToModel: platformMonthly / TRAFFIC_GW.spendPerMonth, // ≈ 1.9
+    redisOpsPerSecond: TRAFFIC_GW.peakPerSecond * 2 + 10, // ≈ 205
+    meteringGbPerDay: TRAFFIC_GW.callsPerDay / M, // ≈ 1.58
+    meteringGb400Days: (TRAFFIC_GW.callsPerDay * 400) / M, // ≈ 631
+    thin: { engineers: 1, monthly: 400_000 / 12 + 1_500 }, // the thin start (§15.5): ≈ 34,800
   };
 })();
 
-/** Fail open or closed, per dependency and tier (sheet §15.5). */
+/** Fail open or closed, per dependency and cell (sheet §15.5). */
 export const FAILURE_POLICY = [
   {
     dependency: "Counter store (Redis)",
-    t0: "open: local counters at limit ÷ replicas, ≤ 15 min, alert",
-    other: "closed: 503",
+    t0: "open: local counters at limit ÷ replicas in the Region, ≤ 15 min, page",
+    other: "assistant open ≤ 5 min; AP, catalogue, labs closed",
   },
-  { dependency: "Budget ledger", t0: "open ≤ 15 min, then closed", other: "closed" },
-  { dependency: "NER scanner", t0: "support: regex only + alert; voice: n/a", other: "labs: closed" },
-  { dependency: "Config store", t0: "serve last-known-good, never fail", other: "serve last-known-good" },
-  { dependency: "Metering write", t0: "open: spool to local disk, replay", other: "open: spool" },
-  { dependency: "Provider A", t0: "fall back to B", other: "assistant to B then C; labs closed" },
+  {
+    dependency: "Budget ledger",
+    t0: "open with a page (support at minute 16 is worse than overspend)",
+    other: "closed",
+  },
+  {
+    dependency: "Name scanner",
+    t0: "regex + dictionary for up to 4 h under an exception the privacy owner signs in advance (structured identifiers and every known name still covered), then the human path",
+    other: "labs closed",
+  },
+  {
+    dependency: "Config store / control plane",
+    t0: "last-known-good routes; keys from the signed deny-list (10 s pull); key data older than 24 h → unknown keys refused",
+    other: "same",
+  },
+  { dependency: "Metering store", t0: "spool to a replicated local queue, replay", other: "same" },
+  {
+    dependency: "Dictionary store",
+    t0: "replicated to the other Region; on a miss the first call is held for a chunked full scan (≈ 57 ms)",
+    other: "labs closed",
+  },
+  {
+    dependency: "Provider A",
+    t0: "B (voice first, support to its quota)",
+    other: "assistant to C; labs to S or closed",
+  },
 ] as const;
 
-// ── Evaluation and release gates ────────────────────────────────────────────────────────────────────────────────────
-
-/** Gates for a gateway release or an alias change. Values illustrative; the release-gate figure fails one. */
+/** Release and alias-change gates. The release-gate figure fails one ("determinism"). */
 export const GATES = [
-  { id: "overhead", label: "Overhead p95 at 2 × peak a pod", target: "≤ 15 ms plain, ≤ 60 ms NER" },
-  { id: "bytes", label: "Prompt bytes unchanged (golden requests)", target: "0 diffs" },
-  { id: "cache", label: "Cache-read share on replay vs direct", target: "≥ direct − 1 point" },
-  { id: "budget", label: "Overshoot, 1,000 parallel on a 1M budget", target: "≤ 0.1%" },
-  { id: "redaction", label: "Redaction recall (structured / names)", target: "≥ 99% / ≥ 95%" },
-  { id: "fallback", label: "Fallback target on the tenant's gold set", target: "not lower (paired)" },
-  { id: "chaos", label: "Provider A killed for 5 min", target: "T0 errors ≤ 1%" },
-  { id: "reconcile", label: "Metered vs invoiced, daily", target: "gap ≤ 1%" },
+  { id: "overhead", label: "Overhead p95, a pod at 2 × design load", target: "≤ 20 ms plain, ≤ 60 ms NER" },
+  { id: "determinism", label: "Same input → same bytes across replicas and versions", target: "0 diffs" },
+  { id: "cache", label: "Cache-read share on a 1-hour replay vs direct", target: "≥ direct − 1 point" },
+  { id: "budget", label: "Budget overshoot under a labs-shaped loop", target: "0" },
+  {
+    id: "redaction",
+    label: "Recall, lower bound (structured / names); carry-over",
+    target: "≥ 99% / ≥ 95%; 0 raw values",
+  },
+  { id: "fallback", label: "Target on the tenant's gold set (paired, MDD stated)", target: "not lower by ≥ 5 points" },
+  { id: "drill", label: "Production: one T0 alias 100% on B, 10 min", target: "SLI ≥ 99% good calls" },
+  { id: "reconcile", label: "Metered vs provider usage, daily", target: "gap ≤ 1%" },
 ] as const;
 
-/** Quality canaries per provider: a fixed set every 10 minutes (illustrative), against F37-type silent degradation. */
-export const CANARIES = { prompts: 50, everyMinutes: 10, perDay: 50 * 6 * 24 } as const; // 7,200 a day per provider
+/** Gold-set power: support's 200 tickets, ≈ 10% discordant pairs → 95% interval on the difference ≈ ± 4.4 points. */
+export const GATE_POWER = (() => {
+  const n = 200;
+  const discordant = 0.1;
+  return { n, discordant, mdd: 1.96 * Math.sqrt(discordant / n) }; // ≈ 0.044
+})();
 
-/** Audit and retention (sheet §14). */
+export const CANARIES = { prompts: 50, everyMinutes: 10, perDay: 50 * 6 * 24 } as const;
+
 export const AUDIT = {
   rowBytes: 1_000,
   metadataDays: 400,
   bodiesDefault: "not stored",
   bodiesOptInDays: 30,
-  placeholderMap: "in memory for the request only",
+  dictionary: "encrypted per conversation (KMS), idle + 1 h, deleted on close",
+  endUser: "HMAC with a rotating platform key",
 } as const;
 
 /**
- * Self-hosted pool S (illustrative): 2 GPUs in London running an open-weights 8B-class model on vLLM with prefix
- * caching, behind an endpoint picker that scores replicas by cached prefix and queue depth (dossier F33). Used by labs
- * and as the catalogue job's second target. 2 × 2.50 × 720 = 3,600 USD a month, charged to the teams that use it.
- */
-export const SELF_HOSTED = { gpus: 2, monthlyUsd: 2 * PRICES.gpuHour * 720, region: "London" } as const;
-
-/**
- * The walk-through call (sheet §9): the support agent's first call on the kettle message at 11:00 on sale day.
- *   Reserve: 2,700 expected cached × 0.10 + 2,300 uncached × 2.00 + 512 max_tokens × 10.00 per million
- *          = 0.00027 + 0.0046 + 0.00512 = 0.00999 USD; tokens: 2,300 ITPM, 512 OTPM.
- *   Settle (a 30-token tool call): 0.00027 + 0.0046 + 0.0003 = 0.00517 USD; refund 0.00482 USD and 482 OTPM.
- *   Pre-scanned during the 30 ms case load, so it takes the plain path: leaves for A at 4.7 ms; first token at 400 ms
- *   as the support service measures it (the provider's share 395.3 ms).
+ * Walk-through (sheet §9): the support agent's first call on the two-tool kettle message, 11:00 on sale day.
+ *   Money reserved (upper bound): 5,000 tokens ≈ 20,000 bytes × 2.50 + 512 × 10.00 per million = 0.05 + 0.00512 =
+ *   0.05512 USD; rate reserved: 5,000 ITPM (estimate) + 512 OTPM.
+ *   Settled from usage: 2,700 cache read × 0.10 + 2,300 cache write × 2.50 + 30 out × 10.00 = 0.00027 + 0.00575 +
+ *   0.0003 = 0.00632 USD (support's own cost model charges this write to the message); refund 0.0488 USD; rate settles
+ *   to 2,300 ITPM (the write) and 30 OTPM.
  */
 export const WALKTHROUGH = (() => {
   const cached = SUP_CONTEXT.stable; // 2,700
-  const uncached = SUP_CONTEXT.averageChanging; // 2,300
-  const maxTokens = RESERVE.maxTokens; // 512
+  const written = SUP_CONTEXT.averageChanging; // 2,300
   const out = SUP_OUTPUT.toolCall; // 30
-  const base = usd(cached, PRICES.mid.cached) + usd(uncached, PRICES.mid.input);
-  const reserved = base + usd(maxTokens, PRICES.mid.output);
-  const settled = base + usd(out, PRICES.mid.output);
+  const bytes = (cached + written) * RESERVE.bytesPerToken; // 20,000
+  const reserved = usd(bytes, RESERVE.maxInputPrice) + usd(RESERVE.maxTokens, PRICES.mid.output);
+  const settled = usd(cached, PRICES.mid.cached) + usd(written, PRICES.mid.cacheWrite) + usd(out, PRICES.mid.output);
   return {
     cached,
-    uncached,
-    maxTokens,
+    written,
     out,
-    reserved, // 0.00999
-    settled, // 0.00517
-    refund: reserved - settled, // 0.00482
-    refundOtpm: maxTokens - out, // 482
-    leavesAtMs: OVERHEAD.plain.p50, // 4.7 (the message was pre-scanned during the case load)
-    firstTokenMs: LATENCY.firstTokenMs, // 400 as the support service sees it; the provider's share 395.3
+    bytes,
+    reserved, // 0.05512
+    settled, // 0.00632
+    refund: reserved - settled, // 0.0488
+    leavesAtMs: OVERHEAD.plain.p50, // 5.6
+    firstTokenMs: LATENCY.firstTokenMs, // 400 at the support service; A's share 394.4
+  };
+})();
+
+/** Self-hosted pool S: 2 GPUs, London, open-weights 8B class on vLLM behind an endpoint picker (F33); charged to labs. */
+export const SELF_HOSTED = { gpus: 2, monthlyUsd: 2 * PRICES.gpuHour * 720, region: "London" } as const;
+
+/**
+ * The support agent's first call as the gateway sees it (sheet §11; figure llm-gateway/request-layout), in the order
+ * the Anthropic API caches it (tools → system → messages): the 2,700 stable tokens end at the cache breakpoint and are
+ * never touched; the changing 2,300 (average; evidence comes on half of calls: 2,000 × 0.5 = 1,000) are redacted by
+ * regex and the dictionary; the name scanner reads only the new message, 50 tokens ≈ 200 characters of ≈ 20,000.
+ */
+export const REQUEST_LAYOUT = (() => {
+  const tok = (id: string) => SUP_CONTEXT.blocks.find((b) => b.id === id)?.tokens ?? 0;
+  const evidence = SUP_CONTEXT.averageChanging - (tok("case") + tok("turns") + tok("tool-results") + tok("message")); // 1,000
+  const blocks = [
+    {
+      id: "tools",
+      label: "Tool definitions",
+      tokens: tok("tools"),
+      stable: true,
+      action: "passed through, never re-serialised",
+    },
+    { id: "instructions", label: "Instructions", tokens: tok("instructions"), stable: true, action: "untouched" },
+    {
+      id: "procedure",
+      label: "Procedure",
+      tokens: tok("procedure"),
+      stable: true,
+      action: "untouched; cache breakpoint",
+    },
+    {
+      id: "case",
+      label: "Case state",
+      tokens: tok("case"),
+      stable: false,
+      action: "regex + dictionary, notes included",
+    },
+    {
+      id: "evidence",
+      label: "Evidence",
+      tokens: evidence,
+      stable: false,
+      action: "regex + dictionary (nothing matches)",
+    },
+    {
+      id: "turns",
+      label: "Recent turns",
+      tokens: tok("turns"),
+      stable: false,
+      action: "dictionary: “Hi Sarah Collins” → “Hi [PERSON_7f3a9c]”",
+    },
+    {
+      id: "tool-results",
+      label: "Tool results",
+      tokens: tok("tool-results"),
+      stable: false,
+      action: "dictionary + field rules",
+    },
+    {
+      id: "message",
+      label: "New message",
+      tokens: tok("message"),
+      stable: false,
+      action: "pre-scanned: regex + CPU name scan",
+    },
+  ] as const;
+  const total = sum(blocks.map((b) => b.tokens)); // 5,000
+  const stable = sum(blocks.filter((b) => b.stable).map((b) => b.tokens)); // 2,700
+  return {
+    blocks,
+    total,
+    stable,
+    changing: total - stable, // 2,300
+    bytes: total * RESERVE.bytesPerToken, // ≈ 20,000
+    nerTokens: tok("message"), // 50
+    nerChars: tok("message") * RESERVE.bytesPerToken, // ≈ 200
+    minCacheable: 512, // F27
+  };
+})();
+
+/**
+ * Values the page uses after its interviewer pass (review/llm-platform-gateway-interviewer.md; page-agent notes in
+ * build/llm-platform-gateway/PAGE-NOTES.md), with working.
+ */
+export const PAGE_ADDS = (() => {
+  // Small-model interim guarantee on A until the requested 15M ITPM is granted: 1.2 × the guaranteed need.
+  const smallInterimGuarantee = 5.8e6; // 1.2 × ≈ 4.83M guaranteed small need = 5.80M, 58% of the 10M Scale tier
+  const smallInterimShareOfScale = smallInterimGuarantee / 10e6; // 0.58
+  // Canary detection: 100 prompts at a 90% pass rate, 95% two-sided: 1.96 × √(0.9 × 0.1 ÷ 100) ≈ 0.059 → ≈ 5.9 points.
+  const canaryDetectablePoints = 1.96 * Math.sqrt((0.9 * 0.1) / 100) * 100; // 5.88
+  // Release-gate pass counts (Wilson lower bounds at the gate thresholds; illustrative suite sizes).
+  const gatePassCounts = [
+    { passes: 997, of: 1_000 },
+    { passes: 773, of: 800 },
+  ] as const;
+  // One cold cell's scanner cores beside the steady 18.8 (support ≈ 10.2, voice ≈ 8.6).
+  const coldCellScannerCores = { support: 10.2, voice: 8.6, steady: 18.8 } as const;
+  const returnStepPerMinute = 0.25; // traffic returned to A per minute after a good probe (illustrative)
+  return {
+    smallInterimGuarantee,
+    smallInterimShareOfScale,
+    canaryDetectablePoints,
+    gatePassCounts,
+    coldCellScannerCores,
+    returnStepPerMinute,
   };
 })();

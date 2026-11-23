@@ -172,17 +172,59 @@ describe("gcase-kgsemi: the candidate families after the interviewer pass", () =
   });
 });
 
-// Wave 3 presets are still under design review: loaded here so they are not unused files; their numbers are pinned
-// when each page lands.
-describe("Wave 3 presets under design review", () => {
-  it("load and export their top-level constants", async () => {
-    const gateway = await import("@/components/diagrams/presets/gcase-gateway");
-    const moderation = await import("@/components/diagrams/presets/gcase-moderation");
-    const chat = await import("@/components/diagrams/presets/gcase-chat");
-    const code = await import("@/components/diagrams/presets/gcase-code");
-    expect(gateway.PROVIDER_LIMITS).toBeDefined();
-    expect(moderation.PLATFORM).toBeDefined();
-    expect(chat.TRAFFIC).toBeDefined();
-    expect(code.SEATS).toBeDefined();
+describe("gcase-gateway: the LLM platform gateway's numbers", () => {
+  it("keeps the canary bound and the interim small-model guarantee", async () => {
+    const { PAGE_ADDS, SELF_HOSTED, CANARIES } = await import("@/components/diagrams/presets/gcase-gateway");
+    expect(PAGE_ADDS.canaryDetectablePoints).toBeCloseTo(5.88, 1);
+    expect(PAGE_ADDS.smallInterimShareOfScale).toBeCloseTo(0.58, 2);
+    expect(SELF_HOSTED.gpus).toBe(2);
+    expect(CANARIES.perDay).toBe(7_200);
   });
+});
+
+describe("gcase-code: the code assistant's numbers", () => {
+  it("keeps the completion fleet, the cancellation saving and the seat economics", async () => {
+    const { COMPLETION_FLEET, FUNNEL, COST, PAGE_ADDS } = await import("@/components/diagrams/presets/gcase-code");
+    expect(COMPLETION_FLEET.gpus).toBe(355);
+    expect(FUNNEL.sent).toBeCloseTo(5_355, 0);
+    expect(FUNNEL.arriving).toBeCloseTo(4_200, 0);
+    expect(PAGE_ADDS.gpusIfAllSentArrive).toBe(452);
+    expect(PAGE_ADDS.gpusWithoutGate).toBe(591);
+    expect(PAGE_ADDS.curveGpus.map((c) => c.gpus)).toEqual([389, 355, 200, 120]);
+    expect(PAGE_ADDS.chatModel).toBeCloseTo(334, 0);
+    expect(PAGE_ADDS.chatModelCached).toBeCloseTo(127, 0);
+    expect(COST.meanSeat).toBeCloseTo(31.35, 1);
+    expect(PAGE_ADDS.margin30).toBeCloseTo(0.158, 2);
+    expect(PAGE_ADDS.heavyShareOfMean).toBeCloseTo(0.46, 2);
+  });
+});
+
+describe("gcase-moderation: the content moderation system's numbers", () => {
+  it("keeps the staffing, the prevalence bounds and the per-slice replay", async () => {
+    const { PEOPLE, PREVALENCE_BOUNDS, PREVALENCE_WEEKLY, REPLAY_SLICE } =
+      await import("@/components/diagrams/presets/gcase-moderation");
+    expect(PEOPLE.fte).toBeCloseTo(1_492, 0);
+    expect(PEOPLE.perMonth / 1e6).toBeCloseTo(6.76, 2);
+    const hate = PREVALENCE_BOUNDS.find((r) => r.id === "hate")!;
+    expect(hate.upper95).toBeCloseTo(6.59, 2);
+    expect(hate.twoSided95.lo).toBeCloseTo(4.03, 2);
+    expect(hate.twoSided95.hi).toBeCloseTo(6.83, 2);
+    expect(PREVALENCE_WEEKLY.find((r) => r.id === "hate")!.weeklyFail).toBeCloseTo(0.53, 2);
+    expect(REPLAY_SLICE.k).toBe(84);
+    expect(REPLAY_SLICE.globalDeOnly2x).toBeCloseTo(0.0056, 4);
+    expect(REPLAY_SLICE.catch2x).toBeGreaterThan(0.999);
+  });
+});
+
+describe("gcase-chat: the chat service's numbers", () => {
+  it("keeps the fleet range, the cost per turn and the latency paths", async () => {
+    const { CAPACITY, COST, LATENCY, DEGRADE } = await import("@/components/diagrams/presets/gcase-chat");
+    expect(CAPACITY.design.gpus).toBe(14_520);
+    expect(CAPACITY.bf16Attention.gpus).toBe(16_896);
+    expect(CAPACITY.bf16Kv.fleet.gpus).toBe(14_592);
+    expect(COST.perTurn).toBeCloseTo(0.0024, 4);
+    expect(LATENCY.held.p50).toBeCloseTo(691, 0);
+    expect(LATENCY.turn50Miss.p50).toBeCloseTo(414, 0);
+    expect(Math.round(DEGRADE.inflightSlots.withoutSlot)).toBe(40_675);
+  }, 30_000);
 });

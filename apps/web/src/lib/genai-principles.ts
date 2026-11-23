@@ -44,6 +44,9 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -68,6 +71,9 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -82,6 +88,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -94,6 +101,10 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/ai-answer-engine`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -101,7 +112,12 @@ const ROWS: PrincipleRow[] = [
     name: "Count and cap in tokens",
     line: "Quotas, budgets and capacity are measured in tokens and GPU time, not in requests.",
     teach: concept("rate-limiting-throttling", "capacity-planning-and-cost-estimation"),
-    caseStudies: [`${CASE}/ai-answer-engine`],
+    caseStudies: [
+      `${CASE}/ai-answer-engine`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/chatgpt-style-chat-service`,
+    ],
   },
   {
     id: "P7",
@@ -112,6 +128,10 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/customer-support-agent`,
       `${CASE}/ai-answer-engine`,
       `${CASE}/conversational-assistant-design`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -126,6 +146,8 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/code-assistant`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -137,6 +159,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -152,6 +175,10 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -177,6 +204,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/code-assistant`,
     ],
   },
   {
@@ -190,6 +218,9 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -202,6 +233,8 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -214,6 +247,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/content-moderation-system`,
     ],
   },
   {
@@ -228,6 +262,10 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -239,6 +277,10 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/voice-agent-call-centre`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
 ];
