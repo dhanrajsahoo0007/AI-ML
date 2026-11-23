@@ -203,7 +203,7 @@ const spec: DiagramSpec = {
         [430, 175],
         [430, 510],
       ],
-      labelAt: 0.42,
+      labelAt: 0.31,
     },
     { from: "gw", to: "api", label: "allowed", flow: true, packet: true, delay: 0.9, until: 7 },
 

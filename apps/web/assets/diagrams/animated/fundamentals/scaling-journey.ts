@@ -311,7 +311,7 @@ const spec: DiagramSpec = {
         [850, 400],
         [700, 400],
       ],
-      labelAt: 0.5,
+      labelAt: 0.2,
     },
   ],
 };

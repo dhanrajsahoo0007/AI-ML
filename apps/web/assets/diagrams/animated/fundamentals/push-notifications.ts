@@ -21,7 +21,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Zones: services 15-185, tokens/pipeline 205-575, providers 595-775, device 790-945.
 const spec: DiagramSpec = {
   title: "Push notifications: register, send, clean up",
-  width: 960,
+  width: 1010,
   height: 400,
   steps: [
     { title: "The phone gets a device token and registers it" },
@@ -33,11 +33,11 @@ const spec: DiagramSpec = {
     { id: "registry", title: "Device tokens", tone: "violet", x: 205, y: 40, w: 370, h: 150 },
     { id: "pipeline", title: "Send pipeline", tone: "orange", x: 205, y: 220, w: 370, h: 150 },
     { id: "providers", title: "Apple and Google", tone: "blue", x: 595, y: 220, w: 180, h: 150 },
-    { id: "device", title: "Device", tone: "neutral", x: 790, y: 40, w: 155, h: 330 },
+    { id: "device", title: "Device", tone: "neutral", x: 830, y: 40, w: 166, h: 330 },
   ],
   nodes: [
     // Step 1: registration.
-    { id: "phone", label: "Phone", sub: "app may be closed", icon: "phone", x: 865, y: 290, w: 160 },
+    { id: "phone", label: "Phone", sub: "app may be closed", icon: "phone", x: 913, y: 290, w: 160 },
     { id: "apns", label: "APNs / FCM", sub: "one conn per phone", icon: "bell", tone: "blue", x: 685, y: 290, w: 168 },
     { id: "tokenapi", label: "Token API", sub: "POST /devices", icon: "api", tone: "teal", x: 480, y: 110, w: 140 },
     {

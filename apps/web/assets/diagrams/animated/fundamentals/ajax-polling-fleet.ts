@@ -88,7 +88,7 @@ const spec: DiagramSpec = {
     },
   ],
   edges: [
-    { from: "pages", to: "lb", label: "GET every 5 s", flow: true, packet: true },
+    { from: "pages", to: "lb", label: "GET", flow: true, packet: true },
     { from: "lb", to: "api", flow: true, packet: true, delay: 0.6 },
     { from: "api", to: "db", label: "SELECT per poll", flow: true, packet: true, delay: 1.2, until: 1 },
     { from: "api", to: "cache", label: "read", flow: true, packet: true, delay: 1.2, step: 2 },
