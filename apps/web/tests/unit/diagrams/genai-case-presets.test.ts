@@ -172,15 +172,6 @@ describe("gcase-kgsemi: the candidate families after the interviewer pass", () =
   });
 });
 
-// Wave 3 presets are still under design review: loaded here so they are not unused files; their numbers are pinned
-// when each page lands.
-describe("Wave 3 presets under design review", () => {
-  it("load and export their top-level constants", async () => {
-    const chat = await import("@/components/diagrams/presets/gcase-chat");
-    expect(chat.TRAFFIC).toBeDefined();
-  });
-});
-
 describe("gcase-gateway: the LLM platform gateway's numbers", () => {
   it("keeps the canary bound and the interim small-model guarantee", async () => {
     const { PAGE_ADDS, SELF_HOSTED, CANARIES } = await import("@/components/diagrams/presets/gcase-gateway");
@@ -223,4 +214,17 @@ describe("gcase-moderation: the content moderation system's numbers", () => {
     expect(REPLAY_SLICE.globalDeOnly2x).toBeCloseTo(0.0056, 4);
     expect(REPLAY_SLICE.catch2x).toBeGreaterThan(0.999);
   });
+});
+
+describe("gcase-chat: the chat service's numbers", () => {
+  it("keeps the fleet range, the cost per turn and the latency paths", async () => {
+    const { CAPACITY, COST, LATENCY, DEGRADE } = await import("@/components/diagrams/presets/gcase-chat");
+    expect(CAPACITY.design.gpus).toBe(14_520);
+    expect(CAPACITY.bf16Attention.gpus).toBe(16_896);
+    expect(CAPACITY.bf16Kv.fleet.gpus).toBe(14_592);
+    expect(COST.perTurn).toBeCloseTo(0.0024, 4);
+    expect(LATENCY.held.p50).toBeCloseTo(691, 0);
+    expect(LATENCY.turn50Miss.p50).toBeCloseTo(414, 0);
+    expect(Math.round(DEGRADE.inflightSlots.withoutSlot)).toBe(40_675);
+  }, 30_000);
 });

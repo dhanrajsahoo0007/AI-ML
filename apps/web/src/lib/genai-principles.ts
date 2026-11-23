@@ -73,6 +73,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/conversational-assistant-design`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -103,6 +104,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -110,7 +112,12 @@ const ROWS: PrincipleRow[] = [
     name: "Count and cap in tokens",
     line: "Quotas, budgets and capacity are measured in tokens and GPU time, not in requests.",
     teach: concept("rate-limiting-throttling", "capacity-planning-and-cost-estimation"),
-    caseStudies: [`${CASE}/ai-answer-engine`, `${CASE}/llm-platform-gateway`, `${CASE}/code-assistant`],
+    caseStudies: [
+      `${CASE}/ai-answer-engine`,
+      `${CASE}/llm-platform-gateway`,
+      `${CASE}/code-assistant`,
+      `${CASE}/chatgpt-style-chat-service`,
+    ],
   },
   {
     id: "P7",
@@ -124,6 +131,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -139,6 +147,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/code-assistant`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -169,6 +178,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -210,6 +220,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -254,6 +265,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
   {
@@ -268,6 +280,7 @@ const ROWS: PrincipleRow[] = [
       `${CASE}/llm-platform-gateway`,
       `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
+      `${CASE}/chatgpt-style-chat-service`,
     ],
   },
 ];

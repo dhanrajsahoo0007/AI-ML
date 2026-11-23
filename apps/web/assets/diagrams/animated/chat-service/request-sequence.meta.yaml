@@ -1,0 +1,23 @@
+title: Turn 50, a dropped stream and a stop, step by step
+alt: >-
+  A sequence diagram with six lanes: an orange user app, a teal gateway, a neutral orchestrator, a violet hot state
+  store, a green prefill unit and a green decode rack, built in three steps. Step 1: the app posts turn 50 with an
+  idempotency key; the gateway reads the plan from a signed token and checks the token bucket; the orchestrator gets
+  the summary of turns 1 to 40 and turns 41 to 49 from the conversation cache while the input screen, the turn router
+  at 0.07, which means fast, and recall run in parallel; it hashes the conversation to its home prefill unit, which
+  holds 13,700 cached tokens and computes 450 new ones after about 41 milliseconds in the queue, 9 of them work; 14,150
+  tokens of KV, 0.50 gigabytes, move to the decode rack in 1.2 milliseconds over RDMA; the first step gives 1.7
+  tokens; numbered events stream to the app and into the resume buffer, and event 151, done, is sent once the reply is
+  stored. Step 2: the laptop's connection drops after event 80; decoding continues through a 10-second grace and,
+  with 3.75 seconds left, finishes; events 81 to 151 are buffered; the phone asks with Last-Event-ID 80 and the
+  gateway replays 81 to 151 from the buffer, kept 10 minutes after the end but not across a region failover, with no
+  regeneration. Step 3: a stop posts an idempotent cancel that takes a queued turn out of the prefill queue or stops
+  the decode sequence and frees its KV blocks, and the partial reply is stored as cancelled; stops and dropped
+  reasoning turns free about 58 GPUs of capacity on average. An edit of turn 47 posts with an earlier parent, creates
+  a sibling branch, moves the current leaf with a conditional update, and its prefix up to turn 46 still hits.
+caption: >-
+  Numbered events make a dropped stream a replay, not a regeneration, and a stop travels all the way to the engine.
+  Ids and stage times are illustrative.
+tags: [genai, chat-service, sequence, streaming, sse, prompt-caching, case-study]
+source: original
+created: 2026-11-23

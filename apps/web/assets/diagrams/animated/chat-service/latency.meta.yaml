@@ -1,0 +1,25 @@
+title: Time to first token, by path
+alt: >-
+  A waterfall in five steps. Each path is drawn as stage medians laid end to end, followed by two rows for the whole
+  path's simulated 50th and 95th percentiles. Step 1: turn 50 with its prefix on its home unit: edge, session and token
+  bucket 21 milliseconds; the input screen, turn router and recall in parallel, 18; the inference router 2; the
+  small-job queue with the 450 new tokens, 41, of which 9 are work; KV to decode and joining a step, 12; the first
+  step of 1.7 tokens, 23; the network, 20: 137 milliseconds by medians, with simulated home-unit hits at 155 at the
+  median and 266 at the 95th percentile against targets of 250 and 500. Step 2, on the same scale: the same turn
+  missing recomputes 11,650 tokens in 188 milliseconds on an idle unit, 284 in all, while all simulated misses take 331
+  at the median and 733 at the 95th percentile, against 600 and 1,200; misses of turn 50's size take 414 and 827. Step 3, on its own scale: a search turn writes
+  a 30-token search call, shows Searching after about 614 milliseconds by medians, searches for 700, re-prefills 2,000
+  tokens of results and answers at about 1,390 by medians; simulated, Searching shows at 636 and the answer starts at
+  1,468 at the median and 2,271 at the 95th percentile, against 2,000 and 3,000. Step 4, on its own scale: a reasoning
+  turn shows Thinking within about 61 milliseconds, thinks 2,000 tokens at 100 a second for 20 seconds with a summary
+  every 5 seconds, and its answer starts at 20,216 milliseconds at the median and 45,144 at the 95th percentile,
+  against 30,000 and 60,000. Step 5, on the scale of steps 1 and 2: a risky-input turn, 3 percent of turns, follows
+  the hit path but holds its first 32-token window for 533 milliseconds until it is screened, 670 by medians;
+  simulated, 691 at the median and 821 at the 95th percentile, against its own targets of 800 and 1,300.
+caption: >-
+  Stage medians show where the time goes; the simulated p95 shows where the tail lives: the prefill queue for misses,
+  the held window for risky-input turns, thinking length for reasoning turns. Each path meets its own target. Stage
+  times are illustrative.
+tags: [genai, chat-service, latency, ttft, waterfall, case-study]
+source: original
+created: 2026-11-23
