@@ -327,7 +327,8 @@ export const TRAFFIC_GW = (() => {
  *   voice 414.7 × 1,600 = 663,552 ITPM; × 25 = 10,368 OTPM; briefings and hedges 192 × 0.341 = 65.5 a minute ×
  *   1,600 = 104,800 ITPM (illustrative sizes);
  *   assistant 45.4 × 3,539 = 160,700 ITPM; 10,860 OTPM; labs cap 200,000 / 20,000.
- *   → 3.07M ITPM at peak (31%); guaranteed 1.5 × need ≈ 4.60M (46%, under the 60% rule).
+ *   → 3.07M ITPM at peak (31%); guaranteed 1.5 × need for uncapped keys + labs at its cap ≈ 4.50M (45%, under
+ *   the 60% rule); burst pool 5.50M.
  * Small, peak need: support 720 × 4,000 = 2,880,000; voice agent 967.7 × 1,600 = 1,548,288 + detector 768 × 300 =
  *   230,400; assistant 45.4 × 3,921 = 178,000 → 4.84M; guaranteed 1.5 × = 7.26M = 73% of 10M, over the 60% rule:
  *   the design requests 15M (48%).
@@ -352,7 +353,8 @@ export const QUOTAS = (() => {
   };
   const peakItpm = sum(Object.values(need).map((n) => n.itpm));
   const peakOtpm = sum(Object.values(need).map((n) => n.otpm));
-  const guaranteedItpm = headroom * peakItpm;
+  // Capped keys (labs) are guaranteed their cap, not 1.5 × it (review R2-13): 1.5 × 2,869,453 + 200,000 = 4.50M.
+  const guaranteedItpm = headroom * (peakItpm - need.labs.itpm) + need.labs.itpm;
   const smallNeed = {
     support: m * SUPPORT.small.inputPerMessage, // 2,880,000
     voice:
@@ -368,11 +370,11 @@ export const QUOTAS = (() => {
     peakItpmShare: peakItpm / PROVIDER_LIMITS.mid.itpm, // ≈ 0.31
     peakOtpm, // ≈ 0.15M
     peakOtpmShare: peakOtpm / PROVIDER_LIMITS.mid.otpm,
-    guaranteedItpm, // ≈ 4.60M
+    guaranteedItpm, // ≈ 4.50M (45%)
     guaranteedShare: guaranteedItpm / PROVIDER_LIMITS.mid.itpm,
     supportGuaranteedItpm: headroom * need.support.itpm, // ≈ 2.91M
     supportGuaranteedOtpm: headroom * need.support.otpm, // ≈ 159,300
-    burstPool: PROVIDER_LIMITS.mid.itpm - guaranteedItpm, // ≈ 5.4M
+    burstPool: PROVIDER_LIMITS.mid.itpm - guaranteedItpm, // ≈ 5.50M
     smallNeed,
     smallPeak, // ≈ 4.84M
     smallGuaranteedShare: (headroom * smallPeak) / PROVIDER_LIMITS.small.itpm, // ≈ 0.73 → request 15M
@@ -441,16 +443,36 @@ export const RESERVE = (() => {
       lagS,
     },
     labsHeldPerCall, // 0.34 USD
-    labsHeldMax: LABS.maxParallel * labsHeldPerCall, // 6.81 USD: the last ≤ 8% of labs' day is refused early, then released
+    labsHeldMax: LABS.maxParallel * labsHeldPerCall, // 6.81 USD = 8.1% of labs' day, refused early, then released
+    labsHeldShare: (LABS.maxParallel * labsHeldPerCall) / LABS.budgetUsd, // 0.081
+    /**
+     * Batch (review R2-2): the upper bound is HELD until each result settles, not released at submission.
+     * Catalogue: 20,000 × (3,200 bytes × 0.125 + 400 × 0.50) ÷ 1M × 0.5 = 6.00 USD held against 2.80 billed (2.1×).
+     */
+    catalogueBatchHeld:
+      CATALOGUE.items *
+      (usd(CATALOGUE.input * 4, PRICES.small.cacheWrite) + usd(CATALOGUE.output, PRICES.small.output)) *
+      AP_PRICES.batchDiscount,
+    /** T0 ledger fails open with a page (R2-10): support spends 1,801.2 ÷ 1,440 ≈ 1.25 USD a minute → ≈ 18.8 USD in 15 min. */
+    ledgerOpenUsdPerMin: SUPPORT.spendPerDay / 1_440,
+    ledgerOpen15MinUsd: (15 * SUPPORT.spendPerDay) / 1_440,
     /**
      * A mass cache miss (a deploy) as a RATE: every support call counts its full input, 720 × 8,580 = 6.18M a minute
-     * against its guaranteed 2.91M; the 3.27M excess comes from the 5.4M burst pool (T0 borrows first), leaving 2.13M.
+     * against its guaranteed 2.91M; the 3.27M excess comes from the 5.50M burst pool (T0 borrows first), leaving 2.23M.
      */
     massMissItpm: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage, // 6,177,600
     massMissExcess: SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage - QUOTAS.supportGuaranteedItpm,
     labsAskedTokens: (TEAM_KEYS.labs.inputM + TEAM_KEYS.labs.outputM) * M, // 45M
-    /** Large-ceiling aliases (thinking): incremental reservation in 4,096-token chunks; overshoot ≤ in flight × chunk. */
+    massMissPoolLeft:
+      QUOTAS.burstPool - (SUPPORT.peakMessagesPerSecond * 60 * SUPPORT.inputPerMessage - QUOTAS.supportGuaranteedItpm), // ≈ 2.23M
+    /**
+     * Large-ceiling aliases (thinking): incremental reservation in 4,096-token chunks, EXTENDED when 75% of a chunk is
+     * used (R2-9): the next 1,024 tokens cover the cut-to-stop latency (0.3 s × 80 tokens a second ≈ 24), so overshoot
+     * stays 0.
+     */
     incrementalChunk: 4_096,
+    extendAt: 0.75,
+    abortResidueTokens: 0.3 * 80, // 24, inside the unused quarter of the chunk
   };
 })();
 
@@ -499,13 +521,26 @@ export const OVERHEAD = (() => {
       ner.p50 <= targets.ner.p50 &&
       ner.stageSum <= targets.ner.p95,
     providerShareMs: LATENCY.firstTokenMs - plain.p50, // 394.4
+    /**
+     * Support's pre-scan (review R2-7): /v1/scan hop 1 ms + scanner queue 2 ms (illustrative) + NER 13.5 p50 / 30 p95
+     * (the p95 is assumed: F41 gives a median only) = 16.5 / 33 ms against support's 30 ms case-load stage: hidden at
+     * p50, ≤ 3 ms exposed on the first call at p95. With the GPU fallback (F40, 38 / 86 ms): 41 / 89 → 11 / 59 ms exposed.
+     * Voice scans each partial transcript's new words before a speculative call leaves, so the scan sits on its speak
+     * path: no-tool turn 1,100 + 13.5 = 1,113.5 ms p50 (≤ 1,200) and 1,494 + 30 = 1,524 ms p95 by stage sum (≤ 1,600).
+     */
     prescan: {
       overlapMs: SUP_LATENCY.gateway,
+      hopMs: 1,
+      queueMs: 2,
       nerP50: 13.5,
       nerP95: 30,
-      exposedP50: 0,
-      exposedP95: Math.max(0, 30 - SUP_LATENCY.gateway),
+      totalP50: 16.5,
+      totalP95: 33,
+      exposedP50: Math.max(0, 16.5 - SUP_LATENCY.gateway), // 0
+      exposedP95: Math.max(0, 33 - SUP_LATENCY.gateway), // 3
+      gpuExposed: { p50: Math.max(0, 38 + 3 - SUP_LATENCY.gateway), p95: Math.max(0, 86 + 3 - SUP_LATENCY.gateway) }, // 11 / 59
     },
+    voiceScanOnPath: { p50: 1_100 + 13.5, p95StageSum: 1_494 + 30, targets: { p50: 1_200, p95: 1_600 } },
     measured: { litellm4: { p50: 2, p95: 8, p99: 13 }, litellm2: { p50: 12, p95: 29, p99: 43 }, podP99At100: 47 },
     gpuNerRef: { chars: 317, avg: 38.11, p95: 86.47 }, // F40, the rejected GPU option
     podKneeRps: 100,
@@ -523,10 +558,12 @@ export const OVERHEAD = (() => {
  *   support 720 × 8,580 = 6,177,600 input + 100,440 × 10 = 1,004,400 → 7.18M (6.68M at 5×); start deductions 1,188 ×
  *   (5,200 + 512) = 6.79M, lower than the settled count;
  *   voice 414.7 × 3,600 = 1,492,992 + 10,368 × 10 = 103,680 → 1.60M (1.54M at 5×);
- *   → T0 mid ≈ 8.78M TPM (8.22M at 5×). The assistant (≈ 0.65M cold) goes to C instead, to keep B for T0.
+ *   support hand-offs 57.6 × (2,500 + 1,000) = 201,600; voice briefings and hedges 65.5 × (3,600 + 250) = 252,000;
+ *   → T0 mid ≈ 9.23M TPM (8.65M at 5×). The assistant (≈ 0.55M cold) goes to C instead, to keep B for T0.
  * Small: support 2,880,000 + 72,000 × 10 = 3.60M; voice 967.7 × 3,600 + 24,192 × 10 + detector 230,400 = 3.95M →
- *   ≈ 7.55M TPM.
- * Quota to request (1.2 × need): mid 10.5M TPM, small 9.1M TPM on the EU geographic profile, + a TPD. Until granted,
+ *   ≈ 7.56M TPM.
+ * Quota to request (1.2 × need): mid 11.1M TPM, small 9.1M TPM on the EU geographic profile, + a TPD of ≈ 4.03B
+ * (a 4-hour outage). Until granted,
  * B carries voice first and support up to its quota; the rest of support hands off to people (its own path).
  * Cold cost per support message: no cache 8,580 × 2.00 + 139.5 × 10 = 0.01856 (× 2.44); every call writing 8,580 ×
  * 2.50 + 1,395 = 0.02285 (× 3.01) of 0.00759; B's own price unverified.
@@ -543,20 +580,27 @@ export const FAILOVER = (() => {
   const voiceIn = VOICE.uncachedPerCall + VOICE.cachedPerCall; // 3,600
   const supportMid = (b: number) => m * SUPPORT.inputPerMessage + m * SUPPORT.outputPerMessage * b;
   const voiceMidNeed = (b: number) => voiceMid * voiceIn + voiceMid * VOICE.outputPerCall * b;
-  const midNeed = supportMid(bd) + voiceMidNeed(bd); // ≈ 8.78M
-  const midNeedLow = supportMid(bdLow) + voiceMidNeed(bdLow); // ≈ 8.22M
+  // T0's other mid calls (review R2-6): support hand-offs 57.6 a minute × (2,500 + 100 × b); voice briefings and hedges
+  // 65.5 a minute × (3,600 + 25 × b).
+  const handoffs = (b: number) => m * SUPPORT.perMessage.handoff * (2_500 + 100 * b); // 201,600 at 10×
+  const voiceExtra = (b: number) =>
+    VOICE_CALLS.salesDayConcurrent * (VOICE.other.briefing + VOICE.other.hedge) * (voiceIn + VOICE.outputPerCall * b); // 252,000
+  const midNeed = supportMid(bd) + voiceMidNeed(bd) + handoffs(bd) + voiceExtra(bd); // ≈ 9.23M
+  const midNeedLow = supportMid(bdLow) + voiceMidNeed(bdLow) + handoffs(bdLow) + voiceExtra(bdLow); // ≈ 8.65M
   const smallNeed =
     m * SUPPORT.small.inputPerMessage +
     m * SUPPORT.small.outputPerMessage * bd +
     voiceSmall * voiceIn +
     voiceSmall * VOICE.outputPerCall * bd +
-    VOICE_CALLS.salesDayConcurrent * VOICE.other.detector * VOICE.detectorInput; // ≈ 7.55M
+    VOICE_CALLS.salesDayConcurrent * VOICE.other.detector * VOICE.detectorInput; // ≈ 7.56M
   const coldNoCache = usd(SUPPORT.inputPerMessage, PRICES.mid.input) + usd(SUPPORT.outputPerMessage, PRICES.mid.output);
   const coldWrites =
     usd(SUPPORT.inputPerMessage, PRICES.mid.cacheWrite) + usd(SUPPORT.outputPerMessage, PRICES.mid.output);
   return {
     firstUnluckyMs: CONCEPT_FALLBACK.userFirstTokenMs, // 3,450
     breaker: { window: BREAKER.window, trips: BREAKER.failuresToTrip, openS: BREAKER.openS, probes: BREAKER.probes },
+    /** T0 also trips on latency (review R2-1): slow = first token > 800 ms; open when slow-or-failed > 10% of a minute. */
+    slowTrip: { slowMs: 2 * LATENCY.firstTokenMs, share: 0.1, minCalls: 20 },
     openPathMs: LATENCY.firstTokenMs + 150, // 550 (150 ms cold penalty, illustrative)
     voiceFast429Ms: 50 + VOICE.firstTokenMs + 150, // 600
     voiceSilentMs: 2 * VOICE.firstTokenMs + VOICE.firstTokenMs + 150, // 1,350
@@ -564,7 +608,9 @@ export const FAILOVER = (() => {
     midNeed,
     midNeedLow,
     smallNeed,
-    midRequest: 1.2 * midNeed, // ≈ 10.5M
+    midRequest: 1.2 * midNeed, // ≈ 11.1M
+    /** TPD to request: a 4-hour peak-hour outage of A on B = (9.23 + 7.56)M × 240 ≈ 4.03B tokens. */
+    tpdFor4h: (midNeed + smallNeed) * 240,
     smallRequest: 1.2 * smallNeed, // ≈ 9.1M
     assistantColdMid: ASSISTANT.peakTurnsPerSecond * 60 * ASSISTANT.coldPerTurn, // ≈ 0.55M (+ output)
     coldCountedRatio: SUPPORT.inputPerMessage / SUPPORT.uncachedPerMessage, // 3.44
@@ -576,19 +622,37 @@ export const FAILOVER = (() => {
   };
 })();
 
-/** Availability of T0 (sheet §4 N2, §15.5). Inputs illustrative; the arithmetic is the point. */
+/**
+ * Availability of T0 (sheet §4 N2, §15.5). SLI: share of T0 calls whose first content token reaches the tenant within
+ * 800 ms without a 5xx, per 5-minute window. Inputs illustrative; the arithmetic is the point. Bad minutes a month:
+ *   gateway cells 2
+ *   + A down 43.2 (99.9%) × P(B unusable | A down) 0.2 = 8.64
+ *   + detection of hard failures 2 incidents × 0.5 min = 1
+ *   + brownouts (review R2-1): a T0 call whose first token is later than 800 ms counts as a "slow" failure, and the
+ *     breaker opens when slow-or-failed calls exceed 10% of a rolling minute (≥ 20 calls). Full brownouts (A slow on
+ *     most calls): 3 a month × 0.5 min to trip and move = 1.5; partial brownouts under the 10% trip: 120 min a month ×
+ *     5% of calls slow = 6 → 7.5
+ *   + name scanner beyond its pre-signed 4-hour regex-and-dictionary exception: 0.1
+ *   = 19.24 bad minutes → 99.955%. Target 99.9% (43.2 minutes), so the margin is 24 minutes; 99.95% (21.6) is met only
+ *   if brownouts stay as assumed (one more 30-minute partial brownout at 10% slow adds 3). An F38-sized month (262 min
+ *   on A): 2 + 52.4 + 1 + 7.5 + 0.1 = 63.0 → 99.85%, a miss.
+ */
 export const AVAILABILITY = (() => {
   const monthMin = 30 * 24 * 60; // 43,200
-  const gatewayMin = 2; // both Regions of a T0 cell bad at once, or a bad release before rollback
-  const aDownMin = 43.2; // A at 99.9% for T0's alias (illustrative; one provider gave 262 min in Dec 2024, F38)
-  const pBGivenA = 0.2; // B unusable when A is down: same weights and vendor (F37 reached Bedrock), or quota short
+  const gatewayMin = 2;
+  const aDownMin = 43.2;
+  const pBGivenA = 0.2;
   const incidents = 2;
-  const detectMin = 0.5; // per incident: calls before the breaker opens and the 3,450 ms first calls
-  const badMin = gatewayMin + aDownMin * pBGivenA + incidents * detectMin; // 11.64
-  const target = 0.9995;
-  const budget = monthMin * (1 - target); // 21.6
-  const for9999 = (monthMin * 0.0001 - gatewayMin - incidents * detectMin) / aDownMin; // 0.0306
-  const badMonth = gatewayMin + 262 * pBGivenA + incidents * detectMin; // 55.4
+  const detectMin = 0.5;
+  const brownout = { full: 3, tripMin: 0.5, partialMin: 120, partialSlowShare: 0.05, tripShare: 0.1 };
+  const brownoutMin = brownout.full * brownout.tripMin + brownout.partialMin * brownout.partialSlowShare; // 7.5
+  const scannerMin = 0.1;
+  const fixed = gatewayMin + incidents * detectMin + brownoutMin + scannerMin; // 10.6
+  const badMin = fixed + aDownMin * pBGivenA; // 19.24
+  const target = 0.999;
+  const budget = monthMin * (1 - target); // 43.2
+  const stretch = monthMin * (1 - 0.9995); // 21.6
+  const badMonth = fixed + 262 * pBGivenA; // 63.0
   return {
     monthMin,
     gatewayMin,
@@ -596,14 +660,19 @@ export const AVAILABILITY = (() => {
     pBGivenA,
     incidents,
     detectMin,
-    badMin, // 11.64
-    availability: 1 - badMin / monthMin, // 0.99973
-    target, // 99.95%
-    budget, // 21.6
-    pBGivenAFor9999: for9999, // ≈ 0.031: needed for 99.99%
-    badMonthMin: badMonth, // 55.4 in an F38-sized month
-    badMonthAvailability: 1 - badMonth / monthMin, // 0.99872
-    sliThresholdMs: 2 * LATENCY.firstTokenMs, // 800: a call is good if its first token arrives ≤ 800 ms
+    brownout,
+    brownoutMin,
+    scannerMin,
+    badMin, // 19.24
+    availability: 1 - badMin / monthMin, // 0.99955
+    target, // 99.9%
+    budget, // 43.2
+    stretch, // 21.6 (99.95%)
+    v2BadMin: gatewayMin + aDownMin * pBGivenA + incidents * detectMin, // 11.64, the v2 sum without brownouts
+    badMonthMin: badMonth, // 63.0 in an F38-sized month
+    badMonthAvailability: 1 - badMonth / monthMin, // 0.99854
+    sliThresholdMs: 2 * LATENCY.firstTokenMs, // 800
+    slowMs: 2 * LATENCY.firstTokenMs, // a T0 call slower than this counts toward the breaker
   };
 })();
 
@@ -696,14 +765,14 @@ export const REDACTION = [
     data: "customer PII",
     inline: "regex + dictionary on all text; NER on unseen text (pre-scanned)",
     cards: "block",
-    onScannerDown: "regex + dictionary ≤ 15 min, then hand-offs; privacy owner paged",
+    onScannerDown: "regex + dictionary up to 4 h (pre-signed exception), then hand-offs",
   },
   {
     tenant: "Voice agent",
     data: "customer PII (spoken)",
     inline: "regex + dictionary; NER on unseen text, pre-scanned as each turn is transcribed",
     cards: "block",
-    onScannerDown: "regex + dictionary ≤ 15 min, then transfer",
+    onScannerDown: "regex + dictionary up to 4 h (pre-signed exception), then transfer",
   },
   {
     tenant: "Employee assistant",
@@ -738,11 +807,40 @@ export const REDACTION_EVAL = (() => {
     cards: { n: 1_000, upperIfZero: 3 / 1_000 }, // 0 of 1,000 → ≤ 0.3% at 95%
     carryOver: { conversations: 500, turns: 4 }, // 0 raw values from earlier turns in later calls
     dictionaryMs: 0.1, // exact-match (Aho–Corasick) over ≈ 20 KB
-    dictionaryTtl: "conversation idle + 1 h",
+    dictionaryTtl: "idle + 1 h; support and voice idle + 24 h (resumed conversations, night judges)",
+    /**
+     * Miss path (review R2-3): with no dictionary (Redis loss, idle expiry) the whole prompt must be scanned once.
+     * CPU NER rate from F41: 523 characters in 13.5 ms ≈ 38,700 characters a second a core. Support's 20,000 characters:
+     * serial 516 ms (400 + 516 > 800: bad by the SLI), so the scan is split into 10 chunks of 2,000 on 10 cores:
+     * 2,000 ÷ 38,700 ≈ 52 ms + 5 ms fan-out ≈ 57 ms on that first call only (first token 457 ms, good).
+     * A whole cold cell at peak: support 19.8 calls × 20,000 + voice 23.04 × 14,400 = 396,000 + 331,800 = 727,800
+     * characters a second ≈ 18.8 cores for the minutes until dictionaries refill.
+     */
+    nerCharsPerCoreSecond: 523 / 0.0135, // 38,741
+    fullRescanSerialMs: (20_000 / 523) * 13.5, // 516
+    fullRescanChunkedMs: (2_000 / 523) * 13.5 + 5, // ≈ 56.6
+    coldCellCores: (SUPPORT.peakMidCallsPerSecond * 20_000 + VOICE.peakAgentCallsPerSecond * 14_400) / (523 / 0.0135), // ≈ 18.8
     cpuNerMs: 13.5,
     gpuNerMs: 38.11,
     regexMs: 0.2,
   };
+})();
+
+/**
+ * Night judges (review R2-4): support's 50,000 conversation judges and voice's 128,000 turn judges run 01:00–05:00 on
+ * A's real-time API (not the Batch API, which keeps data 29 days and is not ZDR-eligible, F45), under aliases
+ * `support-judge` and `voice-judge` with the same redaction policy as their tenants. Their dictionaries are kept until
+ * the judge has run (≤ 24 h), so the normal path is the dictionary pass. Worst case, no dictionary: full NER at night,
+ * support ≈ 28,000 characters (7,000 tokens) ÷ 38,741 = 0.723 s a call; voice ≈ 4,000 characters (1,000 tokens,
+ * illustrative) = 0.103 s → 50,000 × 0.723 + 128,000 × 0.103 ≈ 49,370 s ≈ 13.7 CPU-hours ≈ 3.4 cores over 4 hours,
+ * inside the scanner fleet at night.
+ */
+export const JUDGES = (() => {
+  const rate = 523 / 0.0135;
+  const support = { calls: SUPPORT.deferredPerDay, chars: 28_000 };
+  const voice = { calls: VOICE.deferredPerDay, chars: 4_000 };
+  const cpuSeconds = (support.calls * support.chars + voice.calls * voice.chars) / rate;
+  return { support, voice, windowHours: 4, cpuHours: cpuSeconds / 3_600, cores: cpuSeconds / (4 * 3_600) };
 })();
 
 // ── Capacity, cells, platform cost ──────────────────────────────────────────────────────────────────────────────────
@@ -750,10 +848,11 @@ export const REDACTION_EVAL = (() => {
 /**
  * Three cells (support, voice, T1–T3), each active-active in London and Ireland; each Region carries its cell alone at
  * 1.5 × peak, 50 RPS a pod, + 1 spare: support 56.76 × 1.5 = 85.1 → 2 + 1 = 3; voice 36.93 × 1.5 = 55.4 → 2 + 1 = 3;
- * other 3.9 × 1.5 = 5.8 → 1 + 1 = 2 → 8 a Region, 16 pods. CPU name-scanner pods 2 a Region.
- * Infra a month (illustrative): pods 16 × 0.20 × 720 = 2,304; scanner pods 4 × 0.20 × 720 = 576; Redis 6 × 150 = 900;
- * metering 900; canaries 2,679 → 7,359. Team 4 engineers (on-call shared with SRE) × 400,000 ÷ 12 = 133,333.
- * → ≈ 140,700 a month ≈ 0.0030 USD a call (model ≈ 0.0016 a call); ≈ 1.9 × the model spend it carries.
+ * other 3.9 × 1.5 = 5.8 → 1 + 1 = 2 → 8 a Region, 16 pods. CPU name-scanner pods 3 a Region (4 vCPU each, 12 cores),
+ * autoscaled to 6 (24 cores) for a cold cell (≈ 18.8 cores, REDACTION_EVAL).
+ * Infra a month (illustrative): pods 16 × 0.20 × 720 = 2,304; scanner pods 6 × 0.20 × 720 = 864; counter Redis 6 × 150
+ * = 900; dictionary Redis (separate, persistence off) 6 × 150 = 900; metering 900; canaries 2,679 → 8,546. Team 4 engineers (on-call shared with SRE) × 400,000 ÷ 12 = 133,333.
+ * → ≈ 141,900 a month ≈ 0.0030 USD a call (model ≈ 0.0016 a call); ≈ 1.9 × the model spend it carries.
  * Canaries: 50 prompts × 144 runs = 7,200 a day a target; mid ≈ 1,000 in + 200 out = 0.004 USD → 28.8 a day; three mid
  * targets (A, B, C at mid prices, illustrative) + two small (A, B: 0.0002 → 1.44) ≈ 89.3 a day ≈ 2,679 a month.
  */
@@ -767,7 +866,7 @@ export const CAPACITY = (() => {
   };
   const regions = 2;
   const gatewayPods = regions * sum(Object.values(perRegion)); // 16
-  const scannerPods = regions * 2;
+  const scannerPods = regions * 3;
   const canaryMid = 7_200 * (usd(1_000, PRICES.mid.input) + usd(200, PRICES.mid.output)); // 28.8
   const canarySmall = 7_200 * (usd(1_000, PRICES.small.input) + usd(200, PRICES.small.output)); // 1.44
   const canariesMonthly = (3 * canaryMid + 2 * canarySmall) * 30; // 2,679
@@ -775,12 +874,13 @@ export const CAPACITY = (() => {
     gatewayPods: gatewayPods * 0.2 * 720,
     scannerPods: scannerPods * 0.2 * 720,
     redis: regions * 3 * 150,
+    dictionaryRedis: regions * 3 * 150,
     metering: 900,
     canaries: canariesMonthly,
   };
-  const infraMonthly = sum(Object.values(infra)); // ≈ 7,359
+  const infraMonthly = sum(Object.values(infra)); // ≈ 8,546
   const teamMonthly = (4 * 400_000) / 12; // 133,333
-  const platformMonthly = infraMonthly + teamMonthly; // ≈ 140,700
+  const platformMonthly = infraMonthly + teamMonthly; // ≈ 141,900
   return {
     perRegion,
     regions,
@@ -817,7 +917,7 @@ export const FAILURE_POLICY = [
   },
   {
     dependency: "Name scanner",
-    t0: "regex + dictionary ≤ 15 min (signed tenant exception), then the tenant's human path",
+    t0: "regex + dictionary for up to 4 h under an exception the privacy owner signs in advance (structured identifiers and every known name still covered), then the human path",
     other: "labs closed",
   },
   {
@@ -826,6 +926,11 @@ export const FAILURE_POLICY = [
     other: "same",
   },
   { dependency: "Metering store", t0: "spool to a replicated local queue, replay", other: "same" },
+  {
+    dependency: "Dictionary store",
+    t0: "replicated to the other Region; on a miss the first call is held for a chunked full scan (≈ 57 ms)",
+    other: "labs closed",
+  },
   {
     dependency: "Provider A",
     t0: "B (voice first, support to its quota)",
