@@ -44,7 +44,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 90,
       y: 240,
-      w: 150,
+      w: 162,
     },
     ...Array.from({ length: PARTS }, (_, i) => ({
       id: `p${i}`,

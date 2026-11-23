@@ -93,7 +93,10 @@ const spec: DiagramSpec = {
   nodes: [
     // Clients
     card("customer", "Customer", "chat, email", "users", C.clients, ROW.core2, 1, { tone: GENAI_TONE.user }),
-    card("staff", "Support staff", "approve, take over", "users", C.clients, ROW.s1, 7, { tone: GENAI_TONE.user }),
+    card("staff", "Support staff", "approve, take over", "users", C.clients, ROW.s1, 7, {
+      w: 158,
+      tone: GENAI_TONE.user,
+    }),
     card("orders", "Shop APIs", "orders, payments", "card", C.clients, ROW.s3, 4),
 
     // Edge and gateway
@@ -117,7 +120,7 @@ const spec: DiagramSpec = {
 
     // Models, tools and policy
     card("helpdesk", "Helpdesk", "staff queue", "ticket", C.left, ROW.s1, 7, { tone: GENAI_TONE.tool }),
-    card("model", "Agent model", "mid-size, tool use", "model", C.left, ROW.s2, 1, { tone: GENAI_TONE.model }),
+    card("model", "Agent model", "mid-size, tool use", "model", C.left, ROW.s2, 1, { w: 154, tone: GENAI_TONE.model }),
     card("tools", "Order tools", "own orders only", "tool", C.left, ROW.s3, 4, { tone: GENAI_TONE.tool }),
     card("retriever", "Retriever", `top ${RETRIEVAL.candidates}, rerank`, "reranker", C.right, ROW.s1, 2, {
       tone: GENAI_TONE.rank,

@@ -27,7 +27,7 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 600, y: 40, w: 260, h: 290 },
   ],
   nodes: [
-    { id: "pages", label: "Order pages", sub: "20k open, every 5 s", icon: "browser", x: 110, y: 130, w: 150, h: 64 },
+    { id: "pages", label: "Order pages", sub: "20k open, every 5 s", icon: "browser", x: 110, y: 130, w: 166, h: 64 },
     {
       id: "lb",
       label: "Load balancer",
@@ -36,7 +36,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 300,
       y: 130,
-      w: 140,
+      w: 150,
       h: 64,
     },
     {
@@ -82,7 +82,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 110,
       y: 270,
-      w: 150,
+      w: 156,
       h: 64,
       step: 3,
     },

@@ -240,11 +240,11 @@ const spec: DiagramSpec = {
   zones: genaiZones({ core: "Assistant orchestration", services: "Search, models and tools" }),
   nodes: [
     // Clients and edge
-    card("employee", "Employee", "web, Slack, Teams", "users", C.clients, ROW.c2, 1, { tone: GENAI_TONE.user }),
+    card("employee", "Employee", "web, Slack, Teams", "users", C.clients, ROW.c2, 1, { w: 160, tone: GENAI_TONE.user }),
     card("gateway", "API gateway", "SSO, status, SSE", "gateway", C.edge, ROW.c2, 1),
 
     // Assistant orchestration
-    card("router", "Router", "path + tool bundle", "router", C.left, ROW.c1, 5, { tone: GENAI_TONE.rank }),
+    card("router", "Router", "path + tool bundle", "router", C.left, ROW.c1, 5, { w: 156, tone: GENAI_TONE.rank }),
     {
       id: "orch",
       label: "Orchestrator",
@@ -287,7 +287,7 @@ const spec: DiagramSpec = {
 
     // Offline pipelines
     card("eval", "Evaluation", "permission suite, canaries", "chart", C.async, 118, 8, {
-      w: AW,
+      w: 200,
       h: 44,
       tone: GENAI_TONE.check,
     }),

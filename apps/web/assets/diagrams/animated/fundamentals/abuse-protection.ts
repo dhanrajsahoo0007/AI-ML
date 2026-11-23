@@ -26,8 +26,8 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 700, y: 40, w: 200, h: 360 },
   ],
   nodes: [
-    { id: "users", label: "Real readers", sub: "about 2 logins/s", icon: "users", x: 100, y: 110, w: 140 },
-    { id: "bots", label: "Login bot", sub: "4,000 IPs, 400/s", icon: "robot", tone: "red", x: 100, y: 230, w: 140 },
+    { id: "users", label: "Real readers", sub: "about 2 logins/s", icon: "users", x: 100, y: 110, w: 144 },
+    { id: "bots", label: "Login bot", sub: "4,000 IPs, 400/s", icon: "robot", tone: "red", x: 100, y: 230, w: 148 },
     {
       id: "sync",
       label: "Seller sync",
@@ -36,7 +36,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 100,
       y: 350,
-      w: 140,
+      w: 152,
     },
     {
       id: "gateway",
@@ -46,7 +46,7 @@ const spec: DiagramSpec = {
       tone: "green",
       x: 330,
       y: 230,
-      w: 150,
+      w: 162,
       h: 64,
     },
     {
@@ -59,7 +59,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 330,
       y: 105,
-      w: 150,
+      w: 164,
     },
     {
       id: "login",
@@ -69,7 +69,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 570,
       y: 165,
-      w: 150,
+      w: 156,
     },
     { id: "listings", label: "Listings", sub: "search, browse", icon: "search", tone: "teal", x: 570, y: 315, w: 150 },
     {

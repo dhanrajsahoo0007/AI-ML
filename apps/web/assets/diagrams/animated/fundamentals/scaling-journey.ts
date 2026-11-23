@@ -39,7 +39,7 @@ const spec: DiagramSpec = {
     { id: "async", title: "Background work", tone: "orange", x: 640, y: 410, w: 280, h: 150 },
   ],
   nodes: [
-    { id: "users", label: "Users", sub: "browser / phone", icon: "users", x: 95, y: 250, w: 130, h: 64 },
+    { id: "users", label: "Users", sub: "browser / phone", icon: "users", x: 95, y: 250, w: 148, h: 64 },
     {
       id: "app1",
       label: "App server",
@@ -72,7 +72,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 270,
       y: 250,
-      w: 140,
+      w: 150,
       h: 64,
     },
 
@@ -85,7 +85,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 495,
       y: 150,
-      w: 160,
+      w: 168,
       h: 64,
     },
     {
@@ -97,7 +97,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 495,
       y: 350,
-      w: 160,
+      w: 168,
       h: 64,
     },
 
@@ -157,7 +157,7 @@ const spec: DiagramSpec = {
       step: 7,
       x: 850,
       y: 485,
-      w: 120,
+      w: 128,
       h: 58,
     },
   ],

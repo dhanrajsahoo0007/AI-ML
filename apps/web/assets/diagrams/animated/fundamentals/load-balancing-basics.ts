@@ -76,7 +76,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 330,
       y: 422,
-      w: 150,
+      w: 174,
       step: 2,
     },
     {

@@ -106,6 +106,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: COL.edge,
       y: 450,
+      w: 120,
       w: W,
     },
     {
@@ -164,6 +165,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: COL.left,
       y: ROW.core1,
+      w: 126,
       w: W,
     },
 

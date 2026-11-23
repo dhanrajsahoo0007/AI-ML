@@ -142,9 +142,13 @@ const spec: DiagramSpec = {
     // Search, models and checks
     card("model", "Answer model", "small or mid-size", "model", C.left, ROW.s1, 1, { tone: GENAI_TONE.model }),
     card("search", "Search APIs", "two vendors", "search", C.left, ROW.s2, 1, { tone: GENAI_TONE.tool }),
-    card("fetcher", "Fetcher, parser", "3 pages, 500 ms", "browser", C.left, ROW.s3, 3, { tone: GENAI_TONE.tool }),
+    card("fetcher", "Fetcher, parser", "3 pages, 500 ms", "browser", C.left, ROW.s3, 3, {
+      w: 156,
+      tone: GENAI_TONE.tool,
+    }),
     card("subagents", "Subagents", "search and fetch", "robot", C.right, ROW.s1, 6, { tone: GENAI_TONE.model }),
     card("crossenc", "Cross-encoder", `${cheap.spans} → ${cross.spans} spans`, "layers", C.right, ROW.s2, 4, {
+      w: 156,
       tone: GENAI_TONE.rank,
     }),
 

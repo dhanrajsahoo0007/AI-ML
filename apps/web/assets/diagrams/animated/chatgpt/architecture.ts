@@ -80,7 +80,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 490,
       y: 235,
-      w: 140,
+      w: 152,
     },
     {
       id: "overflow",
@@ -92,7 +92,7 @@ const spec: DiagramSpec = {
       step: 8,
       x: 660,
       y: 235,
-      w: 140,
+      w: 150,
     },
     {
       id: "chat",

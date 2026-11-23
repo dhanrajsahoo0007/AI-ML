@@ -49,7 +49,7 @@ const spec: DiagramSpec = {
       fill: "pastel",
       x: 105,
       y: 105,
-      w: 150,
+      w: 154,
     },
     {
       id: "controller",

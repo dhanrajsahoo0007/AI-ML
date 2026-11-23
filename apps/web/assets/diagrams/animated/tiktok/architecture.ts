@@ -136,7 +136,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 515,
       y: 390,
-      w: 150,
+      w: 158,
     },
     {
       id: "params",
@@ -148,7 +148,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 670,
       y: 390,
-      w: 140,
+      w: 152,
     },
     {
       id: "upload",
@@ -160,7 +160,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 480,
       y: 520,
-      w: 140,
+      w: 146,
     },
     {
       id: "content",
@@ -172,7 +172,7 @@ const spec: DiagramSpec = {
       step: 8,
       x: 665,
       y: 520,
-      w: 150,
+      w: 160,
     },
     {
       id: "trainer",

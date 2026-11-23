@@ -113,7 +113,7 @@ const shapes: LayoutShape[] = [
     5
   ),
   box("q", 520, 312, 170, 50, "Question tokens", "“Is the kettle safe to use?”", MODALITY_TONE.text, 5),
-  box("llm", 724, 306, 140, 62, "LLM", "reads the whole sequence", MODALITY_TONE.model, 5, true),
+  box("llm", 724, 306, 148, 62, "LLM", "reads the whole sequence", MODALITY_TONE.model, 5, true),
   { id: "a-proj-vis", type: "arrow", x: 0, y: 0, from: "proj", to: "vis", step: 5 },
   arrow("a-vis-q", "vis", "q", 5),
   arrow("a-q-llm", "q", "llm", 5),

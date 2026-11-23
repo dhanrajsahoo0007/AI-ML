@@ -22,7 +22,7 @@ const spec: DiagramSpec = {
     { id: "services", title: "Services", tone: "teal", x: 785, y: 50, w: 165, h: 450 },
   ],
   nodes: [
-    { id: "phone", label: "Phone app", sub: "1 request", icon: "phone", tone: "neutral", x: 95, y: 230, w: 116, h: 58 },
+    { id: "phone", label: "Phone app", sub: "1 request", icon: "phone", tone: "neutral", x: 95, y: 230, w: 128, h: 58 },
     {
       id: "engine",
       label: "Query engine",
@@ -32,7 +32,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 320,
       y: 230,
-      w: 140,
+      w: 146,
       h: 64,
     },
     { id: "r_me", label: "Query.me", sub: "runs once", icon: "code2", tone: "green", x: 520, y: 110, w: 170, h: 58 },
@@ -44,7 +44,7 @@ const spec: DiagramSpec = {
       tone: "green",
       x: 520,
       y: 230,
-      w: 170,
+      w: 182,
       h: 58,
     },
     {
@@ -56,7 +56,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 520,
       y: 350,
-      w: 170,
+      w: 186,
       h: 58,
     },
     {
@@ -68,7 +68,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 700,
       y: 440,
-      w: 120,
+      w: 136,
       h: 58,
     },
     {
@@ -102,7 +102,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 870,
       y: 350,
-      w: 146,
+      w: 162,
       h: 58,
     },
   ],

@@ -108,6 +108,7 @@ shapes.push({
   type: "box",
   x: X0 + w(CAP),
   y: 230,
+  w: 126,
   w: w(EXCESS),
   h: H,
   label: "+3,000/s",

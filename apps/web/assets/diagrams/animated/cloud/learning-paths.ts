@@ -9,11 +9,11 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // levels (violet), inside one dotted group. Step 1 draws the hubs and the first path, step 2 the interview path,
 // step 3 the three levels.
 //
-// Geometry: row labels are text in x 12-130. Columns start at x 140 and are 88 wide with a gap of 4, so the seventh
-// ends at 780 (canvas 790). Headers are boxes at y 20-64. The first two rows sit at y 82 and 138 (cells 46
+// Geometry: row labels are text in x 12-130. Columns start at x 140 and are 92 wide with a gap of 4, so the seventh
+// ends at 808 (canvas 812). Headers are boxes at y 20-64. The first two rows sit at y 82 and 138 (cells 46
 // tall). The group for the three levels starts at y 206, 22 units below the interview row so its tab clears it, and
 // its rows sit 34 units lower and 56 apart (y 240, 296, 352).
-// Cell labels fit 88 - 8 = 80 px at 6.2 px per character: "Fundamentals" (12 characters) is the longest header.
+// Cell labels fit 92 - 8 = 84 px at 6.2 px per character: "Fundamentals" (12 characters) is the longest header.
 // The cell numbers and page counts below match the ordered lists on the page.
 
 const HUBS = [
@@ -28,7 +28,7 @@ const HUBS = [
 
 type HubId = (typeof HUBS)[number]["id"];
 
-const COL_X = (i: number) => 140 + i * 92;
+const COL_X = (i: number) => 140 + i * 96;
 const COL = Object.fromEntries(HUBS.map((h, i) => [h.id, COL_X(i)])) as Record<HubId, number>;
 
 // One row per path. `cells` maps a hub to [order label, pages read in that hub].
@@ -96,7 +96,7 @@ const shapes: LayoutShape[] = [
     type: "box",
     x: COL_X(i),
     y: 20,
-    w: 88,
+    w: 92,
     h: 44,
     label: h.label,
     tone: "blue",
@@ -108,7 +108,7 @@ const shapes: LayoutShape[] = [
       type: "cell",
       x: COL[hub],
       y: r.y,
-      w: 88,
+      w: 92,
       h: 46,
       label: order,
       sub: pages === 1 ? "1 page" : `${pages} pages`,
@@ -121,9 +121,9 @@ const shapes: LayoutShape[] = [
 const spec: LayoutSpec = {
   kind: "layout",
   title: "Three learning paths over the same hubs",
-  width: 790,
+  width: 812,
   height: 420,
-  groups: [{ id: "cert", title: "Certification-minded", tone: "violet", x: 6, y: 206, w: 780, h: 206 }],
+  groups: [{ id: "cert", title: "Certification-minded", tone: "violet", x: 6, y: 206, w: 804, h: 206 }],
   steps: [
     { title: "From zero: every hub, in the order Brightpost grew" },
     { title: "Interview prep: decisions and failures first" },

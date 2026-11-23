@@ -28,7 +28,7 @@ const spec: DiagramSpec = {
   ],
   nodes: [
     { id: "phone", label: "Phone", sub: "unpacks br", icon: "phone", x: 100, y: 130, w: 124 },
-    { id: "edge", label: "CDN edge", sub: "keeps br copy", icon: "cdn", tone: "blue", x: 284, y: 130, w: 124 },
+    { id: "edge", label: "CDN edge", sub: "keeps br copy", icon: "cdn", tone: "blue", x: 284, y: 130, w: 136 },
     {
       id: "app",
       label: "App server",
@@ -38,7 +38,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 472,
       y: 130,
-      w: 124,
+      w: 130,
     },
     {
       id: "queue",
@@ -49,7 +49,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 660,
       y: 300,
-      w: 124,
+      w: 140,
     },
     {
       id: "db",

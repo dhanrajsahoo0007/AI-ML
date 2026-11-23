@@ -50,7 +50,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 297,
       y: 140,
-      w: 160,
+      w: 166,
     },
     {
       id: "gw",

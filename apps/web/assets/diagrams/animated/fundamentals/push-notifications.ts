@@ -37,8 +37,8 @@ const spec: DiagramSpec = {
   ],
   nodes: [
     // Step 1: registration.
-    { id: "phone", label: "Phone", sub: "app may be closed", icon: "phone", x: 865, y: 290, w: 130 },
-    { id: "apns", label: "APNs / FCM", sub: "one conn per phone", icon: "bell", tone: "blue", x: 685, y: 290, w: 150 },
+    { id: "phone", label: "Phone", sub: "app may be closed", icon: "phone", x: 865, y: 290, w: 160 },
+    { id: "apns", label: "APNs / FCM", sub: "one conn per phone", icon: "bell", tone: "blue", x: 685, y: 290, w: 168 },
     { id: "tokenapi", label: "Token API", sub: "POST /devices", icon: "api", tone: "teal", x: 480, y: 110, w: 140 },
     {
       id: "tokens",
@@ -73,7 +73,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 100,
       y: 290,
-      w: 150,
+      w: 166,
     },
     {
       id: "queue",
@@ -95,7 +95,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 480,
       y: 290,
-      w: 150,
+      w: 168,
     },
   ],
   edges: [
