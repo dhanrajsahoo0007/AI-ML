@@ -96,7 +96,7 @@ const shapes: LayoutShape[] = [
   { id: "a-enc-pv", type: "arrow", x: 416, y: 112, w: 52, h: 0, step: 3 },
 
   box("proj", 470, 176, 190, 56, "Projector", `${VLM.connector} (LLaVA-1.5)`, MODALITY_TONE.model, 4, true),
-  { id: "a-pv-proj", type: "arrow", x: 520, y: 124, w: 0, h: 50, step: 4 },
+  { id: "a-pv-proj", type: "arrow", x: 520, y: 142, w: 0, h: 32, step: 4 },
   text("proj-note", 680, 190, 190, "maps each vector to the", 4),
   text("proj-note2", 680, 208, 190, "LLM's width, so it reads", 4),
   text("proj-note3", 680, 226, 190, "like a word embedding", 4),

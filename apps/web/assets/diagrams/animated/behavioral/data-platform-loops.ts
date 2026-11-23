@@ -3,7 +3,7 @@ import type { LayoutSpec } from "@/components/diagrams/types";
 const spec: LayoutSpec = {
   kind: "layout",
   title: "The loops at Databricks, Snowflake and Datadog",
-  width: 760,
+  width: 780,
   height: 344,
   steps: [
     { title: "Before the panel", covers: "Recruiter and screening calls" },

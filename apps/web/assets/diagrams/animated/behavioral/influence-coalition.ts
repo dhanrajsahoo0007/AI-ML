@@ -13,7 +13,7 @@ const spec: SequenceSpec = {
   lanes: [
     { id: "you", label: "You (Author)", icon: "user", tone: "blue" },
     { id: "partner", label: "Partner Team", icon: "users", tone: "orange" },
-    { id: "tooling", label: "Codemod / Shim", icon: "wrench", tone: "teal" },
+    { id: "tooling", label: "Codemod/Shim", icon: "wrench", tone: "teal" },
     { id: "org", label: "Org Standard", icon: "award", tone: "green" },
   ],
   messages: [
