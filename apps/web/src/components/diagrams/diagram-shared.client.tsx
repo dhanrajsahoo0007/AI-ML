@@ -171,7 +171,12 @@ export function DiagramFigure({
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div
           style={{ minWidth, maxWidth: Math.max(minWidth, Math.min(1040, Math.max(width + 48, 880))) }}
-          className="relative w-full rounded-xl border border-hairline bg-paper p-3 sm:p-5"
+          // The play/pause button sits in its own band above the drawing, so it never covers a label or a box in
+          // the top-right corner (at 375 px the drawing scales down but the button does not).
+          className={cn(
+            "relative w-full rounded-xl border border-hairline bg-paper p-3 sm:p-5",
+            !reduced && "pt-12 sm:pt-12"
+          )}
         >
           {!reduced && (
             <button
