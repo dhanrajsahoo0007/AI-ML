@@ -1,0 +1,231 @@
+---
+title: "Concurrency Control, Locking and Reservations"
+description: "Two buyers, one item: row locks, version checks, atomic conditional updates, timed holds, one writer per key and fencing tokens."
+icon: lock
+updated: 2026-11-16
+tier: advanced
+---
+
+Two shoppers press "buy" on the last kettle in the same millisecond, both see one left, and both get a confirmation.
+
+- Interviewers ask about concurrency control to see whether you can spot a read-decide-write race, and pick the cheapest mechanism that closes it under real contention.
+
+## Overview
+
+- The **lost update**: two requests read the same value, both decide, both write; one write silently overwrites the other.
+- A **row lock** (`SELECT ... FOR UPDATE`) makes the second request wait. Correct, but it serialises everyone on the hot row.
+- A **version check** (optimistic concurrency) writes only if the row has not changed since it was read; the loser retries.
+- An **atomic conditional update** (`UPDATE ... WHERE stock > 0`) checks and writes in one statement. Under a flash sale, it is usually the right answer.
+- A **timed hold** reserves an item for a few minutes while the shopper pays, and expires on its own.
+- A **distributed lock** needs a **lease** and a **fencing token**: without the token, a paused holder can write after its lease has gone.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Check that the seat is available, then insert the booking."
+  - **Why the interviewer pushes back:** "Two requests check at the same instant. Both see it free. What stops two bookings?"
+  - **The answer that stands out:** make the check and the write one atomic step (a conditional update or a unique constraint), add a timed hold for the payment window, and fence any distributed lock with a token. Name the cost: losers fail fast and must be told "sold out".
+</Callout>
+
+## Mental model
+
+- Two people edit the same shared document offline and both press save: whoever saves last wins, and the other's changes vanish.
+- A row lock is a key to the room: one person at a time.
+- A version check is "save only if nobody else saved since I opened it".
+- An atomic update is a ticket machine: one press takes one ticket, and when the roll is empty the button stops working.
+
+## Core concepts
+
+- The running example is Brightpost's flash sale: **10,000 kettles**, **500,000 shoppers** at **12:00**, and a **10-minute hold** while each shopper pays.
+
+### The lost update
+
+- Read, decide, write is a race whenever two requests do it to the same row.
+- Database isolation does not always save you: at the common default (read committed), both reads see 1 and both writes succeed.
+
+<AnimatedDiagram spec="animated/patterns/lock-lost-update" caption="Read, decide, write: two requests that read the same 1 both sell the last kettle." />
+
+**How to read it:**
+
+- Both checkouts read stock = 1 before either writes.
+- B's write (red) silently replaces A's; both are told their order is confirmed.
+
+**The numbers:**
+
+- With 500,000 shoppers in the first minute, about 8,300 attempts arrive a second: any read-decide-write gap of even a millisecond is crossed many times.
+
+<PremiumBreak />
+
+### Three ways to close the race
+
+<AnimatedDiagram spec="animated/patterns/lock-three-ways" stepper caption="All three stop the double sale; under a flash sale only the atomic conditional update keeps the hot row moving." />
+
+<StepCards>
+  <StepCard n={1} title="A row lock">
+    `SELECT ... FOR UPDATE` locks the kettle's row until the transaction ends. The second buyer waits; nothing is lost. But the lock is held for the whole read-decide-write transaction, so every buyer queues on one row.
+  </StepCard>
+  <StepCard n={2} title="A version check">
+    Read the row with its version, then `UPDATE ... WHERE version = 7`. If someone changed it first, zero rows update and the request re-reads and retries. No waiting, but under heavy contention most attempts conflict.
+  </StepCard>
+  <StepCard n={3} title="An atomic conditional update">
+    `UPDATE stock SET available = available - 1 WHERE available > 0` checks and decrements in one statement. The row is locked only for that statement; zero rows updated means sold out, and the loser knows at once.
+  </StepCard>
+</StepCards>
+
+The atomic decrement and a hold, in SQL (the Redis form of the hold in the comment):
+
+```sql
+-- Take one kettle only if any are left; 0 rows means sold out
+UPDATE stock SET available = available - 1
+WHERE sku = 'kettle' AND available > 0;
+
+-- Hold it for this order for 10 minutes
+INSERT INTO holds (sku, order_id, expires_at)
+VALUES ('kettle', 4471, now() + interval '10 minutes');
+
+-- Redis: SET hold:4471 kettle NX EX 600   (nil means already held)
+```
+
+## Architecture
+
+The kettle's path from basket to order, with a timed hold.
+
+<AnimatedDiagram spec="animated/patterns/lock-hold" stepper caption="A hold takes the kettle off sale for 10 minutes; payment confirms it, and expiry puts it back without anyone cleaning up." />
+
+<StepCards>
+  <StepCard n={1} title="Add to basket: a 10-minute hold">
+    Checkout takes one kettle with the atomic decrement and records a hold that expires in 10 minutes. If the decrement updates no row, the shopper is told "sold out" straight away.
+  </StepCard>
+  <StepCard n={2} title="Pay within the hold">
+    The shopper pays £42 while the hold stands. Nobody else can take this kettle, and nobody holds a database lock while the shopper types a card number.
+  </StepCard>
+  <StepCard n={3} title="Confirm: write the order, drop the hold">
+    Checkout writes order 4471 and deletes the hold. The kettle is sold.
+  </StepCard>
+  <StepCard n={4} title="No payment: the hold expires">
+    If the shopper walks away, the hold expires after 10 minutes and an expiry job puts the kettle back on sale. No crashed service can leave it stuck.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Row locks in practice
+
+- `FOR UPDATE` waits for a locked row; `NOWAIT` fails at once instead; `SKIP LOCKED` skips locked rows.
+- PostgreSQL warns that `SKIP LOCKED` gives an inconsistent view and suits queue-like tables, where each worker should grab a different job, not stock counts.
+- Keep locked transactions short: never hold a row lock across a network call to a card provider.
+
+### One writer per key
+
+- Instead of locking, route every write for one key to one place, in order: a queue partitioned by key, or an actor per key.
+- One consumer applies the kettle's decrements one after another, with no contention at all.
+- The cost is a hop through the queue and a single consumer's throughput per key (see [Message Queues and Pub/Sub](/system-design/patterns/message-queues)).
+
+### Distributed locks, leases and fencing tokens
+
+- A lock across machines (Redis `SET NX EX`, an etcd lease, a ZooKeeper ephemeral node) must expire, or a crashed holder blocks everyone forever.
+- Expiry creates a new problem: a holder that pauses (garbage collection, a slow disk) for longer than its lease wakes up still believing it holds the lock.
+
+<AnimatedDiagram spec="animated/patterns/lock-fencing" stepper caption="A lease can expire while its holder is paused; a fencing token lets the storage refuse the stale holder's write." />
+
+**How to read it:**
+
+- The lock service hands out a number that grows with every grant: 33, then 34.
+- Storage remembers the highest token it has seen and rejects a write with a lower one, so the paused client's late write with 33 fails.
+
+**The numbers:**
+
+- A 10 s lease and a 30 s pause leave a 20 s window in which two clients believe they hold the lock; the token closes it.
+- Redis docs describe `SET resource token NX EX ttl` as a simple lock, released only by a script that checks the token; Kleppmann's critique is that Redis-based locks give no fencing token, so use a consensus store (see [Leader Election and Consensus](/system-design/patterns/leader-election)) where correctness depends on it.
+
+### Worked example: the kettle at 12:00
+
+At 12:00 the sale opens: 500,000 shoppers, 10,000 kettles, about 8,300 attempts a second in the first minute.
+
+1. **Row lock, 5 ms held per sale:** one row sells at most 1,000 ÷ 5 = 200 kettles a second. Selling out takes 10,000 ÷ 200 = 50 s while attempts queue behind the lock and time out.
+2. **Version check, about 1,000 attempts in flight:** each round of 1,000 conflicting attempts sells one kettle; selling 10,000 costs on the order of 10,000,000 attempts (illustrative).
+3. **Atomic update, about 0.5 ms per statement:** about 2,000 sales a second, sold out in about 5 s. Every loser gets "0 rows" in one statement.
+4. **After sell-out,** a cached "sold out" flag in front of the database stops the remaining 490,000 attempts from reaching it at all.
+
+**The numbers:**
+
+- Holds: 10,000 kettles each held for up to 10 minutes. If 20 % of holders never pay (illustrative), 2,000 kettles come back on sale over the next 10 minutes.
+- Without the hold, a payment that fails after the decrement needs a compensating increment (see [Saga and Distributed Transactions](/system-design/patterns/saga)).
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Row lock (`FOR UPDATE`) | Simple; no retries | Everyone queues on a hot row; deadlocks possible | Low contention, short transactions |
+| Version check (optimistic) | No waiting; works across services | Retries explode under contention | Edits to records that rarely conflict |
+| Atomic conditional update | One statement; losers fail fast | Only works when the rule fits in a `WHERE` | Counters, stock, seat claims |
+| Timed hold | No lock held during payment; self-cleaning | Stock is off sale for the hold time | Checkout, seat and room booking |
+| One writer per key | No contention at all | A queue hop; one consumer's speed per key | Ledgers, per-account balances |
+| Distributed lock with fencing | Coordinates work across machines | Needs a consensus store and token checks | Jobs that must not run twice |
+
+## Production systems
+
+- **PostgreSQL** (as of November 2026): `FOR UPDATE` locks selected rows; `NOWAIT` errors instead of waiting; `SKIP LOCKED` skips locked rows and, per the docs, suits queue-like tables rather than general work.
+- **Redis**: `SET key value NX EX seconds` sets the key only if it is absent, with an expiry, and returns nil if it already exists; the docs recommend a random token value and a check-and-delete script to release.
+- **Martin Kleppmann, "How to do distributed locking" (2016):** a lock needs a fencing token that the storage checks; timing-based locks such as Redlock can be broken by pauses and clock jumps.
+- **Used in our case studies:** [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Tinder](/system-design-case-studies/case-studies/tinder) · [Zillow](/system-design-case-studies/case-studies/zillow)
+
+## Failure modes & pitfalls
+
+- **Check, then insert.** Two requests both pass the check. Make the check and the write one statement, or add a unique constraint.
+- **Holding a row lock across a network call.** The card provider takes 2 s and every buyer waits. Use a hold, not a lock, for the payment window.
+- **Optimistic locking on a hot row.** Retries multiply load exactly when it is highest. Switch to an atomic update or one writer per key.
+- **Locks with no expiry.** A crashed holder blocks everyone. Use leases.
+- **Leases without fencing.** A paused holder writes after its lease expired. Pass a token and have the storage reject old ones.
+- **Holds with no expiry job.** Abandoned baskets keep stock off sale. Expire holds and return the stock.
+
+## Interview framework
+
+1. Find the read-decide-write and say how two requests race through it.
+2. Pick the mechanism by contention: atomic update for hot counters, version check for rare conflicts, row lock for short low-contention transactions.
+3. Add a timed hold for any wait on a person or a payment.
+4. If a lock spans machines, give it a lease and a fencing token, held in a consensus store.
+5. Do the flash-sale numbers: sales per second the hot row can take, and what losers see.
+
+**What interviewers listen for:** the race named precisely, an atomic step instead of check-then-act, and fencing on distributed locks.
+
+**Red flags:** "use a distributed lock" with no expiry or token, or a row lock held while calling a payment provider.
+
+## Further reading
+
+- [The locking clause: FOR UPDATE, NOWAIT, SKIP LOCKED (PostgreSQL docs)](https://www.postgresql.org/docs/current/sql-select.html)
+- [SET with NX and EX (Redis docs)](https://redis.io/docs/latest/commands/set/)
+- [How to do distributed locking (Martin Kleppmann, 2016)](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html)
+- Related pages: [Leader Election and Consensus](/system-design/patterns/leader-election) · [Idempotency](/system-design/patterns/idempotency) · [Saga and Distributed Transactions](/system-design/patterns/saga) · [Relational Databases](/system-design/databases/relational-databases) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a lost update?" category="Concepts" level="Junior">
+    - Two requests read the same value, both compute a new value from it, and both write.
+    - The second write overwrites the first, so one change is silently lost.
+    - Selling the last kettle twice is a lost update on the stock count.
+  </InterviewQuestion>
+  <InterviewQuestion question="Optimistic or pessimistic concurrency control, and when?" category="Trade-offs" level="Mid">
+    - Pessimistic (a row lock) makes others wait; it suits short transactions with real contention.
+    - Optimistic (a version check) lets everyone proceed and rejects the loser; it suits records that rarely conflict, such as profile edits.
+    - Under heavy contention on one row, optimistic retries explode; an atomic conditional update or one writer per key works better.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the stock decrement for 10,000 kettles and 500,000 shoppers at 12:00." category="Scaling" level="Senior">
+    - Use one atomic statement, UPDATE ... SET available = available - 1 WHERE available > 0, so check and write cannot be split.
+    - Place a 10-minute hold for the payment window, expired by a job that returns stock.
+    - Once sold out, set a cached flag so the remaining attempts never reach the database.
+    - At about 0.5 ms per statement, one row sells about 2,000 a second, sold out in about 5 s.
+  </InterviewQuestion>
+  <InterviewQuestion question="A lock holder pauses for 30 seconds. What goes wrong?" category="Failure modes" level="Senior">
+    - Its lease expires during the pause, and another client takes the lock and starts writing.
+    - When the first client wakes, it still believes it holds the lock and writes too, corrupting the data.
+    - A fencing token fixes it: the lock service hands out increasing numbers and the storage rejects writes with a lower number than it has seen.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not hold a database lock while the shopper pays?" category="Architecture" level="Mid">
+    - Payment takes seconds to minutes, and every other buyer of that row waits the whole time.
+    - A crashed checkout could hold the lock until the connection times out.
+    - A timed hold records the reservation without a lock and expires on its own.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is queue-based serialisation, and when do you use it?" category="Architecture" level="Senior">
+    - Route every write for one key to one queue partition or one actor, so a single consumer applies them in order.
+    - There is no contention and no retry, and ordering per key comes for free.
+    - It suits ledgers and per-account balances; the cost is a queue hop and one consumer's throughput per key.
+  </InterviewQuestion>
+</InterviewQuestions>

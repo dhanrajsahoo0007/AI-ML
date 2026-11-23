@@ -1,0 +1,256 @@
+---
+title: "Long-Context Scaling (Ring Attention & KV Quantization)"
+description: "Serving and training million-token contexts with Ring Attention, context parallelism, FP8/INT4 KV cache quantization and chunked prefill."
+icon: gauge
+updated: 2026-11-15
+---
+
+A 128,000-token prompt is easy to accept and hard to serve: its KV cache can exceed a GPU's memory and its prefill can take tens of seconds.
+
+- **What interviewers look for:** Bytes-per-token arithmetic, sequence-level parallelism (splitting the sequence rather than the layers), and an honest view of what KV compression costs in accuracy.
+
+## Overview
+
+- Long context breaks **memory first, then time**. The KV cache grows linearly with tokens (**2.62 MB per token** for the 80-layer, 64-KV-head model used here, so **335.5 GB** for 128,000 tokens), and attention arithmetic grows with the square of the length.
+- **Ring Attention** (Liu et al., 2023) cuts the sequence into one block per GPU. Each GPU keeps its **query block** and passes **key/value blocks round a ring**, computing while the next block arrives. The sequence can be **as many times longer as there are devices**, with exact attention.
+- The transfer hides behind the compute when a block holds at least **F ÷ B tokens** (compute rate over link bandwidth): about **1,000** on NVLink and about **25,000** on InfiniBand for an A100.
+- **KV-cache quantisation** stores keys and values in **FP8, INT8 or INT4**: half or a quarter of the bytes, so **2× or 4× the tokens** in the same memory. KIVI quantises **keys per channel** and **values per token**; KVQuant reports **under 0.1 perplexity loss at 3 bits**. Always measure on your own task.
+- **Chunked prefill** (Sarathi) slices a long prompt into pieces mixed with other users' decode steps, so one huge prompt does not freeze every stream. **Prefill-decode disaggregation** goes further and gives each phase its own GPUs.
+- The techniques **stack**: context parallelism divides the cache across GPUs, quantisation shrinks each share, and RoPE scaling decides whether the model can use the extra length at all.
+
+## Mental model
+
+- Picture a 1,000-page report that a team of four editors must cross-check, page against page:
+
+- **Fixed query shards:** One editor cannot hold all 1,000 pages on her desk, so each editor takes 250 pages as her own and keeps them for the whole job.
+- **Ring Attention rotation:** A courier carries a stack of pages round the table—each editor checks her own pages against the stack in front of her, then passes it to her neighbour and receives the next until after four rounds every page has been checked against every other page while holding at most her own pages plus one stack.
+- **KV quantisation:** Photocopying every page at lower resolution so each stack takes a quarter of the desk space.
+- **Chunked prefill:** Reading a very long report in small chapters so every other customer at the counter does not have to wait.
+
+## Core concepts
+
+### Context parallelism and Ring Attention across GPUs
+
+- **Context parallelism (CP):** Splits one sequence across GPUs along the token dimension; tensor parallelism splits matrices and pipeline parallelism splits layers, which cannot help when one sequence's activations or cache exceed memory because every GPU still holds all tokens of its share.
+- **Ring Attention (Liu, Zaharia and Abbeel, 2023):** Uses blockwise attention where a query block's attention over key/value blocks is computed in any order by combining each block's softmax statistics (running maximum and sum). GPU *i* keeps query block Q*i* and in each round computes against its current KV block while sending it to GPU *i+1* and receiving one from GPU *i−1*, yielding an **exact** result after N rounds.
+- **All-gather CP (Llama 3):** Llama 3 trained at 128K by having each GPU gather all keys and values and attend for its own query chunk, chosen because it handles document masks more simply and GQA keeps keys and values small next to queries.
+- **Decode vs. prefill CP in vLLM:** vLLM exposes **decode context parallelism** (`-dcp`) to shard the KV cache along the token dimension, while prefill context parallelism (including a ring variant) is under active development (docs, November 2026).
+
+### KV cache quantization (FP8, INT8, INT4) and token eviction
+
+- **Runtime KV quantisation:** Converts 16-bit cache numbers into 8-bit floats (**FP8**, in E4M3 or E5M2 layout), 8-bit integers (**INT8**) or 4-bit integers (**INT4**) plus a group **scale** (and zero point for asymmetric schemes), halving bytes at 8 bits and quartering at 4; unlike weight quantisation ([Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization)), scales must be chosen on the fly or calibrated in advance.
+- **Token eviction:** Shrinks the cache by dropping tokens—StreamingLLM keeps the first few tokens ("attention sinks") and a recent window to run stably on million-token streams, but cannot answer questions about dropped tokens.
+- **Precision vs. retention:** Quantisation keeps every token at lower precision whereas eviction keeps some tokens at full precision; combine them only after measuring recall on your task.
+
+### Chunked prefill and prefill-decode disaggregation
+
+- **Prefill-decode interference:** **Prefill** reads the whole prompt at once (compute-bound) while **decode** makes one token per step (memory-bound); mixed in one batch, a 128,000-token prefill makes that step last seconds so every other user's next token waits.
+- **Chunked prefill (Sarathi, Agrawal et al., 2023):** Cuts the prompt into fixed-budget chunks and mixes one chunk with decode steps that ride along cheaply, reporting up to 1.25×–1.33× end-to-end throughput on a single GPU and up to 10× higher decode throughput on LLaMA-13B.
+- **vLLM V1 defaults:** Chunked prefill is on by default, decodes are scheduled first, and `max_num_batched_tokens` sets the budget (smaller values like 2,048 help inter-token latency; larger ones help time to first token; see [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)).
+- **Prefill-decode disaggregation:** Runs the two phases on different GPUs and ships the KV cache over a link; DistServe (Zhong et al., 2024) reports serving 7.4× more requests or meeting a 12.6× tighter latency target than colocated systems.
+
+### RoPE scaling and mid-training context extension
+
+- **Out-of-range positions:** A model trained on 8,000-token windows has never seen position 100,000, and rotary position embeddings (RoPE) fail outside the trained range (see [Positional Encodings](/ai-system-design/genai-system-design/positional-encodings)).
+- **Position interpolation and YaRN:** **Position interpolation** (Chen et al., 2023) rescales positions into the trained range and fine-tunes briefly (extending LLaMA to 32,768 tokens within 1,000 steps), while **YaRN** (Peng et al., 2023) refines the rescaling using 10× fewer tokens and 2.5× fewer steps.
+- **Staged mid-training extension:** Llama 3 raised its window from 8K to 128K in six stages on about 800 billion tokens (setting its RoPE base frequency to 500,000), advancing only when short-context scores recovered and needle-in-a-haystack tests passed.
+- **Effective context quality:** A bigger window is not automatically a better reader; see [Context Windows and In-Context Learning](/ai-system-design/genai-system-design/context-windows-and-in-context-learning) for lost-in-the-middle and RULER.
+
+## Architecture
+
+The figure follows one 128,000-token prompt through a ring of four GPUs.
+
+<AnimatedDiagram
+  spec="animated/serving/longctx-ring-attention"
+  stepper
+  caption="Each GPU keeps its query block and passes key and value blocks round the ring; after four rounds every query block has met every key and value block, and the sends overlap the compute."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Cut the prompt into one block per GPU">
+    The prompt of 128,000 tokens becomes four blocks of 32,000. GPU *i* keeps query block Q*i* and its own key/value block KV*i* for the whole pass.
+  </StepCard>
+  <StepCard n={2} title="Round 1: every GPU uses its own KV block">
+    Each GPU computes attention for its queries against the keys and values it already holds (the diagonal of the grid). At the same time it starts sending that KV block to the next GPU.
+  </StepCard>
+  <StepCard n={3} title="Round 2: KV blocks move one hop">
+    GPU 0 now holds KV3 (it arrived from GPU 3), GPU 1 holds KV0, and so on. Each GPU computes against the new block and forwards it.
+  </StepCard>
+  <StepCard n={4} title="Round 3: another hop">
+    The pattern repeats. Each GPU only ever holds its queries, the block it is using and the block arriving.
+  </StepCard>
+  <StepCard n={5} title="Round 4: the last block arrives">
+    After three hops every GPU has seen all four KV blocks. Nothing is left to send.
+  </StepCard>
+  <StepCard n={6} title="Why the transfer costs nothing">
+    A round does 33.6 TFLOP of attention and sends 1.05 GB. A block of 32,000 tokens is far above the 1,040-token minimum for NVLink, so each send finishes before its compute does.
+  </StepCard>
+</StepCards>
+
+- **Prefill vs. decode CP:** The figure shows the prefill pass; in decode there is one new query per sequence, so each GPU attends to the KV shard it holds and the partial results are merged using their softmax statistics (which is what vLLM's decode context parallelism does).
+
+## Technical mechanics
+
+### Overlap of KV block communication and compute
+
+- **Overlap condition (`c ≥ F/B`):** For a block of *c* tokens and hidden size *d*, attention scores and value products cost ~4·d·c² FLOPs while sending a 16-bit key and value block costs 4·c·d bytes (Liu et al., §3); with compute rate F and link bandwidth B, the send hides behind compute when 4dc²/F ≥ 4cd/B, or **c ≥ F/B**.
+- **Minimum block sizes:** Table 2 of the paper puts the minimum block at ~1.0 thousand tokens for an A100 on NVLink (312 TFLOPS over 300 GB/s) and ~24.5 thousand over InfiniBand (12.5 GB/s); compute grows with c² and traffic with c, and each GPU holds six blocks of activations (query, current K/V, incoming K/V, output) independent of total length.
+- **Three practical caveats:**
+  1. The count ignores projections and feed-forward layers, which add compute without network traffic.
+  2. A causal mask means roughly half the block pairs have nothing to compute, leaving early GPUs idle in a naive ring (Llama 3 balances this by giving each GPU two chunks from opposite ends of the sequence).
+  3. On slow links the minimum block can exceed GPU memory, so keep context parallelism inside a fast NVLink node where possible.
+
+### Accuracy vs. compression ratio in KV quantization
+
+- **The outlier problem:** A group of numbers is stored as integers between its min and max, so one huge outlier stretches the range and leaves everything else with few distinct levels.
+- **Asymmetric outlier structure:** KIVI (Liu et al., 2024) measured real caches and found that **keys have a few fixed channels with very large magnitudes**, while **values have no such pattern**.
+
+<AnimatedDiagram
+  spec="animated/serving/longctx-kivi-axes"
+  stepper
+  caption="Keys have a few huge channels, so each channel gets its own scale; values have none, and the attention output is a weighted sum of a few tokens, so each token gets its own scale."
+/>
+
+**How to read it:**
+
+- **Grid layout:** Each grid is a cache with 8 tokens as rows and 8 channels as columns; stronger colour means larger magnitude (shape only, not measured).
+- **Keys per channel:** Grouping keys by token lets the two strong columns set every row's range (red), whereas grouping by channel gives each column its own scale (green) so a big channel only stretches its own range.
+- **Values per token:** Values are grouped by token because attention output is a sparse weighted sum of value rows, so an error confined to one token barely touches the important ones.
+
+Key results and production flags:
+
+- **KIVI (2-bit):** Uses group size 32 and keeps the newest tokens in full precision (a residual of 128 in its experiments so per-channel groups have enough tokens to form), reporting ~2.6× less peak memory including weights, up to 4× larger batches and 2.35×–3.47× higher throughput on Llama, Falcon and Mistral with quality close to 16-bit.
+- **KVQuant (3-bit):** Quantises keys before RoPE with non-uniform levels per layer and separate per-vector outliers, reporting under 0.1 perplexity increase at 3 bits on Wikitext-2 and C4.
+- **vLLM FP8 support:** Enabled via `--kv-cache-dtype fp8` (E4M3 or E5M2 layouts); without calibration every scale is 1.0, so the docs recommend calibrating with `llm-compressor` (unlocking per-attention-head scales on FlashAttention) and using skip-layers for sensitive sliding-window layers (vLLM docs, November 2026).
+- **What the papers do not promise:** Perplexity is a gentle test whereas retrieving one exact fact from 100,000 tokens, long arithmetic and code are much harder—always run your own long-context evaluation before and after.
+
+### Latency and VRAM budgets at 128k to 1M tokens
+
+- **Memory budget:** Cache bytes = tokens × bytes per token. For the 80-layer, 64-KV-head model at 16 bits, 128,000 tokens take 335.5 GB and 1,000,000 tokens take 2,621 GB (~33 GPUs of 80 GB for the cache alone, or 655 GB at 4 bits).
+- **Time budget:** Every decode step reads the cache (step time ≥ bytes read ÷ bandwidth), while prefill is quadratic: 4·d·s² per layer is ~5.4 × 10¹⁴ FLOPs at 128,000 tokens, or ~34 s of attention alone on four A100s at peak (illustrative, no causal saving).
+- **Architectural multipliers:** Llama 3 70B uses 80 layers and 8 KV heads of 128 dims (327,680 bytes/token, ~8× smaller than 64 heads, so 41.9 GB at 128K); [Efficient Attention](/ai-system-design/genai-system-design/efficient-attention) and [Multi-Head Latent Attention](/ai-system-design/genai-system-design/multi-head-latent-attention) shrink the cache by design, quantisation multiplies on top, and [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) removes repeated prefill.
+
+### Worked example: Brightpost reviews a year of orders
+
+A wholesale customer asks Brightpost's assistant to review a year of order history (**128,000 tokens** vs. the usual 2,200; 4.4 ms/token decode budget; illustrative 200 GB cache budget).
+
+<AnimatedDiagram
+  spec="animated/serving/longctx-kv-quant-memory"
+  stepper
+  caption="Halving the bits halves the bytes per token and doubles the tokens that fit: at 16 bits a 128,000-token sequence overruns a 200 GB budget, at 8 bits it fits, at 4 bits it leaves room for another."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Bytes of cache per token">
+    2 × 80 × 64 × 128 values = 1,310,720 values. At 2 bytes that is 2,621,440 bytes (2.62 MB); at 1 byte, 1.31 MB; at half a byte, 0.66 MB.
+  </StepCard>
+  <StepCard n={2} title="One 128,000-token sequence against the budget">
+    128,000 × 2.62 MB = 335.5 GB at 16 bits, which is 135.5 GB over 200 GB. At 8 bits it is 167.8 GB and fits; at 4 bits it is 83.9 GB.
+  </StepCard>
+  <StepCard n={3} title="Tokens of context that fit">
+    200 GB ÷ 2,621,440 bytes = 76,293 tokens at 16 bits; 152,587 at 8 bits; 305,175 at 4 bits. Only the last two clear 128,000.
+  </StepCard>
+</StepCards>
+
+**Putting the pieces together:**
+
+- **Per-GPU decode bandwidth:** On four GPUs with context parallelism, each holds a 32,000-token block (83.9 GB at 16 bits, 21.0 GB at 4 bits). At an illustrative 3 TB/s, reading that share takes 83.9 ÷ 3,000 = 28 ms/token at 16 bits vs. 21.0 ÷ 3,000 = 7 ms/token at 4 bits—neither meets 4.4 ms, so Brightpost routes these requests to a separate long-context pool with its own latency target.
+- **Chunked prefill and disaggregation:** Chunked prefill with an 8,192-token budget cuts the prompt into ⌈128,000 ÷ 8,192⌉ = 16 chunks so ordinary streams continue between chunks; if prefill and decode ran on separate GPUs, an 8B model's 2,200-token ordinary prompt (128 KiB/token) would ship 275 MiB (~6 ms on an illustrative 50 GB/s link).
+
+<Callout tone="red" title="What breaks">
+  A cache in 4-bit with a per-token scheme for keys can pass perplexity and still lose the one order number the customer asked about. Another failure: one 128,000-token request admitted to a pool sized for 2,200-token ones empties the free blocks and forces preemption for everyone. Cap prompt length per pool, and evaluate recall at the longest length you will serve.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Ring Attention / context parallelism | Exact attention; sequence length scales with GPUs; per-GPU memory independent of length | Needs fast links and big blocks; load imbalance under causal masks; more engineering | One sequence is too big for one GPU's memory or prefill time |
+| All-gather context parallelism | Simpler, handles document masks, cheap with grouped-query attention | Each GPU briefly holds all keys and values | Moderate lengths, GQA models, training at 128K |
+| FP8 / INT8 KV cache | About 2× the tokens, small accuracy risk, a flag in vLLM | Needs calibration for best accuracy; sliding-window layers sensitive | Default first step when memory-bound |
+| INT4 or lower KV cache (KIVI, KVQuant) | 4× or more the tokens; more batch | Custom kernels, outlier handling, larger accuracy risk | Very long contexts after you measured recall |
+| Token eviction | Fixed memory for endless streams | Dropped tokens are gone | Chat streams where old detail does not matter |
+| Chunked prefill | Stable streams during long prompts | Slightly later first token for the long prompt | Any mixed-length workload |
+| Prefill-decode disaggregation | Each phase tuned to its own latency target | KV transfer cost and a second pool to run | Strict first-token and per-token targets at scale |
+
+## Production systems
+
+- **Ring Attention** (Liu et al., 2023) reports sequences up to device count times longer than earlier memory-efficient transformers, and over 1 million tokens for a 7B model on 32 A100 GPUs in training.
+- **Llama 3** (Meta, 2024) trained to a 128K window in six stages on about 800 billion tokens and used all-gather context parallelism; the 70B model has 80 layers and 8 KV heads.
+- **KIVI** and **KVQuant** report 2-bit and 3-bit caches with small quality loss; KVQuant reports 1 million tokens of LLaMA-7B context on one A100-80GB and 10 million on eight GPUs.
+- **vLLM** documents FP8 KV cache (`--kv-cache-dtype fp8`), decode context parallelism and chunked prefill by default in V1 (docs checked 15 November 2026).
+- **Sarathi** and **DistServe** are the research behind chunked prefill and disaggregation: up to 4.25× decode throughput for LLaMA-33B, and 7.4× more requests served, respectively.
+
+## Failure modes & pitfalls
+
+- Sizing GPUs from the weights and forgetting that the cache at 128,000 tokens can be larger than the model.
+- Assuming a bigger window means better recall: check lost-in-the-middle and RULER-style results.
+- Reading a perplexity result as proof that retrieval still works at 4 bits.
+- Using Ring Attention across slow links with small blocks, so the transfer shows up as idle GPUs.
+- Leaving the FP8 scale at 1.0 and never calibrating, then blaming the format.
+- Admitting long and short prompts to the same pool with no cap on prompt tokens per step.
+
+## Interview framework
+
+1. Start with the bytes: 2 × layers × KV heads × head size × bytes per value, per token, then times the length and the batch.
+2. Say which resource breaks first (cache memory, then prefill time) and name the fixes: shrink the cache, split the sequence, schedule the prefill.
+3. Explain Ring Attention in one breath: queries stay, KV blocks rotate, compute overlaps the send, the answer is exact, and the block must be at least F ÷ B tokens.
+4. Explain KIVI's asymmetry (keys per channel because of outlier channels, values per token) and why you would still run your own recall test.
+5. Close with operations: separate long-context pool, chunked prefill budget, prompt-length caps and metrics (free blocks, inter-token latency, recall at max length).
+
+**What interviewers listen for:** a bytes-per-token number, the overlap condition, the reason keys and values are quantised along different axes, and the difference between compressing the cache and splitting it.
+
+**Red flags:** treating context length as free, claiming Ring Attention is an approximation, or calling quantisation lossless without a test.
+
+## Further reading
+
+- [Ring Attention with Blockwise Transformers for Near-Infinite Context (Liu, Zaharia and Abbeel, 2023)](https://arxiv.org/abs/2310.01889)
+- [KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache (Liu et al., 2024)](https://arxiv.org/abs/2402.02750)
+- [KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization (Hooper et al., 2024)](https://arxiv.org/abs/2401.18079)
+- [SARATHI: Efficient LLM Inference by Piggybacking Decodes with Chunked Prefills (Agrawal et al., 2023)](https://arxiv.org/abs/2308.16369)
+- [vLLM documentation: quantized KV cache and context parallel deployment](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/)
+- [The Llama 3 Herd of Models (Meta, 2024)](https://arxiv.org/abs/2407.21783)
+- Related pages: [Efficient Attention](/ai-system-design/genai-system-design/efficient-attention) · [Multi-Head Latent Attention](/ai-system-design/genai-system-design/multi-head-latent-attention) · [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization) · [Context Windows and In-Context Learning](/ai-system-design/genai-system-design/context-windows-and-in-context-learning) · [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is the KV cache the first thing that breaks at 128,000 tokens, and how big is it?" category="Concepts" level="Junior">
+    - **Linear growth:** The cache stores a key and a value for every token, every layer and every KV head, growing as `2 × layers × KV heads × head size × bytes per value` per token.
+    - **Size at 128,000 tokens:** For an 80-layer model with 64 KV heads of size 128 in 16-bit, that is 2.62 MB per token, so 128,000 tokens take 335.5 GB—more than the weights.
+    - **GQA reduction:** Models with grouped-query attention have fewer KV heads and a cache several times smaller, but it still grows linearly with every token.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain Ring Attention and why it is exact." category="Concepts" level="Mid">
+    - **Blockwise ring rotation:** The sequence is split into one block per GPU; each GPU keeps its query block and, in each round, computes attention against the key/value block it currently holds while passing that block to the next GPU and receiving another.
+    - **Exact softmax combination:** Attention over key/value blocks can be computed in any order if each block's softmax statistics (running max and sum) are combined correctly, so after all rounds the result equals ordinary attention with nothing dropped or approximated.
+    - **Multi-device scaling:** The sequence limit becomes the total memory across devices rather than one device's memory.
+  </InterviewQuestion>
+  <InterviewQuestion question="When does Ring Attention's communication hide completely, and what happens when it does not?" category="Scaling" level="Senior">
+    - **Overlap threshold (`c ≥ F ÷ B`):** A round computes ~4·d·c² FLOPs and sends 4·c·d bytes, so the send hides when block size *c* is at least the ratio of compute rate to link bandwidth (~1,000 tokens on NVLink and ~25,000 on InfiniBand for an A100).
+    - **When blocks are too small:** GPUs wait for data and utilisation drops; fix this with bigger blocks, faster links, or keeping context parallelism inside one node.
+    - **Causal mask load imbalance:** Causal masks leave uneven work per GPU, which Llama 3 handles by giving each GPU two chunks from opposite ends of the sequence.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does KIVI quantise keys per channel but values per token?" category="Trade-offs" level="Mid">
+    - **Key channel outliers:** A few fixed channels in the key cache have very large magnitudes; grouping along the channel confines each outlier to its own scale so other channels keep their resolution.
+    - **Sparse value weighting:** Values show no fixed channel outliers, and attention output is a sparse weighted sum of value rows—quantising per token keeps errors inside their own token so important tokens are not damaged by the rest.
+    - **Full-precision residual:** Because a per-channel group needs several tokens to form, KIVI keeps the newest tokens in full precision until a group fills.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost wants to double concurrency on a memory-bound deployment. Would you quantise the KV cache?" category="Trade-offs" level="Mid">
+    - **Start with FP8:** FP8 halves bytes per token, roughly doubles the tokens that fit, and is a single flag in vLLM (with scales calibrated for best accuracy).
+    - **Evaluate recall and latency:** Run Brightpost's golden set and a long-context recall test before and after, watching cost per answer and time per token.
+    - **When to go to 4 bits:** Going to 4 bits or lower gives a further gain but needs specialised kernels and carries a larger accuracy risk, so reserve it for the long-context pool after measuring and checking GQA/paging gains first.
+  </InterviewQuestion>
+  <InterviewQuestion question="One customer sends a 128,000-token prompt and every other user's stream stutters. What do you change?" category="Failure modes" level="Senior">
+    - **Enable chunked prefill:** The prefill is running as one huge step that blocks decodes; turn on chunked prefill and set the per-step token budget so the prompt becomes ~16 chunks of 8,192 tokens mixed with other users' decode tokens.
+    - **Tune the chunk budget:** A smaller budget protects inter-token latency while a larger one gets the long prompt its first token sooner.
+    - **Isolate long requests:** Cap prompt length per pool, route long requests to a separate pool or disaggregated prefill GPUs, and alert on preemptions and free blocks.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design serving for 1,000,000-token contexts. What do you combine?" category="Architecture" level="Senior">
+    - **Memory arithmetic and compression:** For the 80-layer, 64-head model, 1,000,000 tokens is ~2.6 TB of cache at 16 bits; use GQA or latent attention models, quantise the cache to FP8 or lower after measuring recall, and shard the cache across GPUs with context parallelism (ring or all-gather prefill and sharded decode).
+    - **Scheduling and isolation:** Use chunked prefill and a separate long-context pool so ordinary traffic keeps its latency, budgeting decode time as bytes read per GPU over bandwidth.
+    - **Positional extension:** Verify the model was actually extended to that length via RoPE scaling and long-document training so it can use the context.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do RoPE scaling and context parallelism relate?" category="Concepts" level="Junior">
+    - **Context parallelism and quantisation:** Fit a long sequence into GPU memory and compute time.
+    - **RoPE scaling (PI, YaRN) and fine-tuning:** Make the model's position encoding work at lengths it was not originally trained on.
+    - **Why both are required:** Without RoPE scaling the model may not understand position 100,000, and without parallelism or compression you cannot hold the sequence in memory.
+  </InterviewQuestion>
+</InterviewQuestions>

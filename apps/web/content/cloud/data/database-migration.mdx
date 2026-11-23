@@ -1,11 +1,342 @@
 ---
 title: "Database Migration: Full Load, Change Data Capture and Cutover"
-description: "How to move a live database with only minutes of downtime: full load, change data capture, validation, cutover and rollback."
-status: outline
+description: "How to move a live database with minutes of downtime: schema conversion, full load, change data capture, validation, cutover and a rollback path."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how to move a live database with minutes of downtime: same-engine versus different-engine moves, schema conversion, the full-load-then-change-capture pattern, validation, cutover and rollback. Managed migration services are the tool, not the lesson.
+<KeyIdea>
+  To move a live database, copy it while it keeps working, then replay every change made since, so the final switch takes minutes, not a night.
+</KeyIdea>
 
-**Related reading on this site:** [Polyglot Persistence](/system-design/databases/polyglot-persistence) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Databases on AWS](/cloud/aws/databases)
+## The story
+
+About 60 gift shops buy Brightpost's cards wholesale. They order through a wholesale app that a contractor built on one virtual machine, with its own MySQL database. It holds 60 GB: 110,000 orders and 18 GB of invoice PDFs inside the tables. Asha wants it in the managed PostgreSQL engine that runs the shop's orders, so the team has one engine to look after. Her first try is a dump and restore on a Saturday. At 20:00 she stops all writes and plans 6 hours. The dump takes 1 hour. Loading rows and building indexes on PostgreSQL is slower, and at 02:00 the invoice table is still loading. At 05:00 the load stops on 212 rows with a date of `0000-00-00`, which PostgreSQL refuses. At 07:30 Asha gives up and reopens MySQL. Writes were frozen for 11.5 hours, and about 40 orders that shops sent by email are typed in by hand on Monday.
+
+Every step below removes one reason that night went wrong. The second try freezes writes for 9 minutes.
+
+## How it works
+
+Three words first. The **source** is the database you are leaving, and the **target** is the one you are moving to. **Downtime** is the time the app cannot write. **Cutover** is the moment the app stops using the source and starts using the target.
+
+### Step 1: Same engine or a different one
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={1} minWidth={620} caption="Before the move: the wholesale app reads and writes MySQL on one VM, and the managed PostgreSQL target already exists." />
+
+A move is **homogeneous** when source and target run the same engine, such as MySQL into a managed MySQL. The tables, types and queries carry over unchanged. A move is **heterogeneous** when the engines differ, as with MySQL into PostgreSQL. Then the schema must be converted, and some of the app's queries must change too.
+
+Brightpost's move is heterogeneous, so it has two halves. First, convert the schema and change and test the app's queries. Second, copy 60 GB without stopping the shops for a night. A homogeneous move skips the first half, and the engine's own [replication](/system-design/databases/sync-vs-async-replication) often does the copying.
+
+<PremiumBreak />
+
+### Step 2: The naive way: stop, copy, start
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={2} minWidth={620} caption="The failure: the whole copy runs while writes are stopped. It overruns, and the shops are refused for 11.5 hours." />
+
+A **dump and restore** exports every row to a file, then loads that file into the target. It is the simplest method, and it is correct only if nothing writes during the copy. So the downtime is the whole copy: export, transfer, load, then index builds.
+
+<Callout tone="red" title="What breaks">
+  Asha timed the dump on her laptop, not the load on the target. At 20:00 writes stop. The load runs row by row and builds indexes as it goes. At 02:00, when the window should close, the 18 GB invoice table is still loading. At 05:00 the 212 zero dates stop the load, and nothing has been tested yet. At 07:30 she reopens MySQL: 11.5 hours frozen, about 40 orders typed in by hand, and the move not done.
+</Callout>
+
+Two lessons follow. The copy must happen while the app keeps writing. And whatever can fail, such as types, dates or large rows, must fail in a rehearsal.
+
+### Step 3: Convert the schema first
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={3} minWidth={620} caption="A converter reads the MySQL schema and creates the PostgreSQL tables, keys and indexes before any row is copied." />
+
+**Schema conversion** turns the source's table definitions into the target's. A converter tool reads every table, column and index on the source. It writes the target's version and lists what it could not convert. Most columns map cleanly. A few never do.
+
+<Compare
+  columns={["MySQL has", "PostgreSQL needs", "What Brightpost did"]}
+  rows={[
+    ["Zero dates such as 0000-00-00", "A real date or NULL", "Turned 212 zero dates into NULL"],
+    ["AUTO_INCREMENT on a column", "A sequence or an identity column", "Identity columns, reset at cutover"],
+    ["TINYINT(1) used as true or false", "BOOLEAN", "Converted the column and the app's checks"],
+    ["Case-insensitive text comparison", "Case-sensitive by default", "Made email lookups ignore case"],
+    ["Stored procedures and triggers", "Rewritten by hand", "Moved 2 triggers into app code"],
+  ]}
+  caption="The usual MySQL to PostgreSQL gaps. A converter flags most of them; a person decides each fix."
+/>
+
+Queries that use MySQL-only functions need rewriting too. Asha runs the app's tests against the empty converted schema for two weeks before copying any data.
+
+### Step 4: Full load while the app keeps writing
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={4} minWidth={620} caption="A replication task copies every table into PostgreSQL in 3 hours, while the shops keep ordering on MySQL." />
+
+A **full load** copies every row that exists when it starts. A managed **replication task** does it, several tables at a time. New orders keep landing in MySQL meanwhile. The task notes where in the source's change log the load began, so it knows which changes to replay later.
+
+Brightpost's full load takes 3 hours on a Tuesday afternoon. Two habits help.
+
+1. **Indexes after rows.** Loading into a table with no secondary indexes is quicker, so the converted indexes are added when the load ends.
+2. **Large objects in their own mode.** A **large object** is a big value in one column, such as a PDF. Many tools copy large objects more slowly, or cut them at a size limit unless you set one. Brightpost's biggest invoice is 9 MB.
+
+### Step 5: Change data capture from the source's log
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={5} minWidth={620} caption="The task reads the MySQL change log and replays each committed change on PostgreSQL. Lag falls from 35 minutes to 4 seconds." />
+
+Every database writes each committed change to a log before it touches the tables. MySQL calls it the binary log; PostgreSQL has the <Term id="wal" />. **Change data capture**, or CDC, reads that log and replays each insert, update and delete on the target. **Lag** is how far the target trails the source.
+
+When the full load ends, 3 hours of changes are waiting. The task replays them in about 35 minutes. After that, lag stays at 2 to 5 seconds while the shops keep ordering. Four things can stop CDC or make it wrong.
+
+1. **The log must be complete.** MySQL must log whole rows, not statements, and keep the log longer than the task could ever fall behind. Brightpost keeps 24 hours.
+2. **Every table needs a primary key.** Without one, the task cannot tell which row an update means. Two of Brightpost's tables had none, and Asha added keys.
+3. **Long transactions hold changes back.** A change appears in the log only when its <Term id="transaction" /> commits. A report that runs for an hour inside one transaction delays everything behind it.
+4. **Target triggers fire twice.** A trigger on the target runs again for each replayed row. Switch target triggers off until cutover.
+
+[CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) shows other uses of a change stream.
+
+### Step 6: Validate: counts and checksums
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={6} minWidth={620} caption="Validation compares row counts and checksums for every table, on the source side and on the target." />
+
+A copy with no errors can still be wrong. A type can round a price, or a large object can be cut short. So check three ways, each stricter than the last.
+
+1. **Row counts per table.** Brightpost's orders table has 110,214 rows on both sides. A count catches missing rows, not wrong values.
+2. **Checksums.** A **checksum** is a short number computed from a set of values. If one value changes, the checksum changes. Compute one per table, or per block of 10,000 rows, on both sides and compare them.
+3. **Reads from both.** For a week, a test job sends the app's real queries to both databases and compares the answers.
+
+The first checksum run finds 31 invoices that differ. They were larger than the task's default limit for large objects, and were cut short. Asha raises the limit above 9 MB and reloads those rows. Then every table matches.
+
+### Step 7: The cutover window
+
+<AnimatedDiagram spec="animated/cloud/database-migration-1" stepper caption="Brightpost's cutover, minute by minute: writes stop at 06:00 and open again on PostgreSQL at 06:09." />
+
+The cutover is a short, rehearsed list. Brightpost runs it at 06:00 on a Sunday, its quietest hour.
+
+1. **Freeze.** The app stops taking writes and shows shops a "back in 10 minutes" page.
+2. **Drain.** The task applies the last changes, and lag reaches 0. Run the counts once more.
+3. **Reset sequences.** Set each sequence past the highest id on the target.
+4. **Start the reverse copy.** Changes on the target now flow back to the source.
+5. **Switch the connection string.** Point the app at the target's address. If the switch is a <Term id="dns" /> change, lower the record's <Term id="ttl" /> a day ahead.
+6. **Smoke test.** A **smoke test** is a few quick real actions that prove the basics work. Asha places one test order and opens one invoice.
+7. **Reopen** writes, and watch errors and slow queries for an hour.
+
+<Callout tone="orange" title="The trap the rehearsal caught">
+  CDC copies rows, not the counter behind each id. In the rehearsal, nobody reset the sequences. The first test order asked for id 1, which already existed, and failed with a duplicate key. Step 3 of the list exists because of that test.
+</Callout>
+
+Brightpost rehearses the list twice on a copy in the test account. The real window lasts 9 minutes.
+
+### Step 8: Rollback by reverse replication
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" step={7} minWidth={620} caption="After cutover the app writes to PostgreSQL, and a reverse copy keeps MySQL current, so going back loses no order." />
+
+A **rollback plan** says how to go back, and what it costs. Without one, a problem found on Monday leaves two choices: fix it live, or return to MySQL and lose every order since 06:09.
+
+**Reverse replication** removes that choice. From cutover on, the task copies every change on PostgreSQL back into MySQL. MySQL stays seconds behind, so going back is a second short cutover. Brightpost keeps the reverse copy for 7 days. Then it keeps a final snapshot of the MySQL disk for 30 days and deletes the VM. Rehearse the rollback too, and agree in advance who may call it.
+
+### Step 9: The downtime budget
+
+Agree a **downtime budget** with the business before choosing a method. That is the longest freeze it accepts. Brightpost's is 15 minutes.
+
+<Compare
+  columns={["", "Dump and restore", "Full load, then CDC"]}
+  rows={[
+    ["Writes frozen", "The whole copy: 11.5 h on the first try", "The drain and switch: 9 min"],
+    ["Grows with the data", "Yes", "Hardly; only the final drain"],
+    ["Orders at risk if the source dies mid-move", "None; nothing is written", "The last few seconds of lag"],
+    ["Rollback", "Reopen the source; nothing was written to the target", "Reverse copy; nothing lost"],
+    ["Moving parts", "A file and two commands", "A converter, a task, a log, validation"],
+  ]}
+  caption="Brightpost's numbers. Dump and restore still wins for a small database with a long quiet night."
+/>
+
+Until cutover, the source is the copy you recover from, so the <Term id="rpo" />, the amount you could lose, is what its backups give.
+
+## On AWS, Google Cloud and Azure
+
+The method is the same on all three clouds: convert, full load, CDC from the log, validate, cut over. The tools differ in which engine pairs they cover.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Service:** AWS Database Migration Service (DMS) runs replication tasks, on an instance you size or as DMS Serverless.
+    - **Schema conversion:** DMS Schema Conversion converts tables and code and reports what it could not. The older desktop AWS Schema Conversion Tool (SCT) does the same job.
+    - **Full load and CDC:** a task does a full load, CDC, or both in order. For MySQL it reads the binary log, which must log whole rows.
+    - **Validation:** DMS data validation compares rows on both sides after the load and during CDC, and reports mismatches.
+    - **Engine pairs:** same-engine moves and many cross-engine ones, including MySQL to PostgreSQL. A second task can copy changes back for a rollback.
+
+    **The difference that changes a design.** AWS splits the job across two tools: one converts the schema, the other copies the data. DMS can create target tables, but only in a basic form, without secondary indexes or sequence positions. So create the schema with the converter first, and let the task load into the tables that exist.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Service:** Database Migration Service runs migration jobs into Cloud SQL and AlloyDB, with no replication server for you to size.
+    - **Schema conversion:** for Oracle and SQL Server sources, a conversion workspace converts the schema to PostgreSQL. Same-engine jobs need no conversion.
+    - **Full load and CDC:** a continuous job copies the data, then replays changes from the source's log until you promote the target.
+    - **Validation:** the open-source Data Validation Tool compares row counts and column checksums between source and target.
+    - **Engine pairs:** MySQL to MySQL, PostgreSQL to PostgreSQL, and Oracle or SQL Server to PostgreSQL. MySQL to PostgreSQL is not one of its paths, so a move like Brightpost's uses an outside converter and CDC tool.
+
+    **The difference that changes a design.** Cutover here is **promotion**: the target runs as a replica during the job, and promoting it makes it a writable primary and ends the job. Plan the rollback copy to the source as a separate piece of work, and test it in the rehearsal.
+  </Tab>
+  <Tab label="Azure">
+    - **Service:** Azure Database Migration Service moves SQL Server into Azure SQL and MySQL into Azure Database for MySQL. Azure Database for PostgreSQL flexible server has its own migration service for PostgreSQL sources.
+    - **Schema conversion:** same-engine paths copy the schema as it is. Changing engines needs a separate conversion tool.
+    - **Full load and CDC:** an online migration copies the data, then keeps applying changes until you start the cutover. An offline one copies once, inside a window.
+    - **Validation:** checks before the move test that the source is ready. Comparing the data afterwards is a job you script.
+    - **Engine pairs:** same-engine moves. MySQL to PostgreSQL is not a built-in path, so it uses an outside converter and CDC tool.
+
+    **The difference that changes a design.** The target engine picks the tool: SQL Server and MySQL go through Database Migration Service, PostgreSQL through flexible server's own service. A team that also changes engine plans the conversion and the change copy itself.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/migration-cutover" stepper minWidth={620} caption="The whole move in seven steps. The Services toggle shows each provider's tool for every box." />
+
+<CloudMapping diagram="cloud/migration-cutover" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should this database move?"
+  tree={{
+    q: "Can the business stop writes for the whole copy, with hours to spare?",
+    yes: "Dump and restore in one window. Time the load on a full-size copy first, not only the dump.",
+    no: {
+      q: "Is the database too big to copy over the network in a few days?",
+      yes: {
+        answer: "Ship the bulk on a transfer appliance, then use CDC from the log to catch up the changes since.",
+        href: "/cloud/data/file-hybrid-and-transfer",
+      },
+      no: {
+        q: "Does the target run the same engine as the source?",
+        yes: "Full load, then CDC with the engine's own replication or a managed migration job. No conversion step.",
+        no: {
+          q: "Has the app passed its tests against the converted schema?",
+          yes: "Full load, then CDC, then validate, then a rehearsed cutover with a reverse copy ready.",
+          no: "Convert first and fix what did not convert. Copy no data until the app works on the new engine.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The full load takes 3 hours. Afterwards the task replays the waiting changes in 35 minutes. From the start of the load, when is the target first within seconds of the source?" hint="Add the load and the catch-up.">
+    After about 3 hours 35 minutes. From then on lag stays at 2 to 5 seconds, and the cutover can be planned.
+  </QuizItem>
+  <QuizItem question="Both orders tables have 110,214 rows. Is the copy correct?" hint="What does a count not see?">
+    Not yet. A count proves no rows are missing, not that the values match. Brightpost's counts matched while 31 invoices were cut short. Checksums found them.
+  </QuizItem>
+  <QuizItem question="The first try froze writes for 11.5 hours, the second for 9 minutes. About how many times shorter was the second freeze?">
+    About 77 times: 690 minutes against 9.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Dump and restore", "Full load + CDC, cutover", "Full load + CDC + reverse copy"]}
+  rows={[
+    ["Writes frozen", "Hours; 11.5 h for Brightpost", "Minutes; 9 for Brightpost", "Minutes"],
+    ["Rollback after reopening", "Lose orders since the switch", "Lose orders since the switch", "Lose nothing"],
+    ["Extra running cost", "None", "A task for days or weeks", "A task for one more week"],
+    ["Needs on the source", "Nothing", "A complete change log, primary keys", "The same, plus a writable source"],
+    ["Use it for", "Small data, a quiet night", "Moves you can test fully first", "A live shop's orders"],
+  ]}
+  caption="Brightpost chose the third column. Real task costs and limits differ by cloud."
+/>
+
+A week of reverse copy costs a running task and a VM, and buys a way back that loses nothing.
+
+## Common pitfalls
+
+- **Timing the dump, not the load.** Loading and index builds are often the slow half. Time the whole path on a full-size copy.
+- **Forgetting sequences.** CDC copies rows, not id counters, so the first new order collides with an old id. Reset every sequence before writes open.
+- **Large objects cut short.** Many tools cap large objects unless told otherwise. Find the biggest value, set the limit above it and checksum those tables.
+- **Tables without primary keys.** CDC cannot match an update or a delete to a row. Add a key before the load, or the target drifts.
+- **No way back.** Without a reverse copy, going back loses every order since the switch. Keep one running for a week.
+
+## How to say it in an interview
+
+"I copy a live database in two phases. First, a full load copies every table while the app keeps writing. Then change data capture reads the source's log and replays each change, so the target stays seconds behind. For a different engine, I convert the schema and test the app on it before any data moves. I validate with row counts and checksums, not only a successful job. Cutover is a rehearsed list: freeze, drain to zero lag, reset sequences, start a reverse copy, switch the address and smoke test. The reverse copy is my rollback, and it loses nothing."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is change data capture, and why does almost every migration tool use it?" level="Mid" category="Cloud">
+    **Short answer.** Change data capture reads the source database's log of committed changes and replays each insert, update and delete on the target. Tools use it because it lets the copy happen while the app keeps writing. The only downtime left is the final drain and switch.
+
+    **Why.** A plain copy is correct only if nothing writes during it, so the downtime grows with the data. Brightpost's dump and restore froze writes for 11.5 hours. With CDC, the 3-hour load ran while shops ordered, and lag then stayed at a few seconds. Reading the log costs the source little, because the database writes it anyway.
+
+    <AnimatedDiagram spec="animated/cloud/migration-cutover" step={5} highlight={["source", "task", "target"]} caption="The task reads the source's change log and replays each committed change on the target." />
+
+    **Follow-ups the interviewer may ask.**
+    - What must be true of the source's log for CDC to work?
+    - Why does a table without a primary key break CDC?
+
+    **Watch out for.** Saying CDC polls the tables for changed rows. Polling misses deletes and loads the source. Log-based CDC sees every committed change in order.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your CDC lag stays at 40 minutes the week before cutover. What are the likely causes?" level="Mid" category="Cloud">
+    **Short answer.** Either changes arrive faster than the task can apply them, or something holds them back. Check the task's processor and memory first. Then the target's write speed, indexes and triggers. Then long transactions on the source, large objects and tables without primary keys.
+
+    **Why.** After the backlog is replayed, lag should fall to seconds; Brightpost's reached 4 seconds. A lag that holds steady means the apply side is saturated. A lag that jumps and recovers points to a long transaction, whose changes appear only when it commits. Target triggers and extra indexes slow every replayed row.
+
+    <AnimatedDiagram spec="animated/cloud/migration-cutover" step={5} path="source>task>target" caption="Lag builds either between the log and the task or between the task and the target." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you tell a slow task from a slow target?
+    - Would you cut over with 40 minutes of lag if the business insisted?
+
+    **Watch out for.** Starting the cutover anyway. The freeze then lasts as long as the drain, 40 minutes or more, and blows the downtime budget.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you prove the new database holds the same data before you switch?" level="Mid" category="Cloud">
+    **Short answer.** Three checks, each stricter than the last. Row counts per table catch missing rows. Checksums per table or per block of rows catch changed values. Running the app's real queries against both databases and comparing answers catches problems in types and text.
+
+    **Why.** A job with no errors can still be wrong. Brightpost's orders tables both had 110,214 rows, yet 31 invoices had been cut short by a large-object limit. Only the checksums showed it.
+
+    <AnimatedDiagram spec="animated/cloud/migration-cutover" step={6} highlight={["task", "target", "validate"]} caption="Validation compares counts and checksums from the source side and from the target." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you checksum a table that keeps changing during CDC?
+    - Which column types would you check first in a MySQL to PostgreSQL move?
+
+    **Watch out for.** Counts alone. They prove that no row is missing, not that any value is right.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Plan a MySQL-to-managed-PostgreSQL migration with under 15 minutes of downtime and a tested rollback." level="Senior" category="Cloud">
+    **Short answer.** Convert the schema and test the app on it first. Then run a full load and CDC until lag holds at seconds, and validate with counts and checksums. Rehearse the cutover twice: freeze, drain, reset sequences, start a reverse copy, switch and smoke test. Keep the reverse copy for a week.
+
+    **Why.** Downtime is only the freeze, so it must not grow with the data. Brightpost's 60 GB moved with a 9-minute freeze at 06:00 on a Sunday. Zero dates, true-or-false columns and case rules are fixed in the schema, not on the night. The rehearsal found the sequence trap. The reverse copy keeps MySQL seconds behind, so a rollback is another short switch.
+
+    <AnimatedDiagram spec="animated/cloud/database-migration-1" step={3} caption="Sequences, the reverse copy, the switch and a test order all happen inside the 9-minute window." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you call the rollback, and who decides?
+    - How does the app switch its address, and how long can old connections linger?
+
+    **Watch out for.** A rollback plan that was never tested. If the reverse copy has never run, it is a hope, not a plan.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="After cutover, new orders fail with a duplicate key error. What happened, and what should the runbook say?" level="Senior" category="Cloud">
+    **Short answer.** The sequences were not reset. CDC copied the rows but not the counters that hand out new ids, so the target tried to reuse an id that already existed. The runbook should set every sequence past the highest id before writes open, and the smoke test should create a real row.
+
+    **Why.** In MySQL the counter belongs to the table. In PostgreSQL it is a separate sequence, and copying rows with their ids leaves it at its start. Brightpost's rehearsal hit this: the first test order asked for id 1. With the step in the list, the real first order got 110,215.
+
+    **Follow-ups the interviewer may ask.**
+    - Which other objects does a row copy leave behind?
+    - How would you design ids so that a migration cannot collide?
+
+    **Watch out for.** Fixing it by deleting the clashing rows. Those are real orders; reset the sequence instead.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Databases on AWS](/cloud/aws/databases)
+- [Synchronous vs Asynchronous Replication](/system-design/databases/sync-vs-async-replication)
+- [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing)
+
+## Further reading
+
+- [AWS Database Migration Service User Guide](https://docs.aws.amazon.com/dms/latest/userguide/Welcome.html): tasks, CDC, validation and Schema Conversion.
+- [Google Cloud Database Migration Service](https://cloud.google.com/database-migration/docs): supported sources, migration jobs and conversion workspaces.
+- [Azure Database Migration Service](https://learn.microsoft.com/azure/dms/dms-overview): supported scenarios and online migrations.
+- [Migration service in Azure Database for PostgreSQL](https://learn.microsoft.com/azure/postgresql/migrate/migration-service/overview-migration-service-postgresql): PostgreSQL sources into flexible server.

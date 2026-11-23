@@ -23,9 +23,9 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Schemas", tone: "violet", x: 410, y: 250, w: 450, h: 110 },
   ],
   nodes: [
-    { id: "scooters", label: "120k scooters", sub: "1 status / 10 s", icon: "zap", x: 100, y: 130, w: 140 },
+    { id: "scooters", label: "120k scooters", sub: "1 status / 10 s", icon: "zap", x: 100, y: 130, w: 150 },
     { id: "ingest", label: "Ingest", sub: "Avro writer", icon: "server", tone: "teal", x: 295, y: 130 },
-    { id: "kafka", label: "Kafka topic", sub: "17 B / message", icon: "queue", tone: "orange", x: 520, y: 130, w: 130 },
+    { id: "kafka", label: "Kafka topic", sub: "17 B / message", icon: "queue", tone: "orange", x: 520, y: 130, w: 140 },
     {
       id: "job",
       label: "Battery job",
@@ -46,7 +46,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 635,
       y: 305,
-      w: 150,
+      w: 164,
     },
     { id: "ci", label: "CI check", sub: "v3 schema", icon: "shield", tone: "red", x: 295, y: 305, step: 3 },
   ],

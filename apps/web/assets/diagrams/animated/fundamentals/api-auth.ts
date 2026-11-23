@@ -28,7 +28,7 @@ const spec: DiagramSpec = {
     { id: "identity", title: "Identity", tone: "violet", x: 210, y: 280, w: 670, h: 160 },
   ],
   nodes: [
-    { id: "web", label: "Web app", sub: "session cookie", icon: "browser", tone: "neutral", x: 105, y: 110, w: 130 },
+    { id: "web", label: "Web app", sub: "session cookie", icon: "browser", tone: "neutral", x: 105, y: 110, w: 138 },
     {
       id: "mobile",
       label: "Phone app",
@@ -37,9 +37,9 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 105,
       y: 245,
-      w: 130,
+      w: 158,
     },
-    { id: "partner", label: "Grocer server", sub: "API key", icon: "server", tone: "neutral", x: 105, y: 380, w: 130 },
+    { id: "partner", label: "Grocer server", sub: "API key", icon: "server", tone: "neutral", x: 105, y: 380, w: 148 },
     {
       id: "gateway",
       label: "API gateway",
@@ -84,7 +84,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 640,
       y: 365,
-      w: 130,
+      w: 150,
       step: 4,
     },
     {
@@ -95,7 +95,7 @@ const spec: DiagramSpec = {
       tone: "red",
       x: 795,
       y: 365,
-      w: 130,
+      w: 154,
       step: 5,
     },
   ],

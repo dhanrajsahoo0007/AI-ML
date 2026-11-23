@@ -1,97 +1,203 @@
 ---
 title: "Idempotency"
 description: "Making repeated requests safe: idempotency keys, deduplication and conditional writes for retries and at-least-once delivery."
+icon: repeat
+updated: 2026-11-16
 ---
 
-Networks time out, clients retry, brokers redeliver. Idempotency is what stops a retry from charging a card twice.
+Networks time out, clients retry, brokers redeliver, and a timeout does not mean the work failed.
 
-## TL;DR
+- Idempotency is what stops a retry from charging a card twice. Interviewers ask about it to see whether you know where retries come from and how the server tells a retry from a new request.
+
+## Overview
 
 - An operation is **idempotent** if doing it many times has the same effect as doing it once.
 - `GET`, `PUT` and `DELETE` are naturally idempotent; `POST` is not.
-- Use an **idempotency key** chosen by the client and stored with the result.
+- Use an **idempotency key** chosen by the client and stored with the result; a repeat gets the stored result.
+- **Reserve the key before doing the work**, so two concurrent duplicates cannot both run.
 - Consumers of at-least-once queues must **deduplicate**.
-- Conditional writes and unique constraints enforce it in the database.
+- **Conditional writes** and **unique constraints** enforce it in the database.
 
-## The idea in plain English
+## Mental model
 
-Pressing an elevator button five times still calls one elevator. A well-designed API behaves the same when a request is repeated.
+- Pressing a lift button five times still calls one lift.
+- A cloakroom ticket works the same way: hand over the same ticket twice and you get the same coat, not two.
+- The idempotency key is the ticket. The server keeps the ticket with what it handed out, and every repeat of that ticket gets the same answer.
 
 ## Core concepts
 
-1. **Idempotency key.** A unique id (UUID) sent in a header; the server stores key and response.
-2. **Dedup store.** Table or cache of processed keys with a TTL.
-3. **Unique constraints.** Insert fails on a duplicate key, making the second attempt a no-op.
-4. **Conditional updates.** `UPDATE ... WHERE version = n` or compare-and-set.
-5. **Natural idempotency.** Set a state (`status = paid`) rather than apply a delta (`balance += 10`).
+- The running example is Brightpost's checkout paying for **order 4471, a £42 kettle**. The app gives up after **2 s**; at the sale-day peak the card provider sometimes takes **2.4 s** (illustrative timings).
+
+### Why retries double the work
+
+- A client that times out cannot tell "the request was lost" from "the reply was lost".
+- Retrying is right for the first case and wrong for the second, unless the operation is idempotent.
+
+<AnimatedDiagram spec="animated/patterns/idem-double-charge" stepper caption="A timeout does not mean the work failed; retrying a non-idempotent call does it twice." />
+
+<StepCards>
+  <StepCard n={1} title="The first attempt times out, but succeeds">
+    The app posts the payment and waits 2 s. The card provider is slow today and confirms the charge at 2.4 s, after the app has given up.
+  </StepCard>
+  <StepCard n={2} title="The retry charges again">
+    The app retries, the order service has no way to know this is a repeat, and the provider charges £42 again. The shopper has paid £84 for one kettle.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- At the 300 orders/s peak, if 0.5 % of payments time out and are retried (illustrative), that is 1.5 double charges a second, 5,400 an hour.
+
+<PremiumBreak />
+
+### The tools
+
+- **Idempotency key.** A unique id (a UUID) the client sends in a header, the same on every retry; the server stores the key with the response.
+- **Dedup store.** A table or cache of processed keys with a TTL.
+- **Unique constraints.** An insert fails on a duplicate key, so the second attempt is a no-op.
+- **Conditional updates.** `UPDATE ... WHERE version = n`, or compare-and-set.
+- **Natural idempotency.** Set a state (`status = paid`) rather than apply a change (`balance += 10`).
 
 ## Architecture
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    participant D as Dedup store
-    C->>S: POST /pay (Idempotency-Key: k1)
-    S->>D: seen k1?
-    D-->>S: no
-    S->>S: process payment
-    S->>D: save k1 -> result
-    S-->>C: 200 result
-    C->>S: retry POST /pay (k1)
-    S->>D: seen k1?
-    D-->>S: yes, result
-    S-->>C: 200 same result
-```
+The same payment with an idempotency key, from the first request to the replays.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/idem-key-flow" stepper caption="Reserve the key first, save the response with it, and every repeat gets the first answer instead of a second charge." />
+
+<StepCards>
+  <StepCard n={1} title="Reserve the key before any work">
+    The app sends key `k-4471` with the payment. The order service inserts the key into the key store as "in progress"; the insert is atomic, so only one request can win it.
+  </StepCard>
+  <StepCard n={2} title="Charge once, save the response">
+    The service charges £42, saves the 200 status and body against the key, and replies. If the reply is lost, the work is still recorded.
+  </StepCard>
+  <StepCard n={3} title="A retry gets the saved response">
+    The app retries with the same key. The insert finds it done and returns the saved body: the shopper sees "paid", and the card is charged once.
+  </StepCard>
+  <StepCard n={4} title="A concurrent duplicate gets 409">
+    A duplicate that arrives while the first is still running finds the key in progress and is told 409, retry later. It never reaches the card provider.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### The key's life
+
+- A key moves through four states, and each state decides what a repeat gets.
+
+<AnimatedDiagram spec="animated/patterns/idem-record" caption="A repeat is answered by the record's state: wait while it runs, replay when it is done, start fresh once it expires." />
+
+**How to read it:**
+
+- In progress (lime) blocks duplicates; done (green) holds the answer to replay.
+- The dashed arrow: if the handler fails before any side effect, delete the key so the client can try again.
+- If it fails after a side effect (the card was charged, the save failed), the key must not be deleted; record the outcome or reconcile it.
 
 ### Races
 
-Two concurrent requests with the same key must not both run. Reserve the key first (insert with a unique constraint or atomic set-if-absent) in a "processing" state, then complete it.
+- Two concurrent requests with the same key must not both run.
+- Reserve the key first, with an insert under a unique constraint or an atomic set-if-absent, in an "in progress" state, then complete it.
+- A plain "check, then insert" lets both requests see "absent" and both run.
 
-### Scope and expiry
+### Scope, payload and expiry
 
-Keys are scoped per user and endpoint, and kept long enough to cover realistic retry windows (hours to days for payments).
+- Scope keys per user (or account) and per endpoint, so two customers cannot collide.
+- Store a hash of the request with the key, and reject a reused key with a different payload: the IETF draft for the `Idempotency-Key` header suggests 422.
+- Keep keys long enough to cover realistic retry windows: hours to days for payments. Stripe keeps them at least 24 hours.
+
+### Queues and consumers
+
+- At-least-once delivery means a consumer may see the same message twice.
+- Record each handled message id with the consumer's own write, in one transaction, and skip ids already recorded (see [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc)).
+
+### Worked example: order 4471 with one retry
+
+The app pays for order 4471 with key `k-4471`, times out at 2 s and retries once.
+
+1. **0 s.** The order service reserves `k-4471` and calls the card provider.
+2. **2.0 s.** The app gives up and retries at 2.5 s. The key is still in progress, so the retry gets 409.
+3. **2.4 s.** The provider confirms; the service saves the 200 and the body against the key.
+4. **3.5 s.** The app retries again, finds the key done and shows "paid".
+
+**The numbers:**
+
+- Charges: 1, against 2 without a key.
+- The shopper waits 3.5 s instead of 2.4 s, which is the price of a safe retry; a longer client timeout would cut it.
+- Key storage: 200,000 payments a day × 1 KB per record (illustrative) = 200 MB a day; with a 24 h TTL the store holds about one day's keys.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Key store | Safe retries | Extra storage and a lookup per request |
-| Long retention | Covers late retries | More storage |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Idempotency key store | Safe retries for any operation | A lookup and a write per request | Payments, orders, any `POST` that is retried |
+| Unique constraint on a natural key | No extra store | Only works when a natural key exists | One order per basket, one booking per seat |
+| Conditional update (version check) | Rejects stale repeats | The client must handle the conflict | Updates to existing rows |
+| Set state instead of adding | Naturally idempotent | Not every operation is a "set" | Status changes, counters set from a source |
+| Long key retention | Covers late retries | More storage | Payments and anything that costs money |
 
-## Real-world examples
+## Production systems
 
-- [Kindle Payments](/system-design/case-studies/kindle-payments) and [Uber Eats](/system-design/case-studies/uber-eats): payments and orders.
-- [Hotel Booking](/system-design/case-studies/hotel-booking) and [Ticketmaster](/system-design/case-studies/ticketmaster): avoiding double booking.
-- [Distributed Message Queue](/system-design/case-studies/distributed-message-queue): consumer-side dedup.
+- **Stripe** (as of November 2026): an `Idempotency-Key` header of up to 255 characters on any `POST`; the status code and body of the first request are saved and replayed, including 500s; keys may be pruned after 24 hours; a reused key with different parameters is rejected.
+- **IETF `Idempotency-Key` header draft** (-07, October 2025): 409 for a retry while the original is still being processed, 422 for a reused key with a different payload, 400 when a required key is missing.
+- **AWS** (Builders' Library): idempotent APIs use a client request token so a retry returns the original result.
+- [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) and [Uber Eats](/system-design-case-studies/case-studies/uber-eats): payments and orders. [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) and [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster): avoiding double booking. [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue): consumer-side dedup.
+- **Used in our case studies:** [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Instagram](/system-design-case-studies/case-studies/instagram) · [S3](/system-design-case-studies/case-studies/s3)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Generating the key on the server (it must come from the client).
-- Check-then-act without atomicity.
-- Returning an error for a duplicate instead of the original result.
-- Forgetting side effects such as emails.
+- **Generating the key on the server.** A retry gets a new key and runs again. The key must come from the client.
+- **Check-then-act without atomicity.** Two duplicates both see "absent". Reserve the key with an atomic insert.
+- **Returning an error for a duplicate** instead of the original result. The client cannot tell whether it paid. Replay the stored response.
+- **Forgetting side effects** such as emails. The charge is deduplicated but the receipt is sent twice. Put every side effect behind the key or make it idempotent too.
+- **Deleting the key after a partial failure.** The card was charged, the save failed, and the retry charges again. Only delete when nothing happened.
 
-## How to answer in an interview
+## Interview framework
 
-Identify which operations are retried, add client-generated keys, store results atomically, and mention expiry and concurrent duplicates.
+1. Identify which operations are retried: client retries, gateway retries, queue redelivery.
+2. Add client-generated keys, scoped per user and endpoint.
+3. Reserve the key atomically, process once, store the response, replay it for repeats.
+4. Cover concurrent duplicates (409), a changed payload (422) and expiry.
+5. Make consumers of queues deduplicate the same way.
 
-## Related patterns
+**What interviewers listen for:** a key reserved before the work, and the stored response replayed.
 
-[Message Queues](/system-design/patterns/message-queues) · [Saga](/system-design/patterns/saga) · [Circuit Breaker and Retries](/system-design/patterns/circuit-breaker-and-retries)
+**Red flags:** "we just check if the payment exists first", or keys generated by the server.
 
 ## Further reading
 
-- [Designing robust and predictable APIs with idempotency (Stripe)](https://stripe.com/blog/idempotency)
+- [Designing robust and predictable APIs with idempotency (Stripe)](https://stripe.com/blog/idempotency) · [Idempotent requests (Stripe API docs)](https://docs.stripe.com/api/idempotent_requests)
 - [Making retries safe with idempotent APIs (AWS Builders' Library)](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/)
+- [The Idempotency-Key HTTP Header Field (IETF draft)](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header)
+- Related pages: [Message Queues](/system-design/patterns/message-queues) · [Saga](/system-design/patterns/saga) · [Circuit Breaker and Retries](/system-design/patterns/circuit-breaker-and-retries) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you make a payment API idempotent?" category="Design" level="Mid">
-    Require a client-generated idempotency key, atomically reserve it, process once, store the response, and return the stored response for repeats.
+  <InterviewQuestion question="How do you make a payment API idempotent?" category="Architecture" level="Mid">
+    - Require a client-generated idempotency key on the request.
+    - Atomically reserve the key, process once, and store the response with it.
+    - Return the stored response for every repeat.
   </InterviewQuestion>
   <InterviewQuestion question="Why is idempotency needed with at-least-once queues?" category="Concepts" level="Mid">
-    Redelivery means a handler may see the same message twice; without deduplication the side effect would be applied twice.
+    - Redelivery means a handler may see the same message twice.
+    - Without deduplication the side effect would be applied twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which HTTP methods are idempotent, and why does it matter?" category="Concepts" level="Junior">
+    - GET, PUT and DELETE are idempotent by definition: repeating them leaves the same state.
+    - POST is not, so retries of a POST can create duplicates.
+    - Clients, proxies and gateways retry idempotent methods freely; a POST needs an idempotency key to be retried safely.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two requests with the same key arrive at the same moment. What happens?" category="Failure modes" level="Senior">
+    - With check-then-insert, both see no record and both charge the card.
+    - Reserve the key with an atomic insert under a unique constraint (or set-if-absent), so exactly one request wins.
+    - The loser finds the key in progress and gets 409; it retries and then receives the saved response.
+  </InterviewQuestion>
+  <InterviewQuestion question="The card was charged but the service crashed before saving the response. What does the retry do?" category="Failure modes" level="Senior">
+    - The key is still "in progress", so the retry must not simply run again.
+    - Pass the idempotency key on to the card provider too, so its side is deduplicated and the retry learns the charge already happened.
+    - Otherwise reconcile: look up the charge by order id before charging, and only then complete the key.
+  </InterviewQuestion>
+  <InterviewQuestion question="How long should you keep idempotency keys, and where?" category="Trade-offs" level="Mid">
+    - Long enough to cover every realistic retry: clients, gateways and queues, so at least a day for payments.
+    - In a store with an atomic insert: the main database in the same transaction as the work, or a key-value store with a TTL.
+    - Keeping them in the same database as the order makes the reservation and the work commit together.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -79,8 +79,8 @@ export default async function NewsletterIssuePage({ params }: { params: Params }
         <CoverPlaceholder className="mt-8 aspect-[21/9] max-h-[460px] w-full rounded-3xl" />
       )}
 
-      <div className="mx-auto mt-10 grid max-w-[1080px] gap-12 xl:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="min-w-0 max-w-[72ch]">
+      <div className="mx-auto mt-10 grid max-w-[1080px] gap-12 xl:grid-cols-[minmax(0,1fr)_220px] min-[1440px]:max-w-none">
+        <div className="min-w-0 max-w-[72ch] min-[1440px]:max-w-none">
           <header>
             {(number || series) && (
               <p className="text-xs font-semibold tracking-[0.1em] text-primary uppercase">

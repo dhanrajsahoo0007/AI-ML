@@ -1,0 +1,19 @@
+title: Maps and navigation high-level architecture
+alt: >-
+  An architecture diagram in seven steps across six zones: clients, edge, routing core, application services, async
+  pipeline and storage. Step 1: the phone app reads map tiles from a CDN, which reads a blob store on a miss; a map
+  builder cuts the tiles from the map database. Step 2: the phone asks the API gateway for a route and the routing
+  engine runs plain Dijkstra over the whole road graph, drawn red because a long route takes about 2 seconds. Step 3:
+  the map builder hands the routing engine a graph split into cells with shortcuts, and routes take milliseconds.
+  Step 4: phones send batched location fixes to a report ingest, onto a report stream; a traffic processor turns them
+  into a speed per road segment in a live-speeds store, and raw reports go to the speed history. Step 5: a customizer
+  turns changed speeds into new cell weights for the routing engine every 30 seconds and feeds segment speeds to an
+  ETA service, which sums times along each path. Step 6: the phone keeps a session with a navigation gateway; the
+  navigation service checks its position and asks the routing engine for a reroute. Step 7: an ETA model trained on
+  the history corrects the summed arrival time.
+caption: >-
+  Maps and navigation: tiles from a CDN, routes on a graph split into cells, live speeds from a report stream, and new
+  weights every 30 s without rebuilding the graph.
+tags: [case-studies, google-maps, architecture, routing, location]
+source: original
+created: 2026-11-17

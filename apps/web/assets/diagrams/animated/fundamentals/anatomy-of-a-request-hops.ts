@@ -42,7 +42,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 370,
       y: 130,
-      w: 140,
+      w: 148,
       h: 64,
     },
     {
@@ -53,7 +53,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 370,
       y: 260,
-      w: 140,
+      w: 158,
       h: 64,
     },
     {

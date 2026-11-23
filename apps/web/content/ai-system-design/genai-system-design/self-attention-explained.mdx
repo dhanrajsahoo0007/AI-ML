@@ -3,21 +3,39 @@ title: Self-Attention Explained
 description: Queries, keys and values, scaled dot-product attention and multi-head attention, with a worked example you can reproduce on a whiteboard.
 ---
 
-Self-attention is the one mechanism you must be able to derive in an AI interview. Expect to write the formula, explain each matrix, compute a tiny example, and discuss its cost.
+Self-attention is the one mechanism you must be able to derive in an AI interview. Expect to write the formula, explain each matrix, compute a tiny example, and discuss its cost. This page does all four with one running example, "the cat sat", small enough to check by hand.
 
-## TL;DR
+## Overview
 
 - Every token creates a **query** (what it is looking for), a **key** (what it offers) and a **value** (what it passes on).
 - Relevance between two tokens is the **dot product** of one's query and the other's key, scaled and turned into weights with a **softmax**.
 - Each token's output is the **weighted average of all values**, so it becomes a context-aware version of itself.
+- A **mask** removes positions a token must not read: future tokens in a decoder, padding in a batch.
 - **Multi-head attention** runs several smaller attentions in parallel so different heads can learn different relationships.
 - Cost is **quadratic** in sequence length, which drives most long-context engineering.
 
-## The idea in plain English
+<KeyIdea>Self-attention lets every token read every other token in one step, by scoring query against key and taking a softmax-weighted average of the values.</KeyIdea>
 
-Think of a library search. Your **query** is the question you type. Every book has a **key**, its catalogue entry. The **value** is the book's content. You compare your query to every key, decide how relevant each book is, and read a blend of the books in proportion to that relevance.
+## Mental model
 
-In self-attention, every word plays all three roles at once. The word "it" in "the animal didn't cross the street because it was tired" issues a query like "who am I referring to?". The key of "animal" matches that query strongly, so the output for "it" ends up containing a lot of "animal".
+- Think of a library search. Your **query** is the question you type.
+- Every book has a **key**, its catalogue entry.
+- The **value** is the book's content. You compare your query to every key, decide how relevant each book is, and read a blend of the books in proportion to that relevance.
+
+- In self-attention, every word plays all three roles at once.
+- The word "it" in "the animal didn't cross the street because it was tired" issues a query like "who am I referring to?".
+- The key of "animal" matches that query strongly, so the output for "it" ends up containing a lot of "animal".
+
+Here is the same idea as one attention head on another sentence.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-arcs-long-range"
+  caption="One head lets “it” reach straight back to “server”, five words away, in a single step; the weights are illustrative and sum to 1. After Vaswani et al. (2017), Figure 3."
+/>
+
+**How to read it:** "It" is the token asking; each arc's thickness is the weight it gives one word. The green row is one softmax row: "server" gets most, "request" (the other candidate noun) comes second. "Server" is five words back, yet it is one hop; a recurrent network would need five steps.
+
+**The numbers:** 0.03 + 0.52 + 0.04 + 0.03 + 0.18 + 0.04 + 0.08 + 0.03 + 0.05 = 1.00, so the output for "it" is 52% "server" and 18% "request".
 
 ## Core concepts
 
@@ -25,7 +43,7 @@ In self-attention, every word plays all three roles at once. The word "it" in "t
 
 2. **Scores.** $QK^\top$ is an n-by-n matrix where entry (i, j) says how much token i should attend to token j.
 
-3. **Scaling.** Scores are divided by $\sqrt{d_k}$. Without it, large dot products saturate the softmax and kill gradients.
+3. **Scaling.** Scores are divided by $\sqrt{d_k}$, where $d_k$ is the size of each key. Without it, large dot products saturate the softmax and kill gradients ([shown below](#why-divide-by-dk)).
 
 4. **Softmax per row.** Each row of scores becomes a probability distribution that sums to one.
 
@@ -39,23 +57,20 @@ In self-attention, every word plays all three roles at once. The word "it" in "t
 
 7. **Multi-head attention.** With h heads, each head uses projections of size $d_{model}/h$. Outputs are concatenated and multiplied by an output matrix $W_O$. Total cost is about the same as one full-size head.
 
-8. **Self vs cross-attention.** In self-attention, Q, K and V all come from the same sequence. In cross-attention (encoder-decoder models, and many multimodal models), queries come from one sequence and keys and values from another.
+8. **Self vs cross-attention.** In self-attention, Q, K and V all come from the same sequence. In cross-attention (encoder-decoder models, and many multimodal models), queries come from one sequence and keys and values from another. The original Transformer uses attention three ways: encoder self-attention, masked decoder self-attention, and encoder-decoder cross-attention (Vaswani et al., 2017, §3.2.3).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    X["Token vectors X<br/>(n x d_model)"] --> WQ["x W_Q"] --> Q["Queries Q"]
-    X --> WK["x W_K"] --> K["Keys K"]
-    X --> WV["x W_V"] --> V["Values V"]
-    Q --> S["Scores = Q K^T / sqrt(d_k)"]
-    K --> S
-    S --> M["Apply mask<br/>(causal or padding)"]
-    M --> SM["Softmax per row"]:::accent
-    SM --> O["Weights x V"]
-    V --> O
-    O --> Z["Context-aware token vectors"]
-```
+The formula is five operations in a fixed order; this is the paper's own diagram of them.
+
+<AnimatedDiagram
+  spec="animated/transformer/scaled-dot-product"
+  caption="Queries are compared with keys, the scores are scaled, optionally masked and turned into weights, and the weights mix the values. Adapted from Vaswani et al. (2017), Figure 2."
+/>
+
+**How to read it:** Read bottom up. Q and K meet in the first MatMul, one score per query-key pair; V joins only at the last MatMul. The mask sits before the softmax, so the surviving weights still sum to one. The small model on the left marks where this block sits; every attention block runs the same arithmetic.
+
+**The numbers:** In the original Transformer, $d_k = 512 / 8 = 64$, so the Scale box divides every score by $\sqrt{64} = 8$.
 
 Step by step for one token:
 
@@ -65,7 +80,7 @@ Step by step for one token:
 4. Softmax the scores into weights.
 5. Sum all value vectors with those weights. That sum is the token's new representation.
 
-## Deep dive
+## Technical mechanics
 
 ### A worked example
 
@@ -77,31 +92,126 @@ Take three tokens, "the", "cat", "sat", with 2-dimensional queries and keys (so 
 | cat | (0, 1) | (0, 2) | (0, 1) |
 | sat | (1, 1) | (1, 1) | (1, 1) |
 
-For "sat", the query (1, 1) dotted with each key gives scores 1, 2 and 2. Divided by 1.41 they become about 0.71, 1.41 and 1.41. The softmax of those is roughly 0.20, 0.40 and 0.40. The output is 0.20 x (1, 0) + 0.40 x (0, 1) + 0.40 x (1, 1) = (0.60, 0.80). "Sat" has pulled in mostly "cat" and itself, which is the behavior you want from a verb looking for its subject.
+- For "sat", the query (1, 1) dotted with each key gives scores 1, 2 and 2.
+- Divided by 1.41 they become about 0.71, 1.41 and 1.41.
+- The softmax of those is roughly 0.20, 0.40 and 0.40.
+- The output is 0.20 x (1, 0) + 0.40 x (0, 1) + 0.40 x (1, 1) = (0.60, 0.80).
+- "Sat" has pulled in mostly "cat" and itself, which is the behavior you want from a verb looking for its subject.
+
+Here is the same calculation for all three tokens at once; watch the bottom row of every grid.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-worked-example"
+  stepper
+  caption="Follow the bottom row: “sat” scores 1, 2 and 2, the scale and softmax turn them into weights 0.20, 0.40 and 0.40, and its new vector (0.60, 0.80) is mostly “cat” and itself."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Score every pair">
+    $QK^\top$ fills a 3 × 3 grid: row = the token asking, column = the token read. "Cat" scores 2 on itself because its key (0, 2) is long. Gap: scores grow with key size.
+  </StepCard>
+  <StepCard n={2} title="Shrink the scores">
+    Divide by $\sqrt{2} \approx 1.41$: 2 becomes 1.41, 1 becomes 0.71. Each row keeps its order. Gap: rows do not sum to one yet.
+  </StepCard>
+  <StepCard n={3} title="Softmax each row">
+    Each row becomes weights that sum to 1: "cat" gives 0.58 to itself, 0.28 to "sat", 0.14 to "the". Gap: nothing has been read yet.
+  </StepCard>
+  <StepCard n={4} title="Blend the values">
+    Weights times V: "the" becomes (0.80, 0.60), "cat" (0.42, 0.86), "sat" (0.60, 0.80). Every output now mixes in the others.
+  </StepCard>
+</StepCards>
+
+**The numbers:** for "cat", 0.14 × (1, 0) + 0.58 × (0, 1) + 0.28 × (1, 1) = (0.42, 0.86).
+
+### Why divide by √d_k
+
+At $d_k = 2$ the scale barely matters; at a real head size it does. If the parts of q and k are independent with mean 0 and variance 1, their dot product has variance $d_k$ (Vaswani et al., 2017, footnote 4). At $d_k = 64$, scores spread with a standard deviation of 8.
+
+<AnimatedDiagram
+  spec="animated/transformer/softmax-scale"
+  caption="Unscaled, scores 8 apart make the softmax all-or-nothing and its slope almost zero; divided by √64 = 8, the same ranking gives weights of 0.64 to 0.03 and a slope about 680 times larger. Illustrative scores."
+/>
+
+**How to read it:** Unscaled (left), scores one standard deviation apart give key 1 all the weight. Divided by 8 (right), the order is the same but every key keeps some say. The slope $p(1 - p)$ is the gradient that trains $W_Q$ and $W_K$; near zero, they stop learning. This is the paper's reason too: large dot products push the softmax into "regions where it has extremely small gradients" (§3.2.1).
+
+**The numbers:** unscaled, $0.999665 \times 0.000335 \approx 0.0003$; scaled, $0.644 \times 0.356 \approx 0.23$, about 680 times larger.
+
+<Callout tone="red" title="What breaks">
+  The scale fixes the spread at initialization, not forever. Training ViT-22B, Dehghani et al. (2023) saw attention logits grow until the weights were almost one-hot and the loss diverged, at around 8B parameters. The fix: a LayerNorm on queries and keys before the dot product (QK normalization).
+</Callout>
+
+### The same example with a causal mask
+
+A decoder-only LLM may not read the future: when it predicts the next token, later tokens do not exist yet. Here are the same three tokens under a causal mask.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-causal-example"
+  stepper
+  caption="The mask hides every later token, so “the” reads only itself and “cat” no longer reads “sat”; the last row, “sat”, is the same as without the mask."
+/>
+
+**How to read it:** The mask puts −∞ above the diagonal, where the key comes after the query. Since $e^{-\infty} = 0$, those keys get weight exactly 0 and each row still sums to 1. "The" reads only itself; "cat" loses "sat"; "sat" is last, so nothing changes for it.
+
+**The numbers:** for "cat", softmax(0, 1.41) ≈ 0.20, 0.80, so 0.20 × (1, 0) + 0.80 × (0, 1) = (0.20, 0.80), against (0.42, 0.86) unmasked.
+
+No row depends on a later token, so each token's keys and values can be computed once and kept: the KV cache, covered in [Efficient attention](/ai-system-design/genai-system-design/efficient-attention).
+
+<Callout tone="red" title="What breaks">
+  A row with every key masked divides 0 by 0 in the softmax and returns NaN, which spreads through the network. A causal mask that also hides the diagonal, or a padding row, causes it. Always let a token see itself, and handle fully masked rows in the kernel (many use a large negative number instead of a true −∞).
+</Callout>
 
 ### Multi-head attention
 
-```mermaid
-flowchart TB
-    X["Token vectors"] --> H1["Head 1<br/>own W_Q, W_K, W_V"]
-    X --> H2["Head 2"]
-    X --> H3["..."]
-    X --> H8["Head h"]
-    H1 --> C["Concatenate head outputs"]
-    H2 --> C
-    H3 --> C
-    H8 --> C
-    C --> WO["Output projection W_O"]:::accent
-    WO --> Y["Multi-head attention output"]
-```
+One head gives each token one blend. Multi-head attention gives it several without making the layer bigger.
 
-Studies of trained models find heads that specialize: some track the previous token, some follow syntactic dependencies, and "induction heads" copy patterns seen earlier in the context, which is linked to in-context learning. Many heads turn out to be redundant, which is one reason grouped-query attention can share keys and values across heads with little quality loss.
+<AnimatedDiagram
+  spec="animated/transformer/multi-head"
+  caption="Each of the 8 heads works on its own 64-wide slice, and Concat puts them back together at 512 wide. Adapted from Vaswani et al. (2017), Figure 2."
+/>
+
+**How to read it:** Each Linear is a stack because every head has its own projection, 512 wide in and 64 out. The eight heads attend in parallel, each with its own weights. Concat lays their outputs end to end and $W_O$ mixes them.
+
+**The numbers:** 512 / 8 = 64 per head; 8 × 64 = 512 after Concat. The weights total 4 × 512 × 512 = 1,048,576 per layer (no biases) for 8 heads or 1, hence a cost "similar to that of single-head attention with full dimensionality" (§3.2.2).
+
+Because each head has its own projections, heads can learn different jobs on the same sentence.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-arcs-two-heads"
+  caption="Two heads in the same layer read the same sentence differently: one links the pronoun to its noun, the other looks one word back. Illustrative weights; after Vaswani et al. (2017), Figures 4 and 5."
+/>
+
+**How to read it:** Head A (top) is the first figure's row: "it" reads mostly "server" (0.52). Head B (bottom) puts 0.72 to 0.86 of each word's weight on the word before it, carrying local order. One head has one softmax per token and could not do both.
+
+- Trained heads specialize. In BERT, Clark et al. (2019) found heads for the previous token, separators, direct objects and coreference. "Induction heads" complete [A][B] … [A] with [B]; Olsson et al. (2022) link them to in-context learning.
+- Many heads are redundant: Voita et al. (2019) pruned 38 of 48 encoder heads for a 0.15 BLEU drop, one reason grouped-query attention can share keys and values cheaply.
+- Head count still matters: one head scored 24.9 BLEU against 25.8 for 8 heads, and 32 heads fell back to 25.4 (Vaswani et al., 2017, Table 3).
 
 ### Cost
 
-For sequence length n and model size d, computing $QK^\top$ costs on the order of n squared times d operations, and the attention matrix has n squared entries per head. Doubling the context roughly quadruples attention work, while the projections and the feed-forward layers only double.
+- For sequence length n and model size d, computing $QK^\top$ costs on the order of n squared times d operations, and the attention matrix has n squared entries per head.
+- Doubling the context roughly quadruples attention work, while the projections and the feed-forward layers only double.
+- In exchange, any token reaches any other in one step. Table 1 of the paper: self-attention costs O(n² · d) with path length O(1); a recurrent layer costs O(n · d²) with O(n) sequential steps. Self-attention does less work whenever n is smaller than d.
+
+The grid shows where the square comes from.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-cost-grid"
+  caption="Every token scores every token, so the score matrix has n × n entries: each doubling of n gives four times the pairs, and four times the attention work and memory per head."
+/>
+
+**How to read it:** Each small square is one query-key score. The grids are drawn at the same size, so the count of squares is the cost; each arrow doubles n and multiplies the pairs by four.
+
+**The numbers:** 4² = 16, 8² = 64, 16² = 256 pairs. At 32,768 tokens, one head's score matrix has 1,073,741,824 entries, about 2.1 GB in 16-bit numbers, per head and per layer.
+
+<Callout tone="red" title="What breaks">
+  Storing that matrix runs a GPU out of memory before the arithmetic is the limit. FlashAttention (Dao et al., 2022) computes the same exact result in on-chip tiles and never stores it, so its extra memory grows linearly with n. At decode time the pressure moves to the KV cache, which GQA and MLA shrink.
+</Callout>
 
 ## Trade-offs
+
+Each variant keeps the formula and changes which keys a query can read or how many distinct keys and values are stored.
+
+<Compare caption="Attention variants: what each one shares or restricts, and what it costs.">
 
 | Variant | Pros | Cons | When to use |
 | --- | --- | --- | --- |
@@ -111,27 +221,35 @@ For sequence length n and model size d, computing $QK^\top$ costs on the order o
 | Sliding-window attention | Linear cost in sequence length | Distant tokens only reachable through stacked layers | Long inputs with mostly local structure |
 | Linear attention approximations | Linear cost | Usually weaker quality on language | Research and niche long-sequence tasks |
 
-## Real-world examples
+</Compare>
 
-- The original Transformer used 8 heads with 64-dimensional keys and values each.
-- BERT-base uses 12 layers with 12 heads; BERT-large uses 24 layers with 16 heads.
-- Llama 2 70B and Mistral 7B use grouped-query attention to shrink the KV cache.
+FlashAttention is not listed because it is not a trade-off: same output, different GPU schedule. [Multi-head latent attention](/ai-system-design/genai-system-design/multi-head-latent-attention) goes past GQA by caching one compressed vector per token.
+
+## Production systems
+
+- The original Transformer used 8 heads with 64-dimensional keys and values each, in a 512-wide model.
+- BERT-base uses 12 layers with 12 heads at width 768 (110M parameters); BERT-large uses 24 layers with 16 heads at width 1,024 (340M).
+- Llama 2's 34B and 70B models use grouped-query attention to shrink the KV cache; its 7B and 13B models do not.
+- Mistral 7B has 32 query heads sharing 8 key-value heads, and adds sliding-window attention with a 4,096-token window.
 - Vision Transformers apply the same self-attention to image patches instead of words.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Forgetting that a token attends to itself as well as others.
 - Applying the softmax over the wrong axis. It runs over keys, so each query's weights sum to one.
-- Thinking more heads means more compute. Total width stays the same; heads just split it.
-- Treating attention weights as a faithful explanation of the model's reasoning. They are a useful signal, not proof.
+- Masking after the softmax instead of before it: the remaining weights no longer sum to one.
+- A fully masked row, which returns NaN, and unchecked logit growth, which saturates the softmax (both above).
+- Thinking more heads means more compute. Total width stays the same; the heads divide it.
+- Treating attention weights as a faithful explanation of the model's reasoning. They are a useful signal, not proof: Jain and Wallace (2019) found different weights that give the same prediction.
 
-## How to answer in an interview
+## Interview framework
 
 1. Start with the intuition: each token asks a question, every token advertises an answer, and the output is a relevance-weighted blend.
 2. Write the formula and name the shapes of Q, K, V and the score matrix.
-3. Explain the scale factor and the mask.
-4. Explain multi-head attention and what different heads learn.
-5. Close with cost: quadratic in length, plus the KV cache at inference, and the variants (GQA, FlashAttention, sliding window) used to manage it.
+3. Work one row on the whiteboard: "sat" scores 1, 2, 2, scales to 0.71, 1.41, 1.41, gets weights 0.20, 0.40, 0.40 and becomes (0.60, 0.80).
+4. Explain the scale factor (variance $d_k$) and the mask (−∞ before the softmax).
+5. Explain multi-head attention and what different heads learn.
+6. Close with cost: quadratic in length, plus the KV cache at inference, and the variants (GQA, FlashAttention, sliding window) used to manage it.
 
 **What interviewers listen for:** correct shapes, a reason for every step, and awareness of cost.
 
@@ -139,31 +257,46 @@ For sequence length n and model size d, computing $QK^\top$ costs on the order o
 
 ## Further reading
 
-- [Attention Is All You Need (Vaswani et al., 2017)](https://arxiv.org/abs/1706.03762)
+- [Attention Is All You Need (Vaswani et al., 2017)](https://arxiv.org/abs/1706.03762): §3.2, Tables 1 and 3.
+- [Neural Machine Translation by Jointly Learning to Align and Translate (Bahdanau et al., 2014)](https://arxiv.org/abs/1409.0473)
 - [Fast Transformer Decoding: One Write-Head is All You Need, MQA (Shazeer, 2019)](https://arxiv.org/abs/1911.02150)
 - [GQA: Training Generalized Multi-Query Transformer Models (Ainslie et al., 2023)](https://arxiv.org/abs/2305.13245)
-- [Neural Machine Translation by Jointly Learning to Align and Translate (Bahdanau et al., 2014)](https://arxiv.org/abs/1409.0473)
+- [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness (Dao et al., 2022)](https://arxiv.org/abs/2205.14135)
+- [Scaling Vision Transformers to 22 Billion Parameters (Dehghani et al., 2023)](https://arxiv.org/abs/2302.05442): QK normalization.
+- [What Does BERT Look At? (Clark et al., 2019)](https://arxiv.org/abs/1906.04341)
+- [Analyzing Multi-Head Self-Attention: Specialized Heads Do the Heavy Lifting (Voita et al., 2019)](https://arxiv.org/abs/1905.09418)
+- [In-context Learning and Induction Heads (Olsson et al., 2022)](https://arxiv.org/abs/2209.11895)
+- [Attention is not Explanation (Jain and Wallace, 2019)](https://arxiv.org/abs/1902.10186)
+- Model facts: [BERT (Devlin et al., 2018)](https://arxiv.org/abs/1810.04805), [Llama 2 (Touvron et al., 2023)](https://arxiv.org/abs/2307.09288), [Mistral 7B (Jiang et al., 2023)](https://arxiv.org/abs/2310.06825).
 
 <InterviewQuestions>
   <InterviewQuestion question="What are queries, keys and values, and where do they come from?" category="Concepts" level="Junior">
-    They are three learned linear projections of the same token vectors. The query represents what a token is looking for, the key represents what a token can be matched on, and the value is the information it passes on when matched. Because the projection matrices are learned, the model decides during training what counts as relevant and what gets shared.
+    - They are three learned linear projections of the same token vectors.
+    - The query represents what a token is looking for, the key represents what a token can be matched on, and the value is the information it passes on when matched.
+    - Because the projection matrices are learned, the model decides during training what counts as relevant and what gets shared.
   </InterviewQuestion>
   <InterviewQuestion question="Why is the softmax applied across keys rather than across queries?" category="Concepts" level="Junior">
-    Each query needs a distribution over all the positions it could read from, so its weights must sum to one across keys. That turns the output into a proper weighted average of values. Normalizing across queries would instead make positions compete to be read, which does not match what attention is meant to compute.
+    - Each query needs a distribution over all the positions it could read from, so its weights must sum to one across keys.
+    - That turns the output into a proper weighted average of values.
+    - Normalizing across queries would instead make positions compete to be read, which does not match what attention is meant to compute.
   </InterviewQuestion>
   <InterviewQuestion question="How does a causal mask work mechanically?" category="Architecture" level="Junior">
-    Before the softmax, every score where the key position is after the query position is set to minus infinity. After the softmax those entries become exactly zero, so no information flows from future tokens. This lets a decoder train on next-token prediction for every position in one parallel pass without cheating.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is the difference between self-attention and cross-attention?" category="Architecture" level="Mid">
-    In self-attention, queries, keys and values all come from the same sequence, so tokens exchange information with each other. In cross-attention, queries come from one sequence and keys and values from another, for example the decoder querying the encoder's output in translation, or text tokens querying image features in a multimodal model.
+    - Before the softmax, every score where the key position is after the query position is set to minus infinity.
+    - After the softmax those entries become exactly zero, so no information flows from future tokens.
+    - This lets a decoder train on next-token prediction for every position in one parallel pass without cheating.
   </InterviewQuestion>
   <InterviewQuestion question="Does multi-head attention cost more compute than single-head attention?" category="Trade-offs" level="Mid">
-    Not meaningfully. With h heads, each head works in a dimension of d divided by h, so the total size of the projections and the total multiply count are about the same as a single head of full width. What changes is expressiveness: several independent attention patterns instead of one.
+    - Not meaningfully. With h heads, each head works in a dimension of d divided by h, so the total size of the projections and the total multiply count are about the same as a single head of full width.
+    - What changes is expressiveness: several independent attention patterns instead of one.
   </InterviewQuestion>
   <InterviewQuestion question="Explain grouped-query attention and why modern LLMs use it." category="Scaling" level="Senior">
-    In grouped-query attention, query heads are split into groups and each group shares one key head and one value head. The KV cache shrinks by the ratio of query heads to KV heads, which makes long-context, high-batch decoding much cheaper because decoding is limited by memory bandwidth. Quality stays close to full multi-head attention, unlike multi-query attention, which shares a single key and value head across all queries and loses more.
+    - In grouped-query attention, query heads are split into groups and each group shares one key head and one value head.
+    - The KV cache shrinks by the ratio of query heads to KV heads, which makes long-context, high-batch decoding much cheaper because decoding is limited by memory bandwidth.
+    - Quality stays close to full multi-head attention, unlike multi-query attention, which shares a single key and value head across all queries and loses more.
   </InterviewQuestion>
   <InterviewQuestion question="Can attention weights be used to explain a model's prediction?" category="Failure modes" level="Senior">
-    Only with care. Attention weights show where information was read from in one layer and head, but the final prediction depends on many layers, residual paths and feed-forward computation. Research has shown cases where different attention patterns give the same output. Attention maps are a useful diagnostic, but gradient-based or intervention-based methods give more faithful explanations.
+    - Only with care. Attention weights show where information was read from in one layer and head, but the final prediction depends on many layers, residual paths and feed-forward computation.
+    - Research has shown cases where different attention patterns give the same output.
+    - Attention maps are a useful diagnostic, but gradient-based or intervention-based methods give more faithful explanations.
   </InterviewQuestion>
 </InterviewQuestions>

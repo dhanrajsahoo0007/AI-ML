@@ -1,0 +1,19 @@
+title: Latency per extraction path
+alt: >-
+  Four request waterfalls on one millisecond scale, one per step, each row a stage with its p50 duration. Step 1,
+  route A, a digital invoice with a known template: ingest and render 800 ms, classify 600, a green small model on the
+  words 9,167, rules and score 420 and the outbox write 500, 11,487 ms in all (21,450 at p95); OCR is off the path.
+  Step 2, route B, a scan with a tie-break: ingest and render 800, blue OCR on two pages 2,076 ms (the slower of two
+  1,500 ms pages), classify 600, then a small vision-language model 9,667 ms and Textract 4,000 ms in parallel, the
+  pair ending at 9,975, a tie-break of 4,000 ms on 8 percent of invoices, rules and score 420 and the outbox write
+  500: 18,371 ms p50 and 34,413 p95, or 14,371 and 27,663 without the tie-break. Step 3, route C: the same front, a
+  mid-size model pre-fill of 23,167 ms beside Textract, then rules and score, 27,095 ms to a review task. Step 4, a
+  receipt: 600, OCR 1,500, classify 600, a small model 2,800, card match and score 120 and a notification 500, 6,120
+  ms. A footer gives the targets: straight-through invoices in the outbox within 2 minutes p50 and 10 minutes p95,
+  with the slowest path at 34.4 seconds p95, and receipts within 30 seconds p95, at 14.3 seconds.
+caption: >-
+  The extraction call is most of every path, and the second reader runs beside it; even a disputed scan reaches the
+  outbox in 18 seconds, far inside the minutes the supplier portal needs.
+tags: [genai, case-study, document-processing, latency]
+source: original
+created: 2026-11-17

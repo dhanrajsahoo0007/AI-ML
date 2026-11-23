@@ -1,0 +1,15 @@
+title: Transactional outbox with a log-tailing relay
+alt: >-
+  An architecture diagram built in six steps. Step 1: an orange shopper sends POST /orders to the teal order service,
+  which inserts row 4471 into the violet orders table inside the orders database. Step 2: in the same transaction the
+  service inserts an OrderPlaced row into a green outbox table in the same database. Step 3: the commit is written to
+  the violet write-ahead log, and a relay, drawn as the solid green accent, tails the log and reads only the outbox
+  inserts. Step 4: the relay publishes the event to a neutral broker, keyed by order id 4471. Step 5: the broker
+  delivers the event, at least once, to three teal consumers: the search index, the product cache and the email sender.
+  Step 6: the email sender checks a violet processed-ids store and drops an event id it has already handled.
+caption: >-
+  The order row and the outbox row commit together; the relay reads the log, never the request path, and consumers
+  deduplicate.
+tags: [patterns, outbox, cdc, messaging, idempotency]
+source: original
+created: 2026-11-16

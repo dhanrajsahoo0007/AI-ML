@@ -1,0 +1,16 @@
+title: Routing a message to one socket among many gateways
+alt: >-
+  An architecture diagram built in four steps. An orange shopper, A, tracking order 4471, holds a socket through a grey
+  layer-4 balancer to teal gateway 2, one of three teal gateways shown out of 12; a teal order service on the right
+  has an update for A. Step 1: the order service hands the update to gateway 1, and a red arrow says gateway 1 has no
+  socket for A. Step 2: a green session registry, the solid accent, appears; gateway 2 writes "A = gateway 2", the
+  order service reads A's entry and pushes to gateway 2. Step 3: the alternative, a grey pub/sub broker with a channel
+  per user; the order service publishes to user:A and the broker delivers to gateway 2, its subscriber. Step 4:
+  gateway 2 dies, and a red dashed arrow shows its entry in the registry expiring; A reconnects through the balancer
+  to gateway 1, which writes "A = gateway 1".
+caption: >-
+  A gateway can write only to sockets it holds, so the sender needs a route: a registry lookup or a per-user channel,
+  and both must forget a dead gateway.
+tags: [patterns, realtime, websockets, gateways, session-registry, pub-sub]
+source: original
+created: 2026-11-16

@@ -1,0 +1,25 @@
+title: Document extraction pipeline architecture
+alt: >-
+  An architecture diagram in six zones, built up in eight steps. Step 1: suppliers, in orange, send a PDF to the
+  intake API, which passes it to the orchestrator, the dark accented node; the orchestrator sends the PDF to a green
+  extractor model and posts the JSON it returns straight to the ERP, and the intake API keeps the original, keyed by
+  its sha256, in a violet document store along the bottom. Step 2: an orange expense app sends receipts to the
+  intake, and the orchestrator sends every page down a trunk on the left to a green page classifier. Step 3: a blue
+  page parser under the orchestrator renders pages and checks for hidden text, and a blue OCR node, on the same
+  trunk, writes words and boxes to a pages-and-words store. Step 4: a lime router under the orchestrator splits
+  invoices 55, 40 and 5 percent into routes A, B and C and now makes the call to the extractor on the line the
+  orchestrator used before; schemas and supplier profiles feed the orchestrator. Step 5: a green second reader,
+  Textract, joins the trunk; the orchestrator hands both readers' fields to a lime validator, which reads purchase
+  orders and the supplier master from the ERP and passes to a lime scorer; the orchestrator writes values and word
+  ids to the field records store. Step 6: the scorer sends flagged invoices up to a teal review queue, worked by AP
+  clerks in an orange review app, and auto-approved ones to a teal poster; approved invoices also go to the poster,
+  which now posts each invoice once to the ERP and waits for its acknowledgement, replacing the direct post. Step 7:
+  corrections flow from the field records to a lime labels-and-calibrator node, which feeds a gold set of 2,000
+  invoices. Step 8: a lime release gate takes the gold set and the calibrator's weekly candidate, and gates the
+  extractor.
+caption: >-
+  The model proposes every field; a second reader on different inputs, rules in code against the ERP and a
+  calibrated score decide what posts on its own, and the poster posts it once.
+tags: [genai, case-study, architecture, document-processing, structured-output]
+source: original
+created: 2026-11-17

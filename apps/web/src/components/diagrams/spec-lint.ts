@@ -2,21 +2,28 @@
 // assets/diagrams/animated. Returns plain problem strings; an empty array means the spec is fine.
 
 import { SERVICE_BY_ID } from "@/lib/cloud-catalog";
+import { getIconComponent } from "@/lib/icons";
+import { DIAGRAM_ICONS } from "./diagram-icons";
+import { boundaryTabWidth, zoneTabWidth } from "./diagram-style";
 import { NODE_H, NODE_W, boundsOverlap, nodeBounds, shapeBounds, type Bounds } from "./geometry";
+import { isGlyph } from "./glyphs";
 import { SEQ, sequenceWidth } from "./sequence-layout";
-import type { AnySpec, DiagramNode, DiagramSpec, DiagramStep, LayoutSpec, SequenceSpec } from "./types";
+import { FONTS, measureText, type TextFont } from "./text-width";
+import type { AnySpec, DiagramNode, DiagramSpec, DiagramStep, DiagramZone, LayoutSpec, SequenceSpec } from "./types";
 
-/** Estimated label width per character at the engine's 13.5px label size. */
-const CHAR_W = 6.2;
-/** The sub line is 11.5px regular weight. */
-const SUB_CHAR_W = 4.8;
-/**
- * Horizontal room a card node spends on its icon: text starts at x + 52. Loosened from 52 + 8px right padding to
- * 52 - 4 (the text may reach the border) because existing specs (messenger/architecture "Session registry",
- * databases/btree-lookup "Internal page") sit right at the edge and render fine.
- */
-const ICON_PAD = 48;
-const TEXT_PAD = 16;
+// Text widths come from ./text-width (Inter's measured advances, the same model the renderers size pills, tabs and
+// lane headers with), so a label that passes here is inside its box in the browser, at full size and at phone
+// scale. Text keeps 2 units clear of its box's border: the estimate is within 0.7 units of the browser for 99% of
+// the labels, so a pass means the text really is inside.
+
+/** A card node with an icon starts its text at x + 52 (animated-diagram.tsx). */
+const ICON_TEXT_X = 52;
+/** Room text keeps clear of its box's right border (start-anchored text) or of each side (centred text). */
+const RIGHT_PAD = 2;
+const SIDE_PAD = 2;
+/** Layout labels: at most this many "\n"-separated lines, each 15px tall (layout-diagram.client.tsx LINE_H). */
+const MAX_LINES = 3;
+const LINE_H = 15;
 
 /** Problems found in a spec of any kind; an empty array means it passes. */
 export function lintSpec(spec: AnySpec): string[] {
@@ -37,6 +44,30 @@ function duplicates(ids: string[], what: string): string[] {
 
 const insideCanvas = (b: Bounds, width: number, height: number) =>
   b.x1 >= 0 && b.y1 >= 0 && b.x2 <= width && b.y2 <= height;
+
+/** A card node draws its icon (and starts its text at x + 52) only when the name resolves, as in CardNode. */
+const drawsIcon = (name: string | undefined) =>
+  !!name && (isGlyph(name) || !!DIAGRAM_ICONS[name] || !!getIconComponent(name));
+
+/** True when `text` in `font` fits in `room` units. */
+const fits = (text: string, font: TextFont, room: number) => measureText(text, font) <= room;
+const over = (text: string, font: TextFont, room: number) => Math.ceil(measureText(text, font) - room);
+
+/**
+ * A zone's title must end inside the zone: the tab starts 16 units in (14 for a region or VPC, 12 for a subnet's
+ * inline label) and the text sits centred in it with 14 (12) units of padding.
+ */
+function lintZoneTitle(zone: Pick<DiagramZone, "id" | "title" | "kind" | "w">, what: string): string[] {
+  const right =
+    zone.kind === "subnet"
+      ? 12 + measureText(zone.title.toUpperCase(), FONTS.subnet)
+      : zone.kind
+        ? 14 + boundaryTabWidth(zone.title) - 12
+        : 16 + zoneTabWidth(zone.title) - 14;
+  return right > zone.w
+    ? [`${what} "${zone.id}": title "${zone.title}" runs ${Math.ceil(right - zone.w)}px past its ${zone.w}px width`]
+    : [];
+}
 
 /**
  * Step numbers must be 1..steps.length and contiguous: every step that exists is introduced by at least one
@@ -99,17 +130,22 @@ function lintArchitecture(spec: DiagramSpec): string[] {
     if (!insideCanvas(b, spec.width, spec.height))
       out.push(`node "${n.id}" leaves the ${spec.width}×${spec.height} canvas`);
     if (n.variant !== "glyph") {
-      const room = (n.w ?? NODE_W) - (n.icon ? ICON_PAD : TEXT_PAD);
-      if (n.label.length * CHAR_W > room)
-        out.push(`node "${n.id}": label "${n.label}" is wider than its ${n.w ?? NODE_W}px box`);
-      // Sub width loosened from 5.3 to 4.8px per character for databases/read-scaling "100 reads : 1 write"
-      // and databases/cdc-to-search "bulk upserts, idempotent" (digits, spaces and commas are narrow).
-      if (n.sub && n.sub.length * SUB_CHAR_W > room)
-        out.push(`node "${n.id}": sub "${n.sub}" is wider than its ${n.w ?? NODE_W}px box`);
+      const w = n.w ?? NODE_W;
+      const room = drawsIcon(n.icon) ? w - ICON_TEXT_X - RIGHT_PAD : w - SIDE_PAD * 2;
+      if (!fits(n.label, FONTS.label, room))
+        out.push(
+          `node "${n.id}": label "${n.label}" is ${over(n.label, FONTS.label, room)}px wider than its ${w}px box`
+        );
+      if (n.sub && !fits(n.sub, FONTS.sub, room))
+        out.push(`node "${n.id}": sub "${n.sub}" is ${over(n.sub, FONTS.sub, room)}px wider than its ${w}px box`);
       if ((n.h ?? NODE_H) < 36) out.push(`node "${n.id}": height ${n.h} is too small for a label`);
+      if (n.fill && n.accent) out.push(`node "${n.id}": fill does nothing on an accent node`);
+    } else if (n.fill) {
+      out.push(`node "${n.id}": fill only applies to card nodes, not glyph nodes`);
     }
     out.push(...lintCloudRefs(n));
   }
+  for (const z of spec.zones) out.push(...lintZoneTitle(z, "zone"));
   for (let i = 0; i < spec.nodes.length; i++) {
     for (let j = i + 1; j < spec.nodes.length; j++) {
       const a = spec.nodes[i];
@@ -153,20 +189,40 @@ function lintLayout(spec: LayoutSpec): string[] {
 
   const solid = spec.shapes.filter((s) => s.type === "box" || s.type === "cell");
   for (const s of spec.shapes) {
+    if (s.weight !== undefined && !(s.weight >= 0 && s.weight <= 1))
+      out.push(`shape "${s.id}": weight ${s.weight} is not between 0 and 1`);
+    if (s.symbol && s.type !== "circle") out.push(`shape "${s.id}": symbol only applies to circles`);
+    if (s.fill && s.type !== "box" && s.type !== "cell" && s.type !== "circle")
+      out.push(`shape "${s.id}": fill only applies to boxes, cells and circles`);
     if (s.type === "arrow") {
       if (s.from && !shapes.has(s.from)) out.push(`arrow "${s.id}": unknown shape "${s.from}"`);
       if (s.to && !shapes.has(s.to)) out.push(`arrow "${s.id}": unknown shape "${s.to}"`);
       if (!s.from && !s.to && !s.w && !s.h) out.push(`arrow "${s.id}" has no from/to and no length`);
       continue;
     }
+    if (s.type === "path" && (s.points?.length ?? 0) < 2) {
+      out.push(`path "${s.id}" needs at least two points`);
+      continue;
+    }
     const b = shapeBounds(s);
     if (!insideCanvas(b, spec.width, spec.height))
       out.push(`shape "${s.id}" leaves the ${spec.width}×${spec.height} canvas`);
+    const lines = s.label?.split("\n") ?? [];
+    if (lines.length > MAX_LINES) out.push(`shape "${s.id}": label has ${lines.length} lines (at most ${MAX_LINES})`);
     if (s.label && (s.type === "box" || s.type === "cell")) {
-      const room = b.x2 - b.x1 - 8;
-      if (s.label.length * CHAR_W > room) out.push(`shape "${s.id}": label "${s.label}" is wider than its box`);
+      const room = b.x2 - b.x1 - SIDE_PAD * 2;
+      for (const line of lines)
+        if (!fits(line, FONTS.shape, room))
+          out.push(`shape "${s.id}": label "${line}" is ${over(line, FONTS.shape, room)}px wider than its box`);
+      if (s.sub && !fits(s.sub, FONTS.shapeSub, room))
+        out.push(`shape "${s.id}": sub "${s.sub}" is ${over(s.sub, FONTS.shapeSub, room)}px wider than its box`);
+      // A single line always fits (the default heights); stacked lines and a sub line need the room.
+      const textH = lines.length * LINE_H + (s.sub ? 14 : 0);
+      if (lines.length > 1 && textH + 6 > b.y2 - b.y1)
+        out.push(`shape "${s.id}": ${lines.length} label lines need a box at least ${textH + 6}px tall`);
     }
   }
+  for (const g of spec.groups ?? []) out.push(...lintZoneTitle(g, "group"));
   for (let i = 0; i < solid.length; i++) {
     for (let j = i + 1; j < solid.length; j++) {
       if (boundsOverlap(shapeBounds(solid[i]), shapeBounds(solid[j]))) {
@@ -194,11 +250,11 @@ function lintSequence(spec: SequenceSpec): string[] {
   );
   if (spec.lanes.length === 0) out.push("a sequence diagram needs at least one lane");
 
-  // Lane headers are at most 150px wide with the text at +46 after an icon (sequence-diagram.client.tsx); lanes get equal
-  // columns.
+  // Lane headers are at most SEQ.headerMaxW wide, with the text at +46 after an icon (sequence-diagram.client.tsx).
   for (const l of spec.lanes) {
-    const room = 150 - (l.icon ? 46 + 8 : TEXT_PAD);
-    if (l.label.length * CHAR_W > room) out.push(`lane "${l.id}": label "${l.label}" is wider than its header`);
+    const room = l.icon ? SEQ.headerMaxW - 46 - RIGHT_PAD : SEQ.headerMaxW - SIDE_PAD * 2;
+    if (!fits(l.label, FONTS.label, room))
+      out.push(`lane "${l.id}": label "${l.label}" is ${over(l.label, FONTS.label, room)}px wider than its header`);
   }
   const colW = (sequenceWidth(spec) - SEQ.marginX * 2) / Math.max(1, spec.lanes.length);
   if (colW < SEQ.minColW)

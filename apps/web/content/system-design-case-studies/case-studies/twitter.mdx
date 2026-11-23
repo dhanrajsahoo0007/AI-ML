@@ -1,0 +1,641 @@
+---
+title: "Design Twitter"
+description: "The home timeline at scale: fan-out on write against read, the celebrity problem, a timeline cache of ids, real-time search and counts."
+logo: systems/x
+updated: 2026-11-17
+---
+
+Design the home timeline of a microblogging service: hundreds of millions of people open a feed of short posts from the accounts they follow.
+The hard parts are a read rate far above the write rate, and a follower count that runs from a handful to 100 million on the same platform.
+
+- Interviewers use this question to see whether you can price fan-out on write against fan-out on read with numbers, find the threshold where each breaks, and keep a feed fast, fresh and free of deleted posts.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design Twitter's home timeline. Hundreds of millions of people open a feed of posts from the accounts they follow, and some accounts have 100 million followers. Add search over recent posts."
+  level="Senior"
+  minutes={45}
+  bankId="design-news-feed"
+  tests={[
+    "Fan-out on write against fan-out on read, priced with numbers",
+    "The celebrity account and a hybrid threshold",
+    "Cursors, deletes and duplicates in a feed that changes while you read it",
+    "A real-time search index: cheap writes, scatter-gather reads",
+    "Saying why for every store, cache and queue",
+  ]}
+  clarify={[
+    { q: "Newest first or ranked?", a: "Newest first is the main timeline; a ranked view reuses the same candidates." },
+    { q: "Follow one way or friend both ways?", a: "One way: anyone can follow anyone, with no approval." },
+    { q: "How big is the biggest account?", a: "100,000,000 followers; the average post reaches 200." },
+    { q: "How fresh must the timeline be?", a: "A post shows in followers' timelines within 5 s at p99." },
+    { q: "What is in a post?", a: "Up to 280 characters, optional media; media storage is a separate topic." },
+    { q: "How fresh must search be?", a: "Searchable within 10 s; a deleted post never shows." },
+  ]}
+  outOfScope={["Trends", "Direct messages", "Ads", "Media upload and processing", "Notifications"]}
+/>
+
+## Overview
+
+- Posts get a **64-bit time-sortable id** and are stored once, in a **wide-column post store** keyed by post id.
+- A **change stream** from the post store feeds a **post log**; the **fan-out service** appends each new post id to the cached timeline of every active follower.
+- Opening the timeline is **one list read** of ids, plus the recent posts of the few **big accounts** the reader follows, **merged at read time**, then one batched **hydrate** from a post cache.
+- The **timeline cache** holds ids only, at most 500 per reader, for readers active in the last 30 days; anyone else is **rebuilt on a miss**.
+- **Search** reads the same log into an **in-memory index split by time**; a query **scatters** to the newest shards and **gathers** with a deadline.
+- **Counts** are summed from like events in 1-second batches; deleted posts are dropped at **hydration** and at **query time**, never trusted to cleanup.
+
+<Numbers
+  items={[
+    { value: "100,000/s", label: "timeline reads at peak", hint: "46,300/s average" },
+    { value: "2,315/s", label: "posts on average", hint: "200 M a day" },
+    { value: "231,000/s", label: "timeline appends", hint: "100 cached followers a post" },
+    { value: "1 M", label: "followers: push below, merge above", hint: "the hybrid threshold" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Post", notes: "Up to 280 characters with optional media; delete and edit own posts." },
+    { id: "F2", requirement: "Follow and unfollow", notes: "One way, no approval; the timeline reflects it within seconds." },
+    { id: "F3", requirement: "Home timeline", notes: "Posts from followed accounts, newest first, paged by cursor; a ranked view from the same candidates." },
+    { id: "F4", requirement: "Search recent posts", notes: "Keyword search over the last 7 days, newest first." },
+    { id: "F5", requirement: "Likes and counts", notes: "Like a post; show like, repost and reply counts." },
+  ]}
+/>
+
+- Out of scope: trends (see [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards)), direct messages, ads, media storage and processing (see [Design Instagram](/system-design-case-studies/case-studies/instagram)).
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Timeline latency", target: "p99 under 200 ms server side", why: "The timeline is the first screen of the app." },
+    { id: "N2", property: "Delivery freshness", target: "A post in followers' timelines within 5 s at p99", why: "Live events are why people open the app." },
+    { id: "N3", property: "Search freshness", target: "Searchable within 10 s; a deleted post never returned", why: "Search is used for what is happening now." },
+    { id: "N4", property: "Availability", target: "99.99% for timeline reads, 99.95% for posting", why: "A read outage is visible to everyone at once." },
+    { id: "N5", property: "Durability", target: "0 acknowledged posts lost", why: "A post is the user's own content." },
+    { id: "N6", property: "Scale", target: "200 M daily users, 100,000 timeline reads/s at peak", why: "Sizes every cache and fleet below." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Timeline reads", assumption: "200 M daily users × 20 requests (opens, pages, refreshes) ÷ 86,400 s", result: "46,300/s average; 2 × at peak ≈ 100,000/s" },
+    { quantity: "Posts", assumption: "200 M a day ÷ 86,400 s", result: "2,315/s average; 3 × at peak ≈ 7,000/s" },
+    { quantity: "Post reads", assumption: "4 B timeline requests × 20 posts a page", result: "80 B a day: 400 × the 200 M writes" },
+    { quantity: "Timeline appends", assumption: "200 M posts × 100 cached followers (half of 200 are active)", result: "20 B a day ≈ 231,000/s; ≈ 700,000/s at peak" },
+    { quantity: "One 100 M-follower post", assumption: "100 M ÷ 231,000/s", result: "433 s: 7 minutes of the whole fleet's average work" },
+    { quantity: "Hybrid threshold", assumption: "Fleet sized at 1 M appends/s; one post may use 10%, 100,000/s, for 5 s (N2)", result: "500,000 cached followers ≈ 1 M followers" },
+    { quantity: "Timeline cache", assumption: "400 M active users × 500 ids × 16 B × 1.5 overhead × 2 copies", result: "9.6 TB on 150 nodes of 64 GB" },
+    { quantity: "Post store", assumption: "200 M posts × 1 KB × 365 days × 3 replicas", result: "73 TB a year raw, 219 TB stored" },
+    { quantity: "Search", assumption: "200 M searches a day; 3 × at peak", result: "2,300/s average, ≈ 7,000/s peak" },
+    { quantity: "Likes", assumption: "200 M users × 10 likes ÷ 86,400 s", result: "23,000/s; one viral post up to 5,000/s" },
+  ]}
+  note="The data is moderate; the skew in follower counts is the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 400 post reads per post written; 20 timeline requests per post | Do the work at write time: precomputed timelines |
+| D2 | Peak against average | Reads 2 × average; posts 3 ×, more during live events | The fan-out backlog absorbs bursts; reads never wait for it |
+| D3 | Consistency per operation | Post and follow durable, author reads their own post at once; timelines, search and counts eventual by seconds; a delete hides at once | Strong writes in the post store; everything derived may lag; delete checks on read |
+| D4 | Latency target | Timeline p99 200 ms (N1) | One cache read and one batched hydrate; no 200-way merge per request |
+| D5 | Durability | Posts never lost (N5); the timeline cache and counts can be rebuilt | Replicated post store; the cache holds no data that exists only there |
+| D6 | Ordering | Per timeline by post id, newest first; no global order | Time-sortable ids, so merging is sorting by id |
+| D7 | Duplicates | A post twice on one screen is annoying; a like counted twice is wrong | Cursors by id; dedupe ids at merge; one like row per user and post |
+| D8 | Data size and growth | 200 GB of posts a day; 9.6 TB of hot timeline cache | Ids in the cache, bodies once in the store; inactive users not cached |
+| D9 | Fan-out shape | One to 200 on average, one to 100 M at the top: **the defining driver** | Push below 1 M followers, merge at read time above |
+| D10 | Contention | A viral post's like counter; a big account's recent posts read by millions | Batched counters; hot keys replicated and cached in process |
+| D11 | Geography | Readers everywhere; each user writes to one home region | Caches and indexes per region, fed from each region's copy of the log |
+| D12 | Availability and degradation | 99.99% reads (N4); under stress: drop ranking, then slow big fan-outs, then freeze counts | A cached chronological page is always the fallback |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/posts` | Author | New post, with `Idempotency-Key` |
+| `DELETE /v1/posts/{id}` | Author | Delete own post |
+| `PUT /v1/follows/{user_id}` | User | Follow; `DELETE` to unfollow |
+| `GET /v1/timeline/home?max_id=&limit=20` | Reader | Open and scroll the timeline |
+| `GET /v1/timeline/home?since_id=` | Reader | "New posts" check, every 30 s while open |
+| `GET /v1/search?q=&max_id=` | Reader | Search recent posts |
+| `PUT /v1/posts/{id}/like` | Reader | Like; `DELETE` to unlike |
+
+```http
+GET /v1/timeline/home?max_id=1859240387612884992&limit=20
+Authorization: Bearer <session>
+
+200 OK
+{ "posts": [ { "id": "1859240387612884991", "author": {...}, "text": "...", "likes": 1204 }, ... ],
+  "next_max_id": "1859239911870431232",
+  "newest_id": "1859240387612884991" }
+```
+
+- **Pagination:** by cursor, never by offset. `max_id` returns posts older than the oldest one shown; `since_id` asks only for newer ones, so new posts appear as a "show 12 new posts" bar without moving the reader's place.
+- **Why a cursor:** with offsets, 40 new posts arriving between two pages shift every position by 40, so page 2 repeats posts from page 1 (D7). An id cursor names a point in time, which new posts cannot move.
+- **Idempotency:** `POST /v1/posts` takes `Idempotency-Key`, so a retried post after a timeout does not post twice; likes are `PUT`, so repeating one is harmless.
+- **Errors:** `404` for a deleted post; `429` with `Retry-After` past the per-user limits; a timeline request never fails because ranking or counts are slow: it degrades (D12).
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Posts | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra) | Key lookups at 7,000 writes/s, 73 TB a year, multi-region (D5, D8, D11) | `post_id` | Quorum writes; author reads own post from the home region | Sharded MySQL: works, but resharding and failover are yours to build |
+| Posts by author | Same store, second table | Recent posts of one author, newest first (big-account merge, rebuilds) | `(author_id, month)` | As above | A secondary index: scatter across all partitions per read |
+| Follow graph | Wide-column store, adjacency lists both ways | One-hop reads only; 100 M-row follower lists paged (D9) | `user_id`, plus a bucket for big lists | Strong per row | A graph database: traversal power we never use |
+| Timeline cache | In-memory store (<TechIcon id="oss/redis" /> Redis lists) | 231,000 appends/s and 100,000 reads/s, p99 in ms (D1, D4) | `user_id` | Eventual; rebuildable | A database table: disk writes for data we can rebuild |
+| Post cache | In-memory key-value (<TechIcon id="oss/redis" /> Redis or Memcached) | 2 M post reads/s at peak, hot recent posts (D1) | `post_id`; `author_id` for recent lists | Short TTL, deleted on change | Reading the post store: 2 M reads/s on disk |
+| Search index | In-memory inverted index (<TechIcon id="oss/elasticsearch" /> Elasticsearch, Lucene based) | Newest-first keyword search, writes visible in 10 s (N3) | Time slice, then post id | Eventual, 10 s | Database full-text search: one index for writes and 7,000 queries/s |
+| Post log | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Several readers, replay, order per author (D2, D6) | `author_id` | Ordered per partition | A work queue: one consumer per message, no replay |
+| Likes and counts | Wide-column store, like rows and counter rows | One row per like dedupes; counts in batches (D7, D10) | `post_id` | Likes strong, counts eventual | `count = count + 1` on the post row: one hot row |
+
+```sql
+CREATE TABLE posts (
+  post_id    bigint PRIMARY KEY,   -- 64-bit, time-sortable; the partition key
+  author_id  bigint,
+  text       text,
+  media      list<text>,           -- blob keys; the bytes live in object storage
+  version    int,                  -- edits bump it; the id never changes
+  deleted    boolean               -- a tombstone, checked on every read
+);
+
+CREATE TABLE posts_by_author (
+  author_id bigint, month int, post_id bigint,
+  PRIMARY KEY ((author_id, month), post_id)   -- partition (author, month)
+) WITH CLUSTERING ORDER BY (post_id DESC);    -- newest first in one read
+
+CREATE TABLE followers (
+  user_id bigint, bucket int, follower_id bigint,
+  PRIMARY KEY ((user_id, bucket), follower_id) -- 100 M followers split into buckets
+);                                             -- `following` is the mirror table
+```
+
+- **Timeline cache:** key `tl:{user_id}`, a list of 16-byte entries (post id, author id), newest first, trimmed to 500.
+- **Access patterns:** hydrate 20 posts by id in one batch; read one author's newest posts since an id; page through an author's followers 1,000 at a time.
+- **Ids:** time in the high bits, so sorting by id is sorting by time; the cursor, the merge and the search order all rely on it.
+
+Each post id is a Snowflake-style 64-bit number, made on any server without coordination.
+
+<AnimatedDiagram spec="animated/patterns/id-snowflake-bits" stepper caption="Time in the high bits makes ids sort by when they were made; the node id and the sequence keep two ids from the same millisecond apart." />
+
+**How to read it:**
+
+- The figure builds the id one field at a time: 41 bits of milliseconds, 10 bits of node id, 12 bits of sequence; step 4 takes one id apart.
+- The figure's dates come from the pattern page's shop example; the bit layout is the same here.
+
+**The numbers:** 2^12 = 4,096 ids per millisecond per node is 4,096,000 a second; the 7,000 posts/s peak needs one node, so 1,024 node ids are plenty.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 to F3 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Pull at read time (F1, F2, F3)
+
+The smallest design: store each post once and build the timeline when someone asks for it.
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={1} caption="Step 1: the timeline service reads who the reader follows, then asks for the recent posts of all 200 accounts and merges them." />
+
+- **Adds:** the API gateway, a CDN for media, the timeline service, the post service, the graph store and the post store.
+- **Flow:**
+  1. The author posts; the post service writes the post store.
+  2. The reader opens the timeline; the timeline service reads the 200 accounts they follow.
+  3. It asks for each account's recent posts, merges the 200 lists by time and returns the newest 20.
+- **Why this and not that:** a post costs one write, nothing is stored twice, and follow or delete changes show at once. It is the right design for a small product.
+- **The gap:** 100,000 reads/s × 200 accounts is 20,000,000 store reads a second, and each request waits for the slowest of 200 (D1, D4).
+
+<PremiumBreak />
+
+### Step 2: Fan-out on write (F3, N1)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={2} caption="Step 2: new posts flow from the post store's change stream to a fan-out service, which appends each id to the cached timeline of every follower." />
+
+- **Adds:** the **post log**, the **fan-out service** and the **timeline cache**.
+- **Flow:**
+  1. The post store's change stream puts each new post on the log, keyed by author.
+  2. The fan-out service pages through the author's followers and appends the post id to each follower's list in the timeline cache.
+  3. The reader's timeline is now one list read, then the posts are fetched by id.
+- **Why this and not that:** reads outnumber posts 400 to 1, so paying once per post beats paying on every read (D1). Reading from a change stream, not a second write from the post service, means a crash can never store a post without fanning it out.
+- **The gap:** one post by a 100 M-follower account is 100 M appends: 7 minutes of the whole fleet's work.
+
+### Step 3: Big accounts: merge at read time (F3, N2)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={3} caption="Step 3: accounts above 1 M followers are not fanned out; the timeline service merges their recent posts into the page when it is read." />
+
+- **Adds:** a follower threshold of 1 M; the timeline service also asks for the recent posts of the big accounts the reader follows.
+- **Flow:**
+  1. The fan-out service skips authors above 1 M followers.
+  2. On read, the service takes the cached ids plus the recent ids of the reader's 3 or so big accounts, and merges them by id.
+- **Why this and not that:** push fails on one huge account, pull fails on every read; the hybrid pays each cost only where it is small (D9, Deep dive 1).
+- **The gap:** fetching 20 posts per page from the post store is 2 M reads a second at peak.
+
+### Step 4: Time-sorted ids and a post cache (F1, N5)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={4} caption="Step 4: every post gets a 64-bit time-sortable id, and a post cache answers posts by id and recent posts by author." />
+
+- **Adds:** Snowflake-style ids made in the post service, and the **post cache** in front of the post store.
+- **Flow:**
+  1. The post service gives the post an id with the time in its high bits and writes it to the store.
+  2. Hydration reads up to 20 posts by id from the cache in one batch; a miss falls through to the store.
+- **Why this and not that:** time-sorted ids make the merge, the cursor and newest-first search a sort by id (D6). A database sequence is one writer for the whole platform; a random UUID does not sort by time.
+- **The gap:** a list for every one of 1.5 B registered users is mostly memory nobody reads.
+
+### Step 5: A bounded timeline cache (N1, N6)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={5} caption="Step 5: the cache keeps 500 ids for each active reader; a reader with no list is rebuilt by the fan-out service on their first visit." />
+
+- **Adds:** limits on the timeline cache: ids only, 500 per reader, only readers active in 30 days; a **rebuild on miss**.
+- **Flow:**
+  1. Fan-out appends only to lists that exist, so inactive users cost nothing.
+  2. A returning reader misses; the timeline service builds the first page by pulling, as in Step 1, and asks the fan-out service to store the newest 500 ids.
+- **Why this and not that:** 400 M active lists of 8 KB fit in 9.6 TB; caching everyone would be 3.75 × larger for lists that are never read (D8, Deep dive 2).
+- **The gap:** nobody can search posts yet.
+
+### Step 6: Real-time search (F4, N3)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={6} caption="Step 6: an indexer reads the post log into an in-memory index split by time; the search service queries the newest shards and merges." />
+
+- **Adds:** the **indexer**, the **search index** and the **search service**.
+- **Flow:**
+  1. The indexer reads new posts and deletes from the log and adds them to the newest index slice within 10 s.
+  2. A query goes to every shard of the newest slices; each returns its best hits and the search service merges them with a deadline.
+- **Why this and not that:** search is a different index over the same posts; building it from the log keeps it off the write path and replayable (D3, Deep dive 3).
+- **The gap:** a newest-first timeline shows a follower's tenth reply before a friend's announcement.
+
+### Step 7: Rank the candidates (F3)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={7} caption="Step 7: the timeline service sends the merged candidates to a ranker and pages through its order." />
+
+- **Adds:** the **ranker**.
+- **Flow:**
+  1. The timeline service gathers a few hundred candidates: cached ids, big-account posts and, optionally, posts from accounts the reader does not follow.
+  2. The ranker scores them; the service hydrates and returns the top 20.
+- **Why this and not that:** ranking is a separate stage over the same candidates, so the chronological page stays the fallback when the ranker is slow (D12).
+- **The gap:** posts show no counts.
+
+### Step 8: Counts (F5)
+
+<AnimatedDiagram spec="animated/twitter/architecture" step={8} caption="Step 8: likes go to the post store as rows; a like counter reads them from the log and writes counts in 1-second batches." />
+
+- **Adds:** the **like counter**.
+- **Flow:**
+  1. A like is a row keyed by post and user, so a repeat changes nothing.
+  2. The like counter reads like events from the log, sums them per post for 1 s and writes one count update per post.
+- **Why this and not that:** a viral post takes 5,000 likes a second; incrementing one row 5,000 times a second is a hot key, one batched write a second is not (D10).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/twitter/architecture" stepper caption="Home timeline: fan out post ids on write, merge big accounts on read, hydrate from a post cache, and feed search and counts from the same log." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Author and reader apps | Post, like, read the timeline, search |
+| **Edge** | API gateway, CDN | Authentication, rate limits, routing; media and avatars |
+| **Timeline core** | Fan-out service, timeline service | Push ids into timelines; read, merge, page |
+| **Application services** | Post service, search service, ranker | Posts and ids, search scatter-gather, ranking |
+| **Async pipeline** | Post log, indexer, like counter | Carry every change to the fan-out, the index and the counts |
+| **Storage** | Timeline cache, graph store, search index, post store, post cache | Ids per reader, follows, the index, posts and their cache |
+
+A post by an account with 5,000 followers, then a follower opening the app:
+
+1. `POST /v1/posts`: the post service makes id 1859240387612884992 and writes the post store; the author's next read of their own profile comes from the home region.
+2. The change stream puts the post on the log, keyed by author; the fan-out service reads it within about a second.
+3. It reads 5 pages of 1,000 followers, finds 2,500 with a cached list and appends the id to each: 2,500 appends in well under the 5 s target.
+4. The indexer adds the post to the newest search slice; it is searchable within 10 s.
+5. A follower opens the app: one list read, 3 big-account reads, a merge by id, one batched hydrate from the post cache, 19 posts and a cursor.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST with cursors, polling for new posts
+
+- **Choice:** REST over HTTPS for every client call; cursor pagination by id; the open app polls `since_id` every 30 s for the "new posts" bar.
+- **Why:** every call is a short request and response; polling an id is cheap and tolerates seconds of delay, which N2 allows (D3).
+- **Why not WebSockets for new posts:** 200 M daily users holding sockets open to learn, a few seconds earlier, that new posts exist; the timeline does not need sub-second push (see [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) where it does).
+- **Why not offset pagination:** new posts shift offsets and repeat or skip posts across pages (D7).
+- **Why not GraphQL:** a few fixed shapes, and the edge caches GETs by URL more easily; internal calls between services can use gRPC.
+
+### CDN: media and avatars, never the timeline
+
+- **Choice:** a CDN serves images, video, avatars and the app's static files.
+- **Why:** media is most of the bytes and is the same for every viewer, so the edge absorbs it (D1, D11).
+- **Why not cache timelines at the CDN:** each timeline is personal, and a deleted post must vanish on the next read (N3).
+- **Media upload and storage:** blob storage behind the CDN, as in [Design Instagram](/system-design-case-studies/case-studies/instagram).
+
+### Load balancer and API gateway: layer 7
+
+- **Choice:** a layer-7 (HTTP) load balancer behind the gateway, routing by path, with least-outstanding-requests balancing; the gateway does authentication and per-user and per-app rate limits.
+- **Why:** every request is short HTTP, so path routing sends timeline, post and search calls to separate fleets, and one slow fleet cannot take the others down (D12).
+- **Why not layer 4:** it cannot route by path or retry one failed request; it fits long-lived sockets, which this design does not have.
+- **Why rate limits here:** a scraper reading timelines at 100 requests a second costs as much as 2,000 normal users; stop it before the timeline fleet.
+
+### Fan-out service: workers on the log
+
+- **Choice:** stateless workers reading the post log, partitioned by author; each post is split into batches of 1,000 follower ids, and appends to the cache are pipelined.
+- **Why:** 231,000 appends/s on average, bursting to 700,000/s, are done off the request path, so posting stays fast and a backlog only delays delivery (D1, D2).
+- **Why not fan out inside the post request:** a 900,000-follower author has 450,000 cached followers, so their own post would take 4.5 s to return at 100,000 appends/s.
+- **Why not one task per follower on a work queue:** 20 B tasks a day, and no replay when a bug loses some; batches from the log are 1,000 × fewer messages.
+
+### Timeline cache: Redis lists of ids
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis lists, key `tl:{user_id}`, 16-byte entries, trimmed to 500, two copies, only for users active in 30 days.
+- **Why:** an append and a range read are each one in-memory command, so 231,000 appends/s and 100,000 reads/s stay at millisecond latency (D1, D4); losing a node costs rebuilds, never data (D5).
+- **Why not Memcached:** values are opaque blobs, so every append is read 8 KB, prepend, write back, and two concurrent fan-outs to one reader overwrite each other.
+- **Why not a database table:** durable writes for data we can rebuild; 231,000 inserts/s plus the deletes to trim them, for no benefit.
+- **Why not cache whole posts:** 200 TB instead of 3.2 TB, and an edit would have to rewrite every follower's copy (D8).
+
+### Post store: a wide-column database
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra-style wide-column store: `posts` by id, `posts_by_author` by author and month, three replicas, quorum writes.
+- **Why:** reads and writes are by key, never joins; 73 TB a year grows by adding nodes; replication across regions is built in (D5, D8, D11).
+- **Why not sharded <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL:** it works, and many feeds started there; but you build sharding, resharding and cross-region failover yourself, for queries that never need SQL.
+- **Why not MongoDB:** documents add nothing for fixed-shape rows looked up by key.
+- **Why not DynamoDB:** a fine managed equivalent; the design names the store type, not the vendor.
+
+### Post cache: posts by id and recent ids by author
+
+- **Choice:** an in-memory key-value cache (<TechIcon id="oss/redis" /> Redis or Memcached) of posts by id, plus a short list of recent ids per big author; entries deleted on edit or delete.
+- **Why:** 100,000 pages/s × 20 posts is 2 M post reads a second, almost all of posts from the last day, so a cache hit rate above 95% is realistic (D1).
+- **Why not read the post store:** 2 M reads a second on disk across three replicas, for the same few million hot posts.
+- **Hot keys:** a big account's recent list is read by millions; the timeline service keeps it in process for 1 s, so each server reads it once a second (D10).
+
+### Graph store: adjacency lists both ways
+
+- **Choice:** a wide-column store with `following` and `followers` tables, sharded by user id; big follower lists split into buckets of 1 M.
+- **Why:** both questions are one hop: who do I follow (timeline rebuild), who follows this author (fan-out); each is one partition scan (D9).
+- **Why not a graph database:** it is built for multi-hop traversals we never run, and is harder to shard to billions of edges.
+- **Why not one relational join table:** fine at small scale; at 100 M followers the author's rows sit in one hot range unless you split them yourself.
+
+### Post log: Kafka fed by change data capture
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `author_id`, filled from the post store's change stream; readers: fan-out, indexer, like counter, later trends.
+- **Why change data capture:** the log sees exactly what was stored; a second write from the post service could store a post and crash before publishing it.
+- **Why Kafka:** several readers each need every change in order per author, at their own pace, with replay after a bug (D2, D6).
+- **Why not a work queue (RabbitMQ, SQS):** one consumer per message and no replay; adding the indexer would mean a second copy of every message.
+
+### Search index: in-memory, split by time
+
+- **Choice:** an in-memory inverted index (<TechIcon id="oss/elasticsearch" /> Elasticsearch or another Lucene-based engine), one slice per day split into 20 shards of 10 M posts, replicated for read throughput.
+- **Why:** newest-first is the main order, so the newest slice answers most queries; small in-memory slices take 2,315 writes/s with 10 s freshness (N3).
+- **Why not database full-text search:** one index taking writes and 7,000 queries/s, with no way to keep only the newest days in memory.
+- **Why not one big index:** every write and every query would land on the same structure; old days would compete with today for memory.
+
+### Ranker: a separate service
+
+- **Choice:** a stateless scoring service that takes a few hundred candidates and returns an order.
+- **Why:** models change weekly and need their own hardware; the timeline service stays simple and falls back to newest first if the ranker misses its deadline (D12).
+- **Why not rank inside the timeline service:** a model deploy would redeploy the hot path.
+
+### Counts: like rows plus batched counters
+
+- **Choice:** one like row per `(post_id, user_id)` and a counter row per post, updated by the like counter once a second; hot counts served from the post cache.
+- **Why:** the like row makes a repeated like harmless (D7); summing 5,000 likes a second into one write a second removes the hot row (D10).
+- **Why not `count = count + 1` per like:** 5,000 updates a second on one row for one viral post.
+- **Why not Redis `INCR` alone:** fast, but a failover loses recent increments and nothing dedupes; it can front the counter, not replace the like rows.
+
+## Deep dives
+
+### Fan-out arithmetic and the hybrid threshold
+
+- **Push** costs one append per cached follower per post: 20 B a day for an average of 100, which is fine; the problem is the tail.
+- **One 100 M-follower post** is 100 M appends, about 50 M to cached lists: at 100,000 appends/s for that post it lands in 500 s, and followers see replies to it before the post itself (N2).
+- **Pull** costs one read per followed account per timeline load: 200 reads × 100,000/s.
+- **The threshold** comes from the freshness target: a post may use 10% of the 1 M appends/s fleet for 5 s, so 500,000 cached followers, which is about 1 M followers (D9).
+- **Above it:** no fan-out; the post goes into the author's recent list in the post cache; readers merge it at read time.
+
+The pattern figure prices the three options for one ordinary account and one huge one.
+
+<AnimatedDiagram spec="animated/patterns/fanout-celebrity" caption="Push breaks on the one huge account and pull breaks on every feed open; the hybrid pays each cost only where it is small." />
+
+**How to read it:**
+
+- Each column is an option; the red cells are the cost that breaks it.
+- The figure uses the pattern pages' shop example (2 M followers); the same shape holds at 100 M.
+
+**The numbers:** a reader following 200 accounts, 3 above the threshold, costs 1 list read + 3 recent-list reads per page, against 200 reads with pure pull.
+
+One page under the hybrid, the next page by cursor, and a returning reader:
+
+<AnimatedDiagram spec="animated/twitter/hybrid-merge" stepper caption="A page is one list read, a few big-account reads and one batched hydrate; the cursor keeps the next page stable while new posts arrive." />
+
+<StepCards>
+  <StepCard n={1} title="First page: cached ids plus big accounts">
+    The service reads 40 cached ids, twice the page so deleted posts can be dropped, and the recent ids of 3 big accounts. It merges by id, hydrates 20, drops 1 deleted post and returns 19 with a cursor.
+  </StepCard>
+  <StepCard n={2} title="Next page by cursor">
+    The next request sends the oldest id shown. Only older ids come back, so posts that arrived in the meantime cannot repeat a post or push one off the page.
+  </StepCard>
+  <StepCard n={3} title="A returning reader: rebuild on a miss">
+    A reader away for 45 days has no list. The service pulls recent posts from all 200 accounts once, returns the first page and asks the fan-out service to store the newest 500 ids.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  A threshold on follower count alone misses an account that jumps from 900,000 to 3 M followers in a day. Re-check the count on every post, and move the account to the merge path the moment it crosses.
+</Callout>
+
+### The timeline cache: memory, inactive users, cursors and deletes
+
+- **Ids only:** an entry is a post id and an author id, 16 bytes; the author id lets the service filter blocked or muted accounts without fetching the post.
+- **Bounded:** 500 entries is about 25 pages; a reader who scrolls past it falls back to pulling older posts by author, which almost nobody does.
+- **Active users only:** fan-out appends only to lists that already exist (append-if-exists), so 1.1 B inactive users cost no memory and no fan-out work.
+- **Rebuild on miss:** one pull of 200 accounts' recent posts, about 300 ms, once; then the list is stored and pushes resume.
+- **Deletes:** the post store marks the post deleted; hydration drops it, so it vanishes on the next read; the fan-out service also removes the id from lists, but nothing depends on that finishing.
+- **Unfollow:** entries carry the author id, so the service drops posts by accounts the reader no longer follows; the list cleans itself as new ids push old ones out.
+
+<AnimatedDiagram spec="animated/twitter/timeline-cache" stepper caption="Ids only, 500 per reader, active readers only: 9.6 TB on 150 nodes, against 200 TB if the cache held whole posts." />
+
+**How to read it:** each row is one step: an entry, one reader's list, the fleet, and the two things the design refuses to cache in red.
+
+**The numbers:** 400 M × 500 × 16 B = 3.2 TB; × 1.5 overhead × 2 copies = 9.6 TB; ÷ 64 GB = 150 nodes. Whole posts: 400 M × 500 × 1 KB = 200 TB.
+
+<Callout tone="red" title="What breaks">
+  Losing a cache node turns its 2.7 M readers into misses at once, and 2.7 M rebuilds of 200 reads each is a pull storm on the post store. Keep two copies, and rate-limit rebuilds so the rest get a page built from the big-account and recent-post caches first.
+</Callout>
+
+### Real-time search: cheap writes, scatter-gather reads, hidden deletes
+
+- **Cheap writes:** the indexer appends each new post to the newest in-memory slice; postings are stored newest first, so a query reads the freshest hits first.
+- **Split by time, then by post:** one slice per day, 20 shards of 10 M posts each; old slices are frozen and compacted, the newest one takes all writes.
+- **Scatter-gather reads:** the search service sends the query to the 20 shards of the newest slice, each returns its top 20, and the service merges them; older slices are asked only if the page is not full.
+- **A deadline:** with 20 shards, 1 − 0.99^20 = 18% of queries wait on at least one slow shard; answer at 100 ms with the shards that replied.
+- **Hidden deletes:** every shard holds the set of deleted ids from the last 7 days and filters them at query time, so a delete is hidden as soon as it reaches the log, before the index is rewritten (N3).
+
+The pattern figure shows the scatter, the merge and the deadline.
+
+<AnimatedDiagram spec="animated/patterns/batch-scatter" stepper caption="A search waits for the slowest of 20 shards, so it sets a deadline and answers with the shards that made it." />
+
+**How to read it:** step 2 scatters to 20 shards, step 3 merges each shard's top 10, step 4 answers at the deadline without the slow shard.
+
+**The numbers:** 7,000 queries/s × 20 shards = 140,000 shard queries/s; with 4 replicas each replica takes 1,750/s. Deleted ids: 1% of 200 M posts a day × 7 days × 8 B = 112 MB on every shard.
+
+<Callout tone="red" title="What breaks">
+  Removing a deleted post from the index alone leaves a window of seconds in which it is still found, and a replay of an old log segment can bring it back. The query-time filter is the guarantee; index removal is cleanup.
+</Callout>
+
+### Worked example: a 100 M-follower account posts during a final
+
+1. 20:45:00.000: the account posts; the post service writes the post store and returns; the change stream puts it on the log.
+2. The fan-out service sees 100 M followers, above the 1 M threshold: it skips fan-out and adds the id to the account's recent list in the post cache.
+3. 20:45:00.4: 30 M readers follow the account; at peak 100,000 timeline reads/s, about 30% of them, 30,000/s, read its recent list. Each of 300 timeline servers caches it for 1 s: 300 cache reads/s, not 30,000.
+4. 20:45:01: replies jump to 20,000 a second for 10 s, each reaching 100 cached followers: 2 M appends/s against a 1 M/s fleet, a backlog of 10 M appends that the 300,000/s of spare capacity clears in about 33 s.
+5. 20:45:05: the post is searchable; likes reach 5,000/s and the like counter writes one count a second.
+
+**The numbers:** pushing that post would have cost 50 M appends, 50 s of the whole 1 M/s fleet, during the very minute the reply storm needs it.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Timeline build | Pull, push, hybrid | Hybrid: push below 1 M followers, merge above | D1, D9, N1, N2 | Two read paths to test; big-account posts read on every page | Most traffic is ranked from candidates that are not followed |
+| Cache contents | Whole posts, ids | Ids (16 B) and author ids | D8, D3 | A hydrate call on every page | Never at this size |
+| Who is cached | Everyone, active users | Users active in 30 days | D8, N6 | 300 ms on a returning user's first open | Memory becomes cheap relative to rebuild load |
+| Ids | Database sequence, UUID, 64-bit time-sorted | 64-bit time-sorted | D6, D7 | Ids leak creation time; clock skew must be handled | Ids must be unguessable |
+| Timeline consistency | Synchronous, eventual | Eventual, under 5 s | D3, N2 | A follower may see a post seconds after another | A product needs exact order across readers |
+| Pagination | Offset, cursor | Cursor by id | D7, F3 | No "jump to page 9" | Never for a live feed |
+| Search | Database full-text, separate index | Separate in-memory index from the log | D3, N3, F4 | A second copy of every post, 10 s behind | Search over all history: add a disk tier |
+| Change propagation | Dual write, change data capture | Change data capture into a log | D5, D2 | A second of delay, a log to run | Never: a lost fan-out is a missing post |
+| Deletes | Purge everywhere, filter on read | Filter on read, purge as cleanup | N3, D3 | A tombstone check on every hydrate and query | Never |
+| Counts | Increment per like, batched | Batched every 1 s | D10, D7 | Counts up to a second behind | Exact real-time counts are a product need |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | Fan-out service and the read-time merge | Followers range from 1 to 100 M |
+| [Caching](/system-design/patterns/caching) | Timeline cache, post cache | 400 post reads per write |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Each timeline list is a view of the follow graph and posts | Reads must be one lookup |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | 64-bit time-sortable post ids | Merging, cursors and search order by id |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Posts by id, graph and caches by user, index by time | No store fits on one machine |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Big accounts' recent lists, viral counters | Millions read or like one key |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Fan-out batches, batched hydrate, search scatter-gather | 231,000 appends/s; 20 shards per query |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | Post store change stream into the log | A stored post must always be fanned out |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | Search deadline, ranker fallback | The slowest of 20 shards sets the latency |
+| [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards) (advanced) | Trends, out of scope here, read from the same log | The follow-up question interviewers ask next |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The post log, keyed by `author_id` | Fan-out, indexer and like counter all read it; replay |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A photo feed | Fan-out of ids, post cache, cursors | Media upload and the CDN dominate: see [Design Instagram](/system-design-case-studies/case-studies/instagram) |
+| A friends feed (two-way) | Push to cached lists, rebuild on miss | No 100 M-follower accounts: friend caps make pure push work; ranking matters more |
+| An activity stream ("people you follow liked…") | Log, fan-out workers, ids only | Many more events per user; aggregate ("12 people liked") before fan-out |
+| A notification inbox | Per-user list of ids, cursor, mark-as-read | Every item must arrive: durable per-user rows, not a cache |
+| A recommendation feed | Candidates, ranker, hydrate | Candidates come from models and the index, not the follow graph: see [Design TikTok](/system-design-case-studies/case-studies/tiktok) |
+
+## How real systems do it
+
+- **2012, "Timelines at Scale" (QCon San Francisco, slides):** over 150 M active users; over 300,000 timeline queries a second at 1 ms p50 and 4 ms p99; about 400 M tweets a day, about 5,000 a second on average, 7,000 at the daily peak and over 12,000 during large events.
+- **2012, same talk:** about 30 B timeline deliveries a day, about 300,000 a second, and 3.5 s at p50 to deliver to 1 M followers. Timelines were Redis native lists of entries of tweet id (8 bytes), user id (8 bytes) and 4 bytes of bits; inserts used `RPUSHX` so only timelines already in cache were written, pipelined 4,000 destinations at a time.
+- **2012, same talk:** search went to a separate Earlybird index fed by an ingester, with Blender querying one replica of every index and merging; a query-expansion slide shows a home timeline read as the cached timeline OR one large account's own timeline, the read-time merge this page uses for big accounts.
+- **2012, "Earlybird: Real-Time Search at Twitter" (ICDE):** over 2 B queries a day at 50 ms on average; tweets usually searchable within 10 s; built on Lucene; each server held 12 segments of 2^23 (about 8.4 M) tweets; a Blender front end passed each query to several Earlybird servers.
+- **2010 Snowflake, 2014 Manhattan:** Snowflake ids are 41 bits of milliseconds, 10 bits of machine id and 12 bits of sequence, roughly time-ordered with no coordination. Manhattan, a multi-tenant key-value database, favoured availability with eventual consistency by default and offered a log-structured engine for heavy writes and a B-tree engine for heavy reads.
+- **2023, the recommendation algorithm post:** the For You timeline takes about 1,500 candidates per request, about half from accounts the user follows; a neural ranker of about 48 M parameters scores them; the pipeline runs about 5 B times a day in under 1.5 s on average. The open-sourced code lists the search index as the source that finds and ranks posts from followed accounts, about 50% of posts. The post says the older Fanout Service, which served followed accounts' posts from a per-user cache for 12 years, had recently been retired.
+- **Where this design differs:** this page is the 2012 shape, push into id lists with a merge for big accounts, because it answers the chronological question asked in interviews. The 2023 ranked timeline pulls followed accounts' posts from the search index instead, which shows the pull side winning once ranking needs hundreds of candidates per read.
+
+## Failure modes & pitfalls
+
+- **Pushing a huge account:** delivery lag climbs for everyone during big events; watch fan-out backlog in seconds per partition; merge accounts above the threshold at read time.
+- **A cache node lost:** millions of misses rebuild at once and hammer the post store; watch the miss rate; two copies, rate-limited rebuilds, a degraded page from the big-account and post caches.
+- **Deleted post still visible:** a delete only purges lists and the index, and a replay or race brings it back; sample hydrated pages for tombstones; filter on read in hydration and in search.
+- **Offset pagination:** readers report repeated posts while scrolling during busy hours; count duplicate ids across consecutive pages in client telemetry; cursors by id.
+- **Clock skew in id generators:** a node with a clock behind makes ids that sort into the past and land below the reader's cursor; alert on generator clock drift; refuse to issue ids when the clock moves backwards.
+- **Hot counter or hot recent list:** one shard's CPU pins during a viral moment; watch per-key request rates; batch counters, cache hot lists in process for 1 s.
+- **Ranker slow:** timeline p99 follows the ranker's tail; watch ranker latency against its deadline; serve the chronological page when it misses.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify chronological or ranked, follow model, largest account, freshness, search; write F1 to F5 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 100,000 reads/s, 2,315 posts/s, 400 to 1, 231,000 appends/s, one 100 M-follower post.
+3. **Minutes 10 to 15:** API with cursors, the posts and followers tables, 64-bit time-sorted ids.
+4. **Minutes 15 to 25:** Steps 1 to 3: pull, then push, then the hybrid with the threshold computed.
+5. **Minutes 25 to 35:** Steps 4 to 8: ids and the post cache, the bounded cache, search, ranking, counts.
+6. **Minutes 35 to 45:** one deep dive: the threshold, the cache and deletes, or the search index; justify each store against its alternative.
+
+**What interviewers listen for:**
+
+- **Mid:** push against pull with the read to write ratio, ids in the cache rather than whole posts, cursor pagination.
+- **Senior:** the celebrity problem with a computed threshold, active-only caching and rebuild on miss, deletes filtered on read, a search index built from the log.
+- **Staff:** how fan-out lag is measured and kept under 5 s during live events, what degrades first, how ranking changes the candidate source, multi-region delivery.
+
+**Red flags:** synchronous fan-out to 100 M followers; whole posts in every list; offset pagination; index cleanup as the only delete guard.
+
+## Further reading
+
+- [Timelines at Scale](https://www.infoq.com/presentations/Twitter-Timeline-Scalability/) (Raffi Krikorian, QCon San Francisco 2012, InfoQ video and slides)
+- [Earlybird: Real-Time Search at Twitter](https://cs.uwaterloo.ca/~jimmylin/publications/Busch_etal_ICDE2012.pdf) (Busch et al., ICDE 2012)
+- [Snowflake, 2010 release](https://github.com/twitter-archive/snowflake/tree/snowflake-2010) (Twitter, GitHub)
+- [Manhattan, our real-time, multi-tenant distributed database for Twitter scale](https://blog.x.com/engineering/en_us/a/2014/manhattan-our-real-time-multi-tenant-distributed-database-for-twitter-scale) (Twitter Engineering, 2014)
+- [Twitter's Recommendation Algorithm](https://blog.x.com/engineering/en_us/topics/open-source/2023/twitter-recommendation-algorithm) (Twitter Engineering, 2023)
+- [the-algorithm](https://github.com/twitter/the-algorithm) (source of the For You timeline, GitHub, 2023)
+- Related pages: [Design Instagram](/system-design-case-studies/case-studies/instagram) · [Design TikTok](/system-design-case-studies/case-studies/tiktok) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Would you build the home timeline with fan-out on write or fan-out on read?" category="Trade-offs" level="Mid">
+  - Price both: reads outnumber posts 400 to 1, so fan-out on write makes each read one list lookup.
+  - Fan-out on write costs one append per active follower: 231,000 a second here, done off the request path.
+  - Pure push breaks on huge accounts and pure pull breaks on every read, so use a hybrid with a follower threshold.
+  </InterviewQuestion>
+  <InterviewQuestion question="An account with 100 million followers posts. What happens?" category="Scaling" level="Senior">
+  - Pushing it is 100 M appends, about 7 minutes of the whole fan-out fleet's average work, and its followers would see replies first.
+  - Above a threshold (1 M followers here, from the 5 s freshness target) skip fan-out and keep the post in the author's recent list.
+  - Readers merge that list into their cached ids at read time, by id; cache the hot list in each timeline server for 1 s.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why paginate the timeline at all, and why with a cursor instead of an offset?" category="Concepts" level="Mid">
+  - A page of 20 bounds the hydrate work and the response size; nobody reads 500 posts at once.
+  - New posts arrive while the reader scrolls, so offsets shift and page 2 repeats posts from page 1.
+  - A cursor of the oldest id shown names a point in time; `max_id` returns only older posts, and new ones never move it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you show new posts without moving the reader's place?" category="Architecture" level="Mid">
+  - Keep the newest id the client has; poll `since_id` every 30 s for a count of newer posts.
+  - Show a "12 new posts" bar; insert them above only when the reader taps it.
+  - The scroll position and the `max_id` cursor below are untouched, so nothing jumps or repeats.
+  </InterviewQuestion>
+  <InterviewQuestion question="A user deletes a post. How do you make sure it disappears from timelines and search?" category="Failure modes" level="Senior">
+  - Mark the post deleted in the post store first: that is the source of truth.
+  - Hydration drops deleted posts, so every timeline hides it on the next read, whatever the cached lists still hold.
+  - Search shards filter a set of recently deleted ids at query time; removing it from the index is cleanup, not the guarantee.
+  - Removing the id from cached lists is best effort and nothing depends on it finishing.
+  </InterviewQuestion>
+  <InterviewQuestion question="How much memory does the timeline cache need, and how do you keep it bounded?" category="Scaling" level="Senior">
+  - Store ids, not posts: 16 bytes an entry, 500 entries, about 8 KB a reader.
+  - Cache only users active in 30 days: 400 M × 8 KB = 3.2 TB, 9.6 TB with overhead and two copies, about 150 nodes.
+  - Append only to lists that exist; rebuild a returning user's list on a miss in about 300 ms.
+  - Whole posts would be 200 TB, and every edit would rewrite every follower's copy.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you measure that the timeline feels fast?" category="Architecture" level="Senior">
+  - Client side: time from app open to the first post drawn, p50 and p99, by region and network type.
+  - Server side: timeline p99 under 200 ms, split into cache read, merge, hydrate and rank.
+  - Freshness: inject canary posts and measure when they appear in canary followers' timelines; alert on p99 above 5 s.
+  - Watch the fan-out backlog in seconds, since it predicts freshness before users notice.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does real-time search balance freshness against query latency?" category="Trade-offs" level="Senior">
+  - Index into small in-memory slices by time, so a new post is searchable within 10 s without rebuilding large structures.
+  - Queries scatter to the newest slice's shards and merge; older slices are asked only if the page is not full.
+  - Set a deadline: with 20 shards, 18% of queries would otherwise wait on a slow one; answer with the shards that replied.
+  - Freshness costs memory for the newest slices; latency costs completeness when a shard misses the deadline.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why time-sortable 64-bit ids instead of a database sequence or random UUIDs?" category="Concepts" level="Mid">
+  - Time in the high bits makes sorting by id sort by time, so merging lists, cursors and newest-first search all compare integers.
+  - Any server makes them without coordination; a database sequence is one writer for the whole platform.
+  - Random UUIDs do not sort by time and are 16 bytes, which doubles the id part of every cached entry.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Fan-out, push and pull, because followers range from 1 to 100 M.
+  - Caching and materialised views, because reads outnumber writes 400 to 1.
+  - Unique ids that sort by time, because merging and cursors depend on it.
+  - Change data capture into a log, because every stored post must reach fan-out, search and counts.
+  - Scatter-gather with deadlines, because a search spans 20 shards.
+  </InterviewQuestion>
+</InterviewQuestions>

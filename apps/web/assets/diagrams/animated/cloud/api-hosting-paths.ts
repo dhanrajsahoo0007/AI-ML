@@ -222,7 +222,7 @@ const spec: DiagramSpec = {
       step: 7,
       x: 490,
       y: 530,
-      w: 176,
+      w: 182,
       cloud: {
         aws: "aws-appsync",
         gcp: { id: "gcp-cloud-run", label: "Cloud Run server" },

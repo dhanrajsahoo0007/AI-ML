@@ -1,0 +1,24 @@
+title: Latency budget per request type
+alt: >-
+  Three latency waterfalls at p50, each on its own millisecond scale, built in four steps; model-server stages are
+  green and marked M, and each model call includes 80 hidden reasoning tokens. Step 1, a template lookup whose slots
+  the encoder fills: edge, SSO, scope role and audit 50, route in parallel with template match 30, slots by encoder 25,
+  link literals to master ids 20, parse, allow-list and EXPLAIN 45, execute on an assistant replica 150 in violet,
+  render 10: the table at 330 milliseconds with no model call before it. Step 2, a generated lookup: edge 50, route and
+  schema linking 60, M first token 400, M reasoning of 80 tokens 800, M query of 150 tokens 1,500, link, parse and
+  EXPLAIN 65, execute and render 160: the table at 3,035 milliseconds, 2.7 seconds of it the model. Step 3, a typed
+  investigation: edge 50, the M planner with 80 reasoning tokens 1,700, link and resolve lots and wafers 100, ending
+  at a dashed plan marker at 1,850; cohort in parallel with sort data 500, within-lot max-T in parallel with the test
+  side 1,000, FDC indicators and clustering 650, evidence as the slowest of 6 parallel draws 2,745 in teal, held-out
+  confirmation of the top 3 and ranking 330, ending at a dashed hypotheses marker at 7,075; M writer first token 600,
+  M reasoning 800, M 540 tokens 5,400 and checks 20: complete at 13,895 milliseconds. Step 4, footer lines give p50
+  and gated p95: lookups over all routes 1,010 and 4,337 against 1,500 and 5,000; template routes 564 and 2,538;
+  generated 3,129 and 5,522; document 1,775 and 2,730; typed plan 1,850 and 2,760; hypotheses 7,075 and 9,751;
+  complete 13,895 and 18,757 against 15,000 and 25,000. The 80 reasoning tokens are a budget: the typed plan fails at
+  about 95, the typed explanation at about 135 and the generated lookup at about 163. All stage times are estimates.
+caption: >-
+  Templates answer in a third of a second because no model runs before the table; in an investigation the model's
+  reasoning and decode are half the wait, and the ranked table arrives before any of it.
+tags: [genai, knowledge-graph, manufacturing, case-study, latency]
+source: original
+created: 2026-11-18

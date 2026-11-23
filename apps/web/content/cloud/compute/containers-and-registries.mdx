@@ -1,11 +1,326 @@
 ---
 title: "Containers and Registries"
-description: "What a container and an image are, why they end the works-on-my-machine problem, and what a registry adds."
-status: outline
+description: "What a container and an image are, why tags move and digests do not, and how a registry scans, signs, copies and cleans the images you run."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** a container as a process with its own filesystem and limits, built from an image made of read-only layers, and the registry that stores and scans those images (tags, digests, scanning, replication and pull cost).
+<KeyIdea>
+  A container runs your program inside a fence on a shared machine, always from the same frozen package, so every server runs the same thing.
+</KeyIdea>
 
-**Related reading on this site:** [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers)
+## The story
+
+Brightpost's shop app now ships as a container image: the app packed with everything it needs. It still runs on the VMs. On a busy Friday, three app servers each run one copy, and each fetches the image tagged `latest` when it starts. At 10:50 Asha pushes a half-tested build of a new basket page, also tagged `latest`, to try it in the test account. At 11:00 autoscaling adds a third server, and at 11:12 a health check replaces server 2. Both fetch `latest` and get the test build, while server 1 still runs version 1.4. The test build saves baskets in a new format that 1.4 cannot read. For 40 minutes the shop runs two versions at once. 52 shoppers who move between servers find an empty basket, and 19 leave without ordering. Rolling back is slow, because all three servers report the same tag.
+
+Nothing in the cloud failed. A name pointed at a new build. Each step below closes one gap that let a test build reach customers.
+
+## How it works
+
+Three words first. A **process** is one running program. The **kernel** is the core of an operating system (OS): the part that talks to the hardware and shares it between processes. An **image** is a read-only package of files that a container starts from.
+
+### Step 1: A container is a fenced process, not a small computer
+
+<AnimatedDiagram spec="animated/cloud/container-vs-vm" step={1} minWidth={620} caption="Three VMs each carry a whole OS with its own kernel. Three containers share the host's one kernel." />
+
+A <Term id="container">container</Term> is a process that the kernel fences off. It sees its own files, network address and process list, and gets a fixed share of processor time and memory. It cannot see the other containers on the machine.
+
+A **virtual machine** (VM) is different. A program called a **hypervisor** splits one physical server into several pretend computers, and each one boots a full OS with its own kernel. A container carries no kernel, only its app and the libraries the app needs. So it is far smaller and starts in seconds. In the picture, the VM side stacks three guest OSs; the container side shares one host OS.
+
+<PremiumBreak />
+
+### Step 2: What the shared kernel buys, and what it costs
+
+<AnimatedDiagram spec="animated/cloud/container-vs-vm" step={2} minWidth={620} caption="A new container starts a process in seconds. The price is a thinner wall: one kernel serves every container." />
+
+Sharing one kernel is why a container is cheap. A new VM boots an OS in 1 to 3 minutes. A new container starts a process in seconds, once its image is on the server.
+
+The same sharing makes the wall thinner. A kernel flaw can let a process break out of its fence and reach every container on that machine. A VM has a kernel of its own. So clouds never run a stranger's containers on your kernel: each customer's containers run on that customer's VMs, or on tiny VMs built for the job.
+
+### Step 3: An image is a stack of layers
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={1} minWidth={620} caption="Brightpost's first setup: the build pushes the shop image as latest, and each server pulls latest when it starts." />
+
+An image is built from a short recipe called a **Dockerfile**, after the tool that made it popular. Each step adds one **layer**: a read-only set of file changes stacked on the layers below. A simplified recipe for the shop looks like this:
+
+```text
+# Base layer: a small Linux with Python
+FROM python:3.12-slim
+# Library layers: the packages the shop needs
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+# Code layer: the shop's own files
+COPY app/ /app
+# The program to start in the container
+CMD ["python", "/app/main.py"]
+```
+
+Layers make updates cheap. Version 1.5 changed only the code layer, about 4 MB, so a server that holds 1.4 downloads 4 MB, not the whole image. The image lives in an <Term id="image-registry">image registry</Term>, a store for images. The build **pushes** an image there; a server **pulls** it to run.
+
+### Step 4: Tags move, digests do not
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={2} minWidth={620} caption="The failure: a test build takes the latest tag, so the two servers that start after 10:50 run it and server 1 does not." />
+
+An image has two kinds of name. A **tag** is a label a person picks, such as `v1.4` or `latest`. Anyone allowed to push can move a tag to a new image. A **digest** is a fingerprint computed from the image's bytes, such as `sha256:4f2a…`. Change one byte and the digest changes, so a digest always means exactly one image.
+
+`latest` is only a tag. It does not mean "the newest tested release". It means "whatever was pushed last under this name".
+
+<Callout tone="red" title="What breaks">
+  At 10:50 the test build takes the `latest` tag. Server 1 pulled `latest` at its 07:00 start and holds 1.4. Servers 2 and 3 start at 11:00 and 11:12 and get the test build. Shoppers move between servers, and 52 of them see an empty basket in 40 minutes. All three servers report `latest`, so Asha spends the first 25 minutes finding out which one runs what.
+</Callout>
+
+### Step 5: Pin the digest, lock the tag
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={3} minWidth={620} caption="Each build gets a version tag and a digest. All three servers pull the same digest, so they run the same bytes." />
+
+Brightpost's pipeline now gives every build a version tag, such as `v1.5`, and writes down its digest. The deploy file names the digest. Every server pulls `sha256:4f2a…`, so a server that starts at 11:12 runs the same bytes as one from 07:00. A rollback names the old digest.
+
+The registry also **locks tags**: once `v1.5` is pushed, nobody can move it to a different image. People read the tag; machines pull the digest. The pipeline that produces both is the subject of [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies).
+
+### Step 6: Scan every image for known flaws
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={4} minWidth={620} caption="The registry scans each push. The scan finds a critical flaw in the base layer, not in Brightpost's own code." />
+
+A **known vulnerability** is a security flaw that has been found and published, usually with a public ID that starts with CVE. A registry **scanner** lists the packages in each layer, compares them with those public lists and rates each finding, from low to critical.
+
+The first scan of 1.5 lists 1 critical flaw and 7 lower ones, all in the base layer. The critical one is in an encryption library from a 9-month-old base image. New flaws about old packages are published daily, so the registry rescans the images in use. Alerts for flaws that are actually exploited belong to [Threat Detection](/cloud/resilience/threat-detection).
+
+### Step 7: Test first, then promote the same digest
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={5} minWidth={620} caption="Every build lands in the test registry. Only a digest that passed tests and the scan is copied to the registry production pulls from." />
+
+Asha's test build reached production because test and production shared one registry and one tag. Now every build lands in a test registry that only the test account can pull from. Production servers pull only from the production registry.
+
+**Promotion** copies an image from one to the other. The rule is strict: copy the same digest, never rebuild it. A rebuild can pick up a newer base layer and gets a new digest, so customers would run untested bytes. The scan is a **gate**: a digest with a critical finding is never promoted. Following <Term id="least-privilege">least privilege</Term>, only the pipeline may write to it.
+
+### Step 8: Sign the digest, run only what is signed
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={6} minWidth={620} caption="The pipeline signs each digest it builds. The check reads the signature from the registry and lets only signed digests start." />
+
+A digest proves the bytes did not change, not who built them. A **signature** does. The pipeline signs each digest with a private key kept in a <Term id="kms">key service</Term>. The registry stores the signature next to the image, and anyone can check it with the public key.
+
+An **admission check** runs before a container starts and refuses any image without a valid signature from Brightpost's pipeline. On Kubernetes or a serverless container platform, the platform runs it. On Brightpost's VMs, the start-up script does. An image built on a laptop cannot run in production, even if someone pushes it.
+
+### Step 9: Pull close, copy across regions, delete old images
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={7} minWidth={620} caption="A lifecycle rule deletes old test builds. A replica keeps production's images in a second region for a recovery fleet." />
+
+Every new server pulls before it can work, so the pull slows every scale-out. Keep the registry in the servers' region. A pull from another region is slower and usually billed as <Term id="egress">data leaving</Term> that region. **Registry replication** copies each pushed image to other regions, so each fleet pulls from nearby. Brightpost replicates to its second allowed region, ready for a recovery fleet. Smaller images help too, as [the compute spectrum](/cloud/compute/compute-spectrum) showed.
+
+Registries also fill up: the test registry gets about 25 builds a week, about 1,300 a year. A <Term id="lifecycle-rule">lifecycle rule</Term> deletes test builds older than 30 days. In production, a rule keeps the last 10 releases, so a rollback always has its old digest.
+
+### Step 10: Updating the base image is patching
+
+With containers, the host's OS and the OS files inside the image are two separate jobs.
+
+<Compare
+  columns={["Layer", "Where it lives", "How Brightpost patches it"]}
+  rows={[
+    ["Host OS and kernel", "The VM", "Patch the VMs, or replace them from a new machine image"],
+    ["Base layer", "The image", "Rebuild on the updated base image, then scan, test, promote"],
+    ["Libraries", "The image", "Raise the version and rebuild"],
+    ["Code", "The image", "The normal release"],
+  ]}
+  caption="Patching a running container means shipping a new image. Nobody patches a container in place."
+/>
+
+A fix made inside a running container is lost when it restarts. So the flaw from Step 6 is fixed by a rebuild on the patched base image. The new digest scans with 0 critical findings and goes through test and promotion like any release. Brightpost now rebuilds on the newest base every Monday. On a serverless container platform the provider patches the host; the image is still yours.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds sell a private registry that scans, copies and cleans images. They differ in how images reach another region and where the signature check runs.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Registry:** Amazon ECR, a private registry per account and region. Tag immutability is a repository setting.
+    - **Scanning:** basic scanning on push, or enhanced scanning through Amazon Inspector, which rescans as new vulnerabilities are published.
+    - **Signing and admission:** AWS Signer signs images with the open Notation tooling. The check before run is yours, for example an admission controller on Amazon EKS.
+    - **Replication:** replication rules copy images to other regions and accounts. Pull-through cache rules keep copies of public images.
+    - **Clean-up:** lifecycle policies expire images by age or by count.
+
+    **The difference that changes a design.** A registry belongs to one account in one region. Another region needs a replication rule; another account needs a copy or a repository policy that lets it pull. So Brightpost's promotion copies one digest from the test account's registry to the shop account's. A replication rule then carries it to the second region.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Registry:** Artifact Registry. A repository lives in one region or a multi-region location. Docker repositories can make tags immutable.
+    - **Scanning:** Artifact Analysis scans images on push and keeps the results current for images that are in recent use.
+    - **Signing and admission:** Binary Authorization. A policy on GKE or Cloud Run refuses images that lack the required attestations, signed statements such as "built by our pipeline".
+    - **Replication:** a multi-region repository serves pulls across the regions of that location. Between separate regional repositories, the pipeline copies the image.
+    - **Clean-up:** cleanup policies delete or keep versions by age, tag or count.
+
+    **The difference that changes a design.** The admission check is a managed policy, not a script on every server. One policy names the attestations an image needs, and GKE and Cloud Run enforce it at deploy time. On VMs that run containers, the start-up script still has to check.
+  </Tab>
+  <Tab label="Azure">
+    - **Registry:** Azure Container Registry (ACR), sold in tiers: Basic, Standard and Premium. A tag can be locked against changes.
+    - **Scanning:** Microsoft Defender for Containers, part of Defender for Cloud, scans images in the registry for known vulnerabilities.
+    - **Signing and admission:** images are signed with Notation and a key in Azure Key Vault. On AKS, an admission policy can refuse unsigned images.
+    - **Replication:** geo-replication, on the Premium tier. One registry name has replicas in several regions, and a pull is served from a nearby one.
+    - **Clean-up:** ACR Tasks, which also builds images in the cloud, can purge old images on a schedule.
+
+    **The difference that changes a design.** Geo-replication keeps one registry name for every region, and a push reaches every replica, so servers everywhere use the same image reference. It comes only with the Premium tier, so a multi-region design picks the tier on day one.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/container-image-to-run" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="May this image run in production?"
+  tree={{
+    q: "Did the build pipeline make it from reviewed code?",
+    no: "No. Rebuild it through the pipeline. An image from a laptop has no signature, and the admission check will refuse it.",
+    yes: {
+      q: "Does the deploy name it by digest, not by a tag such as latest?",
+      no: "Not yet. Resolve the tag to its digest once, write the digest into the deploy file, and deploy that.",
+      yes: {
+        q: "Is its latest scan free of critical findings?",
+        no: "No. Rebuild on the patched base image or raise the library version, then scan again.",
+        yes: {
+          q: "Did this exact digest pass tests in the test registry, and is it signed?",
+          no: "Not yet. Test it, then promote and sign the same digest. Never rebuild it for production.",
+          yes: {
+            answer: "Yes. Promote it to the production registry, and every server will pull the same bytes.",
+            href: "/cloud/operations/ci-cd-and-deployment-strategies",
+          },
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Server 1 pulled latest at 07:00. Servers 2 and 3 pulled latest at 11:00 and 11:12. Why did they get different builds?" hint="What happened at 10:50?">
+    At 10:50 the test build took the latest tag. A tag points at whatever was pushed last, so the same name meant 1.4 at 07:00 and the test build after 10:50.
+  </QuizItem>
+  <QuizItem question="Version 1.5 changes only the code layer, about 4 MB. A server already holds 1.4. How much does it download to run 1.5?" hint="Which layers does it already hold?">
+    About 4 MB. The base and library layers are the same as in 1.4, so the server keeps them and pulls only the new code layer.
+  </QuizItem>
+  <QuizItem question="A digest passed every test in the test registry. For production, the pipeline rebuilds it from the same code. What is wrong?">
+    The rebuild has a new digest. It may carry a newer base layer, so customers would run bytes that nobody tested. Promote the tested digest itself.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Tag that moves (latest)", "Locked version tag (v1.5)", "Digest (sha256:4f2a…)"]}
+  rows={[
+    ["What decides the bytes a server runs", "Whoever pushed last", "The release, once", "The build, forever"],
+    ["Can two servers run different builds?", "Yes: 2 of 3 did, for 40 minutes", "No, once the tag is locked", "No"],
+    ["Readable by people", true, true, false],
+    ["Rollback", "Guess which build was 1.4", "Deploy v1.4 again", "Deploy the old digest"],
+    ["Use it for", "A laptop, never production", "Release notes and conversations", "What servers actually pull"],
+  ]}
+  caption="Three ways to name the shop's image, with the story's numbers."
+/>
+
+Use both. People talk about `v1.5`; the deploy file holds the digest the pipeline recorded for it. A locked tag comes close, but only the digest proves the bytes.
+
+## Common pitfalls
+
+- **`latest` in production.** It means "pushed last", not "tested", so servers that start an hour apart can differ. Deploy by digest and lock version tags.
+- **Scanning once, at push.** Last month's clean image can be critical today. Turn on rescanning for the images you run.
+- **A base image nobody updates.** Brightpost's critical flaw sat in a 9-month-old base layer. Rebuild on the newest base on a schedule, even when the code has not changed.
+- **Pulling from far away.** A registry in another region, or a public one on the internet, slows every scale-out and can add data charges. Public registries may also limit pulls. Pull from the same region, through a replica or a cache.
+- **No lifecycle rules, or careless ones.** Test builds pile up at about 1,300 a year. In production, a rule that deletes by age alone can delete the release still running. Keep by count there.
+
+## How to say it in an interview
+
+"A container is a fenced process that shares the host's kernel, so it starts in seconds, but its wall is thinner than a VM's. It runs from an image of read-only layers, kept in a private registry. In production I deploy a digest, the image's fingerprint, never a tag like latest, so every server runs the same bytes. Every build lands in a test registry, gets scanned for known vulnerabilities, and only a tested, clean digest is promoted unchanged to production. The pipeline signs it, and an admission check runs only signed images. I keep the registry in the servers' region, replicate it for other regions, and let lifecycle rules delete old builds."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a container and a virtual machine?" level="Junior" category="Cloud">
+    **Short answer.** A VM is a pretend computer with its own OS and kernel, made by a hypervisor. A container is a process fenced off by the host's kernel, carrying only the app and its libraries. So it is smaller and starts in seconds.
+
+    **Why.** Three VMs boot three OSs, 1 to 3 minutes each. Three containers share one kernel and start as processes. The price is the wall: a kernel flaw can reach every container on that machine. So clouds keep each customer's containers on that customer's VMs.
+
+    <AnimatedDiagram spec="animated/cloud/container-vs-vm" step={2} caption="Each VM carries a kernel; the containers share one, which makes them fast and their wall thinner." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can a container use a different kernel from its host?
+    - Why do serverless container platforms run each customer on small VMs?
+
+    **Watch out for.** Calling a container "a lightweight VM". It has no kernel of its own, and that one fact explains both its speed and its weaker wall.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does the same image run the same way on every host?" level="Junior" category="Cloud">
+    **Short answer.** The image freezes the app, its libraries and its OS files into read-only layers. Pulled by digest, every host gets the same bytes. Only the kernel comes from the host.
+
+    **Why.** Servers set up by hand drift apart. With an image, Brightpost builds once and ships one package to all three servers. Two servers with one digest cannot differ in their files. Two things still can: settings passed in at start, such as the database address, and the host's kernel.
+
+    <AnimatedDiagram spec="animated/cloud/container-image-to-run" step={3} highlight={["registry", "srv1", "srv2", "srv3"]} caption="Three servers pull one digest, so they run the same bytes." />
+
+    **Follow-ups the interviewer may ask.**
+    - What still differs between a laptop and production if the image is the same?
+    - Why should configuration stay out of the image?
+
+    **Watch out for.** Saying "the same tag". A tag can move between two pulls; Brightpost's three servers once had one tag and two builds.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between a tag and a digest?" level="Mid" category="Cloud">
+    **Short answer.** A tag is a name a person picks, and it can be moved to a new image. A digest is a fingerprint of the image's bytes, so it always means one image. Deploy by digest; use tags for people.
+
+    **Why.** At 10:50 Brightpost's test build took the `latest` tag. Servers that started later ran it; the one from 07:00 did not. For 40 minutes the shop ran two versions, and all three servers said `latest`. With digests, every server runs the same bytes whenever it starts, and a rollback names an exact image.
+
+    <AnimatedDiagram spec="animated/cloud/container-image-to-run" step={2} caption="One tag, two builds: the servers that started after 10:50 got the test build." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a registry's tag lock do, and why is it not enough on its own?
+    - How does the pipeline turn a version tag into a digest for the deploy?
+
+    **Watch out for.** Treating `latest` as "newest stable". It is only a tag, and it means whatever was pushed last.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Scale-out of your service takes 40 seconds, and most of it is the image pull. What do you change?" level="Mid" category="Cloud">
+    **Short answer.** Pull less, from closer. Shrink the image, order layers so releases touch only the top ones, and pull from the same region. Keep a warm spare where the wait still matters.
+
+    **Why.** A multi-stage build leaves compilers and test files out of the final image. With rarely changed layers first, a release changes a few MB and servers keep the rest. A registry in another region adds distance and data charges, so replicate to each region with a fleet. A machine image with the layers already pulled, or a warm spare, skips the pull.
+
+    <AnimatedDiagram spec="animated/cloud/container-image-to-run" step={7} highlight={["registry", "replica", "srv2"]} caption="Servers pull from a registry in their own region; a replica serves the second region." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you measure the pull time separately from the app's start-up time?
+    - What does lazy loading of image layers change?
+
+    **Watch out for.** Adding bigger servers. A larger machine does not pull a 1 GB image from another region much faster.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the path from a code change to production so that only tested, scanned and trusted images ever run." level="Senior" category="Cloud">
+    **Short answer.** The pipeline builds each change once and pushes it, with a version tag and a digest, to a test registry. Tests and a scan gate run against that digest. Only a passing digest is signed and promoted, unchanged, to production. An admission check runs only signed digests.
+
+    **Why.** Each control closes one gap. The digest stops a moving tag from changing what runs, the gap behind Brightpost's 40 minutes. Two registries keep test builds out of production's reach. Promotion without a rebuild ships the tested bytes. The signature proves the pipeline built it, so a laptop image cannot run. Rescanning catches flaws published later; a weekly rebuild on the newest base fixes them.
+
+    <AnimatedDiagram spec="animated/cloud/container-image-to-run" step={6} path="build>testreg>registry>sigcheck>srv3" caption="Build, test, promote the same digest, check the signature, then run." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who may write to the production registry, and who may only read?
+    - How do you ship an urgent fix when the scan gate blocks on a flaw with no patch yet?
+
+    **Watch out for.** Rebuilding for production "with the production settings". A rebuild is a new digest, and nobody tested it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Kubernetes Concepts](/cloud/compute/kubernetes-concepts)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Threat Detection](/cloud/resilience/threat-detection)
+- [Containers on AWS](/cloud/aws/containers)
+- [Containers on Google Cloud](/cloud/gcp/containers)
+- [Containers on Azure](/cloud/azure/containers)
+
+## Further reading
+
+- [Amazon ECR User Guide](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html): repositories, scanning, replication and lifecycle policies.
+- [Artifact Registry overview](https://cloud.google.com/artifact-registry/docs/overview): repositories, locations and cleanup policies.
+- [Binary Authorization overview](https://cloud.google.com/binary-authorization/docs/overview): deploy-time checks for signed images.
+- [Azure Container Registry introduction](https://learn.microsoft.com/azure/container-registry/container-registry-intro): tiers, geo-replication and tasks.

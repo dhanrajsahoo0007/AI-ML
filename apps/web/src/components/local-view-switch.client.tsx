@@ -40,7 +40,7 @@ function LocalViewSwitchImpl({ envDefault }: { envDefault?: string }) {
     <div
       role="group"
       aria-label="Local view of premium pages"
-      data-copy-ok="page"
+      data-copy-ok
       data-testid="local-view-switch"
       className="fixed bottom-4 right-4 z-[70] flex items-center gap-1 rounded-full border border-hairline bg-paper/95 p-1 text-xs shadow-[0_8px_24px_-12px_rgba(17,17,17,0.45)] backdrop-blur print:hidden"
     >

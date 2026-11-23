@@ -4,99 +4,890 @@
   level: Senior
   category: conflict-and-collaboration
   subcategory: peer-technical-conflict
-  companies:
-    - Meta
-    - Google
-    - Amazon
+  signals:
+    - conflict
   topics:
     - /behavioral/competencies/technical-conflict-and-alignment
   a: |-
-    **What interviewers are testing.** Technical disagreements happen every week in healthy engineering teams. Interviewers want to see whether you treat design debates as ego battles ("winning the argument") or as collaborative search problems ("finding which constraint we are weighting differently").
+    **What it tests.** How you handle a technical disagreement with an equal, where neither of you can decide alone. Most deadlocks come from a fact you do not share or a priority you rank differently. The interviewer checks whether you looked for that gap or tried to win. At senior level you must settle it with evidence, and change your own view where the other person was right.
 
-    <KeyIdea>
-    Almost every engineering deadlock comes down to one of two things: **unshared facts** (you disagree on how the system will behave under load) or **unranked priorities** (one engineer is optimizing for 6-month extensibility while the other is optimizing for 3-week delivery or operational simplicity).
-    </KeyIdea>
+    **How to shape the answer.**
 
-    **Four-step resolution pattern:**
+    - **Situation and task.** State both designs fairly, and say what each of you was protecting.
+    - **Action.** Say how you restated their case, how you split facts from priorities, and what test settled it.
+    - **Result.** Give the decision, the numbers behind it, and how you two work together now.
+    - **Learning.** Say what you got wrong at the start.
 
-    1. **Steelman their proposal first:** State the strongest case for the other engineer's design in writing so they know you understood it.
-    2. **Separate facts from values:** If you disagree on a fact (e.g., whether Postgres can handle the write rate), run a 4-hour benchmark instead of arguing for 4 days.
-    3. **Make the trade-off matrix explicit:** Put both options in a table scored against agreed criteria (p99 latency, operational toil, migration risk, time to ship).
-    4. **Update your own view where they were right:** Point out at least one element of their design that improved the final hybrid solution.
+    **A strong answer sounds like this.** "Another senior engineer and I argued for two weeks about where to store an audit log. She wanted our relational database. I wanted a separate streaming system. I wrote her case in my own words and she corrected one point. That showed one disputed fact, whether the database could take 4,000 writes a second, and one difference in priority: she cared about on-call load, I cared about growth. A half-day benchmark showed the database held 6,500. We chose her design with the partitioning from mine. I had underestimated what a new system costs to run."
+
+    **Watch out for.** A story where the other engineer was simply wrong, going to a manager first, and a compromise that nobody tested.
   followUps:
     - q: In hindsight, what part of the other engineer's argument did you initially underestimate?
       level: Senior
-      companies: [Meta, Google]
       a: |-
-        Answering this honestly is a top self-awareness signal. Name a specific operational or edge-case point they raised that proved valid once the system hit production.
-
+        Name one specific point they raised that proved valid in production, such as the on-call cost of a new system or an edge case in failover. Say when you saw they were right and what you told them. An honest answer here shows self-awareness.
+    - q: What would you have done if the benchmark had not settled it?
+      level: Senior
+      a: |-
+        Say that the two of you would agree on who should decide, such as the team's architect or the owner of the system, and bring both cases in one document you wrote together. Then you both commit. Asking for a decision together is different from going over someone's head.
+    - q: How is your working relationship with that engineer now?
+      level: Senior
+      a: |-
+        Give evidence: you reviewed each other's later designs, or they asked you to join their next project. If it stayed tense, say what you did about it. The interviewer checks that the disagreement stayed about the design and never became personal.
 - id: conflict-pushback-pm-unrealistic-scope
   q: Tell me about a time you had to push back on a product manager or engineering manager who wanted to ship a feature without essential reliability or security work.
   level: Mid
   category: conflict-and-collaboration
   subcategory: manager-pm-pushback
-  companies:
-    - Google
-    - Stripe
-    - Airbnb
+  signals:
+    - conflict
+    - influence
   topics:
     - /behavioral/competencies/technical-conflict-and-alignment
     - /behavioral/competencies/tight-deadlines-and-tech-debt
   a: |-
-    **What interviewers are testing.** Saying a flat "no, that's unsafe" makes you look obstructive; saying "yes" and shipping an outage shows weak engineering backbone. Strong candidates translate engineering risks into product terms and offer **tiered options**.
+    **What it tests.** Whether you can disagree with someone who sets your priorities and still help them reach their goal. A flat refusal makes you look like a blocker. Silent agreement followed by an outage shows weak judgment. The interviewer wants the risk explained in product terms, with options. At mid level the hard part is doing this yourself, before asking a manager.
 
-    | Approach | How it lands | Result |
-    | --- | --- | --- |
-    | Flat refusal ("We can't ship without 2 weeks of load testing") | Adversarial; forces an escalation | PM escalates or loses trust |
-    | Silent compliance ("Okay, we'll skip idempotency") | Avoids conflict today, creates an outage tomorrow | Production incident + blame |
-    | Tiered menu with risk bounds ("We can launch to 5% internal beta on Friday, and 100% GA 4 days later once retry safety lands") | Collaborative problem-solving | Hits the milestone safely |
+    **How to shape the answer.**
 
+    - **Situation and task.** Name the feature, the date and the reliability or security work about to be skipped.
+    - **Action.** Say how you put the risk in terms the manager cares about: users affected, money or a likely incident. Give the options you offered, each with a date and a risk.
+    - **Result.** Say what was chosen, what shipped and when.
+    - **Learning.** Say how you raise this kind of risk earlier now.
+
+    **A strong answer sounds like this.** "Our product manager wanted to launch bulk import on Friday without rate limiting or retry safety. I worked on the backend. I showed her that one customer file of 200,000 rows could slow the shared database for every user, and that a retry would create duplicate records. I offered two options: launch Friday to 20 pilot customers with a 5,000 row cap, or launch to everyone nine days later with both protections. She chose the pilot. We found one duplicate bug during the pilot and shipped to everyone eight days later."
+
+    **Watch out for.** Describing the manager as careless, and a story where you gave in and it happened to work.
+  followUps:
+    - q: What would you have done if they had chosen to ship without the work?
+      level: Mid
+      a: |-
+        Say you would record the risk and the decision, add the cheapest protection you could, such as an alert and an off switch, and be ready on launch day. Explain when you would involve your own manager. After a fair decision, you commit.
+    - q: How did you estimate the risk?
+      level: Mid
+      a: |-
+        Give the basis for your numbers: a load test, a past incident or the size of real customer files. Admit the uncertainty. A risk backed by one measured fact persuades better than a list of everything that could go wrong.
+    - q: How was your relationship with that manager afterwards?
+      level: Mid
+      a: |-
+        Give a concrete sign, for example that they started asking you for a risk check during planning. If the relationship got harder, say what you did about it. The interviewer checks that you can disagree and still be easy to work with.
 - id: conflict-influence-without-authority-rfc
-  q: Describe a time you convinced another team—who did not report to your manager—to adopt a technical standard, migration, or API change that wasn't on their roadmap.
+  q: Describe a time you convinced another team (who did not report to your manager) to adopt a technical standard, migration, or API change that wasn't on their roadmap.
   level: Senior
   category: conflict-and-collaboration
   subcategory: influence-without-authority
-  companies:
-    - Meta
-    - Google
-    - Netflix
+  signals:
+    - influence
   topics:
     - /behavioral/competencies/influence-without-authority
+    - /behavioral/leveling-and-tracks/staff-and-principal-behavioral
   a: |-
-    **What interviewers are testing.** Influencing without authority is the primary gating signal between Mid-level (L4) and Senior/Staff (L5/L6) engineers. Another team says "no" not because they dislike clean architecture, but because their sprint is already 110% full and your migration looks like unrewarded risk.
+    **What it tests.** Whether you can change what another team does when you cannot tell them to. Other teams usually refuse because their plan is full and your change looks like unrewarded risk. The interviewer wants to see that you understood their costs and lowered them. At senior level this separates team-level work from wider impact.
 
-    **How to win adoption without authority:**
+    **How to shape the answer.**
 
-    - **Align with their local pain:** Show how your proposal solves a problem *they* already care about (e.g., cutting their on-call page volume or shaving 40 ms off their SLA).
-    - **Pay the migration tax yourself:** Build codemods, compatibility adapters, or draft PRs in their repository so their cost is a 20-minute code review rather than a 2-week rewrite.
-    - **Share the credit:** Highlight their engineers in the launch announcement and leadership review.
+    - **Situation and task.** Name the change, the other team and why it was not in their plan.
+    - **Action.** Say how you found a problem they already cared about that your change would ease. Say what you did to cut their cost: a migration script, an adapter, or draft changes in their code.
+    - **Result.** Give adoption and a number for each side.
+    - **Learning.** Say what you now do first.
 
+    **A strong answer sounds like this.** "On a platform team, I wanted the payments team to move 40 endpoints to our standard request tracing. It was not on their roadmap, and their lead said no. I learned they spent six hours a week on call finding which service had caused a failure. I wrote a short proposal around that problem, built an adapter so both formats worked together, and opened draft changes for their first ten endpoints. They finished the rest in five weeks. Their time to find a failing service fell from 50 minutes to 12, and their engineers presented the result."
+
+    **Watch out for.** Going to a director to force the change, and a proposal that lists benefits only for your own team.
+  followUps:
+    - q: What was their strongest objection, and did it change your proposal?
+      level: Senior
+      a: |-
+        State it as they would, for example the risk of a change during their busiest quarter. Say what you altered: the timing, the scope or who did the work. If nothing changed, the story sounds like pressure and not like influence.
+    - q: What would you have done if they had still said no?
+      level: Senior
+      a: |-
+        Give your order of steps: a smaller pilot, a later date, or living with the gap. Say when you would escalate and how you would tell them first. Escalation is acceptable when it is open and follows a real attempt.
+    - q: How did you make sure the change stayed in place after you stepped away?
+      level: Senior
+      a: |-
+        Describe the lasting part: a check in their build, shared ownership of the adapter, or documentation their engineers wrote. Say who owns it today. Adoption that needs you forever is not finished.
 - id: conflict-giving-receiving-critical-feedback
   q: Tell me about a time you gave constructive criticism to a peer, and a time you received tough feedback that was hard to hear.
   level: Mid
   category: conflict-and-collaboration
   subcategory: feedback-communication
-  companies:
-    - Netflix
-    - Meta
+  signals:
+    - feedback
   topics:
     - /behavioral/competencies/feedback-and-difficult-conversations
   a: |-
-    **What interviewers are testing.** Whether you practice candid, low-ego communication (Situation-Behavior-Impact) when giving feedback, and whether you exhibit genuine behavioral change—not disguised self-praise ("I care too much")—when receiving feedback.
+    **What it tests.** Two skills: giving direct feedback that helps a peer, and taking hard feedback and changing because of it. The interviewer expects two short stories. At mid level the second is harder, because you must name a real weakness and show a new habit.
 
-    - **Giving feedback:** Anchor on observable behavior and concrete team impact in a private 1:1 (e.g., PRs merged without waiting for on-call review causing two rollbacks), ask for their context first, and co-create a specific working agreement.
-    - **Receiving feedback:** Pick a real blind spot (such as jumping to code before aligning stakeholders, or writing overly terse code review comments), describe your initial reaction honestly, and show the measurable habit you built to fix it.
+    **How to shape the answer.**
 
+    - **Giving: situation and action.** Describe what the peer did and its effect on the team. Say you spoke in private and asked for their view first.
+    - **Giving: result.** Say what you agreed and what changed.
+    - **Receiving: situation and action.** Give the feedback in the other person's words, your honest first reaction and what you did.
+    - **Receiving: result and learning.** Show the habit you built and proof that it lasted.
+
+    **A strong answer sounds like this.** "A teammate on our web team merged large changes without waiting for review, and two were rolled back in one month. I asked him privately why. He said reviews took two days. We agreed that he would split his changes and I would review within four hours. The rollbacks stopped. The hard feedback for me came from my lead: my review comments were so short that newer engineers read them as hostile. I felt defensive at first. Then I reread a week of my comments and agreed. I now give the reason in each comment, and two people say reviews feel easier."
+
+    **Watch out for.** Feedback given in public or through a manager, a weakness that is praise in disguise, and a second story with no change in behaviour.
+  followUps:
+    - q: What was your first reaction to the feedback you received, honestly?
+      level: Mid
+      a: |-
+        Admit the real reaction, such as feeling defensive or embarrassed, and how long it lasted. Then say what moved you to act. The interviewer distrusts a candidate who claims to have welcomed hard feedback at once.
+    - q: What would you have done if your peer had disagreed with your feedback?
+      level: Mid
+      a: |-
+        Say you would ask for their view of the same events, look at the facts together and agree on one small change to try. If the problem continued and hurt the team, you would tell them before raising it with a lead.
+    - q: How do you know the change in you lasted?
+      level: Mid
+      a: |-
+        Give evidence from months later: a comment from the same person, a review score or a number. If you slipped back at some point, say when and what you do to catch it.
 - id: conflict-cross-functional-alignment
   q: Tell me about a project where you had to align engineering, product, design, or legal/security stakeholders who had conflicting definitions of success.
   level: Senior
   category: conflict-and-collaboration
   subcategory: cross-functional
-  companies:
-    - Apple
-    - Airbnb
-    - Stripe
+  signals:
+    - communication
   topics:
     - /behavioral/competencies/cross-functional-collaboration
   a: |-
-    **What interviewers are testing.** Cross-functional maturity: can you speak the native language of each function (user journeys for Design, conversion and retention for Product, threat models and auditability for Security/Legal, latency and operability for Engineering) and synthesize a single architecture that satisfies all non-negotiable constraints?
+    **What it tests.** Whether you can understand what each function needs, in its own terms, and bring them to one plan. Design thinks in user journeys, product in conversion, security and legal in threats and audit records, engineering in latency and running costs. At senior level you must separate fixed constraints from preferences and get the decision written down.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the project, the functions involved and how each defined success.
+    - **Action.** Say how you found each group's fixed constraint, how you wrote one shared definition of success, and what each side gave up.
+    - **Result.** Say what shipped, with a number that matters to each side.
+    - **Learning.** Say what you now do at the start of such a project.
+
+    **A strong answer sounds like this.** "I led engineering for a new sign-up flow. Product wanted fewer steps. Security wanted identity checks before any account existed. Design wanted one screen. Legal needed stored proof of consent. I met each group alone and asked what they could not give up. Then I wrote a one-page brief with four fixed constraints and one measure: completed, verified sign-ups. We moved the identity check to after the first screen but before any payment. Security accepted that with a 24 hour limit on unverified accounts. Completion rose from 54 to 63 percent, and the audit passed with no findings."
+
+    **Watch out for.** Calling it alignment when one group simply lost, describing meetings with no document or decision, and speaking about legal or security as obstacles.
+  followUps:
+    - q: What did each group give up?
+      level: Senior
+      a: |-
+        Name one concession per group and why they accepted it. If one group gave up nothing, explain why its constraint was fixed, for example a legal duty. A plan where nobody gave anything up usually means someone was not heard.
+    - q: How did you handle a stakeholder who would not move?
+      level: Senior
+      a: |-
+        Say you asked for the reason behind the position, tested whether another design met that reason, and brought data. If it stayed stuck, describe who made the decision and how you prepared both sides for it.
+    - q: How did you keep everyone aligned after the plan was agreed?
+      level: Senior
+      a: |-
+        Describe the working method: one written brief, a named owner for each constraint, and a short weekly update on the shared measure. Give one moment when the plan drifted and how the brief settled it.
+- id: how-do-you-explain-a-complex-model-to-non-technical-stakehol
+  q: How do you explain a complex model to non-technical stakeholders?
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: cross-functional
+  signals:
+    - communication
+  topics:
+    - /behavioral/competencies/cross-functional-collaboration
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+  a: |-
+    **What it tests.** Whether you can make your work useful to people who do not know machine learning. The interviewer wants a method and one short story where your explanation changed a decision. For a junior candidate the hard part is leaving out the technical detail you are proud of, and being honest about what the model cannot do.
+
+    **How to shape the answer.**
+
+    - **Start with the decision.** Say what the model helps the listener decide, in their terms.
+    - **Use plain words and examples.** Show three or four real cases and the inputs that matter most.
+    - **State the limits.** Give accuracy as "right about 8 times in 10" and say where the model fails.
+    - **Check understanding.** Ask how they would use it. Then give your story.
+
+    **A strong answer sounds like this.** "I start with the decision. In my first job I built a model that predicted which customers would cancel. The retention team did not need the algorithm. I told them: this list shows the 500 customers most likely to leave next month, and about 6 in 10 will leave if nobody calls. I showed four real customers and the three signals behind each score, such as fewer logins. I also said the model was weak for customers under two months old. They chose to call the top 300 first, and cancellations in that group fell by 8 percent."
+
+    **Watch out for.** Terms such as AUC or embeddings with no translation, hiding the error rate to sound confident, and a method with no example.
+  followUps:
+    - q: How do you explain uncertainty without losing their trust?
+      level: Junior
+      a: |-
+        Use counts in place of probabilities, for example "wrong about 2 times in 10", and show one wrong case. Then say what the model is still good for. People trust you more when the first mistake they see is one you warned them about.
+    - q: What do you do when a stakeholder asks why the model made one specific prediction?
+      level: Junior
+      a: |-
+        Say you show the main inputs behind that score in plain words, and you call them signals and never causes. If you cannot explain a case, say so and offer to check it. Never invent a reason.
+    - q: How do you check that they understood?
+      level: Junior
+      a: |-
+        Ask them to say how they will use it, or what they would do with one example case. Listen for wrong assumptions, such as treating a score as certain. If they misread it, change your explanation and try again.
+- id: tell-me-about-a-disagreement-with-a-product-manager-or-stake
+  q: Tell me about a disagreement with a product manager or stakeholder.
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: manager-pm-pushback
+  signals:
+    - conflict
+    - influence
+  topics:
+    - /behavioral/competencies/cross-functional-collaboration
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Whether you can disagree about direction with someone outside engineering and settle it with evidence. The interviewer listens for their goal stated fairly, a cheap test, and your commitment to the final decision even when it was not yours. At mid level a story where you were simply right is the weakest choice.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you disagreed about and what the other person was trying to achieve.
+    - **Action.** Describe the data or small experiment you used and the alternative you proposed.
+    - **Result.** Say who decided and give the outcome with a number. Say where they were right.
+    - **Learning.** Say what you do earlier now.
+
+    **A strong answer sounds like this.** "Our product manager wanted to replace keyword search with a neural search model across the help centre in one release. I am an ML engineer on that team, and I thought it would hurt exact queries such as error codes. Her goal was fewer searches that ended with no click. I proposed a one-week test on 10 percent of traffic. She was right for long questions: no-click searches fell from 34 to 25 percent. I was right about error codes, which got worse. She decided to launch a hybrid. I had asked for a longer test, lost that point, and built the hybrid on her timeline."
+
+    **Watch out for.** Describing the product manager as someone who does not understand technology, winning by escalation, and arguing on after the decision was made.
+  followUps:
+    - q: What was their goal, in their words?
+      level: Mid
+      a: |-
+        State the business aim they were measured on and why their proposal made sense from their seat. If you only learned it late, say so. The interviewer checks that you understood the person before you argued with the idea.
+    - q: What did you do when the decision went against you?
+      level: Mid
+      a: |-
+        Say you stated your concern once, clearly, then committed. Describe the work you did to make their choice succeed, and whether your concern came true. Do not tell the story as a quiet "I told you so".
+    - q: How do you settle a disagreement when there is no time for an experiment?
+      level: Mid
+      a: |-
+        Explain your method: agree on the goal, look at existing data or a past launch, and choose the option that is easier to undo. Say who decides. Give a short example if you have one.
+- id: tell-me-about-collaborating-with-engineers-to-productionize
+  q: Tell me about collaborating with engineers to productionize a model.
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: cross-functional
+  signals:
+    - communication
+  topics:
+    - /behavioral/competencies/cross-functional-collaboration
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+  a: |-
+    **What it tests.** Whether you can take a model from a notebook to a live service together with the engineers who run it. The interviewer listens for early agreement on interfaces, latency budgets and feature pipelines, and for shared responsibility after launch. At mid level, show that you changed the model to fit production limits.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the model, the serving team and the target for latency or throughput.
+    - **Action.** Say what you agreed in the first week: inputs and outputs, a latency budget, who computes each feature. Say how you tested for differences between training and serving.
+    - **Result.** Give the launch date and the live numbers.
+    - **Learning.** Say who watches the model now.
+
+    **A strong answer sounds like this.** "I trained a demand forecast model that the backend team had to serve inside their pricing service. In week one, two backend engineers and I wrote a one-page contract: input fields, a 40 millisecond budget and who computed each feature. My first model used 60 features and took 95 milliseconds. I cut it to 22 features and lost 0.4 percent accuracy. Before launch we replayed 10,000 live requests through both pipelines and found one feature that used a different time zone in serving. We fixed it together. I joined their on-call rotation for model alerts for the first two months."
+
+    **Watch out for.** "I gave them the model and they deployed it", blaming engineers for a slow service, and no mention of who watches the model after launch.
+  followUps:
+    - q: What did you change in your model because of production limits?
+      level: Mid
+      a: |-
+        Give a specific change and its cost: fewer features, a smaller model or a cached result, with the accuracy you gave up. This shows you treated latency and cost as part of your own problem.
+    - q: How did you find and fix training-serving skew?
+      level: Mid
+      a: |-
+        Describe the test: the same requests run through both pipelines and compared field by field. Give the mismatch you found and its cause. Say what check now runs automatically so the two paths cannot drift apart again.
+    - q: Who was paged when the model misbehaved?
+      level: Mid
+      a: |-
+        Say how alerts were split: service health to the engineers, model quality to you, with a shared runbook. Give one real alert and how it was handled. Shared ownership means a name on each alert.
+- id: tell-me-about-a-time-you-had-to-say-no-to-a-request
+  q: Tell me about a time you had to say no to a request.
+  level: Senior
+  category: conflict-and-collaboration
+  subcategory: manager-pm-pushback
+  signals:
+    - conflict
+    - influence
+  topics:
+    - /behavioral/competencies/tight-deadlines-and-tech-debt
+    - /behavioral/competencies/cross-functional-collaboration
+  a: |-
+    **What it tests.** Whether you can refuse a request from someone with more power or urgency than you and keep their trust. The interviewer wants your reasoning, the evidence and what you offered in its place. At senior level a good no protects a team's priorities and often meets the real need more cheaply.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who asked, for what, and why it mattered to them.
+    - **Action.** Say how you found what they really needed, what a yes would cost and what would slip. Give the alternative you offered.
+    - **Result.** Say what they accepted and what happened to the work you protected.
+    - **Learning.** Say how you handle such requests now.
+
+    **A strong answer sounds like this.** "A sales director asked my data team to rebuild all 30 revenue dashboards to update in real time before the quarter ended. I lead that team of five. I asked which decision needed live data. It was one: spotting large deals stuck in approval. A full rebuild would take about ten weeks and stop our billing migration, which finance needed for the audit. I said no to the rebuild and showed him the two timelines. I offered an hourly alert for stuck deals, which took four days. He accepted. The migration finished on time, and we now ask every requester which decision the data serves."
+
+    **Watch out for.** A no with no alternative, a refusal that hides behind process or your manager, and a story where the requester was foolish to ask.
+  followUps:
+    - q: How did the person react, and how did you handle it?
+      level: Senior
+      a: |-
+        Describe the real reaction, including frustration. Say what you did in the moment: repeated their goal, showed the trade and gave a date for the alternative. Then say how the relationship stood later, with a sign such as a new request you worked on together.
+    - q: How do you decide when to say yes even though it hurts your plan?
+      level: Senior
+      a: |-
+        Give your test: the size of the business need, whether only your team can do it, and what slips. Give a short case where you said yes and told your stakeholders what moved. Someone who always says no is hard to trust too.
+    - q: What would you have done if they had gone over your head?
+      level: Senior
+      a: |-
+        Say you would brief your manager with the same facts and options you gave the requester, and accept the decision. The interviewer checks that your no rested on priorities you can defend upward.
+- id: describe-a-time-you-influenced-a-decision-without-authority
+  q: Describe a time you influenced a decision without authority.
+  level: Senior
+  category: conflict-and-collaboration
+  subcategory: influence-without-authority
+  signals:
+    - influence
+  topics:
+    - /behavioral/competencies/influence-without-authority
+    - /behavioral/leveling-and-tracks/staff-and-principal-behavioral
+  a: |-
+    **What it tests.** Whether you can move a decision that belongs to someone else, using evidence and an understanding of what the decision-makers care about. The interviewer listens for who the stakeholders were, what each worried about and what you built to make the case. At senior level the decision should reach beyond your own team.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the decision, who owned it and why you had no authority.
+    - **Action.** Say how you learned each stakeholder's concern, what data or prototype you produced and how your proposal changed.
+    - **Result.** Give the decision and a number. Say what you did not get.
+    - **Learning.** Say how you approach the next such decision.
+
+    **A strong answer sounds like this.** "Our company planned to train 12 product categorisation models, one per country. The decision belonged to the head of the catalogue group, and I was an ML engineer on another team. I believed one multilingual model would do. I asked two country leads what worried them, and it was accuracy on local product names. In two weeks I built a prototype and tested it on their own data. It matched the per-country models in nine markets and was 3 points worse in three. I proposed one shared model plus three local ones. The head agreed, which cut planned training cost by 60 percent."
+
+    **Watch out for.** Influence that was really a manager's order, a case built only on your opinion, and ignoring the people who had to live with the decision.
+  followUps:
+    - q: Who was hardest to convince, and what worked?
+      level: Senior
+      a: |-
+        Name their role and their real concern. Say what evidence answered it, or what you changed to meet it. If they were never convinced, say how the decision went ahead and how you kept working with them.
+    - q: What did you change in your proposal because of what you heard?
+      level: Senior
+      a: |-
+        Give one specific change and who caused it. Say what the change cost you. This is the difference between influence and pushing. A proposal that passes every stakeholder unchanged usually means you did not listen.
+    - q: Tell me about a time you failed to influence a decision.
+      level: Senior
+      a: |-
+        Pick a real case. Say what you tried and why it did not work: timing, weak evidence or the wrong audience. Then say what you do differently. Keep it short and do not blame the decision-maker.
+- id: describe-working-with-a-cross-functional-team-on-an-ai-featu
+  q: Describe working with a cross-functional team on an AI feature.
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: cross-functional
+  signals:
+    - communication
+  topics:
+    - /behavioral/competencies/cross-functional-collaboration
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+  a: |-
+    **What it tests.** Whether you can build an AI feature with people who judge it in different ways. Product wants adoption, design wants a clear experience when the model is wrong, and legal or safety wants limits on what it may say. The interviewer listens for how the group agreed on goals and on a measure of quality. At mid level, make your own part clear.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the feature, the roles on the team and your part.
+    - **Action.** Say how you agreed on the goal and the evaluation together, for example shared test cases. Give one clash of priorities and how it was settled.
+    - **Result.** Say what shipped and what it achieved.
+    - **Learning.** Say what you would start earlier.
+
+    **A strong answer sounds like this.** "I was the ML engineer on a feature that drafted replies for support agents. The team had a product manager, a designer, two backend engineers and a legal reviewer. I proposed one shared test set: 300 real tickets, with rules from each role, such as never promising a refund. Legal wanted a person to review every draft, and product wanted one-click send. We settled on one-click for 12 low-risk ticket types and review for the rest. At launch, agents used the draft in 46 percent of tickets and handling time fell by 70 seconds. Drafts for billing tickets stayed weak."
+
+    **Watch out for.** Describing only the model work, treating legal or safety review as a delay, and giving no shared measure of quality.
+  followUps:
+    - q: How did the team agree on what a good output was?
+      level: Mid
+      a: |-
+        Describe what you built: a shared test set, a scoring guide and who labelled it. Say how disagreements between labellers were settled. Agreement on evaluation before launch is the main thing the interviewer wants from this story.
+    - q: What did design change because of the model's limits?
+      level: Mid
+      a: |-
+        Give one example, such as showing drafts as editable suggestions or adding a way to report a bad answer. Say how you explained the failure cases to the designer. This shows you shared the model's weaknesses early.
+    - q: What would you do differently on the next AI feature?
+      level: Mid
+      a: |-
+        Name one concrete change, for example involving legal in week one or building the test set before the first prototype. Tie it to something that cost time on this project.
+- id: tell-me-about-a-time-you-received-critical-feedback-on-your
+  q: Tell me about a time you received critical feedback on your work.
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: feedback-communication
+  signals:
+    - feedback
+    - growth
+  topics:
+    - /behavioral/competencies/feedback-and-difficult-conversations
+    - /behavioral/leveling-and-tracks/new-grad-and-intern-interviews
+  a: |-
+    **What it tests.** Whether you can hear criticism, stay open and change your work. For a junior candidate this matters a great deal, because you will receive feedback every week. The interviewer wants real feedback about a real weakness, your honest reaction and proof that you changed. The hard part is choosing feedback that does not flatter you.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the work was and who gave the feedback.
+    - **Action.** Give the feedback in their words, how you reacted, what you asked and what you changed.
+    - **Result.** Give the outcome on that piece of work, with a number if you can.
+    - **Learning.** Name the habit you keep and how you ask for feedback now.
+
+    **A strong answer sounds like this.** "In my first month as a junior data analyst, I sent a churn analysis to my senior. She replied that the charts looked fine but she could not trust the numbers, because I had not shown how I handled 3,000 duplicate accounts. It stung, since I had worked on it for a week. I asked her to show me how she would check it. I redid the analysis with the duplicates removed, and the churn rate changed from 7.2 to 5.9 percent. I added a data checks section to the report. I now send her a draft after two days."
+
+    **Watch out for.** Feedback that is really a compliment, explaining why the reviewer was wrong, and "I took it on board" with no specific change.
+  followUps:
+    - q: Did you agree with the feedback at the time?
+      level: Junior
+      a: |-
+        Answer honestly. If you disagreed at first, say what changed your mind, usually checking the facts yourself. If you still disagree with part of it, say which part and what you did anyway. Honest partial agreement is a fine answer.
+    - q: How do you ask for feedback now?
+      level: Junior
+      a: |-
+        Give your habit: sharing drafts early, asking one specific question such as "what would make you doubt this", and asking more than one person. Say how often. Asking before feedback is offered is a strong signal for a junior candidate.
+    - q: Tell me about feedback you chose not to act on.
+      level: Junior
+      a: |-
+        Pick a small case. Say you understood the point, why you decided differently and that you told the person. This shows judgment. Avoid a case where you ignored the feedback silently.
+- id: core-code-review-that-became-a-disagreement
+  q: Tell me about a code review that turned into a real disagreement. How did it get settled?
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: peer-technical-conflict
+  signals:
+    - conflict
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** How you handle conflict over code. The interviewer listens for whether you separated real problems from matters of taste, whether you moved the argument out of written comments when it stopped working, and whether you stayed open to being wrong. For a junior candidate the reviewer is often more senior.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the change was, who reviewed it and what you disagreed about.
+    - **Action.** Say what you tried in writing, when you moved to a call, and what each side showed the other.
+    - **Result.** Say what was changed, what was dropped, and when it merged.
+    - **Learning.** Say what you do differently in reviews now.
+
+    **A strong answer sounds like this.** "On my first large change to our mobile app, a senior engineer left 23 comments and asked me to redo how the screen kept its state. I thought my version was simpler and answered each comment. After four rounds over two days we were stuck, so I asked for a 20-minute call. He showed me a bug in my version when the phone rotated. I showed him that six comments were about style only. I fixed the state handling, he dropped the style points, and we added them to the lint rules. It merged the next day. Now I call after two rounds."
+
+    **Watch out for.** Calling the reviewer picky, giving in to every comment to make it end, and long comment threads when a short talk would have settled it.
+  followUps:
+    - q: What would you have done if the reviewer had been right about everything?
+      level: Junior
+      a: |-
+        Say you would have made the changes and thanked them, and that part of this story is exactly that. The rotation bug was real. Interviewers want to see that your aim was correct code and that winning the thread did not matter to you.
+    - q: What if they had still preferred their approach after the call?
+      level: Junior
+      a: |-
+        Say you would ask who owns the decision, usually the code owner or tech lead, give both views fairly and accept the result. If only taste was left, you would follow the team's existing pattern. Do not describe a stand-off.
+    - q: How do you review other people's code now?
+      level: Junior
+      a: |-
+        Give one or two habits that came from this: you mark comments as blocking or optional, and you explain the reason for each blocking one. This shows the experience changed your behaviour on the other side of the review.
+- id: core-lost-a-design-argument-who-was-right
+  q: Tell me about a design argument you lost. What did you do next, and looking back, who was right?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: peer-technical-conflict
+  signals:
+    - conflict
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Conflict handled like an adult. The interviewer wants to hear that you argued your case with evidence, backed the decision fully once it was made, and later checked honestly who had been right. The hardest versions are where you were wrong, or where you were right and had to avoid saying "I told you so".
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the two options and each side's best reason. Say who decided.
+    - **Action.** Say how you supported the chosen design, and how you turned your concern into something the team could measure.
+    - **Result.** Give the evidence that later showed who was right.
+    - **Learning.** Say what it changed in how you argue.
+
+    **A strong answer sounds like this.** "I work on a platform team. I argued for a managed message queue. The team chose to run our own, which saved about 2,000 dollars a month. My worry was on-call load. After the decision I said I would back it and asked for one thing: a written number that would make us look again, more than two pages a month. I built the alerts and the runbook myself. In six months the queue paged us three times in total. My worry was too large, and I said so in our review. I now ask what result would prove me wrong before I argue."
+
+    **Watch out for.** Slow or half-hearted work on the design you opposed, reopening the argument at every problem, and telling the story so that the others look foolish.
+  followUps:
+    - q: Did you commit fully once the decision was made?
+      level: Mid
+      a: |-
+        Give proof in the form of work. In the sample you built the alerts and the runbook for the option you had opposed. Name the piece of work you did. Saying "I committed" without an action sounds like you only stopped arguing.
+    - q: What would you have done if the decision had gone badly?
+      level: Mid
+      a: |-
+        Say you would bring the agreed number to the team and ask to revisit the choice, with no blame. The trigger was set in advance for this reason. Avoid any answer that sounds like waiting for the failure so you could be proved right.
+    - q: Why did you lose the argument?
+      level: Mid
+      a: |-
+        Give a fair account. Perhaps the saving was certain and your risk was a guess, and you had no data for it. Say what you would bring next time. Knowing why you lost matters more to the interviewer than the argument itself.
+- id: core-hard-to-work-with-colleague-over-months
+  q: Tell me about someone you found hard to work with on a project that lasted months. What did you change in how you worked with them?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: peer-technical-conflict
+  signals:
+    - conflict
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Whether you can keep delivering with a person whose style clashes with yours. The interviewer listens for how you describe them, whether you tried to understand why they worked that way, and what you changed in your own habits. A fair description of the other person counts for more than a happy ending.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Describe what they did and its effect on the work. Use behaviour, with no labels about character.
+    - **Action.** Say what you asked them, what you learned, and the working agreement you made together.
+    - **Result.** Say what improved, what did not, and whether the work shipped.
+    - **Learning.** Say what you do earlier now with a new colleague.
+
+    **A strong answer sounds like this.** "I am a frontend engineer. For five months I built a dashboard on an API owned by one backend engineer. He changed response fields without notice and often took a day to answer messages. My pages broke three times in the first month. I stopped guessing and asked how he liked to work. He worked in long blocks and saw messages as interruptions. We agreed on a 15-minute call at 2 pm each day and a shared file that listed every field. Breaks dropped to one in the next four months. We never became close, but we shipped on time."
+
+    **Watch out for.** Words like lazy, arrogant or toxic, going to a manager before talking to the person, and a story in which only the other person had to change.
+  followUps:
+    - q: What would they say was hard about working with you?
+      level: Mid
+      a: |-
+        Have a real answer. Perhaps you sent many small messages through the day and expected fast replies. Say you learned this by asking. The question checks whether you saw your own part in the problem.
+    - q: At what point would you have involved your manager?
+      level: Mid
+      a: |-
+        Give a clear line: after you had raised it directly and the agreement was broken more than once, or if the delivery date was at risk. Say what you would ask the manager for, such as a decision on who owns the interface.
+    - q: How would that person describe you today?
+      level: Mid
+      a: |-
+        Give something you can support: he later asked you to review his API change, or you both still use the shared file. If you do not know, say so, and give your best guess, such as "direct, and easier to work with after the first month".
+- id: core-realised-mid-argument-you-were-wrong
+  q: Tell me about a technical argument where you realised partway through that the other person was right. What did you do at that moment?
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: peer-technical-conflict
+  signals:
+    - conflict
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+    - /behavioral/leveling-and-tracks/red-flags-and-recovery
+  a: |-
+    **What it tests.** Whether you can change your mind in front of other people. The interviewer listens for what evidence turned you, how quickly you said so, and whether you then helped with the other person's idea. For a junior candidate a small, honest story from a team project is enough.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you were arguing for and what the other person argued. Say why you were confident.
+    - **Action.** Describe the moment you saw the evidence, and what you said. Then say how you helped.
+    - **Result.** Give the outcome of their approach with a number.
+    - **Learning.** Say what you check now before you take a strong position.
+
+    **A strong answer sounds like this.** "In my final-year project our web app took six seconds to load. I argued for about 20 minutes that the database was slow and that we needed a cache. A teammate thought it was the images. Then he opened the network view. The queries took 30 milliseconds and the images were 4 megabytes each. I stopped and said: you are right, I was guessing. I spent the evening helping him resize and compress them. Load time fell to about 1.5 seconds. Measuring first would have saved the whole argument. Now I look at the numbers before I take a side."
+
+    **Watch out for.** A story where you were only slightly wrong, changing sides without saying so aloud, and making excuses for why your first view was reasonable.
+  followUps:
+    - q: Why were you so sure at the start?
+      level: Junior
+      a: |-
+        Give the honest reason, for example that a database had been the cause in your last project and you assumed the same again. Naming the source of the mistake shows self-awareness. Do not defend the first view.
+    - q: How long did it take you to admit it?
+      level: Junior
+      a: |-
+        Answer in real time: seconds, minutes or days. If you held on longer than you should have, say so and say what it cost. A short delay that you admit is believable. A claim that you never resist being wrong is hard to believe.
+    - q: Has it happened again since, and what did you do?
+      level: Junior
+      a: |-
+        Give a short second example where you measured first, or where you conceded faster. This shows the lesson stuck. If there is no second example yet, describe the habit you follow, such as writing down what would prove you wrong.
+- id: core-told-your-manager-news-they-did-not-want
+  q: Tell me about a time you had to tell your manager something about a project that they did not want to hear. When did you tell them, and how?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: manager-pm-pushback
+  signals:
+    - conflict
+    - influence
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+    - /behavioral/leveling-and-tracks/red-flags-and-recovery
+  a: |-
+    **What it tests.** Whether you bring bad news early and in a usable form. The interviewer listens for when you spoke up compared with when you first knew, whether you separated what you knew from what you only suspected, and whether you came with options. Waiting until you are certain is the usual mistake.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the project was, what your manager had promised to others, and what you found.
+    - **Action.** Say how soon you told them, what you said, and the options you offered with their costs.
+    - **Result.** Say what they chose and how the project ended.
+    - **Learning.** Say when you raise a risk now.
+
+    **A strong answer sounds like this.** "I am a data engineer. Three weeks before a warehouse move that my manager had promised to finance, I found that totals in the new system differed from the old by 0.4 percent across two years of history. I did not know why yet. I told her that afternoon: what I knew, what I did not, and two options. We could slip two weeks, or move only the current year on time. She was not pleased, because she had just reported that we were on track. She chose the current year. I found the cause in six days. The full history moved three weeks late."
+
+    **Watch out for.** Sitting on the news until you have a fix, softening it so much that the manager misses the point, and bringing a problem with no options.
+  followUps:
+    - q: Why did you not wait until you knew the cause?
+      level: Mid
+      a: |-
+        Explain the cost of waiting: each day removed options, and your manager was still telling others the date was safe. Say you labelled the unknown parts clearly. Early news with gaps is more useful than complete news that arrives too late.
+    - q: How did your manager react, and how did you handle that?
+      level: Mid
+      a: |-
+        Describe the reaction honestly, including irritation. Say you kept to facts, repeated the options and offered to join the conversation with finance. Do not present the manager as unreasonable. Their position had just become harder because of your news.
+    - q: When could you have seen the risk earlier?
+      level: Mid
+      a: |-
+        Name the point. In the sample, you could have compared totals on a sample month at the start, which takes an hour. Say you now run that check in the first week of any move. A specific earlier moment shows you studied the miss.
+- id: core-unpopular-decision-and-the-reaction
+  q: Tell me about a decision you made that was unpopular with your team or your stakeholders. How did you handle the reaction?
+  level: Senior
+  category: conflict-and-collaboration
+  subcategory: manager-pm-pushback
+  signals:
+    - conflict
+    - influence
+  topics:
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Whether you can hold a decision under pressure and still listen. The interviewer wants the evidence behind the decision, how you dealt with the people who objected, and what you changed because of them. At senior level the decision should affect people outside your own team, and you should know how it looks months later.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you decided, why it was yours to decide, and who disliked it.
+    - **Action.** Say how you explained it, what you adjusted after objections and what you refused to adjust.
+    - **Result.** Give the outcome with a number, and say honestly who is still unhappy.
+    - **Learning.** Say what you would do earlier next time.
+
+    **A strong answer sounds like this.** "I owned the build system for about 60 engineers. I removed the option to skip tests on merge, which was used on 30 percent of merges. Two team leads complained to my director. I had published the data first: 7 of the last 10 broken builds came from skipped tests. I held open sessions for two weeks, cut the test run from 22 minutes to 13 to repay some of the cost, and added an emergency path with a named approver. Broken builds fell from ten a month to three. One team still finds it slower, and I review the numbers with them each month."
+
+    **Watch out for.** A decision that was really popular, a story where the critics were simply wrong, and holding the line while ignoring fair objections.
+  followUps:
+    - q: Did the people who objected change anything in the outcome?
+      level: Senior
+      a: |-
+        Say what moved and what did not. In the sample the rule stayed, the test run got faster and an emergency path was added. Showing which objections changed your plan proves that you listened and did not only wait for the noise to stop.
+    - q: What would have made you reverse the decision?
+      level: Senior
+      a: |-
+        Name the evidence you had set in advance, such as merge time rising by more than a fixed amount with no fall in broken builds after a month. A decision with a stated exit condition sounds like judgment. One without sounds like stubbornness.
+    - q: What would you do differently in how you announced it?
+      level: Senior
+      a: |-
+        Give one concrete change. For example, you would speed up the tests before removing the option, so that people felt the benefit first. Or you would brief the two team leads privately a week ahead.
+- id: core-changed-the-mind-of-someone-senior
+  q: Tell me about a time you changed the mind of someone much more senior than you. What worked?
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: influence-without-authority
+  signals:
+    - influence
+  topics:
+    - /behavioral/competencies/influence-without-authority
+  a: |-
+    **What it tests.** Influence without rank. The interviewer listens for how you prepared, whether you chose the right place and tone, and whether you left room to be wrong yourself. For a junior candidate, a single design detail changed by good evidence is a strong story.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who the senior person was, what they had decided, and what you thought was wrong.
+    - **Action.** Say what evidence you gathered, how you raised it and the words you used.
+    - **Result.** Say what they changed and how they responded to you.
+    - **Learning.** Say what you would repeat next time.
+
+    **A strong answer sounds like this.** "I was eight months into my first backend job. A principal engineer's design had our service call the pricing system on every page view. I thought that would break its rate limit. I did not raise it in the review meeting, because I was not sure. I pulled last month's traffic first: our peak was 900 requests a second against a limit of 500. I sent him a half-page note with the graph and asked what I was missing. He replied within the hour. He had used last year's numbers. He changed the design to keep prices for 60 seconds and thanked me in the document."
+
+    **Watch out for.** Contradicting them in public with no data, a story where the senior person looks careless, and saying you "pushed back" when you only asked a question and dropped it.
+  followUps:
+    - q: What would you have done if they had dismissed your note?
+      level: Junior
+      a: |-
+        Say you would ask what evidence would change their view, and check your own numbers once more. If the risk was serious, you would mention it to your lead and let them judge. Avoid both extremes: giving up at once, or going over their head on day one.
+    - q: Why did you raise it in writing and not in the meeting?
+      level: Junior
+      a: |-
+        Give your reasoning: you were unsure, the data took an hour to gather, and a private note let them check it without an audience. Add that for an urgent risk you would speak up in the meeting, even with less proof.
+    - q: What if they had refused to discuss it at all?
+      level: Junior
+      a: |-
+        Say the approach stays the same: evidence, a clear question, and one more attempt through someone they trust. Past that, you write down the risk where the team can see it and accept the decision. You were heard, and that is the limit of your role.
+- id: core-team-adopted-a-practice-they-first-resisted
+  q: Tell me about a working practice you wanted your own team to adopt, which they resisted at first. How did you get it to stick?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: influence-without-authority
+  signals:
+    - influence
+  topics:
+    - /behavioral/competencies/influence-without-authority
+  a: |-
+    **What it tests.** Influence over peers, where you cannot order anyone. The interviewer wants to hear why the team resisted, how you lowered the cost of trying, and how you showed the result. They also listen for what you gave up. A practice imposed through a manager does not count.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the practice, the problem it solves, and the team's objection in their words.
+    - **Action.** Say how you tried it yourself first, how you proposed a trial, and what you measured.
+    - **Result.** Give the numbers after the trial and say what the team decided, including changes to your idea.
+    - **Learning.** Say what you now do first when you want a team to change a habit.
+
+    **A strong answer sounds like this.** "I wanted our six-person mobile team to write a one-page design note before any change larger than three days. The team called it paperwork. I did not ask for a rule. I wrote notes for my own next two features and asked for 15 minutes of comments. On the second, a teammate saw that I was about to duplicate a sync job, which saved a week. I then proposed a four-week trial with a five-question template. Pull requests that needed major rework fell from five to one. The team voted to keep it for changes over five days, and I accepted that."
+
+    **Watch out for.** Describing the team as resistant to change, getting the manager to impose it, and a practice that quietly died two months later.
+  followUps:
+    - q: Is the team still doing it today?
+      level: Mid
+      a: |-
+        Answer truthfully. If yes, give a sign, such as the count of notes last quarter or a new joiner using the template. If it faded, say why and what you learned. A practice that survives without you pushing is the real result.
+    - q: What was the strongest objection, and was it right?
+      level: Mid
+      a: |-
+        State it fairly, for example that small changes do not need a document. Say that it was partly right and that the five-day limit came from it. Showing that the objection improved your idea is a stronger answer than showing you overcame it.
+    - q: Did any problems show up after the team adopted it?
+      level: Mid
+      a: |-
+        Give one, such as notes growing to four pages or reviews of notes adding a day of waiting. Say how the team fixed it. Every new practice has a cost, and naming it shows you kept watching after the vote.
+- id: core-built-support-before-the-deciding-meeting
+  q: Tell me about a time you built support for a proposal before the meeting where it was decided. Who did you talk to, and what did you change?
+  level: Senior
+  category: conflict-and-collaboration
+  subcategory: influence-without-authority
+  signals:
+    - influence
+  topics:
+    - /behavioral/competencies/influence-without-authority
+  a: |-
+    **What it tests.** Influence at the level where decisions involve many teams. The interviewer listens for whether you knew who decided and who would be affected, whether the private conversations changed your proposal, and whether people who disagreed still got a fair hearing. Talking to people first is good practice. Hiding the opposition is a red flag.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you proposed, who would decide and which teams it touched.
+    - **Action.** Say who you met one to one, what objections you heard and what you changed in the proposal.
+    - **Result.** Say how the meeting went and what was decided.
+    - **Learning.** Say what you do now before any decision that crosses teams.
+
+    **A strong answer sounds like this.** "I am a staff data engineer. I proposed one shared event format for eight teams, to be decided at an architecture review. Over two weeks I met six of the eight leads one at a time. I heard two objections I had missed. Finance needed its data frozen at month end, and one team had nobody free to migrate. I added a freeze window and offered two of my engineers for that migration. One lead still disagreed, so I put his objection in the document and asked him to present it. The meeting took 25 minutes and approved the proposal seven to one."
+
+    **Watch out for.** Lobbying only the people who already agree, promising different things to different teams, and arriving at the meeting with the opposition left out of the document.
+  followUps:
+    - q: Why did you put the opposing view in your own document?
+      level: Senior
+      a: |-
+        Explain that the decision makers would hear it anyway, and hearing it from you showed that the proposal had been tested. It also kept the working relationship with that lead. A decision made with the objection on the table is harder to reopen later.
+    - q: Who did you choose not to speak to beforehand, and why?
+      level: Senior
+      a: |-
+        Name them and give the reason, such as two leads whose teams were barely affected. Say whether that was a mistake. The interviewer is checking that your choice of people was deliberate and that you did not only pick allies.
+    - q: What happened with the lead who voted against it?
+      level: Senior
+      a: |-
+        Say what you did after the meeting: you met him, agreed what would make the migration safe for his team, and gave his team a later slot. Give a sign of the relationship now, for example that he reviewed your next proposal early.
+- id: core-feedback-to-a-peer-about-behaviour
+  q: Tell me about a time you gave a peer feedback about how they behaved with other people, and not about their code. How did you say it?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: feedback-communication
+  signals:
+    - feedback
+  topics:
+    - /behavioral/competencies/feedback-and-difficult-conversations
+  a: |-
+    **What it tests.** Giving feedback that nobody asked for, to someone you do not manage. The interviewer listens for whether you had specific observations, whether you spoke in private and soon, and whether you described the effect without judging the person. Feedback on behaviour is harder than feedback on code.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the peer did, how often, and the effect on other people or on the work.
+    - **Action.** Say when and where you spoke to them, and give the words you used. Say how they reacted.
+    - **Result.** Say what changed, with one sign you could see.
+    - **Learning.** Say how you prepare for this kind of talk now.
+
+    **A strong answer sounds like this.** "A backend engineer on my team often cut in when our two newest engineers spoke in design reviews. In one review I counted six times, four of them with the same person, and she had stopped proposing ideas. I asked him for a coffee the next day. I told him what I had counted and that she had not proposed anything in three weeks. He was surprised and a little defensive. He said he was trying to save time. I asked him to try waiting until people finished. In the next review he cut in once and stopped himself. She presented a design the next month."
+
+    **Watch out for.** Feedback given in a group channel, vague statements such as "you can be harsh", and reporting to the manager before speaking to the person.
+  followUps:
+    - q: What exactly did you say to them?
+      level: Mid
+      a: |-
+        Give the sentences, close to word for word: what you saw, the count, the effect, and one request. Interviewers ask this to check the talk really happened. Keep judgments of character out of it and keep it short.
+    - q: How did you decide it was your place to raise it?
+      level: Mid
+      a: |-
+        Say that you saw it directly, it was hurting the team's work, and nobody else had spoken. Add that you asked yourself whether you would want to be told. If the behaviour had been more serious, you would have gone to your manager first.
+    - q: What would you have done if he had carried on?
+      level: Mid
+      a: |-
+        Say you would raise it with him once more with new examples, and then tell him you were going to mention it to your manager. Telling the person before you escalate is the detail that interviewers listen for.
+- id: core-feedback-you-thought-was-wrong
+  q: Tell me about feedback you received that you believed was wrong. What did you do with it?
+  level: Junior
+  category: conflict-and-collaboration
+  subcategory: feedback-communication
+  signals:
+    - feedback
+  topics:
+    - /behavioral/competencies/feedback-and-difficult-conversations
+  a: |-
+    **What it tests.** How you handle feedback when your first reaction is to reject it. The interviewer wants to see that you checked it before you dismissed it, took the part that was true, and said clearly which part you still disagreed with. Accepting everything is as weak an answer as rejecting everything.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who gave the feedback and what they said. Say why you thought it was wrong.
+    - **Action.** Say how you tested it: examples you asked for, or something you counted.
+    - **Result.** Say which part you accepted, which part you did not, and what you agreed with the person.
+    - **Learning.** Say how you respond now when feedback feels unfair.
+
+    **A strong answer sounds like this.** "In my first review as a junior data engineer, my lead said I asked too many questions and should work things out alone. I thought that was wrong, because my questions had caught two bad requirements. I did not argue. I asked her for examples, and she showed me three that our wiki already answered. For a month I logged my questions: 31 in total, 12 that I could have answered from the documents. I told her I agreed about those 12 and not about the rest. I proposed to search for 15 minutes first and ask once a day in a batch. She agreed."
+
+    **Watch out for.** Feedback you secretly agreed with, arguing in the moment, and a story that ends with the other person admitting they were completely wrong.
+  followUps:
+    - q: How would you respond if part of the feedback was simply inaccurate?
+      level: Junior
+      a: |-
+        Say you would correct the fact calmly with evidence, and still look for what led the person to that view. If your lead believed something untrue about your work, there is usually a gap in what they can see, and that gap is yours to close.
+    - q: Why did you not say you disagreed straight away?
+      level: Junior
+      a: |-
+        Explain that you could not tell in the moment whether you were right or only hurt. Asking for examples gave you facts. Add that you did say it later, with numbers, which is the important part. Staying silent for good would be a weak answer.
+    - q: What did the person think of your response?
+      level: Junior
+      a: |-
+        Report what they said or did afterwards. Perhaps the next review mentioned that your questions were fewer and better. If you never found out, say you would now ask directly a month later whether the change was what they wanted.
+- id: core-told-someone-their-work-was-not-good-enough
+  q: Tell me about a time you had to tell someone that a piece of their work was not good enough to ship or to use. How did you do it?
+  level: Senior
+  category: conflict-and-collaboration
+  subcategory: feedback-communication
+  signals:
+    - feedback
+  topics:
+    - /behavioral/competencies/feedback-and-difficult-conversations
+  a: |-
+    **What it tests.** Holding a standard while treating the person well. The interviewer listens for how specific you were about the gap, whether you said what would pass, and what help you offered. At senior level the person often reports to someone else, and the story should end with a clearer standard.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say whose work it was, why you were the judge, and what was wrong.
+    - **Action.** Say how you told them, the gaps you named, the bar you set and your help.
+    - **Result.** Say what the rework showed and what the delay cost.
+    - **Learning.** Say how the standard is now known before work starts.
+
+    **A strong answer sounds like this.** "I review model launches for our ML group. An engineer on another team sent me an evaluation of a new ranking model, tested on 500 queries from one week. I spoke to him before I wrote anything. I said I could not sign it: the sample was too small to show the 1 percent gain he claimed. I named what would be enough: 5,000 queries over four weeks, split by language. He was frustrated, so I shared my sampling script. The re-run took six days and showed a gain in two of five languages. We launched in those two. Our template now states the minimum sample."
+
+    **Watch out for.** Fixing the work yourself in silence, criticism with no statement of what would pass, and giving the verdict in a comment the whole team reads first.
+  followUps:
+    - q: How did they take it, and how is the working relationship now?
+      level: Senior
+      a: |-
+        Describe the first reaction honestly, then one later sign, such as him sending you the next evaluation early for comments. If things stayed tense, say so. The interviewer wants to know you noticed the person as well as the work.
+    - q: How did you know your standard was right and was more than your own preference?
+      level: Senior
+      a: |-
+        Tie it to a risk. With 500 queries, a 1 percent gain could be noise, and you can show the arithmetic. If part of your objection was preference, say which part and that you did not block on it.
+    - q: What if they had been more senior than you?
+      level: Senior
+      a: |-
+        Say the content stays the same and the framing changes a little: you ask to walk through the evidence together and state plainly what you cannot sign. Add that you would tell your own manager in advance, so nobody is surprised by the delay.
+- id: core-non-engineering-team-with-opposing-goals
+  q: Tell me about a time you worked with a team outside engineering, such as legal, sales or support, whose goals pulled against yours. How did you both get what you needed?
+  level: Mid
+  category: conflict-and-collaboration
+  subcategory: cross-functional
+  signals:
+    - communication
+  topics:
+    - /behavioral/competencies/cross-functional-collaboration
+  a: |-
+    **What it tests.** Communication across functions. The interviewer wants to hear that you understood the other team's target as well as your own, that you went to find the real need behind their request, and that you explained engineering limits in their terms. A story where engineering was right and the other team gave way scores poorly.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the other team, their goal and yours. Say where the two collided.
+    - **Action.** Say what you did to learn their real need, and what you proposed that served both goals.
+    - **Result.** Give a number for each side, including what one side did not get.
+    - **Learning.** Say how you work with that function now.
+
+    **A strong answer sounds like this.** "I am a backend engineer on a reporting product. Sales needed to close three large customers that quarter, and each wanted a custom report. My team's goal was to cut the nine custom formats we already kept alive, at about two days a month each. I asked the sales lead if I could join two customer calls. The customers needed four extra fields and a different date format, which is far less than a custom report. I built configurable columns in two weeks. Sales closed two of the three. The third wanted a layout we declined. We also retired five old formats."
+
+    **Watch out for.** Describing the other team as not understanding technology, saying no without learning what they needed, and saying yes to everything and hiding the cost.
+  followUps:
+    - q: What did the other team give up, and how did they feel about it?
+      level: Mid
+      a: |-
+        Name it plainly: one of three deals did not close on their terms. Say how you and the sales lead discussed it, and whether they would work with you again. An answer where nobody lost anything usually sounds untrue.
+    - q: How did you explain the engineering cost to people who do not write code?
+      level: Mid
+      a: |-
+        Give the words you used. For example, each custom format takes two days every month for as long as the customer stays, which adds up to about a month of one engineer a year. Time and money are terms every function understands.
+    - q: What would you have done if no option served both goals?
+      level: Mid
+      a: |-
+        Say you would write down the trade-off with both costs and take it to the person who owns both targets, together with the sales lead. Going up together, with one shared description, is very different from each side complaining separately.

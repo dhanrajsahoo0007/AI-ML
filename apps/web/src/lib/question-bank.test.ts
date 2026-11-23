@@ -85,7 +85,7 @@ describe("the question library (real content)", () => {
 // Topics and follow-ups, on entries shaped like a library YAML file.
 describe("parseYamlQuestions", () => {
   const CACHING = "/system-design/patterns/caching";
-  const MESSENGER = "/system-design/case-studies/facebook-messenger";
+  const MESSENGER = "/system-design-case-studies/case-studies/facebook-messenger";
   const categories = new Map([
     ["sd", { track: "design" as const, subsections: [{ slug: "chat", title: "Chat", description: "x" }] }],
     ["ai", { track: "ai" as const, subsections: [{ slug: "rag", title: "RAG", description: "x" }] }],
@@ -117,6 +117,23 @@ describe("parseYamlQuestions", () => {
     expect(parse({ ...base, topics: ["/system-design/patterns/nope"] }).errors.join()).toMatch(/topic page not found/);
     expect(parse({ ...base, topics: [CACHING, CACHING] }).errors.join()).toMatch(/duplicate topic/);
     expect(parse({ ...base, topics: CACHING }).errors.join()).toMatch(/topics must be a list/);
+  });
+
+  it("checks signals against the known list", () => {
+    const withSignals = (signals: unknown, known?: ReadonlySet<string>) => {
+      const errors: string[] = [];
+      const questions = parseYamlQuestions("sd.yaml", [{ ...base, signals }], categories, companies, errors, known);
+      return { questions, errors };
+    };
+    const known = new Set(["ownership", "conflict"]);
+    const ok = withSignals(["ownership", "conflict"], known);
+    expect(ok.errors).toEqual([]);
+    expect(ok.questions[0].signals).toEqual(["ownership", "conflict"]);
+    expect(parse(base).questions[0].signals).toEqual([]);
+    expect(withSignals(["nope"], known).errors.join()).toMatch(/unknown signal nope/);
+    expect(withSignals(["ownership", "ownership"], known).errors.join()).toMatch(/duplicate signal/);
+    expect(withSignals("ownership", known).errors.join()).toMatch(/signals must be a list/);
+    expect(withSignals([3]).errors.join()).toMatch(/unknown signal 3/);
   });
 
   it("requires a topic on a system design question but not on an AI one", () => {
@@ -179,5 +196,7 @@ describe("getQuestionsForTopic", () => {
       expect(list.every((x) => x.topics.some((t) => t.href === href))).toBe(true);
       expect(list.every((x) => !x.parent || !ids.has(x.parent.id))).toBe(true);
     }
-  });
+    // About 1.2 s on a laptop, but the default 5 s limit was hit on a busy CI runner (one call per tagged page,
+    // each filtering the whole library), so this test gets more room.
+  }, 30_000);
 });

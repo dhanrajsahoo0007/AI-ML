@@ -1,0 +1,247 @@
+---
+title: "Robotics & Vision-Language-Action Models"
+description: "Models that turn vision and language into robot actions: action tokens, training data, simulation and safety."
+icon: orbit
+updated: 2026-11-15
+---
+
+A vision-language model can name the kettle on a shelf.
+
+- A robot has to pick it up. Interviewers ask about vision-language-action (VLA) models because they test whether you see what changes when output is movement: actions are numbers, the loop runs many times a second, and a mistake breaks real things.
+
+## Overview
+
+- A **VLA model** takes a camera image and an instruction and returns an **action**: usually a small movement of the arm and a gripper command.
+- **Actions can be tokens.** RT-2 and OpenVLA cut each action dimension into **256 bins** and predict the bin numbers like words. OpenVLA's action is **7 tokens**.
+- **The loop sets the speed.** OpenVLA (7 B parameters) runs at about **6 Hz** on one RTX 4090, **167 ms** per action. RT-2's 55 B model ran at **1 to 3 Hz**.
+- **Chunks and flow matching** go faster: π0 (3 B VLM plus a 300 M action expert) predicts **50 actions at once** and controls robots at up to **50 Hz**.
+- **Data is the bottleneck.** OpenVLA trained on **970 k robot episodes**; the internet gives a VLA its language and visual knowledge, not its motor skill.
+- **Safety is outside the model.** Speed limits, force limits, stop buttons and tests on real hardware decide whether a VLA may run near people.
+
+## Mental model
+
+- Think of teaching someone to pack boxes by phone.
+- You can describe a picture to them (a vision-language model does this), but the packer also needs to move their hands.
+- A VLA model is a packer who has read the whole internet and then spent weeks watching people pack.
+- Every fraction of a second it looks at the scene, reads the instruction, and decides one small hand movement.
+- Then it looks again. It is not planning a whole motion in advance.
+- It is correcting as it goes, which is why the speed of the "look, decide, move" loop matters so much.
+
+## Core concepts
+
+### From vision-language to action
+
+- A VLA starts as a vision-language model (see [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models)): image patches become tokens, a language model reads them with the instruction.
+- Fine-tune that model on robot data, where each example is a camera image, an instruction and the action a person or controller took, and it learns to emit actions.
+- RT-2 did this with PaLI-X and PaLM-E, training on web data and robot data together so the robot kept its web knowledge (it could act on objects it had never been shown in robot data).
+- The model never sees "joint angles" as a new kind of thing: it sees more tokens.
+
+### Action representations: tokens, chunks and diffusion policies
+
+- Three ways to write an action. **Tokens**: discretise each dimension into bins and let the language model predict bin numbers one at a time (RT-2, OpenVLA).
+- It reuses the language model unchanged, but 7 tokens in a row cost 7 decode steps.
+- **Chunks**: predict several future actions at once (π0 predicts 50), which cuts the number of model calls and smooths motion.
+- **Diffusion or flow policies**: generate a continuous action chunk by refining noise over several steps, so there is no rounding to bins and the output can be smooth and multi-modal (two good ways to grasp). π0 uses flow matching, a close relative of diffusion, in a separate action expert.
+
+### Data: teleoperation, simulation and cross-embodiment sets
+
+- Robot data is scarce, because someone or something must produce each episode.
+- **Teleoperation** has a person drive the robot while it records images and actions: slow but high quality.
+- **Simulation** gives unlimited episodes cheaply but must cross the sim-to-real gap (below).
+- **Cross-embodiment sets** pool episodes from many robots: OpenVLA trained on 970 k episodes from the Open X-Embodiment collection, and π0 trained on data from several robot types, so one model can control more than one body.
+- Fine-tuning on a few hundred episodes of your own robot and tasks is the usual last step.
+
+## Architecture
+
+How does one instruction become movement?
+
+<AnimatedDiagram
+  spec="animated/multimodal/vla-loop"
+  stepper
+  caption="The VLA loop for a warehouse picking arm: instruction and image in, one action out, the arm moves, the shelf changes, the camera sees it, and the model is asked again."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The instruction and a camera image reach the model">
+    "Pick the kettle, order 4471" is text; the camera frame is an image turned into patch tokens.
+  </StepCard>
+  <StepCard n={2} title="The model returns one action">
+    Seven numbers: a movement in x, y, z, a rotation in roll, pitch, yaw and a gripper command.
+  </StepCard>
+  <StepCard n={3} title="The controller moves the arm">
+    A low-level controller turns the action into joint targets and holds them smoothly.
+  </StepCard>
+  <StepCard n={4} title="The shelf changes and the camera sees it">
+    The new image is the next input. Errors are corrected on the next pass, because the model looks again.
+  </StepCard>
+  <StepCard n={5} title="The loop repeats at the control rate">
+    At about 6 passes a second, the arm gets a new action every 167 ms.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### How an action becomes tokens
+
+<AnimatedDiagram
+  spec="animated/multimodal/action-tokenization"
+  stepper
+  caption="A sideways move of +0.012 m falls in bin 204 of 256. Seven dimensions give seven tokens. Values and ranges are illustrative; the 256 bins are RT-2's and OpenVLA's."
+/>
+
+**How to read it:**
+
+- Step 1 is one continuous number. Step 2 cuts the range into 256 equal bins and finds the one the number falls in: (0.012 + 0.02) ÷ 0.04 × 256 = 204.8, so bin 204.
+- Step 3 repeats for all seven dimensions and writes the bins in a fixed order.
+
+**The numbers:**
+
+- A bin is 0.04 ÷ 256 = 0.156 mm wide, so the robot receives the bin's centre and is off by at most half a bin, 0.078 mm.
+- That rounding is small next to the arm's own error.
+- OpenVLA sets each range from the 1st to the 99th percentile of the training actions, so a few wild actions do not stretch every bin.
+- The language model has no spare "action words", so RT-2 (for PaLM-E) and OpenVLA overwrite the 256 least-used tokens of the tokenizer with the bin numbers.
+- At 6 actions a second, 7 tokens each, that is 42 tokens a second, written one after another.
+
+### Two designs, side by side
+
+<AnimatedDiagram
+  spec="animated/multimodal/vla-architecture"
+  stepper
+  caption="OpenVLA predicts action tokens with a Llama 2 backbone. π0 adds a 300 M-parameter action expert that makes a 50-action chunk by flow matching."
+/>
+
+**How to read it:**
+
+- Both rows start with a vision-language backbone.
+- OpenVLA (top) is a Prismatic VLM: SigLIP and DinoV2 vision encoders, a two-layer MLP projector and Llama 2 7 B; the highlighted block is the only new idea, the action tokens. π0 (bottom) keeps PaliGemma (3 B) and adds a separate action expert of about 300 M parameters, trained from scratch, which reads the backbone's features and produces a chunk of 50 actions by flow matching with 10 steps.
+- The paper reports 73 ms on-board per chunk on an RTX 4090 (14 ms image encoders, 32 ms observation pass, 27 ms flow).
+
+**What the numbers mean:**
+
+- OpenVLA needs 15 GB in bfloat16 and gives about 6 Hz; it beat the 55 B RT-2-X by 16.5 points of absolute success over 29 tasks while having 7 times fewer parameters. π0 runs the slow backbone once per chunk and executes the actions at 50 Hz for dexterous work: the paper re-plans every 0.5 s (after 25 actions) on its 50 Hz robots.
+- The two designs trade simplicity (tokens) for speed and smoothness (chunks and flow).
+
+### Fast and slow systems: planning and control
+
+- A single model at 6 Hz cannot hold a cup steady on its own.
+- Real systems layer loops. A **slow loop** (a VLA or a language model, around 1 to 10 Hz) decides what to do next: which shelf, which grasp.
+- A **fast loop** (a learned or classical controller, often hundreds of hertz or more) tracks the target smoothly and reacts to contact.
+- Action chunks are the bridge: the slow model sends 50 future targets and the fast loop plays them.
+- A language model can also sit above the VLA as a planner that splits "fill order 4471" into pick, check, pack; see [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures).
+
+### Sim-to-real transfer
+
+- Simulators produce cheap episodes, but images, friction and contact differ from the real world.
+- Three tools shrink the gap: **domain randomisation** (vary textures, lighting, mass and friction in simulation so the real world looks like one more variation), **realistic assets and physics** for the objects that matter, and **real-world fine-tuning** on a small set of real episodes.
+- Test on the real arm before trusting any simulation score: contact with a thin ceramic lid is where simulators are weakest.
+
+### Safety and evaluation on real hardware
+
+- A wrong token in text gives a bad sentence; a wrong action can crush a kettle or hit a person.
+- Put safety outside the model: **limits** on speed, force and workspace enforced by the controller, a **hardware stop**, **separation** from people or force-limited collaborative modes, and **checks** on the model's output (reject an action outside the bin range or a sudden jump).
+- Safety standards for industrial and collaborative robots, such as ISO 10218 and ISO/TS 15066, apply to the whole cell, not the model.
+- Evaluate on hardware: run each task many times, record success, partial progress and failures, and vary the scene (new objects, lighting, clutter), because a policy that succeeds on the training shelf can fail on a new one.
+
+### Worked example: a warehouse picking robot
+
+Brightpost's warehouse has an arm that picks the kettle for order 4471. The instruction is "pick the kettle for order 4471". The camera sees a shelf of boxes.
+
+- The model returns, on one pass, the seven tokens of the figure above: bins 204, 102, 32, 128, 140, 192, 255.
+- Decoded, that is a move of +0.012 m in x, −0.004 m in y and −0.015 m in z, a small turn, and a closed gripper (illustrative ranges).
+- At 6 Hz that is 0.012 × 6 = 0.072 m a second in x alone, so a 0.6 m reach at that step size takes about 8 s (0.6 ÷ 0.072; illustrative, and a real path is not a straight line).
+- Each pass sees the new image, so if the box shifts, the next action corrects.
+
+- What the model does not decide: whether the order is valid.
+- The agent that owns the order has already checked that order 4471 exists and that the kettle is in stock; the VLA only moves.
+- The cell limits arm speed and grip force, stops if a person enters the zone, and logs the camera frame and action at every pass.
+- When the arm cannot grasp after three tries, it stops and calls a person, in the same way the support assistant sends a £42 refund over its £30 limit to approval.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Action tokens (RT-2, OpenVLA) | Reuses an LLM unchanged; simple to train and serve | One decode step per token; 256-bin rounding; about 6 Hz for 7 B | Research and tabletop tasks at low control rates |
+| Action chunks with a flow or diffusion head (π0) | Smooth, fast (up to 50 Hz), handles several valid actions | A second model to train; open-loop between chunks | Dexterous, high-rate tasks |
+| Small policy trained from scratch | Fast, cheap, easy to certify | No web knowledge; one task or one robot | A fixed, repeated task |
+| Teleoperated data | High quality, on your robot | Slow and costly to collect | Fine-tuning for your tasks |
+| Simulated data | Unlimited and cheap | Sim-to-real gap | Pre-training and rare cases |
+| Slow VLA plus fast controller | Smooth motion with semantic planning | Two loops to integrate and test | Production cells |
+
+## Production systems
+
+- **RT-2 (Google DeepMind, 2023).** PaLI-X and PaLM-E fine-tuned to output actions as tokens in 256 bins; the 55 B model ran at 1 to 3 Hz and a 5 B version at about 5 Hz.
+- **OpenVLA (2024).** A 7 B open-source VLA trained on 970 k episodes from Open X-Embodiment on 64 A100 GPUs for 14 days; about 6 Hz on one RTX 4090; checkpoints and training code are open.
+- **π0 (Physical Intelligence, 2024).** A 3.3 B flow-matching VLA with a 300 M action expert, 50-action chunks and control up to 50 Hz, shown on tasks such as folding laundry.
+- **Brightpost's picking arm (this page's running example).** An illustrative design: a fine-tuned VLA behind a safety-limited controller, with every pass logged.
+
+## Failure modes & pitfalls
+
+- Judging a VLA by language benchmarks. It can describe the shelf perfectly and still miss the grasp. Measure task success on the real arm.
+- Ignoring the control rate. A model that needs 500 ms per action cannot follow a moving target.
+- Letting the model be the only safety layer. Limits and stops belong in the controller.
+- Training on one scene and testing on it. Vary objects, lighting and clutter in the test set.
+- Trusting simulation scores for contact-heavy tasks without a real test.
+- Forgetting that data is the bottleneck: plan teleoperation time, not only GPU time.
+
+## Interview framework
+
+1. Describe the loop: image and instruction in, one action out, the robot moves, a new image comes in.
+2. Explain action tokens with numbers: 256 bins, a bin width, 7 tokens per action, and what that costs in speed.
+3. Compare tokens with chunks and flow matching: OpenVLA's 6 Hz against π0's 50-action chunks.
+4. Cover data: teleoperation, simulation, cross-embodiment sets, and the sim-to-real gap.
+5. Close with safety and evaluation on hardware, and a fast controller under a slow model.
+
+**What interviewers listen for:** the control rate as a design constraint, the bin arithmetic, the fast and slow split, and safety enforced outside the model.
+
+**Red flags:** treating a robot as "a chatbot with arms", no mention of latency, and no real-hardware evaluation.
+
+## Further reading
+
+- [RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control (Brohan et al., 2023)](https://arxiv.org/abs/2307.15818)
+- [OpenVLA: An Open-Source Vision-Language-Action Model (Kim et al., 2024)](https://arxiv.org/abs/2406.09246)
+- [π0: A Vision-Language-Action Flow Model for General Robot Control (Black et al., 2024)](https://arxiv.org/abs/2410.24164)
+- [Open X-Embodiment: Robotic Learning Datasets and RT-X Models (2023)](https://arxiv.org/abs/2310.08864)
+- [Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware (ACT; Zhao et al., 2023)](https://arxiv.org/abs/2304.13705)
+- [Diffusion Policy: Visuomotor Policy Learning via Action Diffusion (Chi et al., 2023)](https://arxiv.org/abs/2303.04137)
+- Related pages: [Multimodal & Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai) · [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models) · [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a vision-language-action model?" category="Concepts" level="Junior">
+    - A VLA is a vision-language model fine-tuned to output robot actions.
+    - It takes a camera image and an instruction and returns an action, usually a small movement of the arm and a gripper command.
+    - It is called in a loop: each action changes the scene, a new image comes in, and the model is asked again. RT-2, OpenVLA and π0 are examples.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does RT-2 or OpenVLA turn a continuous action into tokens?" category="Concepts" level="Mid">
+    - Each action dimension is cut into 256 uniform bins, and the model predicts the bin numbers as tokens.
+    - OpenVLA uses 7 dimensions (x, y, z, roll, pitch, yaw, gripper) and sets each range from the 1st to the 99th percentile of the training actions.
+    - The language model has no spare tokens, so the 256 least-used tokens are overwritten with the bin numbers.
+    - The robot receives each bin's centre, so the error is at most half a bin.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is the control rate a problem for VLAs?" category="Scaling" level="Mid">
+    - A 7 B-parameter model writes 7 tokens per action, one decode step each, so OpenVLA reaches about 6 Hz on an RTX 4090, 167 ms per action.
+    - RT-2's 55 B model ran at 1 to 3 Hz. That is too slow to follow a moving target or to hold a delicate contact.
+    - The fixes are chunks (predict many actions at once), a smaller backbone, quantisation, and a fast low-level controller beneath the slow model.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does π0 differ from OpenVLA?" category="Architecture" level="Mid">
+    - OpenVLA predicts action tokens with a Llama 2 backbone, so it is autoregressive. π0 starts from PaliGemma (3 B parameters) and adds a separate action expert of about 300 M parameters, which produces a chunk of 50 continuous actions by flow matching with 10 steps.
+    - That avoids rounding to bins, smooths motion and lets the robot be controlled at up to 50 Hz, since the large backbone runs once per chunk. π0's cost is a second model to train and open-loop execution between chunks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you get training data for a VLA, and what are the limits of each source?" category="Trade-offs" level="Mid">
+    - Teleoperation gives high-quality episodes on your own robot but is slow and costly.
+    - Simulation is cheap and unlimited but has a sim-to-real gap, which domain randomisation and real fine-tuning narrow.
+    - Cross-embodiment collections such as Open X-Embodiment pool many robots (OpenVLA used 970 k episodes), which gives breadth but not your exact robot.
+    - A common recipe is pre-training on broad data, then fine-tuning on a few hundred episodes of your own tasks.
+  </InterviewQuestion>
+  <InterviewQuestion question="A VLA picks well in the lab but fails in the warehouse. How do you investigate?" category="Failure modes" level="Senior">
+    - Compare the scenes first: lighting, camera placement, clutter, object types and shelf layout, since a policy tuned to one setup often fails on another.
+    - Log each pass (image, instruction, action) and replay the failures to find where it goes wrong: perception (the wrong box), action (a bad grasp) or timing (too slow for a moving shelf).
+    - Add episodes for the failing conditions by teleoperation and fine-tune, and test on real hardware with varied scenes.
+    - Keep the controller's limits so failure stays safe.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does safety live in a robot that runs a VLA?" category="Architecture" level="Senior">
+    - Outside the model. The controller enforces limits on speed, force and workspace regardless of what the model asks; there is a hardware stop; people are separated or the arm runs in a force-limited mode.
+    - Output checks reject an action outside the expected range or a sudden jump.
+    - Industrial standards such as ISO 10218 and ISO/TS 15066 apply to the whole cell.
+    - The model's role is to propose actions, and the safety layer decides which are executed.
+  </InterviewQuestion>
+</InterviewQuestions>

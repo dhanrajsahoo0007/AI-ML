@@ -1,0 +1,15 @@
+title: "The URL-seen test: a Bloom filter, or a batched merge on disk"
+alt: >-
+  A sequence diagram with five lanes: a teal parser, a green Bloom filter, a blue batch buffer, a violet file of
+  sorted hashes and a grey frontier. Step 1: the parser tests a.com/x against 7 bits of the Bloom filter; one bit is
+  0, so the URL is new, its bits are set and it goes to the frontier. Then b.org/y finds all 7 bits set and is
+  dropped as seen; a note says about 0.8 percent of truly new URLs are wrongly dropped this way. Step 2: the parser
+  appends 8-byte URL hashes to the batch buffer; at 1,000,000 hashes the buffer is sorted and merged with the sorted
+  hash file in one sequential pass, the merged file is written, and only the hashes that were not in the file go to
+  the frontier as new URLs. A note says the merge reads 10 gigabytes in about 20 seconds, every 260 seconds or so.
+caption: >-
+  A Bloom filter answers in memory but drops about 0.8 % of new URLs; a batched merge on disk is exact but minutes
+  behind.
+tags: [case-studies, web-crawler, bloom-filter, deduplication, batching]
+source: original
+created: 2026-11-17

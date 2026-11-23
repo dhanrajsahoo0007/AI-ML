@@ -1,0 +1,405 @@
+---
+title: "Deep Research Agents"
+description: "Agents that plan a research question, search many sources, read, cross-check and write a cited report."
+icon: search-code
+---
+
+A deep research agent takes one open question, plans it, searches many sources over minutes, and writes a report in which every claim names its source.
+
+- Interviewers use it to test planning, parallel work, stopping rules and citations in one design.
+- This page builds on [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems), which covers the lead-and-workers pattern itself, and on [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag), which covers one agent searching in a loop.
+
+## Overview
+
+- **Plan first.** The lead agent pins down what the question means, splits it into sub-questions, and saves the plan outside its context window.
+- **Search wide, then narrow.** Each worker starts with short, broad queries, reads what comes back, and narrows. Workers run in parallel, each in its own context window.
+- **Carry the source with the claim.** A worker returns notes, and each note keeps the id of the page or record it came from. A sentence in the report is only as good as the note under it.
+- **Stop on a rule, not a feeling.** A budget, saturation (a search adds nothing new) and confidence (independent sources agree) each end a search. The report says which one fired.
+- **Check before sending.** A citation pass matches every sentence to a source and sends back what has none.
+- **It is expensive.** Anthropic measured its multi-agent research system at about 15 times the tokens of a chat (June 2025). Products run for minutes, so they run as background jobs.
+- **Evaluate the report, not the path.** Grade factual accuracy, citation accuracy, completeness and source quality, and keep a benchmark with short, checkable answers such as BrowseComp.
+
+## Mental model
+
+- Think of a research lead with three analysts and a fact-checker.
+- The lead writes the brief: what exactly we are asking, who looks where, and when each analyst should stop.
+- The analysts work at the same time and hand back index cards, each with one finding and where it came from.
+- The lead writes the report from the cards. The fact-checker refuses any sentence that has no card behind it.
+
+- A search engine answers "which pages mention this?". A deep research agent answers "what is true, and how do you know?".
+- The second needs a plan, many reads, and a paper trail.
+
+## Core concepts
+
+- Every figure on this page follows one question. Brightpost's support manager asks: "Why are kettle refunds up this month?"
+- It is the same question the lead agent splits on [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems#architecture), with the same three workers: refund records, the help centre and customer reviews.
+- The question is asked on 16 November. All counts in the example are illustrative.
+
+### Planning and decomposing the question
+
+A vague question sends workers in different directions, so the lead fixes the meaning of the words before anyone searches.
+
+<AnimatedDiagram
+  spec="animated/agents/research-plan"
+  stepper
+  minWidth={620}
+  caption="The lead pins down the words in the question before it searches, then gives every sub-question a source and a stop. The plan lives in memory, so a long run cannot lose it."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The question reaches the lead agent">
+    The lead reads the manager's question. It has no data yet, only the words, and two of them are vague: "this month"
+    and "up".
+  </StepCard>
+  <StepCard n={2} title="The lead fixes the scope before searching">
+    "This month" becomes 1–15 November, compared with 1–15 October. "Up" becomes a rate, refunds per 100 kettles sold,
+    so a month that sold more kettles does not look like a problem. Some products ask the user here: Gemini Deep
+    Research shows its plan for the user to revise or approve.
+  </StepCard>
+  <StepCard n={3} title="Three sub-questions, each with a source and a stop">
+    One sub-question per worker. Each names where to look (`query_refunds`, `search_help`, `web_search` and
+    `fetch_page`) and when it is answered. Sub-questions that do not overlap stop two workers from finding the same fact
+    and counting it twice.
+  </StepCard>
+  <StepCard n={4} title="The plan is saved outside the context window">
+    The lead writes the plan to memory. Anthropic's lead agent does the same, because a context window over 200,000
+    tokens is truncated and the plan must survive. After a reset, the lead reads the plan back and carries on.
+  </StepCard>
+</StepCards>
+
+Here is the plan as the lead saves it. The schema is this example's own:
+
+```json
+{
+  "question": "Why are kettle refunds up this month?",
+  "scope": { "compare": ["2026-11-01..15", "2026-10-01..15"], "measure": "refunds per 100 kettles sold" },
+  "sub_questions": [
+    {
+      "id": "w1",
+      "ask": "Refund rate and reasons, Oct vs Nov?",
+      "tools": ["query_refunds"],
+      "done_when": "both rates found"
+    },
+    { "id": "w2", "ask": "Did the damage rule change?", "tools": ["search_help"], "done_when": "edit history read" },
+    {
+      "id": "w3",
+      "ask": "What do reviews say went wrong?",
+      "tools": ["web_search", "fetch_page"],
+      "done_when": "no new sources"
+    }
+  ],
+  "budget": { "tool_calls_per_worker": 10, "max_rounds": 2 }
+}
+```
+
+### Search, browse and read loops
+
+Each worker runs its own [agent loop](/ai-system-design/genai-system-design/agent-architectures#architecture). For the reviews worker, one turn of that loop looks like this:
+
+1. **Search.** A short query first, such as "brightpost kettle review". Anthropic's prompts tell sub-agents to "start wide, then narrow down".
+2. **Read the snippets.** The result list costs a few hundred tokens. The worker decides which pages are worth opening.
+3. **Fetch and read one page.** A full page can cost thousands of tokens, so it opens only the best new one.
+4. **Extract notes.** It writes down each finding with the page's URL and a short quote, then drops the raw page from its working set.
+5. **Decide.** Anthropic's sub-agents think between tool calls to judge result quality, find gaps and refine the next query. The worker searches again, or a stopping rule ends the loop.
+
+- Web pages are untrusted text. A page can contain instructions aimed at the agent, so treat every fetched page as data. See [Computer Use & Browser Agents](/ai-system-design/genai-system-design/computer-use-and-browser-agents) for the injection path.
+- Retrieval from your own documents follows the same loop with a search tool over an index. [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag#stopping-rules-and-budget-control) covers that case with one agent.
+
+### A lead agent and parallel sub-agents
+
+- Research splits well: the three sub-questions above share no state, so three workers can search at once.
+- Each worker spends its own context window on raw pages and hands back a short summary. The [context-isolation figure](/ai-system-design/genai-system-design/multi-agent-systems#core-concepts) counts what that saves the lead.
+- How many workers, and how much effort each, should scale with the question. Anthropic's prompts give the scale, and the numbers are on [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems#architecture).
+- Anthropic's lead agents run sub-agents **synchronously**: the lead waits for the whole set before it continues. One slow worker blocks the run, and the lead cannot redirect a worker mid-search.
+- A worker's task must say what it must not do. Without boundaries, the refund-records worker could also read reviews, and the lead would count one finding as two sources.
+
+### Citations and source tracking
+
+A citation added at the end, by searching for a page that seems to match, is a guess. Here the source travels with the claim from the first read.
+
+<AnimatedDiagram
+  spec="animated/agents/citation-tracking"
+  stepper
+  minWidth={620}
+  caption="Sources travel with the claims: a note keeps its source id, a sentence names its notes, and a check reads the two together. The one sentence the lead inferred is the one that fails. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Each note from a worker carries its source id">
+    The refund-records worker returns two notes from S1, the help-centre worker one from S2, the reviews worker one from
+    S3. A note is a claim plus the id and a short quote of its source.
+  </StepCard>
+  <StepCard n={2} title="The lead's draft: one sentence per claim">
+    The lead writes five sentences. Four rest on a note. The fifth, "The rise began with a new courier on 1 Nov", is the
+    lead's own inference: it joined the cracked kettles to the reviews' complaints about the box, with no record behind
+    it.
+  </StepCard>
+  <StepCard n={3} title="Draft 1 check: one sentence has no source">
+    The check reads every sentence against the note it cites. Four are supported. The fifth cites nothing and goes back
+    to the lead. This is the "1 claim unsourced" in step 4 of the multi-agent figure.
+  </StepCard>
+  <StepCard n={4} title="Round 2 finds S4; draft 2 passes">
+    The lead asks the refund-records worker to join refunds to shipments. It finds 24 of the 26 cracked kettles went
+    with the new courier: S4. The sentence now cites S4 and draft 2 passes.
+  </StepCard>
+</StepCards>
+
+Here is note c4 as the reviews worker returns it. The quote is what the check compares the sentence against:
+
+```json
+{
+  "id": "c4",
+  "claim": "7 reviews since 3 Nov mention a cracked spout or a thin box",
+  "source": {
+    "id": "S3",
+    "url": "https://reviews.example/brightpost/kettle",
+    "retrieved": "2026-11-16T09:14:00Z",
+    "quote": "Spout cracked again, the box was paper-thin"
+  },
+  "independent_sites": 1,
+  "confidence": "medium"
+}
+```
+
+- Model APIs return the same kind of link. OpenAI's web search tool attaches a `url_citation` annotation to the answer text, with the URL, the title and the `start_index` and `end_index` of the words it supports.
+- Anthropic's research system runs a separate **CitationAgent** over the report and the documents, so that every claim is attributed to its source.
+
+<Callout tone="red" title="What breaks">
+  A citation that does not support its sentence. The lead merges two notes into one sentence and keeps one citation, or
+  rounds "26 of 31" up to "almost all". The link is there, so a check that only looks for links passes it. Check the
+  sentence against the quote, not only that a citation exists.
+</Callout>
+
+## Architecture
+
+- The research system is orchestrator-workers with research parts added. The figure is the one on [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems#architecture), where its five steps are explained in turn. Here, read it for what is specific to research.
+
+<AnimatedDiagram
+  spec="animated/agents/orchestrator-workers"
+  stepper
+  minWidth={620}
+  caption="The lead plans and writes; workers search in parallel and send back short summaries; a reviewer checks every claim before the report goes out."
+/>
+
+**How to read it:**
+
+- Step 1 is the [research plan](#planning-and-decomposing-the-question): the lead fixes the scope and saves the plan before any worker starts.
+- Steps 2 and 3 are three [search loops](#search-browse-and-read-loops) at once. "Findings" holds notes with source ids, not transcripts.
+- Steps 4 and 5 are the [citation check](#citations-and-source-tracking) and the second round it causes.
+
+Around the figure, a production system adds four parts:
+
+1. **A job runner.** Research takes minutes. Run it as a background job with a job id, report progress, and notify the user when the report is ready. OpenAI's API docs recommend background mode for requests that take several minutes.
+2. **A notes store.** Notes and fetched pages live outside the context windows, keyed by source id, so the citation pass and the reviewer can reread any quote.
+3. **A tool layer with limits.** Search and fetch go through the harness, which counts calls against the budget, caches pages, and blocks domains you do not trust.
+4. **Traces.** Every worker's queries, pages and notes go into one trace per run, so a wrong sentence can be followed back to the page that caused it.
+
+## Technical mechanics
+
+### Worked example: why are kettle refunds up?
+
+This follows the orchestrator-workers figure through the whole run, from the manager's question to the report. Tool-call counts are illustrative.
+
+| Step | Who                   | What happens                                                                                     | Tool calls |
+| ---- | --------------------- | ------------------------------------------------------------------------------------------------ | ---------- |
+| 1    | Lead                  | Fixes the scope (1–15 Nov vs 1–15 Oct, per 100 sold), writes three sub-questions, saves the plan | 0          |
+| 2–3  | Refund records worker | October: 9 refunds, 600 sold. November: 31 refunds, 620 sold. 26 of 31 "arrived cracked" (S1)    | 3          |
+| 2–3  | Help centre worker    | `search_help` finds "Damaged on arrival"; its edit history shows no change since March (S2)      | 2          |
+| 2–3  | Reviews worker        | 4 searches, 3 fetches; 7 reviews on one site mention a cracked spout or a thin box (S3)          | 7          |
+| 4    | Lead, then reviewer   | Draft 1 has five sentences; the courier sentence has no source and goes back                     | 0          |
+| 5    | Refund records worker | Joins refunds to shipments: 24 of 26 cracked kettles went with the new courier from 1 Nov (S4)   | 2          |
+| 5    | Lead, then reviewer   | Draft 2 cites S4; every sentence is supported; the report goes to the manager                    | 0          |
+
+**The numbers:**
+
+- Rates: 9 ÷ 600 = **1.5** refunds per 100 sold in October; 31 ÷ 620 = **5.0** in November. The rate more than tripled, while sales rose only 20 kettles.
+- Tool calls: 3 + 2 + 7 in round 1, then 2 in round 2 = **14**, against a cap of 3 workers × 10 = 30.
+- Time is set by the slowest worker. Round 1 takes as long as the reviews worker's 7 calls, not 3 + 2 + 7 = 12 in a row: 7 ÷ 12 ≈ 58 % of the sequential time, before the lead's own calls.
+
+The report the manager gets:
+
+- Kettle refunds rose from 1.5 to 5.0 per 100 sold [S1]. 26 of 31 arrived cracked [S1]. The refund rule did not change [S2].
+- Reviews blame the packaging [S3, one site, medium confidence]. The rise began with a new courier on 1 Nov: 24 of 26 cracked kettles went with it [S4].
+
+### Stopping rules, cost and latency
+
+A worker that never stops burns the budget; one that stops after one search misses the answer. Write the rules into the task, and let the harness enforce the hard ones.
+
+<AnimatedDiagram
+  spec="animated/agents/stopping-rules"
+  stepper
+  minWidth={620}
+  caption="Saturation stops the search before the budget does, and before confidence is reached, so the worker says how sure it is instead of searching on. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Search 1 finds 4 new sources">
+    The reviews worker's first, broad query returns 4 review pages it has not seen. It fetches the best one. The three
+    rules on the right are part of its task from the start.
+  </StepCard>
+  <StepCard n={2} title="Searches 2 and 3 find 2, then 1">
+    Narrower queries ("cracked", then "cracked spout november") find fewer new pages. Falling returns are the signal
+    that the topic is nearly covered.
+  </StepCard>
+  <StepCard n={3} title="Search 4 finds nothing new: saturation fires">
+    "brightpost courier damaged kettle" returns only pages it already has. Saturation stops the loop. The budget is at 7
+    of 10 calls. Confidence is not met: all seven reviews are on one site.
+  </StepCard>
+  <StepCard n={4} title="The worker stops and reports its confidence">
+    It stops with 3 calls unspent and marks its claim "medium confidence, one site". The lead decides whether that is
+    good enough, instead of the worker searching until the budget runs out.
+  </StepCard>
+</StepCards>
+
+The three rules, and who enforces each:
+
+- **Budget** (harness): tool calls, tokens and wall-clock time per worker, and a cap on rounds for the lead. Here 10 calls per worker and 2 rounds. At the cap the worker reports what it has and what it could not find.
+- **Saturation** (harness or model): stop when a search adds no source you have not seen. Count by URL after normalising it, and by site, so two copies of one press release count once.
+- **Confidence** (model, checked by the harness): stop when two independent sources agree. Do not trust the model's own sense of certainty: on BrowseComp, OpenAI measured Deep Research's calibration error at 91 %.
+
+On cost and latency:
+
+- Anthropic measured agents at about 4 times the tokens of a chat and its multi-agent system at about 15 times (June 2025). Token usage alone explained 80 % of the variance in its BrowseComp results.
+- Running sub-agents in parallel cut research time by up to 90 % for complex queries in the same write-up.
+- OpenAI said its deep research takes 5 to 30 minutes per task (February 2025). Design for a job the user leaves and comes back to, not a chat reply.
+
+<Callout tone="red" title="What breaks">
+  Effort that ignores the question. Anthropic's early agents spawned 50 sub-agents for simple queries and kept searching
+  after they already had enough. Its fix was explicit scaling rules in the prompt. Back them with a hard budget in the
+  harness, and log which rule stopped every run.
+</Callout>
+
+### Checking claims and source quality
+
+- **Check sentences against quotes.** For each sentence, a grader reads the cited quote and answers "supported, partly, or not". This catches citations that exist but do not support the sentence.
+- **Prefer primary sources.** Brightpost's own refund records beat a blog post about them. Anthropic's human testers found early agents "consistently chose SEO-optimized content farms" over authoritative but lower-ranked sources; source-quality heuristics in the prompt fixed it.
+- **Count independent sources, not links.** Seven reviews on one site are one source for "confidence". Ten news stories rewriting one press release are one source too.
+- **Show conflicts.** When sources disagree, the report says so and names both, instead of picking one silently.
+- **Keep dates.** Every note carries when it was retrieved and, where known, when it was published. "The rule did not change" is only true up to the date of the edit history read.
+- **Separate public and private data.** A fetched page can carry instructions. OpenAI's docs advise running public web search and private MCP lookups in separate requests, so a page cannot steer a tool that reads private records. See [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety) for the lethal trifecta.
+
+### Evaluating research reports
+
+- **Grade the end state.** Agents take "completely different valid paths" to the same goal, so Anthropic judges the final result, not each turn.
+- **Use a rubric judge.** Anthropic's judge scores factual accuracy, citation accuracy, completeness, source quality and tool efficiency. One model call with one prompt, giving a score from 0.0 to 1.0 and a pass or fail, matched human judgement best. See [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation).
+- **Start small.** Anthropic began with about 20 queries from real usage. Early on, a prompt change can move success from 30 % to 80 %, and a few cases show it.
+- **Keep checkable questions.** BrowseComp (OpenAI, April 2025) has 1,266 questions whose answers are hard to find and short to check. Google's DeepSearchQA (December 2025) has 900 tasks across 17 fields.
+- **Keep people in the loop.** Anthropic found that people testing agents catch edge cases evals miss: its human testers found the content-farm problem.
+
+The published BrowseComp results show how hard the task is:
+
+| System (as reported)                          | BrowseComp accuracy |
+| --------------------------------------------- | ------------------- |
+| GPT-4o with browsing (OpenAI, Apr 2025)       | 1.9 %               |
+| OpenAI o1, no browsing (Apr 2025)             | 9.9 %               |
+| OpenAI Deep Research (Apr 2025)               | 51.5 %              |
+| Gemini Deep Research agent (Google, Dec 2025) | 59.2 %              |
+
+- OpenAI's human trainers also tried the questions. They solved 29.2 % and gave up on 70.8 % after two hours.
+- Vendor scores come from different dates and set-ups. Compare systems on your own questions before choosing one.
+
+## Trade-offs
+
+| Decision                         | Option A                         | Option B                                      | Guidance                                                                       |
+| -------------------------------- | -------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------ |
+| One agent vs lead and workers    | Cheaper, simpler to trace        | Parallel, isolated contexts, faster           | Workers when sub-questions are independent and the answer is worth ~15× tokens |
+| Ask the user vs plan alone       | Right scope, one more round trip | Starts at once, may answer the wrong question | Show the plan for long or costly runs                                          |
+| Fixed budget vs adaptive stop    | Predictable cost                 | Stops early on easy questions                 | Both: saturation and confidence inside a hard budget                           |
+| Cite while reading vs cite after | Every claim has a real source    | Simpler pipeline                              | Carry sources with notes; add a citation pass on top                           |
+| Web vs your own sources          | Wide coverage                    | Trusted, current, private                     | Your records first for facts about you; the web for outside views              |
+
+## Production systems
+
+- **OpenAI deep research** launched in ChatGPT on 2 February 2025, built on o3. OpenAI said a task takes 5 to 30 minutes and reported 26.6 % on Humanity's Last Exam at launch.
+- **Gemini Deep Research** launched on 11 December 2024. It shows a multi-step plan for the user to revise or approve, then writes a report with links to its sources. On 11 December 2025 Google opened a Deep Research agent to developers through its Interactions API, built on Gemini 3 Pro, reporting 46.4 % on Humanity's Last Exam and 59.2 % on BrowseComp.
+- **Anthropic's Research feature** uses a lead agent, parallel sub-agents and a citation agent. Its June 2025 engineering write-up is the most detailed public account of how such a system is built and evaluated.
+- Products and models in this space change every few months. The facts above are as of November 2026; check the vendors' current docs before quoting a model name or score.
+
+## Failure modes & pitfalls
+
+- Searching before fixing what the question means.
+- Overlapping sub-questions, so two workers find the same fact and the lead counts it twice.
+- Adding citations after writing, by searching for a page that seems to match.
+- Treating many pages from one site, or one press release, as many sources.
+- Trusting content farms because they rank well.
+- No stopping rule except the budget, or a budget no harness enforces.
+- Treating fetched pages as instructions.
+- Reporting high confidence on one source.
+
+## Interview framework
+
+1. Clarify the question and the reader: scope, time window, which sources count, how long the user will wait.
+2. Plan: sub-questions, one worker each, with sources, boundaries and a stop.
+3. Search loops in parallel, each returning notes with source ids.
+4. Write from notes, then a citation pass and a review; allow one more round for gaps.
+5. Budgets and stopping rules; background jobs; traces.
+6. Evaluate with a rubric judge, a checkable benchmark and human review.
+
+**What interviewers listen for:** a plan before search, sources carried with claims, explicit stopping rules, and an honest cost.
+
+**Red flags:** "the model adds citations at the end", or no answer to "when does it stop?".
+
+## Further reading
+
+- [How we built our multi-agent research system (Anthropic, 13 June 2025)](https://www.anthropic.com/engineering/multi-agent-research-system)
+- [BrowseComp: A Simple Yet Challenging Benchmark for Browsing Agents (Wei et al., 2025)](https://arxiv.org/abs/2504.12516)
+- [Try Deep Research and our new experimental model in Gemini (Google, 11 December 2024)](https://blog.google/products/gemini/google-gemini-deep-research/)
+- [Build with Gemini Deep Research (Google, 11 December 2025)](https://blog.google/technology/developers/deep-research-agent-gemini-api/)
+- [OpenAI's deep research on Humanity's Last Exam (Fortune, 12 February 2025)](https://fortune.com/2025/02/12/openai-deepresearch-humanity-last-exam/)
+- [Web search tool and citations (OpenAI API docs)](https://developers.openai.com/api/docs/guides/deep-research)
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/research/building-effective-agents)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How would you design a research agent that writes reports from web sources?"
+    category="Architecture"
+    level="Senior"
+  >
+    - Run it as a background job. A lead agent fixes the scope, splits the question into sub-questions that do not overlap, and saves the plan to memory.
+    - One worker per sub-question searches in parallel, wide then narrow, and returns notes that each keep a source id, URL, quote and retrieval date.
+    - The lead writes only from notes; a citation pass checks each sentence against its quote and sends unsupported ones back for one more round.
+    - Bound each worker with a tool-call budget plus saturation and confidence rules, trace every query and page, and evaluate with a rubric judge, a checkable benchmark and human review.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why plan before searching, and what goes into the plan?" category="Concepts" level="Mid">
+    - Vague words send workers in different directions: "this month" and "up" need a date range and a measure, such as refunds per 100 sold.
+    - The plan lists sub-questions that do not overlap, where each worker looks, what it must not do, and when it is done.
+    - Saving it outside the context window lets the lead recover after the window fills or resets.
+    - For long or costly runs, show the plan to the user first.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a research agent decide when to stop searching?"
+    category="Concepts"
+    level="Mid"
+  >
+    - Three rules: a hard budget of tool calls, tokens and time; saturation, when a search adds no new source; and confidence, when independent sources agree.
+    - The harness enforces the budget and counts new sources by normalised URL and site; the model proposes confidence, but it is checked against the count of independent sources.
+    - When a rule fires before confidence is reached, the worker reports what it found and how sure it is.
+    - Log which rule ended every run so cost and quality problems show up.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you make sure every claim in the report is backed by a source?"
+    category="Architecture"
+    level="Mid"
+  >
+    - Carry the source from the first read: each note holds a claim, a source id and a short quote.
+    - The lead writes sentences that cite note ids, never free-floating facts.
+    - A citation pass reads each sentence against its quote and marks it supported, partly supported or unsupported.
+    - Unsupported sentences go back to a worker or are cut, and the check looks at content, not only at whether a link exists.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Parallel sub-agents made your research agent faster but much more expensive. Is it worth it?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Anthropic measured about 15 times the tokens of a chat for its multi-agent system, against about 4 times for one agent, and found token use explained most of the quality gain.
+    - Parallel workers cut wall-clock time, up to 90 % on complex queries in that write-up, and keep each context window small.
+    - It pays off when sub-questions are independent and the answer is valuable; it does not for a simple fact.
+    - Scale the number of workers with the question, cap the rounds, and compare cost per accepted report with a single-agent baseline.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you evaluate a deep research agent?" category="Evaluation" level="Senior">
+    - Grade the final report, since good runs take different paths: a rubric judge for factual accuracy, citation accuracy, completeness, source quality and tool efficiency.
+    - Start with about 20 real queries; early changes have large effects, so a small set shows them.
+    - Add a benchmark with short, checkable answers, such as BrowseComp, and track cost and time per report.
+    - Keep human review: it catches problems the judge misses, such as a preference for content farms.
+  </InterviewQuestion>
+</InterviewQuestions>

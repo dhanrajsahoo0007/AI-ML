@@ -117,6 +117,8 @@ function nextConfig(phase: string): NextConfig {
       // (a header-nav.json left by an earlier production build would show production's sections in dev).
       HEADER_NAV: phase === PHASE_DEVELOPMENT_SERVER ? "" : readGenerated("header-nav.json"),
       SEARCH_INDEX: readGenerated("search-index.json"),
+      // The interview questions a practice rating may be saved for (features/practice/question-ids.ts).
+      PRACTICE_IDS: readGenerated("practice-ids.json"),
       // The paywall switch (content/features.yaml) this build was made with: "on" | "off" (plan §9).
       PAYWALL: features.paywall ? "on" : "off",
       // "" when unset: inlined as constants so the gated Sentry/PostHog imports are dead code and never ship

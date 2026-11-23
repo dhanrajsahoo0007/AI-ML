@@ -1,0 +1,17 @@
+title: The Brightpost refund as a flow graph with a branch, a join and a retry
+alt: >-
+  An architecture diagram built in seven steps, inside a zone titled "Graph: one thread". The customer's message for
+  order 4471 goes to classify, a model call that labels it a refund. classify fans out to two tool nodes that run in
+  the same step: get_order, which returns a kettle at £42, and search_help, which returns the article "Damaged on
+  arrival". Both feed join, which waits for both, then check, which asks whether the amount is over £30. Because £42
+  is over £30, check takes the branch to approve, the support agent; a dashed edge marked "£30 or less" would have
+  gone straight to create_refund. approve saves the state to the checkpointer below the graph and pauses the run.
+  After approval the run resumes at create_refund, which times out once and follows a loop edge labelled "timeout:
+  retry" back into itself, using the same key. It returns refund R-2291 to reply, a model call, which hands over to
+  send_email, and the graph ends.
+caption: >-
+  Code owns the order: a fan-out and a join, a branch on the amount, a pause saved by the checkpointer, and one retry
+  that reuses the same idempotency key.
+tags: [agents, workflows, orchestration, genai]
+source: original
+created: 2026-11-15

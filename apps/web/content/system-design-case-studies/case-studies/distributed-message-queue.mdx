@@ -1,0 +1,633 @@
+---
+title: "Design a Distributed Message Queue"
+description: "A replicated, partitioned log: order per key, consumer groups that replay, and no acknowledged message lost when brokers fail."
+logo: systems/distributed-message-queue
+modelledOn: [tech/oss/apache-kafka, tech/oss/rabbitmq]
+updated: 2026-11-17
+---
+
+Design a distributed message queue: producers append messages to topics, many independent consumer groups read them in order, and nothing acknowledged is ever lost.
+The hard parts are a gigabyte a second of writes, order without a global bottleneck, and staying both durable and available while brokers fail.
+
+- Interviewers use this question to see whether you can justify every storage, replication and delivery choice from the workload, and then hold the line when they add a new constraint halfway through.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a distributed message queue like Kafka: producers append messages, many consumer groups read them in order, and nothing acknowledged is lost."
+  level="Senior"
+  minutes={45}
+  bankId="design-message-queue"
+  tests={[
+    "Ordering: where it holds, and what it costs",
+    "Replay: consumers that read the same data at their own pace",
+    "Durability against availability when replicas fail",
+    "Justifying each technology choice against the alternatives",
+  ]}
+  clarify={[
+    { q: "A log that consumers replay, or a job queue that deletes on ack?", a: "A log first; the job-queue model is a deep dive and a variant." },
+    { q: "How much traffic?", a: "1,000,000 messages/s on average, 2,000,000 at peak, 1 kB each." },
+    { q: "How long do we keep messages?", a: "7 days by default; some topics keep the latest value per key forever." },
+    { q: "What order do consumers need?", a: "Order per key (per order id, per user), not across the whole topic." },
+    { q: "What does acknowledged mean?", a: "It survives the loss of any one broker or any one zone." },
+    { q: "Delivery guarantee?", a: "At least once by default; exactly once for pipelines that read and write inside the queue." },
+  ]}
+  outOfScope={["Schema registry", "Stream processing engines", "Cross-region mirroring (one bullet only)", "Client SDK design"]}
+/>
+
+## Overview
+
+- A **topic** is split into **partitions**; each partition is an **append-only log** of segment files, and every message is addressed by its **offset** in that log.
+- The producer's **partitioner** hashes the key, so all messages for one key land in one partition, in order.
+- A **consumer group** gives each partition one owner and remembers **one offset per partition**; replay means moving that number back.
+- Each partition has a **leader** and two **followers** that pull from it; the followers that keep up form the **in-sync set**, and a write is acknowledged once that set has it.
+- A **controller quorum** (Raft) keeps the metadata: which broker leads which partition, and who is in sync.
+- **Producer ids and sequence numbers** remove retry duplicates; **transactions** make read, process, write and commit-offset one atomic step inside the queue.
+
+<Numbers
+  items={[
+    { value: "2 GB/s", label: "writes at peak", hint: "2,000,000 msgs/s × 1 kB" },
+    { value: "1.8 PB", label: "on disk", hint: "7 days × 3 copies" },
+    { value: "36", label: "brokers", hint: "set by disk, not by CPU" },
+    { value: "0", label: "acked messages lost", hint: "with 1 broker or 1 zone down" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Publish to a topic", notes: "Key, value and headers; producers batch." },
+    { id: "F2", requirement: "Consumer groups read independently and can replay", notes: "Each group has its own position; any group can rewind to an offset or a time." },
+    { id: "F3", requirement: "Order within a key", notes: "Messages with the same key are read in the order they were written." },
+    { id: "F4", requirement: "Durability across broker failures", notes: "An acknowledged message survives a broker or zone loss." },
+    { id: "F5", requirement: "Retention by time or size, and compaction", notes: "Delete after 7 days, or keep the latest value per key." },
+    { id: "F6", requirement: "At-least-once delivery; effectively once inside the system", notes: "No duplicates from producer retries; atomic read-process-write." },
+    { id: "F7", requirement: "Topic administration and metadata", notes: "Create topics, add partitions; clients learn which broker leads what." },
+  ]}
+/>
+
+- Out of scope: schema registry, stream processing engines, client SDK design; cross-region mirroring gets one bullet under geography.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Throughput", target: "1 GB/s in on average, 2 GB/s at peak; 6 GB/s out to consumers at peak", why: "Every service in the company publishes here." },
+    { id: "N2", property: "Publish latency", target: "p99 under 20 ms with acks from every in-sync replica", why: "Producers block on the ack." },
+    { id: "N3", property: "End-to-end latency", target: "p99 under 100 ms for a consumer reading at the tail", why: "Downstream services react in near real time." },
+    { id: "N4", property: "Durability", target: "0 acknowledged messages lost with 1 broker or 1 zone down", why: "Billing and orders flow through here." },
+    { id: "N5", property: "Availability", target: "99.99% for publish; a new partition leader in under 10 s", why: "Producers that cannot publish must buffer or drop." },
+    { id: "N6", property: "Retention and replay", target: "7 days by default; replay from any offset in that window", why: "A bug fix reprocesses the last days." },
+    { id: "N7", property: "Elasticity", target: "Add brokers and move partitions with no downtime", why: "Traffic grows every quarter." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Write rate", assumption: "1,000,000 msgs/s × 1 kB; peak 2 ×", result: "1 GB/s average, 2 GB/s peak" },
+    { quantity: "A day of data", assumption: "1 GB/s × 86,400 s", result: "86.4 TB a day" },
+    { quantity: "Retained data", assumption: "86.4 TB × 7 days × 3 copies", result: "605 TB × 3 ≈ 1.8 PB" },
+    { quantity: "Brokers by disk", assumption: "1.8 PB ÷ 50 TB usable per broker", result: "36 brokers, 12 in each of 3 zones" },
+    { quantity: "Disk writes per broker", assumption: "2 GB/s × 3 copies ÷ 36", result: "≈ 167 MB/s at peak, all sequential" },
+    { quantity: "Consumer reads", assumption: "3 groups per topic on average × 2 GB/s", result: "6 GB/s at peak; ≈ 167 MB/s per broker" },
+    { quantity: "Partitions", assumption: "2 GB/s ÷ 5 MB/s per partition = 400 minimum; × 10 for consumer parallelism", result: "4,000 partitions, 12,000 replicas, ≈ 333 per broker" },
+    { quantity: "Produce requests", assumption: "64 kB batches = 64 msgs; 2,000,000 ÷ 64", result: "31,250 requests/s, ≈ 870 per broker" },
+    { quantity: "Tail in memory", assumption: "48 GB page cache ÷ 167 MB/s written", result: "≈ 290 s: the last 5 minutes are read from RAM" },
+    { quantity: "Offset commits", assumption: "4,000 partitions × 20 groups, every 5 s", result: "80,000 offsets, 16,000 commits/s" },
+  ]}
+  note="Retention, not CPU, sets the number of brokers."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 6 GB/s read against 2 GB/s written at peak (3 to 1), plus 4 GB/s of follower copies | Writes are sequential appends; reads of the tail come from the page cache with zero-copy sends |
+| D2 | Peak against average | 2 × by rate; a consumer outage turns into hours of backlog | The log is the buffer: lag grows, nothing is rejected while disk lasts |
+| D3 | Consistency per operation | Strong per partition (one leader orders writes); consumers read only committed offsets; groups lag freely | One leader per partition; consumers stop at the offset every in-sync replica has |
+| D4 | Latency target | Publish p99 20 ms (N2) with acks from all in-sync replicas across 3 zones | Batches of a few milliseconds; followers pull continuously; no disk flush on the ack path |
+| D5 | Durability | No acknowledged message lost with 1 broker or 1 zone down (N4) | 3 replicas in 3 zones, acks=all, at least 2 in-sync copies, unclean election off |
+| D6 | Ordering | The defining driver: per key, never global | Hash key to partition; one writer and one reader per partition per group |
+| D7 | Duplicates | A producer retry or a consumer restart repeats messages; harmful for billing | Producer ids and sequence numbers on the broker; transactions inside the queue; idempotent consumers outside it |
+| D8 | Data size and growth | 1.8 PB on disk, 86.4 TB a day | Segment files deleted whole; disk sets broker count; compaction for keyed topics |
+| D9 | Fan-out shape | One write, read by 3 groups on average, up to 20 | Reads must not copy or delete data: each group is an offset |
+| D10 | Contention | Many producers append to one partition; one hot key can fill one partition | A single leader serialises appends with no locks; split hot keys or salt them |
+| D11 | Geography | One region, three zones; other regions get a copy by mirroring | Replicas spread across zones; cross-region copy is asynchronous, outside the ack |
+| D12 | Availability and degradation | 99.99% publish (N5); when replicas fail, durability wins | Refuse writes below 2 in-sync copies rather than accept writes that one more failure would lose |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `Metadata(topics)` | Producer, consumer | At start, and after a `NOT_LEADER` error |
+| `Produce(topic, partition, batch, acks, producer_id, seq)` | Producer | Every batch, to the partition's leader |
+| `Fetch(topic, partition, offset, max_bytes, max_wait)` | Consumer, follower replica | A loop; waits up to `max_wait` when there is nothing new |
+| `JoinGroup`, `SyncGroup`, `Heartbeat` | Consumer | Joining a group; heartbeat every 3 s |
+| `OffsetCommit`, `OffsetFetch` | Consumer | After processing, every few seconds; on restart |
+| `InitProducerId`, `AddPartitionsToTxn`, `EndTxn` | Transactional producer | Once per session; per transaction |
+| `CreateTopics`, `CreatePartitions` | Operator | Rarely |
+
+A produce request and its answers, written out:
+
+```text
+PRODUCE topic=orders partition=17 acks=all producer_id=4021 epoch=0 base_seq=880
+  batch: 64 records, 64 kB, key=order_id
+
+OK                      base_offset=1_204_330  (every in-sync replica has the batch)
+NOT_LEADER              re-read metadata, resend to the new leader (same seq)
+NOT_ENOUGH_REPLICAS     fewer than 2 in sync: retry later, nothing written
+DUPLICATE_SEQUENCE      already written: treat as success
+```
+
+- **Idempotency:** the producer id and the per-partition sequence number make a retried batch a no-op on the broker.
+- **Pagination:** a fetch is a page by construction: from an offset, up to `max_bytes`; the next fetch starts at the last offset plus one.
+- **Errors:** `NOT_LEADER` (leadership moved), `NOT_ENOUGH_REPLICAS` (durability rule refused the write), `OFFSET_OUT_OF_RANGE` (the offset was deleted by retention: reset to earliest or latest).
+- **Why a binary protocol, not REST:** see Component choices.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Messages | Append-only log of segment files on local disks, one directory per partition replica | Sequential writes and reads, whole-file deletes (D1, D8) | `(topic, partition)` from `hash(key) mod N` | Strong per partition: one leader | A relational table: a B-tree insert and index entry per message, and row deletes for retention |
+| Consumer offsets | Compacted internal log, key `(group, topic, partition)` | 16,000 small writes/s; only the latest value matters (D9) | `hash(group)` | Strong per group | ZooKeeper or etcd: built for small, rare writes, not 16,000 a second |
+| Cluster metadata | Raft-replicated metadata log on 3 controllers | Every broker must agree on one leader per partition (D3, D12) | None: one log | Linearizable | An external ZooKeeper ensemble: a second system to run, and slow full reloads on failover |
+| Transaction state | Compacted internal log, key `transactional_id` | Survives coordinator failover (D7) | `hash(transactional_id)` | Strong per key | Coordinator memory only: a crash forgets open transactions |
+| Producer state | Last sequence per producer id, kept with each partition and snapshotted | Dedup survives leader change (D7) | `(topic, partition)` | Strong per partition | A separate dedup store: a second write on every append |
+
+One partition on one broker is a directory of segment files:
+
+```text
+orders-17/
+  00000000000001200000.log        records, appended in offset order (1 GB per segment)
+  00000000000001200000.index      sparse: every ~4 kB, offset -> byte position
+  00000000000001200000.timeindex  timestamp -> offset, for "replay from 09:00"
+  00000000000001204330.log        active segment: the only file written to
+```
+
+- **Append:** write the batch at the end of the active segment; roll a new segment at 1 GB or one hour.
+- **Fetch from offset:** binary-search the segment by its base offset, look up the sparse index, scan forward a few kB, send bytes.
+- **Replay from a time:** the time index turns 09:00 into an offset; then it is a normal fetch.
+- **Retention:** delete a whole segment once its newest message is older than 7 days: one file unlink, no per-message work.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One broker, one append-only log (F1, F2)
+
+The smallest design: producers append to one file on one broker, consumers read it by position.
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={1} caption="Step 1: one broker appends every message to a file; a consumer reads from an offset it remembers." />
+
+- **Adds:** producers, consumers, one broker, its segment files.
+- **Flow:**
+  1. A producer sends a message; the broker appends it to the end of the file and returns its offset.
+  2. A consumer asks for messages from offset 1,000 and gets the next batch of bytes.
+  3. The consumer remembers where it is; reading deletes nothing.
+- **Why this and not that:** a log with offsets, not a queue that deletes on ack, because many readers need the same data and must be able to re-read it (F2, D9). Offsets need no per-message index (Deep dive 1).
+- **The gap:** one broker caps throughput at one machine's disk and network, far below 2 GB/s (N1).
+
+<PremiumBreak />
+
+### Step 2: Partitions, and a key that picks one (F3, N1)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={2} caption="Step 2: the producer's partitioner hashes the key, so one key always lands in one partition, in order." />
+
+- **Adds:** the **partitioner** in the producer library; topics split into partitions spread over brokers.
+- **Flow:**
+  1. The producer computes `hash(key) mod N` and batches messages per partition.
+  2. Each batch goes to the broker that holds that partition.
+- **Why this and not that:** order per key, not global, because a global order needs one writer for the whole topic: 2 GB/s through one machine (D6). Hashing keeps one key in one partition, so its order holds.
+- **The gap:** with 4,000 partitions, consumers need a way to share them without two readers on one partition.
+
+### Step 3: Consumer groups and their offsets (F2)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={3} caption="Step 3: a group coordinator gives each partition one owner per group; each group commits its own offsets." />
+
+- **Adds:** the **group coordinator** and the **offsets log**.
+- **Flow:**
+  1. Consumers join group `billing`; the coordinator assigns each partition to exactly one member.
+  2. Each member fetches from its partitions and, after processing, commits the next offset to read.
+  3. When a member stops heartbeating, its partitions move to the others, which resume from the committed offsets.
+- **Why this and not that:** one owner per partition per group keeps per-key order without locks (D6); another group reads the same partitions from its own offsets (D9).
+- **The gap:** a broker's disk dies and its partitions, with every acknowledged message, are gone (N4).
+
+The partition and group mechanics, as drawn on the message-queues pattern page:
+
+<AnimatedDiagram spec="animated/patterns/mq-partitions-groups" stepper caption="The key picks the partition, the group gives each partition one owner, and a dead consumer’s partitions wait for the rebalance." />
+
+**How to read it:** step 3 is the per-partition offset commit; step 4 is the rebalance after a consumer stops.
+
+### Step 4: Replicas and the in-sync set (F4, N4)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={4} caption="Step 4: follower replicas pull from the partition leader; the followers that keep up form the in-sync set." />
+
+- **Adds:** **follower replicas**: each partition has a leader and 2 followers, in 3 different zones.
+- **Flow:**
+  1. Followers send fetch requests to the leader, the same call consumers use, and append what they get.
+  2. A follower that has not caught up within 10 s leaves the **in-sync set**; it rejoins when it catches up.
+  3. Consumers read only up to the **high watermark**: the last offset every in-sync replica has.
+- **Why this and not that:** leader and followers, not a majority quorum per write: with an in-sync set, 3 copies survive 2 failures, where a majority needs 5 (Deep dive 2, D5).
+- **The gap:** the producer still does not know when its message is safe.
+
+### Step 5: Acknowledgement levels and a minimum in-sync set (F4, N2, N5)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={5} caption="Step 5: the producer sends with acks=all; the leader answers once every in-sync replica has the batch, and refuses if fewer than 2 are in sync." />
+
+- **Adds:** nothing new: the producer sends with `acks=all`, and each topic sets a minimum of 2 in-sync replicas.
+- **Flow:**
+  1. The leader appends the batch and waits until every in-sync follower has fetched it.
+  2. It acks; the high watermark moves; consumers can now see the batch.
+  3. With only the leader in sync, it refuses the write with `NOT_ENOUGH_REPLICAS`.
+- **Why this and not that:** `acks=1` is faster but loses the batch if the leader dies before a follower fetched it (D5). The minimum of 2 stops a lone leader from acking writes that its own failure would lose (D12).
+- **The gap:** who decides that a broker is dead, and which follower leads next?
+
+### Step 6: A controller quorum for metadata (F7, N5)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={6} caption="Step 6: a Raft quorum of controllers keeps the metadata log of leaders and in-sync sets; clients find leaders through a bootstrap address." />
+
+- **Adds:** the **controller quorum** (3 nodes, Raft), its **metadata log**, and a **bootstrap** address for clients.
+- **Flow:**
+  1. Brokers heartbeat to the active controller and fetch metadata changes from its log.
+  2. When a broker misses heartbeats, the controller picks a new leader from each affected partition's in-sync set and bumps the leader epoch.
+  3. Clients ask any broker for metadata, cache it, and go straight to each partition's leader.
+- **Why this and not that:** one agreed answer to "who leads partition 17" needs consensus; a Raft quorum of 3 survives one failure and keeps the metadata as a log brokers replay (D3, D12).
+- **The gap:** disks fill: 86.4 TB arrive every day (D8).
+
+### Step 7: Retention, segments and compaction (F5, N6)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={7} caption="Step 7: the log cleaner deletes whole segments past retention and compacts keyed topics to the latest value per key." />
+
+- **Adds:** the **log cleaner**.
+- **Flow:**
+  1. Every few minutes, a segment whose newest message is older than 7 days is deleted as one file.
+  2. On compacted topics (offsets, account state), the cleaner rewrites old segments, keeping only the latest value for each key; a null value deletes the key.
+- **Why this and not that:** deleting whole files costs nothing per message; a per-message delete would be 86.4 billion deletes a day (D8).
+- **The gap:** a producer that times out and retries writes the same batch twice (D7).
+
+### Step 8: Producer ids, sequence numbers and transactions (F6)
+
+<AnimatedDiagram spec="animated/message-queue/architecture" step={8} caption="Step 8: the transaction coordinator hands out producer ids and commits writes across partitions; brokers drop repeated sequence numbers." />
+
+- **Adds:** the **transaction coordinator** and its state in the internal log.
+- **Flow:**
+  1. The producer gets a producer id; each batch carries a sequence number per partition.
+  2. The leader accepts a batch only if its sequence is exactly one more than the last; a repeat is answered as a duplicate and not written.
+  3. A transactional producer writes to several partitions plus its consumer offsets, then commits; the coordinator writes commit markers, and `read_committed` consumers skip aborted data.
+- **Why this and not that:** dedup at the broker costs one integer per producer per partition; dedup in every consumer costs a lookup per message (D7). Transactions stop at the queue's edge (Deep dive 3).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/message-queue/architecture" stepper caption="Distributed message queue: a replicated, partitioned log; producers append by key, consumer groups read from their own offsets, and a controller quorum decides who leads." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Producers, consumer groups | Publish by key; read, process, commit offsets |
+| **Client library** | Partitioner, bootstrap | Pick the partition and batch; find each partition's leader |
+| **Partition leaders** | One leader per partition, spread over 36 brokers | Order appends, serve fetches up to the high watermark |
+| **Coordinators** | Group coordinator, transaction coordinator | Partition ownership and offsets; producer ids and commits |
+| **Replication and upkeep** | Follower replicas, controller quorum, log cleaner | Copies in 3 zones; leaders and in-sync sets; retention and compaction |
+| **Storage** | Segment files, metadata log, internal logs | Messages; cluster metadata; offsets and transaction state |
+
+One order event, from producer to the billing group:
+
+1. The checkout service sends `order 4471` keyed by `order_id`; the partitioner picks partition 17 and adds it to a 64 kB batch.
+2. After up to 5 ms the batch goes to partition 17's leader with producer id 4021 and sequence 880.
+3. The leader appends at offset 1,204,330; both followers fetch it within a few milliseconds; the leader acks.
+4. Billing's consumer for partition 17 fetches from its offset and gets the batch from the page cache with a zero-copy send.
+5. Billing processes the event and commits offset 1,204,331 to the offsets log.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: a binary protocol over long-lived TCP, with pull fetches
+
+- **Choice:** a length-prefixed binary request and response protocol over persistent TCP connections; consumers and followers pull with `Fetch`.
+- **Why:** 31,250 produce requests/s of 64 kB batches and continuous fetches need no per-request handshake or text headers (N1, D4). The record batch on the wire is the same bytes as on disk, so the broker can send file bytes without re-encoding (D1).
+- **Why not REST over HTTP:** headers and JSON per request, and no way to send file bytes untouched; fine as a gateway for occasional producers, not for the core path.
+- **Why not gRPC:** a good RPC layer, but its framing means copying each message into a protobuf; the zero-copy send from file to socket is lost.
+- **Why not push to consumers (AMQP style):** the broker would have to track each consumer's speed and back off; with pull, a slow consumer simply asks less often and the log absorbs it (D2).
+
+### Load balancer and CDN: none on the data path
+
+- **Choice:** no load balancer and no CDN; clients bootstrap from any broker, learn the leaders and connect to them directly.
+- **Why:** each request must reach one exact broker, the leader of that partition, so a balancer that spreads requests has nothing to choose (D6).
+- **Why not a layer-4 load balancer:** it would route a produce for partition 17 to a random broker, which then has to forward it: an extra hop on every request and 2 GB/s through the balancer.
+- **Why not a layer-7 proxy:** it would parse every request to route by partition, adding latency and a second copy of 6 GB/s of reads.
+- **Why not a CDN:** consumers are services inside the region and every byte is read by a few groups, not by millions of users.
+- **Bootstrap:** a DNS name listing three brokers; any one returns the full metadata.
+
+### Partition log: append-only segment files on local disks
+
+- **Choice:** an append-only log per partition replica, as 1 GB segment files on local NVMe disks with a sparse offset index and a time index; the layout <TechIcon id="oss/apache-kafka" /> Kafka uses.
+- **Why:** writes are appends and most reads are sequential from an offset, so the disks see sequential I/O only (D1); deleting a day of data is unlinking files (D8).
+- **Why not a relational database:** each message becomes a B-tree insert plus index maintenance, retention becomes billions of row deletes, and one primary per shard cannot take 167 MB/s of inserts per node.
+- **Why not an LSM key-value store such as <TechIcon id="oss/rocksdb" /> RocksDB:** it sorts by key and compacts in the background, rewriting data we only ever append and read in arrival order.
+- **Why not object storage as the primary copy:** a put per batch adds tens of milliseconds and a request fee, too slow for N2; it fits as a cold tier for old segments.
+- **Why not network block storage:** it already copies data within a zone, so 3 replicas pay for 9 copies and every write crosses the network twice.
+
+### Cache: the operating system's page cache, no separate cache
+
+- **Choice:** brokers keep no message cache in their own heap; recent segments stay in the OS page cache, 48 GB per broker.
+- **Why:** consumers at the tail read what was written in the last 5 minutes, which is still in RAM (D1, N3). One copy in memory, no garbage-collected heap holding gigabytes.
+- **Why not <TechIcon id="oss/redis" /> Redis in front:** a second copy of 2 GB/s of writes, a second system to keep consistent, and no help for replays, which are sequential disk reads anyway.
+- **Why not an in-process cache:** the data would be cached twice (heap and page cache) and a restart would start cold.
+
+### Replication: a leader, followers that pull, and an in-sync set
+
+- **Choice:** replication factor 3 across 3 zones; followers fetch from the leader; acks after every in-sync replica; at least 2 in sync.
+- **Why:** f + 1 = 3 copies tolerate f = 2 failures without losing a committed message, so the disk bill stays at 3 × (D5, D8).
+- **Why not a majority quorum per partition (Raft or Paxos):** tolerating 2 failures needs 5 copies: 3 PB instead of 1.8 PB, and a slow replica out of 5 still costs latency (Deep dive 2).
+- **Why not leaderless quorum writes (Dynamo style):** no single writer, so no order within a partition (D6).
+- **Why not asynchronous replication with `acks=1`:** a leader crash loses whatever its followers had not fetched (N4).
+
+### Metadata and coordination: a Raft controller quorum
+
+- **Choice:** 3 dedicated controller nodes running Raft over a metadata log of topics, partitions, leaders and in-sync sets; brokers fetch changes from it.
+- **Why:** every broker and client must agree on one leader per partition (D3); a log lets a standby controller take over without reloading state (N5).
+- **Why not an external ZooKeeper or <TechIcon id="oss/etcd" /> etcd:** it works, but it is a second distributed system to run, and a new controller must read all metadata back from it before acting.
+- **Why not gossip:** eventually consistent; two brokers could each believe they lead partition 17 and accept conflicting writes.
+- **Why not one static controller:** a single point of failure for every leader change.
+
+### Consumer offsets: a compacted internal log
+
+- **Choice:** consumers commit offsets as messages to an internal compacted topic, keyed by group, topic and partition; the group coordinator caches the latest values.
+- **Why:** 16,000 commits/s of a few bytes each, where only the latest per key matters: the log's own replication and compaction handle it (D9, D3).
+- **Why not per-message acknowledgements on the broker:** 2,000,000 acks/s and a state per message per group; an offset per partition is 80,000 numbers in total.
+- **Why not ZooKeeper or a database such as <TechIcon id="oss/postgresql" /> PostgreSQL:** 16,000 small writes/s to an external store, which becomes the bottleneck and another failure domain.
+- **Why not store offsets only in the consumer:** fine for consumers that write results and offsets to their own database in one transaction; a default store is still needed for the rest.
+
+### Partitioner and message ids: the offset is the id
+
+- **Choice:** the producer library picks the partition with `hash(key) mod N`; a message's id is `(topic, partition, offset)`.
+- **Why:** the offset is assigned by the one leader, is dense and ordered, and maps directly to a file position (D6, D1).
+- **Why not a UUID per message:** 16 extra bytes per message and an index from id to position on every read.
+- **Why not Snowflake-style ids:** time-ordered across machines, but order per key already comes from the partition; a second id buys nothing.
+- **Why not round-robin partitioning:** even load, but one key's messages scatter across partitions and lose their order.
+
+### Transaction coordinator: producer ids, sequences and commits
+
+- **Choice:** a coordinator per transactional producer, chosen by hashing its `transactional_id`, logging state to an internal compacted topic.
+- **Why:** read-process-write pipelines inside the queue must not double count after a crash (F6, D7); the coordinator makes the outputs and the offset commit one atomic step.
+- **Why not two-phase commit with outside databases (XA):** a slow participant blocks every partition in the transaction; this design keeps transactions inside the queue.
+- **Why not dedup in every consumer:** still needed for effects outside the queue, but inside it a sequence check per batch is far cheaper than a lookup per message.
+
+### Log cleaner: delete by segment, compact by key
+
+- **Choice:** a background thread per broker: delete segments past 7 days or past a size limit; on compacted topics, keep the latest value per key.
+- **Why:** 86.4 TB a day must leave as cheaply as it arrived (D8); compaction keeps state topics (offsets, account balances) bounded forever (F5).
+- **Why not per-message TTL:** a timer or a delete per message: 86.4 billion a day.
+- **Why not "delete when every group has read it":** one stopped group would hold the disk hostage, and replay (N6) would be impossible.
+
+## Deep dives
+
+### Why the log is fast: sequential appends, the page cache, zero-copy, batching
+
+- **Sequential appends:** each partition writes to the end of one file; at 167 MB/s per broker, the disks stream instead of seeking (D1).
+- **The page cache:** the broker does not cache messages itself; the OS keeps recent segments in RAM, so a consumer within 5 minutes of the tail never touches the disk.
+- **Zero-copy sends:** the record batch is stored in the same format it is sent in, so the broker hands the file range to the socket with one system call (`sendfile`) and the bytes never enter the broker's memory.
+- **Batching end to end:** the producer lingers up to 5 ms to fill 64 kB batches; one request, one append, one replication fetch and one consumer read move 64 messages.
+- **Offsets, not ids:** finding a message is a binary search over segment base offsets and a sparse index, not a random-access index per message.
+
+<AnimatedDiagram spec="animated/message-queue/log-offsets" stepper caption="A partition is a log of offsets; each consumer group is one number per partition, so replay means moving that number back." />
+
+**How to read it:**
+
+- Each cell is one message at its offset; the dotted boxes are segment files. Billing reads at the tail, so its reads come from the page cache.
+- Step 2 is a replay: analytics moves its offset back to 4 and streams 4 to 10 again, sequentially from disk; billing is untouched.
+- Segment 0 is past retention, so the cleaner deletes that file whole; offset 11 is only on the leader, so nobody reads it yet.
+
+**The numbers:**
+
+- 2,000,000 msgs/s ÷ 64 per batch = 31,250 requests/s, about 870 per broker, instead of 55,600 per broker one message at a time.
+- 48 GB of page cache ÷ 167 MB/s written per broker ≈ 290 s: consumers less than about 5 minutes behind read from RAM.
+
+<Callout tone="red" title="What breaks">
+  A consumer replaying 7 days of data reads cold segments from disk and pushes the tail out of the page cache, so tail readers on the same broker slow down. Throttle replays per group, or serve old segments from a separate cold tier.
+</Callout>
+
+### The in-sync set against a majority quorum
+
+- **The in-sync set (ISR):** the leader plus every follower that has fetched up to the leader's end within the last 10 s. A message is committed once every member has it.
+- **Why it is cheaper:** a committed message is on every in-sync replica, so any of them can lead without losing it. f + 1 replicas survive f failures.
+- **A majority quorum:** a write commits on a majority, so to survive f failures you need 2f + 1 copies: 3 for one failure, 5 for two.
+- **The cost of the in-sync set:** the ack waits for the slowest in-sync follower until it is dropped; the 10 s lag limit bounds that wait.
+- **The minimum in-sync size:** with 2 required, losing one replica keeps writes flowing; losing two stops writes on that partition but loses nothing acknowledged.
+- **Unclean election:** if every in-sync replica is gone, the choice is to wait for one to return (consistent, unavailable) or to elect an out-of-sync follower (available, loses the messages it never got). We keep it off (D12).
+
+<AnimatedDiagram spec="animated/message-queue/isr-failover" stepper caption="A slow follower leaves the in-sync set, the leader dies, and the controller picks the new leader from the set, so no acknowledged message is lost." />
+
+<StepCards>
+  <StepCard n={1} title="Ack once the in-sync set has it">
+    The producer appends offset 1,000 with acks=all. Both followers fetch it, so every in-sync replica has it, and the leader acknowledges.
+  </StepCard>
+  <StepCard n={2} title="A slow follower leaves the set">
+    B3 sends no fetch for 30 s, past the 10 s limit, so the leader shrinks the in-sync set to B1 and B2. Offset 1,001 is acknowledged with 2 copies, which meets the minimum of 2.
+  </StepCard>
+  <StepCard n={3} title="The leader dies: B2 takes over">
+    The controller misses B1's heartbeats and makes B2 leader with a new epoch, because B2 has every committed message. B2 refuses writes until B3 catches up and rejoins, then acknowledges the retry at 1,002.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 4,000 partitions × 3 replicas = 12,000 copies; a majority design that survives 2 failures needs 4,000 × 5 = 20,000 copies and 3 PB of disk instead of 1.8 PB.
+
+<Callout tone="red" title="What breaks">
+  With unclean election on, B3 could lead after B1 and B2 die; every message from 1,001 onward is gone, and consumers that already read them see offsets reused for different data. Keep it off for billing; allow it only on topics that prefer uptime to completeness, such as metrics.
+</Callout>
+
+### What "exactly once" covers, and what it does not
+
+- **Producer to log:** producer id plus sequence number per partition; a retried batch is answered as a duplicate and written once. This covers network retries, not an application that sends the same order twice.
+- **Read, process, write inside the queue:** a transaction writes the outputs to several partitions and the consumer's offsets together; `read_committed` consumers never see aborted outputs.
+- **What it does not cover:** a side effect outside the queue (charging a card, sending an email, writing to a database) can run twice when a consumer crashes after the effect and before its offset commit.
+- **The fix outside:** make the effect idempotent: an idempotency key per message (topic, partition, offset, or a business id), checked in the same database transaction as the effect.
+- **The cost:** transactions add a coordinator round trip per commit and hold `read_committed` readers at the oldest open transaction, so long transactions add latency for everyone downstream.
+
+The redelivery case, from the message-queues pattern page: a crash before the ack delivers the message again, and the idempotent check absorbs it.
+
+<AnimatedDiagram spec="animated/patterns/mq-redelivery" stepper caption="At-least-once means a crash before the ack delivers the message again: the idempotent check absorbs the repeat, and the dead-letter queue catches what never succeeds." />
+
+**How to read it:** the same holds for an offset that was not committed: the next owner of the partition reads from the last committed offset and sees the message again.
+
+### The queue model: visibility timeouts, and why they are not a lock
+
+- **A job queue** hands each message to one worker, hides it for a visibility timeout (30 s here), and deletes it when the worker acks.
+- **What it adds:** per-message acks, so one slow message does not hold up the rest; retries and a dead-letter queue per message.
+- **What it loses:** replay (acked messages are gone), several groups reading the same data, and order (another worker takes the next message while the first is hidden).
+- **Why the timeout is not a lock:** if the worker takes longer than the timeout, the message becomes visible and a second worker gets it while the first is still working. The handler must be idempotent, or extend the timeout while it works.
+- **On a log:** per-message acks can be layered on top (a retry topic and a dead-letter topic per group) without giving up replay.
+
+<AnimatedDiagram spec="animated/message-queue/log-vs-queue" stepper caption="A log keeps every message and gives each group an offset; a queue hides a received message for a timeout and deletes it on the ack, and a hidden message is not a locked one." />
+
+**How to read it:**
+
+- Left: two groups at different offsets in the same six messages; nothing is deleted by reading.
+- Right: m1 is acked and gone; m2 and m4 are hidden while workers A and B hold them.
+- Step 2: worker A is still busy at 30 s, m2 reappears and worker C receives it too.
+
+**The numbers:** a queue tracks state and a timer for every in-flight message (120,000 in flight is 120,000 timers); a log tracks one offset per partition per group (80,000 for the whole cluster).
+
+### Worked example: a broker dies at peak
+
+1. Peak: 2 GB/s in; broker 7 leads about 4,000 ÷ 36 ≈ 111 partitions and follows about 222 more.
+2. Broker 7 stops; after its heartbeats time out (a few seconds), the controller moves leadership of its 111 partitions to in-sync followers in other zones.
+3. Producers get `NOT_LEADER`, re-read metadata and resend with the same sequence numbers: no loss, no duplicate.
+4. The 333 replicas that lived on broker 7 now have 2 copies each; with a minimum of 2 in sync, writes continue.
+5. Re-replication: 1.8 PB ÷ 36 = 50 TB to copy back. At 1 GB/s spread over the 35 survivors, that is 50,000 s, about 14 hours, so the copy is throttled and a replacement broker takes the replicas over.
+
+**The numbers:** during those 14 hours, a second failure in another zone leaves some partitions with 1 copy: they refuse writes (D12) but lose nothing acknowledged.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Delivery model | Per-message acks (queue), log with offsets | Log with offsets | D9, F2, N6 | Per-message retry and visibility; slow messages block their partition | One consumer per message, no replay: a job queue |
+| Consumer flow | Push, pull | Pull with long-poll fetches | D2, D4 | A little latency when idle | Consumers are phones or browsers |
+| Replication | In-sync set, majority quorum per partition | In-sync set, factor 3, minimum 2 | D5, D8, N4 | Ack latency follows the slowest in-sync follower | Disks are cheap and tail latency matters more |
+| Unclean election | Allow (available), forbid (durable) | Forbid by default; allow per topic | D12, N4 | A partition is down until an in-sync replica returns | Metrics or logs where gaps are acceptable |
+| Partition count | Few (simple, strong order), many (parallelism) | 400 by throughput × 10 for consumers: 4,000 | D6, N1 | Adding partitions later remaps keys and breaks per-key order | A topic's consumers need more parallelism than its partitions |
+| Metadata | External ZooKeeper, built-in Raft quorum | Built-in Raft quorum of 3 | D3, N5, F7 | Running consensus ourselves | Never for a new build |
+| Ordering scope | Global, per key | Per key via partitions | D6, N1 | No order across keys | A small topic that needs one total order: 1 partition |
+| Dedup | Consumer-side only, producer ids and sequences | Producer ids and sequences, plus idempotent consumers for outside effects | D7, F6 | One integer per producer per partition | Producers without the client library |
+| Storage tier | Local disks only, local plus object storage | Local disks for 7 days | D8, N2 | Disk sets broker count | Retention grows past weeks: move old segments to object storage |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The whole system | The design is the pattern's broker |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Topics split into partitions by key hash | 2 GB/s cannot go through one machine |
+| [Leader Election and Consensus](/system-design/patterns/leader-election) | Controller quorum; partition leaders chosen from the in-sync set | One writer per partition, agreed by everyone |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Producer batches, fetch batches | 31,250 requests/s instead of 2,000,000 |
+| [Idempotency](/system-design/patterns/idempotency) | Producer ids and sequences; idempotent consumers | Retries must not duplicate |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | Pull consumers; the log as a buffer; refusing writes below 2 in sync | Slow consumers must not slow producers |
+| [Consistency Models and CAP](/system-design/patterns/consistency-models) | Strong per partition, lagging consumers, unclean election | Durability against availability when replicas fail |
+| [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination) | Bootstrap and metadata; group coordinator | Clients must find each partition's leader |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A change stream from a database | Partitioned, replicated log; order per key (the row's primary key) | The producer is a log reader on the database; compaction keeps the latest row |
+| An event store | Append-only log, offsets, replay | Retention forever; one partition per aggregate key range; reads by key need an index |
+| A job queue | Brokers, replication, producers | Per-message acks and visibility timeouts; delete on ack; dead-letter queue |
+| Log shipping | Producers batch, brokers append, consumers pull | Loss of a few lines is acceptable: `acks=1`, unclean election allowed |
+| A pub/sub for notifications | Topics and groups | Millions of tiny subscribers: a push tier in front, not a consumer group each |
+
+## How real systems do it
+
+- **Kafka paper, 2011 (LinkedIn, NetDB):** messages have no explicit id and are addressed by their logical offset; the broker relies on the file system page cache and uses `sendfile` to send log segments; consumers pull; a partition is the smallest unit of parallelism; order is guaranteed only within a partition; delivery is at least once; messages were typically kept 7 days. Replication was still future work.
+- **Confluent replication docs (read 2026):** with the in-sync replica model and f + 1 replicas, a topic tolerates f failures without losing committed messages, where majority vote needs 3 copies for one failure and 5 for two. `acks=all` waits for the full in-sync set, `min.insync.replicas` sets the minimum, and unclean leader election is a stated trade-off between availability and consistency, off by default since 0.11.0.0.
+- **KIP-98 (read 2026):** each producer gets a producer id; sequence numbers per partition start at zero; the broker rejects a batch whose sequence is not exactly one more than the last. A transaction coordinator, a `transactional.id`, `read_committed` consumers and offsets written inside the transaction make consume-transform-produce atomic.
+- **KIP-500 (revised 2020):** replaces ZooKeeper with a self-managed metadata quorum: controllers form a Raft quorum over a metadata log, brokers fetch updates from the active controller, and failover needs no long reload.
+- **LinkedIn, 2019:** over 7 trillion messages a day on over 100 Kafka clusters with more than 4,000 brokers, 100,000 topics and 7 million partitions.
+- **Amazon SQS docs (read 2026):** a received message stays in the queue but is invisible for the visibility timeout (default 30 s, at most 12 hours); delivery is at least once, so a message can arrive twice even within the timeout; standard queues allow about 120,000 in-flight messages.
+- **Where this design differs:** the numbers here are round sizing numbers, not any company's; the page follows Kafka's published log design for the core and SQS's documented model for the queue variant, which is what the interview asks for.
+
+## Failure modes & pitfalls
+
+- **`acks=1` on a billing topic:** a leader crash loses messages its followers had not fetched; notice offset gaps in downstream reconciliation; use `acks=all` with a minimum of 2 in sync.
+- **Unclean election on:** messages acknowledged before a double failure vanish; alert on any unclean election; keep it off except for loss-tolerant topics.
+- **A hot key:** one partition gets most of the traffic and its consumer lags while others idle; watch per-partition bytes in and lag; salt the key or split the entity.
+- **Adding partitions to a keyed topic:** `hash(key) mod N` changes, so a key's new messages land in another partition and overtake old ones; create a new topic and migrate, or size partitions up front.
+- **Rebalance storms:** a consumer whose processing exceeds the poll timeout is kicked out, its partitions move, and it rejoins, over and over; watch rebalance rate; process in smaller batches or raise the timeout.
+- **Consumer lag past retention:** a group that falls 7 days behind gets `OFFSET_OUT_OF_RANGE` and skips data; alert on lag in time, not just messages; scale consumers or extend retention for that topic.
+- **Replay evicting the tail:** a large replay pushes recent segments out of the page cache and every tail reader slows; throttle replays or serve them from a cold tier.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify log or job queue, traffic, retention, ordering scope, what "acknowledged" means, the delivery guarantee; write F1 to F7 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 1 GB/s average, 2 GB/s peak, 1.8 PB on disk, 36 brokers set by disk, 4,000 partitions.
+3. **Minutes 10 to 15:** the API (produce, fetch, commit) and the segment-file layout; say why the offset is the id.
+4. **Minutes 15 to 25:** Steps 1 to 5: one log, partitions by key, consumer groups, replication and the in-sync set, `acks=all` with a minimum of 2.
+5. **Minutes 25 to 35:** Steps 6 to 8: the controller quorum, retention and compaction, producer ids and transactions.
+6. **Minutes 35 to 45:** one deep dive: why the log is fast, the in-sync set against a quorum, or what exactly once covers; then the queue variant if asked.
+
+**What interviewers listen for:**
+
+- **Mid:** partitions for throughput, order per key, consumer groups with offsets, 3 replicas.
+- **Senior:** the in-sync set and `acks=all` with a minimum, unclean election as a stated trade-off, producer ids and sequences, why pull, why retention sets broker count.
+- **Staff:** the limits of exactly once, partition count as an irreversible choice, replay isolation, re-replication time after a broker loss, when a job queue beats a log.
+
+**Red flags:** a global order across the topic; deleting messages when a consumer acks; "exactly once" with no scope; a load balancer in front of brokers; a database table as the log.
+
+## Further reading
+
+- [Kafka: a Distributed Messaging System for Log Processing](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) (Kreps, Narkhede, Rao, NetDB 2011)
+- [Kafka Replication and Committed Messages](https://docs.confluent.io/kafka/design/replication.html) (Confluent documentation)
+- [KIP-98: Exactly Once Delivery and Transactional Messaging](https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging) (Apache Kafka)
+- [KIP-500: Replace ZooKeeper with a Self-Managed Metadata Quorum](https://cwiki.apache.org/confluence/display/KAFKA/KIP-500%3A+Replace+ZooKeeper+with+a+Self-Managed+Metadata+Quorum) (Apache Kafka)
+- [How LinkedIn customizes Apache Kafka for 7 trillion messages per day](https://www.linkedin.com/blog/engineering/open-source/apache-kafka-trillion-messages) (LinkedIn Engineering, 2019)
+- [Amazon SQS visibility timeout](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html) (AWS documentation)
+- Related pages: [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Single-leader replication](/system-design/databases/single-leader-replication) · [Replication quorums](/system-design/databases/replication-quorums)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does a consumer replay messages, and what limits how far back it can go?" category="Concepts" level="Mid">
+  - A consumer group's position is one offset per partition; replay means committing an earlier offset, or one looked up from a timestamp.
+  - Reading deletes nothing, so other groups are unaffected.
+  - Retention is the limit: a segment past 7 days is deleted, and an offset inside it returns `OFFSET_OUT_OF_RANGE`.
+  - Replays read cold data from disk; throttle them so they do not evict the tail from the page cache.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you guarantee message ordering, and what breaks it?" category="Concepts" level="Mid">
+  - Order holds within a partition: one leader assigns offsets, and one consumer per group reads each partition.
+  - Hash the key to a partition so every message for one key is in one partition; there is no order across keys.
+  - Producer retries could reorder batches; sequence numbers let the broker reject out-of-order or repeated batches.
+  - Adding partitions changes the key mapping and breaks per-key order for keys in flight.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why store messages in a log with offsets instead of acknowledging and deleting each message?" category="Trade-offs" level="Senior">
+  - Several groups read the same data; with deletes each would need its own copy.
+  - Replay after a bug fix is moving a number, not re-publishing.
+  - State is one offset per partition per group, not one per message per group: 80,000 numbers instead of millions of acks a second.
+  - The cost: no per-message retry, and one slow message holds up its partition; a retry topic or a job queue covers that case.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure an acknowledged message is never lost?" category="Architecture" level="Senior">
+  - Replicate each partition 3 times across 3 zones; followers pull from the leader.
+  - Ack only when every in-sync replica has the message (`acks=all`), and require at least 2 in sync, or refuse the write.
+  - Pick a new leader only from the in-sync set; keep unclean election off.
+  - Do not rely on a disk flush per write: the copies on other machines are the durability.
+  </InterviewQuestion>
+  <InterviewQuestion question="The partition leader dies while one follower is behind. What happens?" category="Failure modes" level="Senior">
+  - The slow follower already left the in-sync set once it lagged past the limit, so it is not eligible.
+  - The controller picks an in-sync follower, which has every committed message, and bumps the leader epoch.
+  - Producers get `NOT_LEADER`, re-read metadata and resend with the same sequence numbers: no loss, no duplicate.
+  - If fewer than 2 replicas are in sync, the new leader refuses writes until the slow one catches up.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does exactly-once delivery mean here, and what does it not cover?" category="Trade-offs" level="Senior">
+  - Producer ids and sequence numbers stop retry duplicates from producer to log.
+  - Transactions make outputs to several partitions and the consumer's offset commit atomic; `read_committed` readers skip aborted data.
+  - It does not cover effects outside the queue: an email or a card charge can repeat if the consumer crashes before committing.
+  - Outside effects need an idempotency key checked in the same transaction as the effect.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many partitions would you give a topic?" category="Scaling" level="Senior">
+  - Throughput first: peak bytes ÷ what one partition sustains, for example 2 GB/s ÷ 5 MB/s = 400.
+  - Then consumer parallelism: a group cannot have more active consumers than partitions, so leave room to grow.
+  - Adding partitions later breaks per-key order, so size up front.
+  - Too many costs leader elections, metadata and open files per broker; keep a few hundred replicas per broker.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should consumers pull messages or should the broker push them?" category="Trade-offs" level="Mid">
+  - Pull: each consumer reads at its own pace, and the log absorbs the difference, so a slow consumer never slows the broker.
+  - Pull makes batching and replay natural: ask for bytes from an offset.
+  - Long-poll fetches remove the cost of empty polls when the topic is idle.
+  - Push suits millions of small subscribers such as phones, which sit behind a separate push tier.
+  </InterviewQuestion>
+  <InterviewQuestion question="The interviewer adds a new constraint: each message is a job that must be retried on its own after a failure, and a slow job must not block others. What changes?" category="Architecture" level="Senior">
+  - That is the queue model: per-message acks, a visibility timeout and a dead-letter queue.
+  - Order per key gives way: other workers take the next messages while one is hidden.
+  - The visibility timeout is not a lock; handlers must be idempotent, or extend the timeout while working.
+  - On a log, the same effect comes from a retry topic and a dead-letter topic per group, keeping replay.
+  </InterviewQuestion>
+  <InterviewQuestion question="A consumer group falls hours behind. What do you do?" category="Failure modes" level="Mid">
+  - Measure lag in time as well as messages, and alert long before it reaches the 7-day retention.
+  - Add consumers up to the partition count; beyond that, more partitions only help new data.
+  - Find the slow step: a downstream database or a hot partition; fix that before scaling.
+  - Producers are unaffected: the log is the buffer, which is why pull consumers were chosen.
+  </InterviewQuestion>
+</InterviewQuestions>

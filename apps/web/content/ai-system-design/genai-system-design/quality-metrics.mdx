@@ -1,0 +1,271 @@
+---
+title: Quality Metrics
+description: Faithfulness, relevance, and automated evaluation frameworks such as RAGAS for LLM and RAG quality measurement.
+updated: 2026-11-15
+---
+
+A metric is a promise that a number tracks quality, and for generated text that promise is easy to break.
+
+- Interviewers ask about quality metrics to see whether you know what each family measures, what it misses, and how you would catch a metric that is wrong.
+
+## Overview
+
+- Quality for generative systems is **multi-dimensional**: faithfulness (claims supported by the context), relevance (the answer addresses the question), helpfulness and coherence. No single scalar replaces human judgment, and a balanced scorecard stops a team optimising one number while another quietly falls.
+- Metrics come in **four families**: reference-based (exact match, BLEU, ROUGE), embedding-based (BERTScore, cosine similarity), judge-based (a rubric scored by an LLM) and task-based (did the job get done). Each is blind to something the next one sees.
+- On one Brightpost answer that **promises a £42 refund without the required approval**, token F1 is **0.56**, embedding cosine **0.96** and a rubric judge **0.67**, while the task check scores **0**.
+- **RAG systems** are scored part by part: retrieval (recall@k, MRR, nDCG) and generation (faithfulness, answer relevance, correctness), so a bad number points at the stage to fix.
+- Automated scores scale regression gates but inherit **judge bias**, so **calibrate** them: measure agreement with human ratings on a labelled golden set and track it over time.
+
+## Mental model
+
+- A restaurant inspector can score a kitchen four ways.
+- Count how many items on the menu match last year's menu word for word (cheap, and blind to a new recipe that is better).
+- Compare the photos of the dishes with the photos in the cookbook (catches a reworded recipe, but a dish with salt instead of sugar looks the same).
+- Ask a senior chef to taste each dish against a checklist (flexible, and the chef has favourite flavours).
+- Or check whether the customers who ate it were fed and did not fall ill (closest to the point, and slowest to learn why it went wrong).
+- Each way is cheap or close to the goal, never both.
+- Quality metrics are those four inspections for an answer.
+
+## Core concepts
+
+- The running example is Brightpost's support assistant.
+- One question recurs on this page: "My kettle from order 4471 arrived cracked.
+- Can I get my £42 back?" Refunds over £30 need approval, so a correct answer sends the refund for approval and does not promise it.
+
+### The dimensions of quality
+
+- Four properties matter for most assistants. **Faithfulness** (also called groundedness) asks whether the claims in the answer are supported by the context the model was given; it matters most for RAG, where a model should not invent sources.
+- **Relevance** asks whether the answer addresses what the user wanted, including follow-ups when a question is underspecified.
+- **Helpfulness** asks whether the steps are actionable, and **coherence** whether the answer is consistent and does not contradict itself.
+- They can move independently: an answer can be faithful and useless, or helpful and invented.
+- Choose the dimensions that fit your product, give each a metric, and report them side by side.
+
+### The four metric families
+
+<AnimatedDiagram
+  spec="animated/eval/metric-families"
+  stepper
+  caption="Four ways to score an answer, from cheap word matching to checking the outcome. Each is blind to something the next one sees."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Reference-based">
+    - Compare the answer's words with a reference answer.
+    - **Exact match** is 1 only when the strings are equal.
+    - **BLEU** (Papineni et al., 2002) is the geometric mean of clipped n-gram precisions for n = 1 to 4, times a brevity penalty for short outputs; it was designed for machine translation and for scoring a whole corpus.
+    - **ROUGE** (Lin, 2004) is recall-oriented: ROUGE-N counts the reference's n-grams found in the answer, and ROUGE-L uses the longest common subsequence; it was built for summaries.
+    - Cheap and deterministic, but a correct answer in other words scores low.
+  </StepCard>
+  <StepCard n={2} title="Embedding-based">
+    - Compare meaning, not words. **BERTScore** (Zhang et al., 2020) matches each token of one text to its most similar token in the other, using cosine similarity of contextual embeddings, and reports precision, recall and F1; it can weight tokens by idf and rescale against a baseline.
+    - A simpler version embeds both whole texts and takes one cosine.
+    - It handles paraphrase, but similar-sounding texts that differ in a number or a "not" stay close.
+  </StepCard>
+  <StepCard n={3} title="Judge-based">
+    - A language model grades the answer against a rubric and returns a score and a reason.
+    - It handles open-ended answers and can read the policy, at the cost of one model call per score and some bias (see [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
+    - Frameworks such as RAGAS use smaller models or judges for reference-free scores.
+  </StepCard>
+  <StepCard n={4} title="Task-based">
+    Check the outcome: was the refund routed correctly, did the code pass its tests, was the ticket resolved. It is the closest to the goal, but it needs an outcome you can check, and a pass or fail does not say why.
+  </StepCard>
+  <StepCard n={5} title="Choosing among them">
+    Moving right is usually closer to what the customer wants and costlier to run. In practice you use several: cheap metrics on every change, judges on a sample, task checks where an outcome exists.
+  </StepCard>
+</StepCards>
+
+### Reference-free and reference-based
+
+- A **reference-based** metric needs a labelled answer per case, so it lives on the golden set (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)) and goes stale as the product changes.
+- A **reference-free** metric needs only the question, the context and the answer, so it runs on live traffic and covers more ground, but it is noisier.
+- RAGAS faithfulness and answer relevance are reference-free; its context recall needs a reference.
+- Use references for strict regression and reference-free scores for breadth.
+
+## Architecture
+
+For a RAG system, metrics attach to three things the system produces for each question: the question, the retrieved context and the answer. Each check compares two of them.
+
+<AnimatedDiagram spec="animated/rag/eval-triad" stepper caption="Three things, three checks: one about retrieval and two about generation, each comparing two of the three." />
+
+1. **Log the three things** for every question: the question, the retrieved context and the answer.
+2. **Context relevance** (question and context): did retrieval bring material that is on topic?
+3. **Faithfulness** (context and answer): is every claim in the answer backed by the context? A faithful answer can still be wrong if the context was wrong.
+4. **Answer relevance** (question and answer): does the answer address what was asked?
+
+The full treatment, with the labelled-question metrics and the RAGAS definitions, is in [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation).
+
+## Technical mechanics
+
+### Retrieval metrics
+
+Retrieval has its own metrics because a wrong passage cannot be fixed by a better prompt. With labelled relevant chunks, three numbers describe one ranked list.
+
+<AnimatedDiagram spec="animated/rag/retrieval-metrics" stepper caption="Score retrieval and generation separately; one ranked list gives three different retrieval numbers." />
+
+**The numbers:**
+
+- On that list, recall@5 = 2 ÷ 3 = 0.67, MRR = 1 ÷ 2 = 0.5 and nDCG@10 = 1.39 ÷ 2.13 = 0.65.
+- They answer different questions: did the right material arrive, how early, and how well ordered.
+
+### Human agreement and calibration
+
+- An automated metric is a proxy, so measure the proxy.
+- Score a labelled set with the metric, have people rate the same cases, and compare: the share of cases where they agree, or a rank correlation.
+- Low agreement signals an ambiguous rubric, an underspecified task or rater fatigue.
+- Fix it by writing clearer guidelines, adding edge-case examples, adjudicating borderline items and holding rater calibration sessions, before you tune the metric itself.
+- Then keep measuring: judge model versions change, and so does the product.
+
+### Worked example: one answer, four scores
+
+<AnimatedDiagram
+  spec="animated/eval/metric-worked-example"
+  stepper
+  caption="A wrong answer that sounds right scores 0.56, 0.96 and 0.67 on three metrics and 0 on the one that checks the outcome. Judge verdicts are illustrative."
+/>
+
+- The golden-set reference sends the refund for approval.
+- Answer A reads well but says "I have refunded the £42 to your card", which skips the approval step.
+- Answer B is correct in other words: "I am sorry the kettle was damaged.
+- A refund of £42 needs approval as it is over £30, so I have passed it on."
+
+**Token overlap, by hand:**
+
+- Lower-case both texts, drop full stops and commas, and split on spaces.
+- A has 13 tokens, the reference 19. They share 9: sorry, kettle, arrived, cracked, i, have, £42, the and your (each counted as often as it appears in both; A's second "your" does not count).
+- Precision = 9 ÷ 13 = 0.69. Recall = 9 ÷ 19 = 0.47.
+- F1 = 2 × 9 ÷ (13 + 19) = 18 ÷ 32 = **0.56**; this is also ROUGE-1 F1.
+- Exact match is 0. ROUGE-L, with a longest common subsequence of 7 tokens, is 0.44.
+
+**BLEU, by hand:**
+
+- Clipped n-gram precisions for A: 9 of 13 one-grams, 4 of 12 two-grams, 3 of 11 three-grams and 2 of 10 four-grams.
+- The brevity penalty is exp(1 − 19 ÷ 13) = 0.63 because A is shorter than the reference.
+- The geometric mean is (0.692 × 0.333 × 0.273 × 0.2)^(1/4) = 0.335, so BLEU = 0.63 × 0.335 = **0.21**.
+- Sentence-level BLEU is rough: B shares no four-gram with the reference, so unsmoothed BLEU for B is 0.
+
+**Embedding cosine, measured:**
+
+- With the open model BAAI bge-small-en-v1.5 (one vector per text, cosine similarity), A scores **0.96** and B **0.97**.
+- For scale, two off-topic sentences score 0.54 and 0.59 against the reference.
+- This model's scores crowd between about 0.5 and 1, so a threshold must be set on your own data, and the cosine barely separates A from B.
+
+**Judge rubric:**
+
+- Three yes or no lines: acknowledges the damage, states £42, sends for approval and does not promise payment.
+- A gets yes, yes, no, so 2 ÷ 3 = **0.67**. B gets 3 ÷ 3 = 1.00.
+- These verdicts are illustrative, what a judge that can read the policy typically returns, not a measured run.
+
+**Task success.** A refund of £42 is over the £30 limit, and A requests no approval, so the task check gives **0**. B requests approval and gets 1.
+
+| Metric | Answer A (wrong) | Answer B (right) |
+| --- | --- | --- |
+| Token F1 (ROUGE-1) | 0.56 | 0.51 |
+| BLEU, no smoothing | 0.21 | 0 |
+| Embedding cosine | 0.96 | 0.97 |
+| Judge rubric (illustrative) | 0.67 | 1.00 |
+| Task success | 0 | 1 |
+
+The two cheapest metrics rank the wrong answer above the right one on token F1, and cannot tell them apart on cosine. Only the judge, given a rubric that names the approval rule, and the task check rank B above A.
+
+<Callout tone="red" title="What breaks">
+  A team gates releases on ROUGE and embedding similarity to the reference. The assistant learns to start with the reference's wording and to promise refunds in a friendly tone. Scores stay at 0.55 to 0.96, no gate fires, and refunds over £30 go out unapproved. Fix: add a rubric line and a task check for the policy rule, and read a sample of high-scoring answers by hand.
+</Callout>
+
+### Metrics in CI and in production
+
+- A regression gate uses a versioned golden set with statistical thresholds, not pointwise perfection, and two tiers: hard-fail on large drops in core scenarios, soft warnings on secondary suites (see [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing)).
+- Allow documented overrides for urgent fixes, and pair the numbers with a small human review sample for high-risk domains.
+- In production, running evaluators on every response costs money and time, so sample, and watch the score distribution, the judge version, retrieval hit rate and input length by segment, because a score can move when the cohort moves.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Exact match, BLEU, ROUGE | Free, fast, deterministic | Blind to rewording; BLEU and ROUGE came from translation and summaries | Short factual answers, extraction, a cheap sanity check |
+| Embedding similarity | Handles paraphrase; one small model | Scores crowd together; misses flipped numbers and negation | Retrieval and near-duplicate checks, never alone |
+| Judge rubric | Flexible; reads policy; gives a reason | A call per score; judge bias; needs calibration | Open-ended answers, on a sample or the golden set |
+| Task-based check | Closest to the goal; no judge bias | Needs a checkable outcome; no reason for failure | Refund routing, code tests, structured actions |
+| Reference-free scores | Run on live traffic, broad | Noisier; correlated subscores | Monitoring and triage |
+| Reference-based scores | Strict, repeatable | Need a maintained dataset that goes stale | Regression gates |
+
+## Production systems
+
+- **BLEU** (Papineni et al., 2002) scores machine translation by clipped n-gram precision and a brevity penalty, and it won the NAACL 2018 test-of-time award.
+- **ROUGE** (Lin, 2004) is a package of recall-oriented overlap measures, ROUGE-N, ROUGE-L, ROUGE-W and ROUGE-S, built for summaries and used in the DUC 2004 evaluation.
+- **BERTScore** (Zhang et al., 2020) compares contextual embeddings by greedy matching; its paper shows BLEU scoring a worse paraphrase above a better one, which is the failure it was built to reduce.
+- **RAGAS** (Es et al., 2023) defines reference-free context relevance, faithfulness and answer relevance for RAG, and **MT-bench** (Zheng et al., 2023) reports that a strong LLM judge agrees with human preferences over 80 % of the time, the level of human-to-human agreement.
+
+## Failure modes & pitfalls
+
+- **One scalar for quality.** The team optimises it and another dimension falls unseen.
+- **Reference overlap as correctness.** A wrong answer in the reference's words scores well, and a right paraphrase scores badly.
+- **Reading cosine as a probability.** Scores from one model crowd into a narrow band; a 0.96 may be ordinary.
+- **A judge with no calibration.** Without a check against human ratings you measure the judge's habits.
+- **Faithfulness read alone.** A faithful answer built on the wrong passage is confidently wrong; pair it with retrieval recall and correctness.
+- **A stale reference set.** The product changes and the references still describe last year's behaviour.
+
+## Interview framework
+
+1. Say that quality is several dimensions, and name the ones your product needs.
+2. Walk the four families with an example each and one blind spot each.
+3. Give a worked case: one answer that overlap and embeddings pass and a task check fails.
+4. Say how you trust a metric: agreement with human ratings on a golden set, tracked over time.
+5. Close with where each runs: cheap metrics in CI, judges on a sample, task checks where an outcome exists.
+
+**What interviewers listen for:** the difference between overlap and correctness, retrieval and generation scored separately, calibration against people, and an awareness of judge bias.
+
+**Red flags:** "we use BLEU" for an open-ended assistant, a single quality score, or trusting an LLM judge without ever checking it.
+
+## Further reading
+
+- [BLEU: a Method for Automatic Evaluation of Machine Translation (Papineni et al., 2002)](https://aclanthology.org/P02-1040/)
+- [ROUGE: A Package for Automatic Evaluation of Summaries (Lin, 2004)](https://aclanthology.org/W04-1013/)
+- [BERTScore: Evaluating Text Generation with BERT (Zhang et al., 2020)](https://arxiv.org/abs/1904.09675)
+- [RAGAS: Automated Evaluation of Retrieval Augmented Generation (Es et al., 2023)](https://arxiv.org/abs/2309.15217)
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- Related pages: [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) · [Offline Evaluation & Benchmarks](/ai-system-design/genai-system-design/offline-evaluation-benchmarks) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What do exact match, BLEU and ROUGE measure, and when are they a poor choice?" category="Concepts" level="Junior">
+    - Exact match checks that two strings are equal.
+    - BLEU measures how many of the answer's n-grams appear in the reference, with a penalty for short outputs, and was designed for machine translation.
+    - ROUGE measures how many of the reference's n-grams appear in the answer, and was designed for summaries.
+    - All three count words, so they punish a correct answer in different words and reward a wrong answer in the reference's words.
+    - They are a poor choice alone for open-ended assistants, but cheap and fine for short factual answers.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is faithfulness, and why is it not enough on its own for a RAG system?" category="Concepts" level="Junior">
+    - Faithfulness asks whether every claim in the answer is supported by the retrieved context; RAGAS splits the answer into statements and scores supported statements over all statements.
+    - It does not ask whether the context was right.
+    - If retrieval returned the wrong passage and the model followed it, the answer is faithful and wrong.
+    - Pair faithfulness with retrieval recall on labelled questions and with correctness against a reference.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does RAGAS-style evaluation differ from a single end-to-end accuracy number on a Q&A benchmark?" category="Architecture" level="Mid">
+    - RAGAS-style metrics decompose the pipeline into retrieval quality and generation quality so you can localise failures, whereas a single accuracy collapses retrieval misses, grounding errors and formatting issues into one opaque score.
+    - Decomposed metrics guide interventions such as better chunking versus prompt changes.
+    - They still need careful reading, because automated subscores can correlate and reference-free judges add their own variance.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose an embedding similarity metric over token overlap, and what is its main risk?" category="Trade-offs" level="Mid">
+    - Choose it when correct answers can be worded many ways, because it compares meaning and so handles paraphrase better than overlap.
+    - The main risk is that texts that differ in a number, a date or a negation still embed close together, and that scores from one model crowd into a narrow band, so a cosine of 0.96 may mean little.
+    - On Brightpost's refund example, a wrong answer and a right one scored 0.96 and 0.97.
+    - Use it for retrieval and near-duplicate checks, and pair it with a rubric or task check for correctness.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you implement a regression gate using automated quality metrics without blocking good releases?" category="Architecture" level="Mid">
+    - Maintain a versioned golden set with statistical thresholds rather than pointwise perfection, run the metrics in CI with the judge version pinned, and use two tiers: hard fail on large drops in core scenarios, soft warnings on secondary suites.
+    - Allow overrides with documented risk acceptance for time-sensitive fixes, and pair the metrics with a small human review sample for high-risk domains such as medical or legal assistance.
+    - Report an interval with each score, because a small change on a 200-case set is inside the noise.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your quality metric has risen for three releases but customer complaints have not fallen. What do you check?" category="Failure modes" level="Senior">
+    - Suspect that the metric measures something other than quality.
+    - Read a sample of the highest-scoring answers by hand, looking for wrong answers that sound right, such as a refund promised without approval.
+    - Measure agreement between the metric and human ratings on a labelled set, and check whether the judge version, prompt or cohort changed.
+    - Then add the missing signal: a rubric line or task check for the failing behaviour, and a metric tied to complaints.
+    - Treat the old metric as a smoke alarm, not a target.
+  </InterviewQuestion>
+  <InterviewQuestion question="What would you monitor alongside automated quality scores in production?" category="Scaling" level="Senior">
+    - Monitor the sampling rate, the judge model version, the score distribution for sudden shifts, correlation with human spot checks, and breakdowns by language or domain.
+    - Track input length and retrieval hit rate, because a metric can change when the mix of requests changes and not the quality.
+    - Alert on discontinuities after a prompt or retriever deploy, and on divergence between automated scores and human feedback such as thumbs-down.
+    - Since scoring every response is costly, sample, and raise the rate for new or risky intents.
+  </InterviewQuestion>
+</InterviewQuestions>

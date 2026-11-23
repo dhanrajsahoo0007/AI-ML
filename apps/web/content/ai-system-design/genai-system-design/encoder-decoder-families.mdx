@@ -3,9 +3,9 @@ title: Encoder, Decoder and Encoder-Decoder Models
 description: BERT vs GPT vs T5, their pre-training objectives, and how to pick the right family for classification, retrieval, generation or translation.
 ---
 
-"Would you use BERT or GPT for this?" is one of the most common applied questions. A good answer goes beyond names to attention patterns, training objectives and cost, then maps them to the task.
+"Would you use BERT or GPT for this?" is one of the most common applied questions. A good answer goes beyond names to attention patterns, training objectives and cost, then maps them to the task. This page follows one short text through all three families: the sentence pair "the kettle boiled" / "she poured the tea", with "boiled" and "tea" as the hidden words, and the review "tea was great" for fine-tuning.
 
-## TL;DR
+## Overview
 
 - **Encoder-only** (BERT family): bidirectional attention, trained to fill in masked tokens. Best at understanding: classification, tagging, embeddings, re-ranking.
 - **Decoder-only** (GPT family): causal attention, trained to predict the next token. Best at open-ended generation, and with scale, almost everything.
@@ -13,15 +13,21 @@ description: BERT vs GPT vs T5, their pre-training objectives, and how to pick t
 - The objective shapes the skill: **masked** objectives learn rich representations; **causal** objectives learn to generate.
 - In production, small encoders still win on cost and latency for focused tasks like search ranking and classification.
 
-## The idea in plain English
+<KeyIdea>The three families share the same Transformer blocks; what separates them is the attention mask and the training objective, and those two choices decide whether a model reads, writes, or reads then writes.</KeyIdea>
 
-An **encoder** is a careful reader: it reads the whole page at once, looking both backward and forward, and writes a summary card for every word. A **decoder** is a writer: it can only look at what it has already written and must guess the next word. An **encoder-decoder** is a translator: one person reads the source text fully, then another writes the translation while glancing back at the reader's notes.
+## Mental model
+
+- An **encoder** is a careful reader: it reads the whole page at once, looking both backward and forward, and writes a summary card for every word.
+- A **decoder** is a writer: it can only look at what it has already written and must guess the next word.
+- An **encoder-decoder** is a translator: one person reads the source text fully, then another writes the translation while glancing back at the reader's notes.
+
+Their training matches: the reader fills in blanks, the writer guesses each next word, and the translator lists what was cut from a page with gaps.
 
 ## Core concepts
 
 1. **Bidirectional vs causal attention.** Encoders let every token see every other token. Decoders block future tokens with a causal mask so they can generate left to right.
 
-2. **Masked language modeling (MLM).** BERT hides about 15% of tokens and predicts them from both sides. Of the chosen tokens, 80% become a mask token, 10% a random token and 10% stay unchanged, so the model cannot rely on seeing the mask symbol at fine-tuning time.
+2. **Masked language modeling (MLM).** BERT hides about 15% of tokens and predicts them from both sides. Of the chosen tokens, 80% become a mask token, 10% a random token and 10% stay unchanged, so the model cannot rely on seeing the mask symbol at fine-tuning time ([the rule, step by step](#the-801010-rule)).
 
 3. **Next sentence prediction (NSP).** BERT's second objective, predicting whether two sentences are consecutive. RoBERTa later showed removing it and training longer on more data works better.
 
@@ -35,23 +41,18 @@ An **encoder** is a careful reader: it reads the whole page at once, looking bot
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph ENC["Encoder-only (BERT)"]
-        direction TB
-        E_IN["the [MASK] sat"] --> E_ST["Bidirectional blocks"] --> E_OUT["Predict 'cat'<br/>or classify the [CLS] vector"]
-    end
-    subgraph DEC["Decoder-only (GPT)"]
-        direction TB
-        D_IN["the cat"] --> D_ST["Causal blocks"]:::accent --> D_OUT["Predict next token 'sat'"]
-    end
-    subgraph ED["Encoder-decoder (T5)"]
-        direction TB
-        S_IN["translate: the cat sat"] --> S_ENC["Bidirectional encoder"]
-        S_ENC --> S_DEC["Causal decoder with cross-attention"]
-        S_DEC --> S_OUT["le chat s'est assis"]
-    end
-```
+Every family keeps some of the 2017 Transformer's blocks and drops others; the small grid under each stack is its attention mask.
+
+<AnimatedDiagram
+  spec="animated/transformer/three-families"
+  caption="The families differ in which blocks they keep and in who can see whom: bidirectional, both with cross-attention, or causal only."
+/>
+
+**How to read it:** An all-green grid means every token sees every token; a green lower triangle means each sees itself and earlier ones. Only the encoder-decoder joins two stacks, through cross-attention: the decoder's queries read the encoder's keys and values. The blocks are the same as in [Transformer architecture](/ai-system-design/genai-system-design/transformer-architecture).
+
+<Callout tone="red" title="What breaks">
+  Asking an encoder-only model to write. BERT has no next-token head and sees both sides, so filling `[MASK]` slots one at a time does not give coherent text. The fix is a model trained with a causal objective: a decoder, or an encoder-decoder when the input is clearly separate.
+</Callout>
 
 Choosing a family for a task:
 
@@ -59,22 +60,109 @@ Choosing a family for a task:
 2. Is the output free text conditioned on a clearly separate input? An encoder-decoder is a natural fit, especially at small and medium sizes.
 3. Is the task open-ended, conversational or multi-task? A decoder-only LLM, often via prompting or fine-tuning.
 
-## Deep dive
+## Technical mechanics
+
+### BERT pre-training and fine-tuning, step by step
+
+BERT trains one encoder on both objectives at once, then reuses it. For a task it keeps every pre-trained weight, adds one small head on the `[CLS]` output, and fine-tunes the whole model. Step through the recipe on the running example.
+
+<AnimatedDiagram
+  spec="animated/transformer/bert-pretrain-finetune"
+  stepper
+  caption="BERT pre-trains one encoder with two heads, masked-word prediction and next-sentence prediction, then fine-tunes all of its weights with a small new head on [CLS]. Adapted from Devlin et al. (2018), Figure 1."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Masked language model">
+    "Boiled" and "tea" are hidden behind `[MASK]`. A Linear layer (768 → 30,000) and a softmax sit only on those two outputs, giving "boiled" 0.54 and "tea" 0.63. Gap: nothing yet teaches how two sentences relate.
+  </StepCard>
+  <StepCard n={2} title="Next sentence prediction">
+    A second head on the `[CLS]` output says whether B follows A: IsNext 0.97. Half of all pairs are real, half random. Gap: neither head is the task you care about.
+  </StepCard>
+  <StepCard n={3} title="Fine-tuning">
+    A copy of the pre-trained encoder reads one labelled review. A new head on `[CLS]` (768 → 2) says positive 0.96. Every weight is updated; the pre-training heads are dropped.
+  </StepCard>
+</StepCards>
+
+**The numbers:** the loss is $-\ln p$ of the right answer: $-\ln 0.544 = 0.610$ for "boiled" and $-\ln 0.634 = 0.456$ for "tea", mean 0.533; NSP adds $-\ln 0.968 = 0.033$, so this pair's loss is 0.566. The new head has $2 \times 768 = 1{,}536$ weights plus 2 biases, about 0.0014% of BERT-base's 110M.
+
+Pre-training is the expensive part: 1,000,000 steps, about 40 passes over 3.3 billion words, 4 days on 16 TPU chips for BERT-base (§A.2). Fine-tuning takes at most 1 hour on one Cloud TPU: batch size 32, 3 epochs, learning rate 5e-5 to 2e-5.
+
+### The 80/10/10 rule
+
+If every chosen word became `[MASK]`, the encoder would learn that only `[MASK]` positions matter. Fine-tuning inputs never contain `[MASK]`, so the representations it learned would not match what it sees later.
+
+<AnimatedDiagram
+  spec="animated/transformer/mlm-masking-rule"
+  caption="Every chosen position is trained to output the original word, but only 80 % of them show [MASK], so the encoder cannot tell which real-looking words it will be asked about; only 150 of every 1,000 tokens give a loss."
+/>
+
+**How to read it:** Each row is one draw for the chosen position; the target is "tea" in all three. In 1 draw of 10 the encoder sees "apple", in another "tea" itself. Since any visible word might be a test, it keeps a useful representation for every token (§A.1).
+
+**The numbers:** $1{,}000 \times 0.15 = 150$ tokens give a loss: $150 \times 0.8 = 120$ show `[MASK]`, 15 a random token, 15 the original. The other 850 give none, while a causal LM gets a target at all 1,000, about 6.7 times as many.
+
+That is the price of reading both ways: MLM converges "slightly slower" than left-to-right training but beats it almost at once (§C.1). ELECTRA (Clark et al., 2020) later learned from every position by detecting replaced tokens.
+
+<Callout tone="red" title="What breaks">
+  Pre-train/fine-tune mismatch. Trained with 100% `[MASK]`, BERT's frozen features scored 94.0 F1 on CoNLL-2003 NER against 94.9 with 80/10/10; with fine-tuning the gap was smaller, 94.9 against 95.4 (Devlin et al., 2018, Table 8). The fix is the mixed rule, and RoBERTa also re-draws the mask every time a sequence is used (dynamic masking).
+</Callout>
+
+### Next sentence prediction, and why RoBERTa dropped it
+
+NSP makes B the true next segment half the time and a random one otherwise; the final model gets it 97–98% right. BERT's own ablation said it helped: without NSP, QNLI fell from 88.4 to 84.9 and SQuAD F1 from 88.5 to 87.9 (Table 5).
+
+RoBERTa (Liu et al., 2019) retested it. Packing full sentences from one document up to 512 tokens, with no NSP loss, matched or beat the original pairs: 84.7 on MNLI against 84.0 (§4.2, Table 2). Pairs of single sentences hurt, likely because they are too short to learn long-range dependencies. RoBERTa then trained on 160 GB of text for 500,000 steps of 8,000 sequences: BERT had been "significantly undertrained".
+
+### Fine-tuning heads
+
+Fine-tuning keeps the input format and changes only the output layer.
+
+- **Classification** (sentiment, entailment): one Linear layer $W \in \mathbb{R}^{K \times H}$ on the `[CLS]` vector, K labels. A single sentence is a pair with an empty B.
+- **Token tagging** (named entities): the same kind of layer on every token's output.
+- **Extractive QA** (SQuAD): question as A, passage as B. Two new vectors S and E score each passage token as the answer's start or end; the best span with end ≥ start wins.
+
+### How BERT packs a sentence pair
+
+- BERT reads one sequence that can hold two sentences.
+- A `[CLS]` token comes first and a `[SEP]` token closes each sentence.
+- Every token's input is the sum of three learned embeddings.
+
+<AnimatedDiagram
+  spec="animated/transformer/bert-input-embeddings"
+  caption="BERT adds three learned embeddings per token: what the token is, which sentence it belongs to, and where it sits. Adapted from Devlin et al. (2018), Figure 2."
+/>
+
+**How to read it:** Each column adds three vectors: token, segment, position. `[CLS]` and the first `[SEP]` belong to sentence A, the final `[SEP]` to B. In this second pair from the story, "scalding" splits into "scald" and "##ing", so 7 words and 3 special tokens fill positions 0 to 10.
+
+**The numbers:** the token table holds $30{,}000 \times 768 = 23{,}040{,}000$ values, about 21% of BERT-base; the position table $512 \times 768 = 393{,}216$; the segment table $2 \times 768 = 1{,}536$.
+
+<Callout tone="red" title="What breaks">
+  The position table has 512 rows, so a 513th token has no position vector and the model cannot read it. Split long documents into overlapping 512-token windows and merge the scores, or use an encoder trained on longer sequences.
+</Callout>
+
+### Three objectives on one sentence
+
+The three families are easiest to tell apart by what each one is asked to output from the same text.
+
+<AnimatedDiagram
+  spec="animated/transformer/objectives-compared"
+  caption="The same text, three objectives: BERT predicts only its 2 hidden words, GPT predicts every next word, and T5's decoder writes back only the dropped spans between sentinels. The hiding rate is illustrative."
+/>
+
+**How to read it:** In each band the bottom row is the input, the top row the target. BERT predicts at its 2 `[MASK]` positions only; GPT at every position, from the words to its left. T5's decoder writes each cut span after its sentinel and ends with `<Z>`.
+
+**The numbers:** per 1,000 tokens, BERT gets 150 targets and GPT 1,000. T5 drops 150 tokens in $150 / 3 = 50$ spans, so the encoder reads $1{,}000 - 150 + 50 = 900$ tokens and the decoder writes $150 + 50 + 1 = 201$.
+
+T5 chose short targets to cut pre-training cost (§3.1.4). BART asks for the whole document back: its large model masks 30% of tokens in spans of Poisson length (λ = 3) and shuffles sentences (Lewis et al., 2019, §5.1).
 
 ### Attention masks side by side
 
-```mermaid
-flowchart TB
-    subgraph B["Bidirectional mask"]
-        B1["Token 3 sees tokens 1, 2, 3, 4, 5"]
-    end
-    subgraph C["Causal mask"]
-        C1["Token 3 sees tokens 1, 2, 3 only"]
-    end
-    subgraph P["Prefix-LM mask"]
-        P1["Prompt tokens see each other fully;<br/>generated tokens see prompt + earlier outputs"]
-    end
-```
+<AnimatedDiagram
+  spec="animated/transformer/three-masks"
+  caption="The same five tokens under three masks: bidirectional sees everything, causal sees only the past, and prefix-LM reads the prompt both ways, then generates causally."
+/>
+
+**How to read it:** Rows are the tokens that look, columns the tokens they look at; grey cells are −∞ before the softmax. Token 3 sees all five tokens under the bidirectional mask and tokens 1 to 3 under the other two. Causal and prefix-LM differ only inside the prompt, where tokens 1 and 2 also read later prompt tokens.
 
 The prefix-LM pattern, used by some models, sits between the two: it reads the input bidirectionally like an encoder but generates like a decoder, inside a single stack.
 
@@ -85,37 +173,52 @@ The prefix-LM pattern, used by some models, sits between the two: it reads the i
 - With enough scale and instruction tuning, generation subsumes classification ("answer with positive or negative").
 - In-context learning emerges naturally from the causal objective.
 
+Decoder-only did not win on quality per FLOP at T5's scale. At equal compute and with the same denoising objective, an encoder-decoder scored 83.28 on GLUE, a prefix LM 81.82 and a decoder-only language model 74.70 (Raffel et al., 2019, Table 2). Decoder-only won on simplicity, one format for every task, and how well it kept improving with size.
+
 Encoders did not disappear: they dominate embedding models, re-rankers and high-throughput classifiers where a 100-million-parameter model beats a 70-billion-parameter one on cost by orders of magnitude.
 
 ## Trade-offs
 
+Each family pays for its strength.
+
+<Compare caption="The three families: what each is good at, what it gives up, and where it is used.">
+
 | Family | Pros | Cons | When to use |
 | --- | --- | --- | --- |
-| Encoder-only | Strong representations, fast, cheap, great for embeddings | Cannot generate text naturally | Classification, NER, semantic search, re-ranking |
+| Encoder-only | Strong representations, fast, cheap, great for embeddings | Cannot generate text naturally; learns from only 15% of tokens per pass | Classification, NER, semantic search, re-ranking |
 | Decoder-only | General purpose, in-context learning, scales well | Costly per token, no bidirectional context for the input | Chat, code, agents, general generation |
 | Encoder-decoder | Efficient for conditioned generation, input read bidirectionally | Two stacks, less common at very large scale | Translation, summarization, structured text-to-text |
 
-## Real-world examples
+</Compare>
 
-- BERT (2018) set new results on GLUE and SQuAD and was widely used in search ranking.
-- RoBERTa showed BERT was undertrained: removing NSP and training longer with more data improved results.
-- T5 framed all NLP tasks as text-to-text and studied pre-training choices systematically.
+The encoder-decoder's two stacks double the parameters but not the compute: each token passes through only one of them.
+
+## Production systems
+
+- BERT (Oct 2018) set new results on GLUE and SQuAD and was widely used in search ranking. BERT-base has 12 layers, width 768, 12 heads and 110M parameters; BERT-large has 24 layers, width 1,024, 16 heads and 340M.
+- RoBERTa (Jul 2019) showed BERT was undertrained: removing NSP and training longer with more data improved results.
+- T5 (Oct 2019) framed all NLP tasks as text-to-text and studied pre-training choices systematically. It scaled to 11B parameters on the C4 web corpus, about 750 GB, with a 32,000-token vocabulary.
+- BART (Oct 2019): a bidirectional encoder and a left-to-right decoder, 12 layers each and width 1,024 in the large model.
+- GPT-1 (Jun 2018): 12 decoder layers, width 768, 512-token context. GPT-2 (Feb 2019): 1.5B parameters, 48 layers, 1,024-token context, trained on 40 GB of WebText.
 - GPT-3 showed that a large decoder-only model can do many tasks from a few examples in the prompt.
-- Modern RAG systems commonly pair a small encoder (embeddings and re-ranking) with a large decoder (generation).
+- Modern RAG systems commonly pair a small encoder (embeddings and re-ranking) with a large decoder (generation). See [Embedding models and selection](/ai-system-design/genai-system-design/embedding-models-and-selection).
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Saying BERT "generates" answers. Extractive QA with BERT predicts start and end positions inside the given text.
 - Assuming the biggest decoder is always best. For a fixed label set at high volume, a fine-tuned encoder is often cheaper and as accurate.
-- Forgetting that embedding quality depends on training for similarity, not just on using an encoder.
+- Forgetting that embedding quality depends on training for similarity, not just on using an encoder. BERT's paper warns that its `[CLS]` vector "is not a meaningful sentence representation without fine-tuning".
+- Fine-tuning BERT-large once on a small dataset: the paper found it "sometimes unstable" and kept the best of several restarts.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define the three families by attention pattern.
 2. Name each family's pre-training objective.
-3. Map tasks to families with a cost argument.
-4. Explain why decoder-only dominates general LLMs.
-5. Show production sense: encoders for retrieval and ranking, decoders for generation, often in the same system.
+3. Work the running example: BERT predicts 2 hidden words from both sides, GPT predicts all 7 next words, T5 writes back `<X> boiled <Y> tea <Z>`.
+4. Explain the 80/10/10 rule and why it exists: `[MASK]` never appears at fine-tuning time.
+5. Map tasks to families with a cost argument.
+6. Explain why decoder-only dominates general LLMs.
+7. Show production sense: encoders for retrieval and ranking, decoders for generation, often in the same system.
 
 **What interviewers listen for:** objectives explained, a task-to-family mapping, and a cost-aware recommendation.
 
@@ -123,29 +226,46 @@ Encoders did not disappear: they dominate embedding models, re-rankers and high-
 
 ## Further reading
 
-- [BERT (Devlin et al., 2018)](https://arxiv.org/abs/1810.04805)
-- [RoBERTa (Liu et al., 2019)](https://arxiv.org/abs/1907.11692)
-- [Exploring the Limits of Transfer Learning with T5 (Raffel et al., 2019)](https://arxiv.org/abs/1910.10683)
-- [BART (Lewis et al., 2019)](https://arxiv.org/abs/1910.13461)
+- [BERT (Devlin et al., 2018)](https://arxiv.org/abs/1810.04805): §3.1 (MLM, NSP), §4 (fine-tuning heads), Tables 5 and 8, §A.1–A.2.
+- [RoBERTa (Liu et al., 2019)](https://arxiv.org/abs/1907.11692): §4.1 dynamic masking, §4.2 and Table 2 on NSP.
+- [Exploring the Limits of Transfer Learning with T5 (Raffel et al., 2019)](https://arxiv.org/abs/1910.10683): §3.1.4 span corruption, §3.2 and Table 2 architectures.
+- [BART (Lewis et al., 2019)](https://arxiv.org/abs/1910.13461): §2.2 noising functions.
+- [Improving Language Understanding by Generative Pre-Training, GPT-1 (Radford et al., 2018)](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
+- [Language Models are Unsupervised Multitask Learners, GPT-2 (Radford et al., 2019)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- [Attention Is All You Need (Vaswani et al., 2017)](https://arxiv.org/abs/1706.03762)
+- [ELECTRA (Clark et al., 2020)](https://arxiv.org/abs/2003.10555)
 - [Sentence-BERT (Reimers and Gurevych, 2019)](https://arxiv.org/abs/1908.10084)
 
 <InterviewQuestions>
   <InterviewQuestion question="What is masked language modeling, and why does BERT not always replace chosen tokens with the mask token?" category="Concepts" level="Junior">
-    Masked language modeling hides some input tokens and trains the model to predict them using context on both sides. BERT selects about 15% of tokens; of those, 80% become the mask token, 10% become random tokens and 10% stay as they are. Because the mask token never appears during fine-tuning, this mix stops the model from relying on it and forces useful representations for every token.
+    - Masked language modeling hides some input tokens and trains the model to predict them using context on both sides.
+    - BERT selects about 15% of tokens; of those, 80% become the mask token, 10% become random tokens and 10% stay as they are.
+    - Because the mask token never appears during fine-tuning, this mix stops the model from relying on it and forces useful representations for every token.
   </InterviewQuestion>
   <InterviewQuestion question="Why can't you simply use BERT for open-ended text generation?" category="Architecture" level="Junior">
-    BERT's attention is bidirectional and it was trained to fill in blanks, not to predict the next token from the left. It has no natural left-to-right generation procedure, and outputs would be incoherent if forced. Generation needs a causal objective, which decoder-only and encoder-decoder models have.
+    - BERT's attention is bidirectional and it was trained to fill in blanks, not to predict the next token from the left.
+    - It has no natural left-to-right generation procedure, and outputs would be incoherent if forced.
+    - Generation needs a causal objective, which decoder-only and encoder-decoder models have.
   </InterviewQuestion>
   <InterviewQuestion question="When would you choose an encoder-decoder model over a decoder-only model?" category="Trade-offs" level="Mid">
-    When the task maps a clearly separate input to an output, such as translation or summarization, and you need a small or medium model. The encoder reads the input bidirectionally once, and the decoder only generates the output, which is efficient. For general-purpose, conversational or very large-scale use, decoder-only models are simpler and benefit more from scaling.
+    - When the task maps a clearly separate input to an output, such as translation or summarization, and you need a small or medium model.
+    - The encoder reads the input bidirectionally once, and the decoder only generates the output, which is efficient.
+    - For general-purpose, conversational or very large-scale use, decoder-only models are simpler and benefit more from scaling.
   </InterviewQuestion>
   <InterviewQuestion question="Why did decoder-only architectures become dominant for LLMs?" category="Concepts" level="Mid">
-    They use one simple stack and one objective, next-token prediction, that turns every token of raw text into training signal and scales smoothly. At scale they show in-context learning, and with instruction tuning they can frame almost any task as generation. That generality made them the default for foundation models.
+    - They use one simple stack and one objective, next-token prediction, that turns every token of raw text into training signal and scales smoothly.
+    - At scale they show in-context learning, and with instruction tuning they can frame almost any task as generation.
+    - That generality made them the default for foundation models.
   </InterviewQuestion>
   <InterviewQuestion question="Design a semantic search system. Which model families would you use where?" category="Architecture" level="Senior">
-    I would embed documents and queries with an encoder trained for similarity, store the vectors in an approximate nearest-neighbor index, and retrieve a candidate set fast. A cross-encoder, also an encoder, would re-rank the top candidates by reading query and document together. If the product needs a written answer, a decoder LLM would generate it from the top passages. Encoders handle the high-volume steps cheaply; the decoder is used only where generation is needed.
+    - I would embed documents and queries with an encoder trained for similarity, store the vectors in an approximate nearest-neighbor index, and retrieve a candidate set fast.
+    - A cross-encoder, also an encoder, would re-rank the top candidates by reading query and document together.
+    - If the product needs a written answer, a decoder LLM would generate it from the top passages.
+    - Encoders handle the high-volume steps cheaply; the decoder is used only where generation is needed.
   </InterviewQuestion>
   <InterviewQuestion question="What did RoBERTa change compared with BERT, and what does that teach about pre-training?" category="Concepts" level="Senior">
-    RoBERTa removed next sentence prediction, trained longer with larger batches on much more data, and used dynamic masking that changes masked positions every epoch. These changes alone gave large gains, showing BERT was undertrained. The lesson is that data, training time and objective details often matter as much as architecture changes.
+    - RoBERTa removed next sentence prediction, trained longer with larger batches on much more data, and used dynamic masking that changes masked positions every epoch.
+    - These changes alone gave large gains, showing BERT was undertrained.
+    - The lesson is that data, training time and objective details often matter as much as architecture changes.
   </InterviewQuestion>
 </InterviewQuestions>

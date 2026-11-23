@@ -1,0 +1,18 @@
+title: Photo-sharing feed high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, feed core, application services, async
+  pipeline and storage. Step 1: the app creates a post through a load balancer; the post service stores the photo in a
+  blob store and a row in a sharded posts database. Step 2: the app uploads the photo straight to the blob store with a
+  signed URL; a resize queue and workers write four sizes, and a CDN serves images, fetching from the blob store on a
+  miss. Step 3: the posts database makes each id on insert. Step 4: a graph service writes follow edges to a follow
+  graph store. Step 5: published posts go onto a post log; fan-out workers read the followers and append the post id to
+  each follower's list in a feed cache, which the feed service, drawn solid green, reads. Step 6: accounts with more
+  than 100,000 followers are not pushed; the feed service reads their recent posts from a post cache and merges them.
+  Step 7: a like service writes like rows and adds to the count in the post cache. Step 8: a ranker scores the
+  candidates and the feed is paged with a cursor.
+caption: >-
+  A photo-sharing feed: photos go straight to blob storage behind a CDN, ids carry their shard, ordinary posts are
+  pushed into feeds and celebrities are merged at read time.
+tags: [case-studies, instagram, architecture, fan-out, feeds]
+source: original
+created: 2026-11-17

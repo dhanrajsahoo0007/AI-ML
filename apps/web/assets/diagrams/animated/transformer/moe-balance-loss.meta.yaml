@@ -1,0 +1,21 @@
+title: The load-balancing loss on one batch
+alt: >-
+  The Switch Transformer load-balancing loss computed on a batch of 8 tokens and 4 experts. On the left, a grid of
+  green cells holds the router's probabilities, one row per token t1 to t8 and one column per expert E1 to E4,
+  shaded by value; t1 reads 0.69, 0.15, 0.09, 0.06 and t5 reads 0.40, 0.16, 0.13, 0.30. A blue column beside it
+  gives each token's pick: E1, E3, E1, E2, E1, E4, E2, E3. Arrows lead from the grid's columns down to a green row,
+  P sub i, the column means: 0.300, 0.260, 0.252, 0.189. Under it a blue row, f sub i, the share of picks: 0.375,
+  0.250, 0.250, 0.125, noted as 3, 2, 2, 1 of 8 picks, and a violet row of their products: 0.112, 0.065, 0.063,
+  0.024. These add up in a box to 0.264, times N = 4 gives a loss of 1.06, and times alpha 0.01 gives 0.0106. On
+  the right, three bars on one scale compare the loss for an even batch (2, 2, 2, 2) at 1.00, this batch (3, 2, 2,
+  1) at 1.06, highlighted, and a collapsed batch (8, 0, 0, 0) at 4.00. Notes say the minimum is 1.00 for any even
+  batch, that t5 is a close call between E1 at 0.40 and E4 at 0.30, and that the gradient on P sub i is N times
+  f sub i, 1.5, 1.0, 1.0 and 0.5, so E1's probability is pushed down three times harder than E4's. The formula at
+  the top reads: load-balancing loss = N times the sum of f sub i times P sub i = 4 times 0.264 = 1.06.
+caption: >-
+  The loss multiplies each expert's share of tokens by its mean router probability: this batch's 3, 2, 2, 1 split
+  scores 1.06 against a floor of 1.00, and the gradient lands hardest on the busiest expert. Router logits are
+  illustrative.
+tags: [transformer, mixture-of-experts, moe, load-balancing, training, genai]
+source: original
+created: 2026-11-16

@@ -1,13 +1,18 @@
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
+import { TierBadge } from "@/components/patterns/tier-badge";
+import { SystemLogo } from "@/components/case-studies/system-logo";
+import { SectionProgressBanner } from "@/components/section-progress-banner.client";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
+import { sectionLeafItems } from "@/lib/progress-stats";
+import { docsKind } from "./kind";
 import { loadDocItems } from "./source";
 import { TopicQuestions } from "@/components/mdx/question-bank";
 import { isPremiumDoc, premiumAnswerCategories } from "@/features/paywall";
 import { Paywall } from "@/features/paywall/public";
-import { ProgressActions } from "@/features/progress/progress-actions.client";
+import { ArticleCompletedBadge, ProgressActions } from "@/features/progress/progress-actions.client";
 import { getSection } from "@/features/sections";
 import type { BreadcrumbItem, ContentSection } from "@/types/content";
 
@@ -27,7 +32,8 @@ export async function SectionDocPage({
 }) {
   const slugPath = slug.join("/");
   const def = getSection(section);
-  const item = def && loadDocItems(def).find((i) => i.slug === slugPath);
+  const items = def ? loadDocItems(def) : [];
+  const item = items.find((i) => i.slug === slugPath);
   if (!def || !item) notFound();
   const premium = isPremiumDoc(def, item);
   if (preview && !premium) notFound();
@@ -41,7 +47,7 @@ export async function SectionDocPage({
   ];
   if (slug.length > 1) {
     // Link the hub only when it exists (test fixtures have no hub page).
-    const hubExists = loadDocItems(def).some((i) => i.isHub && i.slug === slug[0]);
+    const hubExists = items.some((i) => i.isHub && i.slug === slug[0]);
     crumbs.push({
       label: slug[0].replaceAll("-", " "),
       ...(hubExists ? { href: `/${section}/${slug[0]}` } : {}),
@@ -49,14 +55,42 @@ export async function SectionDocPage({
   }
   crumbs.push({ label: doc.frontmatter.title ?? slugPath });
 
+  const leafItems = sectionLeafItems(docsKind.nav(def, items));
+  const sectionHrefs = leafItems.map((i) => i.href);
+  const currentIdx = !item.isHub ? leafItems.findIndex((i) => i.href === item.href) : -1;
+  const prev =
+    currentIdx > 0 ? { title: leafItems[currentIdx - 1].title, href: leafItems[currentIdx - 1].href } : undefined;
+  const next =
+    currentIdx >= 0 && currentIdx < leafItems.length - 1
+      ? { title: leafItems[currentIdx + 1].title, href: leafItems[currentIdx + 1].href }
+      : undefined;
+
   // Articles (pages below a hub) use the docs-style layout: table of contents, updated date, copy for LLM.
   // Hubs stay card grids, and an article can opt out with `layout: classic` in its frontmatter.
   const docsLayout = slug.length > 1 && doc.frontmatter.layout !== "classic";
+  // Advanced pattern pages carry the tier pill in the header, in the paywalled preview too.
+  const tierBadge = !item.isHub && item.data.tier === "advanced" ? <TierBadge className="ml-3 align-middle" /> : null;
+  // Case studies: the system's logo beside the title and, for generic systems, the real systems it is modelled on.
+  const logoId = typeof item.data.logo === "string" ? item.data.logo : undefined;
+  const modelledOn = Array.isArray(item.data.modelledOn) && !item.isHub ? (item.data.modelledOn as string[]) : [];
   const docs = docsLayout
     ? {
         headings: doc.headings,
         updated: await getUpdatedDate(doc.filePath, doc.frontmatter.updated),
         pagePath: `/${section}/${slugPath}`,
+        statusBadge:
+          tierBadge || (!preview && !item.isHub) ? (
+            <>
+              {tierBadge}
+              {!preview && !item.isHub && (
+                <ArticleCompletedBadge
+                  contentKey={item.href.slice(1)}
+                  sectionLabel={def.label}
+                  sectionHrefs={sectionHrefs}
+                />
+              )}
+            </>
+          ) : undefined,
       }
     : undefined;
 
@@ -67,15 +101,42 @@ export async function SectionDocPage({
 
   return (
     <div data-access={premium ? (preview ? "preview" : "full") : "free"}>
-      <div className={`mx-auto px-4 pt-6 md:px-8 ${docsLayout ? "max-w-6xl" : "max-w-4xl"}`}>
+      <div
+        className={`mx-auto px-4 pt-6 md:px-8 min-[1440px]:max-w-[2160px] min-[1440px]:px-12 min-[1920px]:px-16 ${docsLayout ? "max-w-6xl" : "max-w-4xl"}`}
+      >
         <Breadcrumb items={crumbs} />
       </div>
       <ArticleLayout
         title={doc.frontmatter.title ?? slugPath}
         description={doc.frontmatter.description}
         docs={docs}
-        after={preview ? <Paywall path={item.href} /> : <ProgressActions contentKey={item.href.slice(1)} />}
+        logo={logoId && !item.isHub ? <SystemLogo id={logoId} size="lg" className="sm:size-14" /> : undefined}
+        headerExtra={
+          modelledOn.length > 0 ? (
+            <p className="mt-5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Modelled on</span>
+              {modelledOn.map((id) => (
+                <SystemLogo key={id} id={id} size="sm" title={id.split("/").pop()?.replaceAll("-", " ")} />
+              ))}
+            </p>
+          ) : undefined
+        }
+        after={
+          preview ? (
+            <Paywall path={item.href} />
+          ) : !item.isHub ? (
+            <ProgressActions
+              contentKey={item.href.slice(1)}
+              sectionLabel={def.label}
+              sectionHref={def.href}
+              sectionHrefs={sectionHrefs}
+              prev={prev}
+              next={next}
+            />
+          ) : undefined
+        }
       >
+        {item.isHub && <SectionProgressBanner sectionLabel={def.label} items={leafItems} />}
         {doc.body}
         {!preview && <TopicQuestions href={item.href} locked={(q) => premiumAnswers.has(q.category)} />}
       </ArticleLayout>

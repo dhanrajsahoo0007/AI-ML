@@ -189,6 +189,7 @@ async function renderAsset(
     case "svg":
     case "icon":
     case "tech-icon":
+    case "system-logo":
     case "logo": {
       const prefix = a.type === "logo" ? logoPrefix(a.id) : `a${a.hash.slice(0, 8)}`;
       const svg = optimizeSvg(src.toString("utf8"), prefix);

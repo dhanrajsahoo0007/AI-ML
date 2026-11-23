@@ -20,7 +20,7 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 600, y: 40, w: 180, h: 300 },
   ],
   nodes: [
-    { id: "app", label: "Owner app", sub: "sends token", icon: "phone", x: 90, y: 190, w: 116, h: 58 },
+    { id: "app", label: "Owner app", sub: "sends token", icon: "phone", x: 90, y: 190, w: 130, h: 58 },
     { id: "cdn", label: "CDN", sub: "caches GETs", icon: "cdn", tone: "blue", x: 275, y: 90, w: 140, h: 58, step: 2 },
     {
       id: "lb",

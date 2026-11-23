@@ -1,107 +1,230 @@
 ---
 title: "Caching"
 description: "Keeping hot data close to the reader: cache-aside, write-through, write-back, eviction, invalidation and stampedes."
+icon: zap
+updated: 2026-11-16
 ---
 
-Caching is the first lever almost every design pulls to cut latency and protect the database. Interviewers expect you to name a strategy, an eviction policy and an invalidation plan, not just say "add Redis".
+Caching is the first lever almost every design pulls to cut latency and protect the database.
 
-## TL;DR
+- Interviewers expect you to name a strategy, an eviction policy and an invalidation plan, not just say "add Redis", and to say how stale a cached value may be.
 
-- A cache stores copies of expensive-to-compute or slow-to-fetch data in faster memory.
-- **Cache-aside** is the default: the app checks the cache, falls back to the database, then fills the cache.
-- **Write-through** and **write-back** move writes through the cache; the first is safer, the second is faster.
-- **Eviction** (LRU, LFU, TTL) decides what to drop; **invalidation** decides when data is stale.
+## Overview
+
+- A **cache** keeps copies of slow-to-fetch or expensive-to-compute data in faster memory, close to the reader.
+- **Cache-aside** is the default: the app checks the cache, falls back to the database on a miss, then fills the cache.
+- **Write-through** and **write-back** send writes through the cache. The first is safer; the second is faster and can lose writes.
+- **Eviction** (LRU, LFU, TTL) decides what to drop when memory is full; **invalidation** decides when a copy is stale.
+- The **hit rate** sets the payoff: at 95 % the database sees one read in twenty.
 - Watch for **stampedes**, **hot keys** and **stale reads**.
 
-## The idea in plain English
+## Mental model
 
-Reading from memory takes microseconds; reading from a database over the network takes milliseconds. If the same data is read many times, keep a copy nearby. The cost is that the copy can go out of date, so every cache design is a decision about how stale is acceptable.
+- Reading from memory takes about a microsecond; reading from a database over the network takes milliseconds.
+- Think of a chef's counter: the spices used every minute sit within reach, the rest stay in the pantry.
+- Walking to the pantry is the miss, and the counter holds only so many jars, so the least used go back.
+- The cost is that a jar on the counter can be older than the pantry's, so every cache design is a decision about how stale is acceptable.
 
 ## Core concepts
 
-1. **Cache-aside (lazy loading).** App reads cache; on a miss it reads the database and writes the result to the cache. Simple and resilient, but the first read is slow and data can go stale.
-2. **Read-through.** The cache itself loads from the database on a miss. Same behavior, logic lives in the cache layer.
-3. **Write-through.** Writes go to cache and database together. Reads stay fresh; writes are slower.
-4. **Write-back (write-behind).** Writes hit the cache and are flushed to the database later. Very fast writes, but data can be lost if the cache fails first.
-5. **Eviction.** LRU drops the least recently used, LFU the least frequently used, TTL expires entries after a fixed time.
-6. **Invalidation.** Delete or update the cache entry when the source changes, or rely on short TTLs.
-7. **Where caches live.** Browser, CDN, API gateway, application (in-process), distributed cache (Redis, Memcached), database buffer pool.
+- The running example is Brightpost's product pages: **2,300 reads/s** at peak, 1,000,000 products, and at 12:00 on sale day the kettle's page alone takes **690 reads/s**.
+
+### Where caches live
+
+- From the reader inward: the browser, a CDN at the edge (see [CDN](/system-design/fundamentals/cdn)), the API gateway, an in-process cache in each app server, a shared distributed cache (Redis, Memcached), and the database's own buffer pool.
+- Each layer closer to the reader is faster and holds less, and each one is another copy to invalidate.
+
+### Reading through a cache
+
+- **Cache-aside (lazy loading).** The app reads the cache; on a miss it reads the database and writes the result to the cache. Simple and resilient, but the first read is slow and data can go stale.
+- **Read-through.** The cache itself loads from the database on a miss. Same behaviour, with the logic in the cache layer instead of the app.
+- **Refresh-ahead.** The cache reloads a popular key in the background shortly before it expires, so readers never see the miss.
+
+### Write policies
+
+- **Write-through.** Writes go to the cache and the database together. Reads stay fresh; writes are slower, and the cache fills with data nobody reads.
+- **Write-back (write-behind).** Writes hit the cache and are flushed to the database later. Very fast writes, but data is lost if the cache fails before the flush.
+- **Write-around** (the write side of cache-aside). Writes go to the database and the cache key is deleted, so the next read refills it.
+
+<AnimatedDiagram spec="animated/patterns/cache-write-policies" caption="The three policies differ in what a write waits for and in what a dead cache node takes with it." />
+
+**How to read it:**
+
+- Each row asks one question of the three policies. Cache-aside is ringed as the default.
+- The red cell is the one way a policy loses data: write-back holds writes that exist only in memory until the next flush.
+
+**The numbers:**
+
+- A product price changes a few times a day while its page is read hundreds of times a second, so the write path barely matters and cache-aside wins.
+- A shopping-basket counter that changes on every click is the opposite case: write-back saves database writes, at the risk of losing the last flush interval of changes.
+
+<PremiumBreak />
+
+### Eviction
+
+- Memory is finite, so a full cache must drop something.
+- **LRU** drops the least recently used key, **LFU** the least frequently used, and **TTL** expires entries after a fixed time whether or not memory is full.
+- Redis approximates LRU and LFU by sampling a few keys and evicting the best candidate, which costs less memory than an exact list.
+- Try the policies on one request sequence below: LFU keeps a key that is read often even after a burst of one-off reads, where LRU drops it.
+
+<CacheSim policy="lru" capacity={4} sequence="K K K A B C D K E F G K" />
+
+### Invalidation
+
+- **Delete on write.** Update the database, then delete the cache key; the next read refills it. Deleting is safer than updating the cached value, because a delete can be repeated with the same result.
+- **TTL as a backstop.** Even with deletes, a short TTL bounds how long any missed invalidation can last.
+- **Change events.** For stricter needs, drive invalidation from the database's change stream (see [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc)).
+- **Negative caching.** Cache "not found" for a short time too, so repeated lookups of a missing product do not each reach the database. Keep that TTL short, or a newly added product stays invisible.
+- **Memory as the store.** Data that changes every few seconds, such as a courier's live position, is kept only in memory with a TTL of seconds. Nothing is invalidated, and a lost entry costs one update.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    C["Client"] --> APP["App server"]
-    APP -->|"1. get(key)"| CACHE[("Cache<br/>Redis / Memcached")]
-    CACHE -->|"hit"| APP
-    APP -->|"2. miss: query"| DB[("Database")]
-    DB --> APP
-    APP -->|"3. set(key, value, TTL)"| CACHE
-```
+The kettle's product page, read through a cache-aside cache one step at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/cache-aside" stepper caption="The first read pays for the miss and fills the cache; every read in the next 60 seconds is a 1 ms hit." />
 
-### Cache stampede
+<StepCards>
+  <StepCard n={1} title="Without a cache: every read hits the database">
+    The app server reads the kettle's row from the database on every request, about 10 ms each. At 2,300 reads/s the database answers every one of them. It works until the sale-day peak makes the database the slowest thing on the page.
+  </StepCard>
+  <StepCard n={2} title="Check the cache first: a miss">
+    The app server now asks the cache for `product:kettle` before anything else. The key is not there yet, so this read still has to go to the database.
+  </StepCard>
+  <StepCard n={3} title="Read the database and fill the cache">
+    The app reads the row, returns the page and writes the row into the cache with a 60 second TTL. That write is off the reader's path. The value can now be up to 60 seconds old.
+  </StepCard>
+  <StepCard n={4} title="The next read is a hit">
+    For the next 60 seconds every request for the kettle is answered from memory in about 1 ms, and the database never sees it.
+  </StepCard>
+</StepCards>
 
-When a popular key expires, thousands of requests miss at once and all hit the database. Fixes:
+## Technical mechanics
 
-- **Request coalescing / single flight:** only one request rebuilds the value; others wait.
-- **Jittered TTLs:** add random seconds so keys do not expire together.
-- **Early refresh:** refresh in the background shortly before expiry.
-- **Serve stale while revalidating.**
+### Stampedes and hot keys
 
-### Hot keys
+- When a popular key expires, every read in the rebuild window misses at once and all of them reach the database.
 
-One key (a celebrity profile) can overload a single cache node. Replicate the key across nodes, add a small in-process cache in front, or split it into suffixed copies (`key#1`..`key#N`) and read one at random.
+<AnimatedDiagram spec="animated/patterns/cache-stampede" stepper caption="When a hot key expires, every read in the rebuild window misses at once; single flight lets one request rebuild it." />
+
+**How to read it:**
+
+- Step 1: the kettle key's TTL ends at 12:00:00. Three app servers miss together, all three query the database, and the third query times out as the load spikes.
+- Step 2: with single flight, one request rebuilds the key; the others wait about 10 ms and read the refilled value.
+
+- Fixes, cheapest first:
+  - **Request coalescing (single flight):** only one request rebuilds the value; the others wait for it.
+  - **Jittered TTLs:** add random seconds so keys filled together do not expire together.
+  - **Early refresh:** refresh popular keys in the background before they expire.
+  - **Serve stale while revalidating:** answer with the old value while one request fetches the new one (HTTP caches do this with `stale-while-revalidate`).
+- One key can also be too hot for one cache node: replicate it, add a small in-process cache in front, or split it into suffixed copies (`key#1` to `key#N`) and read one at random.
+- [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) covers both problems in depth.
 
 ### Consistency
 
-Updating the database and deleting the cache key is the common approach. A race between a read refilling the cache and a write can leave stale data, which a short TTL bounds.
+- Updating the database and then deleting the key is the common approach.
+- One race remains: a reader misses, reads the old row, and writes it into the cache after the writer's delete. The cache now holds the old value until its TTL ends.
+- A short TTL bounds that race. Memcache at Facebook closes it with **leases**: a miss hands out a token, and a set with a token that a delete has invalidated is refused.
+
+### Worked example: the kettle at sale-day peak
+
+At 12:00 Brightpost's product pages take 2,300 reads/s, 690 of them for the kettle. Follow them through the cache.
+
+1. **Hit rate.** With cache-aside and a 60 s TTL, 95 % of reads are hits (illustrative).
+2. **Database load.** Only misses reach the database.
+3. **Latency.** A hit costs about 1 ms; a miss costs the hit check plus about 10 ms of database time (both illustrative).
+4. **A price change at 12:00:00.** The writer updates the price and deletes `product:kettle`. If the delete is lost, the TTL is the only backstop.
+5. **The TTL ends at 12:01:00.** Single flight lets one request per app server rebuild the key.
+
+**The numbers:**
+
+- Database reads: 2,300 × (1 − 0.95) = 115 reads/s, against 2,300 without a cache: 20 times fewer.
+- Average latency: 0.95 × 1 + 0.05 × (1 + 10) = 0.95 + 0.55 = 1.5 ms, against 10 ms.
+- A lost delete with a 60 s TTL: the kettle's page can show the old price for up to 690 × 60 = 41,400 views.
+- The stampede: without coalescing, a 10 ms rebuild lets 690 × 0.01 ≈ 7 reads through per expiry, and many more if the database slows under the extra load. With single flight on 40 app servers, at most 40 queries reach the database; with a lease in the cache, one.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Cache-aside | Simple, fails safe | Stale reads, cold start |
-| Write-through | Fresh reads | Slower writes, caches unread data |
-| Write-back | Fast writes | Risk of data loss |
-| Long TTL | High hit rate | More staleness |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Cache-aside | Simple; a dead cache only slows reads | First read slow; stale until delete or TTL | The default for read-heavy data |
+| Write-through | Reads are always fresh | Slower writes; caches data nobody reads | Data read soon after every write |
+| Write-back | Fastest writes; batches database writes | Loses unflushed writes on a cache crash | Counters and drafts you can afford to lose |
+| Long TTL | Higher hit rate | More staleness | Data that rarely changes, with delete on write |
+| Short TTL | Bounded staleness | More misses and more database load | Prices, stock levels, anything users act on |
 
-## Real-world examples
+## Production systems
 
-- Twitter and Instagram cache timelines and profile data; see [Twitter](/system-design/case-studies/twitter) and [Instagram](/system-design/case-studies/instagram).
-- A URL shortener is read-heavy and caches hot short codes: [URL Shortener](/system-design/case-studies/url-shortener).
-- Typeahead caches popular prefixes: [Typeahead](/system-design/case-studies/typeahead).
-- Video and image bytes are cached at the edge: [Netflix](/system-design/case-studies/netflix), [YouTube](/system-design/case-studies/youtube).
+- **Memcache at Facebook** (NSDI 2013): a demand-filled look-aside cache. Writes delete the key rather than update it, because deletes are idempotent. Leases hand out a token at most once every 10 seconds per key; on keys prone to thundering herds this cut the peak database query rate from 17K/s to 1.3K/s.
+- **Redis** (as of November 2026): `maxmemory-policy` chooses eviction, such as `allkeys-lru`, `allkeys-lfu` or `volatile-ttl`, and `noeviction` returns errors instead. LRU and LFU are approximated by sampling keys (`maxmemory-samples`, default 5).
+- **HTTP caches and CDNs**: `Cache-Control: stale-while-revalidate` lets a cache serve a stale response while it fetches a fresh one in the background (RFC 5861).
+- Video and image bytes are cached at the edge: [Netflix](/system-design-case-studies/case-studies/netflix), [YouTube](/system-design-case-studies/case-studies/youtube).
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Tinder](/system-design-case-studies/case-studies/tinder) · [Zillow](/system-design-case-studies/case-studies/zillow) · [Typeahead](/system-design-case-studies/case-studies/typeahead)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Caching without a plan for invalidation.
-- Treating the cache as the source of truth with write-back and no durability.
-- Ignoring the hit-rate metric; a cache with a low hit rate only adds latency.
-- Caching per-user data in a shared key by mistake (a security bug).
+- **No invalidation plan.** Data goes stale for as long as the TTL, or forever without one. Delete on write and keep a TTL as a backstop.
+- **Write-back as the source of truth with no durability.** A cache crash loses orders. Use write-back only for data you can lose or rebuild.
+- **Ignoring the hit rate.** A cache with a low hit rate only adds a network hop. Measure hits against misses and size the cache to the hot set.
+- **Per-user data under a shared key.** One customer sees another's basket: a security bug. Put the user id in the key, or do not cache it.
+- **Every key expiring together.** Keys filled by one warm-up job expire in the same second and stampede the database. Add TTL jitter.
+- **Caching "not found" for too long.** A new product stays invisible until the negative entry expires. Keep negative TTLs short.
 
-## How to answer in an interview
+## Interview framework
 
-State what you cache, where, the strategy, eviction and TTL, and how you handle stampedes and invalidation. Quote the read/write ratio that justifies it.
+1. Quote the read/write ratio that justifies a cache, and say what you cache and where.
+2. Pick the read and write policy (cache-aside unless reads must be fresh after every write).
+3. Choose eviction and TTL from how stale the data may be.
+4. Cover invalidation: delete on write, TTL as a backstop, change events where staleness is costly.
+5. Cover failure: stampedes, hot keys, and what happens when the cache is down.
 
-## Related patterns
+**What interviewers listen for:** a hit rate with the database load it implies, and a stated staleness bound.
 
-[Consistent Hashing](/system-design/patterns/consistent-hashing) · [Load Balancing](/system-design/patterns/load-balancing) · [Consistency Models](/system-design/patterns/consistency-models) · [Key-Value & In-Memory stores](/system-design/databases/key-value-stores) · [Choosing a Database](/system-design/databases/choosing-a-database)
+**Red flags:** "add Redis" with no invalidation plan, or write-back for money.
 
 ## Further reading
 
-- [Caching strategies and pitfalls (AWS Builders' Library)](https://aws.amazon.com/builders-library/caching-challenges-and-strategies/)
+- [Caching challenges and strategies (AWS Builders' Library)](https://aws.amazon.com/builders-library/caching-challenges-and-strategies/)
 - [Scaling Memcache at Facebook (NSDI 2013)](https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala)
+- [Key eviction (Redis docs)](https://redis.io/docs/latest/develop/reference/eviction/)
+- [HTTP Cache-Control extensions for stale content (RFC 5861)](https://www.rfc-editor.org/rfc/rfc5861.html)
+- Related pages: [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Load Balancing](/system-design/patterns/load-balancing) · [Consistency Models](/system-design/patterns/consistency-models) · [Key-Value & In-Memory stores](/system-design/databases/key-value-stores) · [Choosing a Database](/system-design/databases/choosing-a-database)
 
 <InterviewQuestions>
   <InterviewQuestion question="Cache-aside vs write-through: when do you pick each?" category="Concepts" level="Mid">
-    Cache-aside suits read-heavy data where occasional staleness is fine and cache failure must not break the app. Write-through suits data that must be fresh on the next read, at the price of slower writes and cache space spent on data that may never be read.
+    - Cache-aside suits read-heavy data where occasional staleness is fine and a cache failure must not break the app.
+    - Write-through suits data that must be fresh on the next read.
+    - Write-through pays with slower writes and cache space spent on data that may never be read.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you prevent a cache stampede?" category="Reliability" level="Senior">
-    Coalesce concurrent misses so one request rebuilds the value, jitter TTLs so keys do not expire together, refresh popular keys early in the background, and optionally serve stale data while revalidating.
+  <InterviewQuestion question="What hit rate do you need, and why does it matter so much?" category="Scaling" level="Junior">
+    - The database sees only the misses, so load falls with (1 − hit rate): at 2,300 reads/s, a 95 % hit rate leaves 115 reads/s and 99 % leaves 23.
+    - Going from 95 % to 99 % cuts database load five times, far more than the four points suggest.
+    - Below about 50 % the cache mostly adds a network hop; size it to hold the hot set.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you keep a cache consistent with the database?" category="Consistency" level="Senior">
-    Write to the database, then delete the cache key so the next read refills it, and bound any race with a TTL. For stricter needs use write-through or invalidation driven by change events, accepting extra complexity.
+  <InterviewQuestion question="How do you prevent a cache stampede?" category="Failure modes" level="Senior">
+    - Coalesce concurrent misses so one request rebuilds the value (single flight in each app server, or a lease in the cache).
+    - Jitter TTLs so keys filled together do not expire together.
+    - Refresh popular keys early in the background.
+    - Optionally serve stale data while one request revalidates.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep a cache consistent with the database?" category="Trade-offs" level="Senior">
+    - Write to the database, then delete the cache key so the next read refills it.
+    - Bound the remaining race, a slow reader refilling an old value after the delete, with a TTL, or close it with leases.
+    - For stricter needs use write-through or invalidation driven by change events, accepting extra complexity.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where would you put caches for an online shop's product page?" category="Architecture" level="Mid">
+    - At the CDN for images and the static parts of the page.
+    - In a shared distributed cache for product rows, so every app server benefits from one fill.
+    - A small in-process cache with a 1 s TTL for the few hottest products, to take load off one cache node.
+    - Keep prices and stock on short TTLs with delete on write, because customers act on them.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is negative caching, and when does it hurt?" category="Concepts" level="Mid">
+    - It caches "not found" so repeated lookups of a missing key stop reaching the database, which also blunts scans for random ids.
+    - It hurts when the item is created later: readers keep seeing "not found" until the negative entry expires.
+    - Use a short TTL for negative entries and delete them when the item is created.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you use write-back caching for a shopping basket?" category="Trade-offs" level="Senior">
+    - For the basket's item counts, possibly: writes are frequent, losing a few seconds of changes is an annoyance, and write-back saves most database writes.
+    - Never for the order or the payment: those must be durable before the customer is told "done".
+    - If you use it, make the cache replicated and persistent, and flush on a short interval so the loss window is seconds.
   </InterviewQuestion>
 </InterviewQuestions>

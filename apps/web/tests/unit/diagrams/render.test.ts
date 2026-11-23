@@ -9,7 +9,7 @@ import { LayoutDiagram } from "@/components/diagrams/layout-diagram.client";
 import { SequenceDiagram } from "@/components/diagrams/sequence-diagram.client";
 import { renderHtml } from "../render-html";
 import type { DiagramSpec } from "@/components/diagrams/types";
-import { arch, layout, seq } from "./fixtures";
+import { arch, layout, paperLayout, seq } from "./fixtures";
 
 // Server render of each renderer. Effects do not run here, so this is also the first paint a reader sees before
 // hydration: animation paused (data-running="false") until the IntersectionObserver reports the figure on screen.
@@ -103,6 +103,42 @@ describe("SequenceDiagram", () => {
   });
 });
 
+describe("AnimatedDiagram card fills and diagram-only tones", () => {
+  const filled: DiagramSpec = {
+    ...arch,
+    nodes: arch.nodes.map((n) =>
+      n.id === "cache"
+        ? { ...n, tone: "pink", fill: "pastel", sub: "pastel" }
+        : n.id === "db"
+          ? { ...n, tone: "lime", fill: "soft" }
+          : n
+    ),
+    edges: arch.edges.map((e) => (e.to === "cache" ? { ...e, tone: "pink" } : e)),
+  };
+  const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: filled, idBase: "t" }));
+
+  it("fills a card with the pastel or soft token and keeps paper as the default", () => {
+    expect(html).toMatch(
+      /data-node="cache".*?fill:var\(--dg-pink-fill\);stroke:var\(--dg-pink\)" [^>]*data-fill="pastel"/
+    );
+    expect(html).toMatch(/data-node="db".*?fill:var\(--dg-lime-soft\)/);
+    expect(html).toMatch(/data-node="client".*?fill:var\(--paper\)/);
+    expect(attr(html, "data-fill")).toEqual(["pastel", "soft"]);
+  });
+
+  it("writes the sub line in ink on a pastel card", () => {
+    expect(html).toMatch(/style="fill:var\(--ink\)">pastel</);
+  });
+
+  it("adds pink and lime arrow markers only when an edge uses them", () => {
+    expect(html).toContain('-arrow-pink"');
+    expect(html).not.toContain("arrow-lime");
+    const plain = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch, idBase: "t" }));
+    expect(plain).not.toContain("arrow-pink");
+    expect(plain).not.toContain("data-fill");
+  });
+});
+
 describe("LayoutDiagram", () => {
   it("rings highlighted shapes and hides later steps", () => {
     const html = renderToStaticMarkup(createElement(LayoutDiagram, { spec: layout, step: 1 }));
@@ -116,6 +152,67 @@ describe("LayoutDiagram", () => {
     const html = renderToStaticMarkup(createElement(LayoutDiagram, { spec: layout }));
     expect(attr(html, "data-shape")).toEqual(["a1", "b0", "b1", "k", "t"]);
     expect(html).toContain(">hash</text>");
+  });
+});
+
+describe("LayoutDiagram paper-figure options", () => {
+  const html = renderToStaticMarkup(createElement(LayoutDiagram, { spec: paperLayout, idBase: "t" }));
+
+  it("fills pastel shapes with the -fill token and keeps the defaults elsewhere", () => {
+    expect(html).toMatch(/data-shape="norm".*?fill:var\(--dg-lime-fill\);stroke:var\(--dg-lime\)/);
+    expect(html).toMatch(/data-shape="add".*?fill:var\(--dg-pink-fill\)/);
+    expect(html).toMatch(/data-shape="pe".*?fill:var\(--dg-neutral-soft\)/);
+  });
+
+  it("adds arrow markers for the layout-only tones only when the spec uses them", () => {
+    expect(html).toContain('-arrow-pink"');
+    expect(html).toContain('-arrow-lime"');
+    const plain = renderToStaticMarkup(createElement(LayoutDiagram, { spec: layout, idBase: "t" }));
+    expect(plain).not.toContain("arrow-pink");
+    expect(plain.match(/<marker /g)).toHaveLength(7);
+  });
+
+  it("stacks multi-line labels as centred tspans", () => {
+    expect(html).toContain('<tspan x="125" y="139">Multi-Head</tspan><tspan x="125" y="154">Attention</tspan>');
+  });
+
+  it("draws circle symbols in place of the label", () => {
+    expect(attr(html, "data-symbol")).toEqual(["sine", "plus"]);
+    expect(html).not.toContain(">Positional encoding</text>");
+  });
+
+  it("shades weighted cells over paper with a per-theme cap, keeping ink labels", () => {
+    expect(html).toContain('data-weight="0.7"');
+    expect(html).toContain("fill-opacity:calc(0.7 * var(--dg-weight-scale, 0.8))");
+    expect(html).toMatch(/fill:var\(--ink\)">.7</);
+  });
+
+  it("omits the arrowhead on a headless arrow and draws paths under the shapes", () => {
+    expect(html).toMatch(/data-shape="skip"[^>]*><path(?![^>]*marker-end)[^>]*>/);
+    expect(html).toMatch(
+      /data-shape="arc"[^>]*><path d="M260.0 250.0 C[^"]+"[^>]*stroke-width="2.8"[^>]*stroke-opacity="0.7"/
+    );
+    expect(html).toMatch(/data-shape="brace"[^>]*><path[^>]*marker-end="url\(#[^"]*-arrow-pink\)"/);
+    const order = attr(html, "data-shape");
+    expect(order.indexOf("arc")).toBeLessThan(order.indexOf("norm"));
+  });
+
+  it("draws no NEW ring and announces nothing for quiet shapes", () => {
+    const spec = {
+      ...paperLayout,
+      shapes: paperLayout.shapes.map((s) => (s.id === "w1" || s.id === "w2" ? { ...s, step: 2, quiet: true } : s)),
+    };
+    const stepped = renderToStaticMarkup(createElement(LayoutDiagram, { spec, step: 2, stepper: true, idBase: "t" }));
+    expect(stepped.match(/data-new="true"/g)).toHaveLength(1);
+    expect(stepped).toContain('data-shape="w1" data-phase="new"');
+    expect(stepped).not.toMatch(/New:[^<]*\.7/);
+  });
+
+  it("announces a multi-line label on one line in the stepper", () => {
+    const stepped = renderToStaticMarkup(
+      createElement(LayoutDiagram, { spec: paperLayout, step: 2, stepper: true, idBase: "t" })
+    );
+    expect(stepped).toContain("Multi-Head Attention");
   });
 });
 

@@ -1,0 +1,18 @@
+title: File sync high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, sync core, block services, async pipeline
+  and storage. Step 1: a desktop client sends a whole file through the load balancer to the green metadata service,
+  which writes the bytes to the object store and a file row to the metadata database. Step 2: files are split into
+  blocks; the client puts each block to the block service, which stores it by hash in the object store and records
+  the hash in the block index. Step 3: the client commits the block list and the metadata service asks the block
+  service which blocks are missing. Step 4: new journal rows flow from the metadata database through an orange change
+  log to the notification service, which wakes a laptop's long poll through the load balancer. Step 5: the desktop
+  watches its folder and keeps a local index of ids and hashes. Step 6: each commit names the revision it was based
+  on, so a stale commit becomes a conflicted copy. Step 7: storage jobs replicate and then erasure-code blocks in the
+  object store. Step 8: a metadata cache holds hot metadata and the block lists of uploads in progress.
+caption: >-
+  File sync: blocks addressed by hash, one commit that makes a version real, a journal per namespace that devices
+  follow with a cursor, and blocks kept in several zones.
+tags: [case-studies, dropbox, architecture, file-sync]
+source: original
+created: 2026-11-17

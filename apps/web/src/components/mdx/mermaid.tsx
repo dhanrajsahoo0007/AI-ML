@@ -65,8 +65,8 @@ export function Mermaid({ chart, caption, minWidth = 560 }: { chart: string; cap
           ref={ref}
           role="img"
           aria-label={caption ?? "Architecture diagram"}
-          style={{ minWidth }}
-          className="flex min-h-[200px] items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:h-auto [&_svg]:max-w-full"
+          style={{ minWidth, maxWidth: Math.max(minWidth, 960) }}
+          className="flex min-h-[200px] w-full items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:h-auto [&_svg]:max-w-full"
         >
           {svg ? (
             <div className="w-full [&>svg]:mx-auto" dangerouslySetInnerHTML={{ __html: svg }} />

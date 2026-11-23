@@ -1,51 +1,28 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import {
-  Activity,
-  Bell,
-  Database,
-  Globe,
-  HardDrive,
-  Layers,
-  MessagesSquare,
-  Network,
-  Pause,
-  Play,
-  Server,
-  Smartphone,
-  Users,
-  Workflow,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { getIconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import { Glyph, isGlyph } from "./glyphs";
-import { TONES, phaseOpacity, soft, stroke, textWidth } from "./diagram-style";
-import type { DiagramStep, DiagramZone, Tone } from "./types";
+import {
+  TONES,
+  boundaryTabWidth,
+  phaseOpacity,
+  pillWidth,
+  soft,
+  stroke,
+  toneText,
+  zoneTabWidth,
+} from "./diagram-style";
+import { TAG_H, TAG_W, type TagSpot } from "./new-tags";
+import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
 // play/pause, stepper, caption), zones, the NEW marker and the travelling packet.
-
-// Lucide fallbacks for icon names that have no drawn glyph.
-export const DIAGRAM_ICONS: Record<string, LucideIcon> = {
-  phone: Smartphone,
-  "load-balancer": Network,
-  chat: MessagesSquare,
-  database: Database,
-  cache: Zap,
-  bell: Bell,
-  blob: HardDrive,
-  socket: Activity,
-  queue: Layers,
-  users: Users,
-  server: Server,
-  globe: Globe,
-  workers: Workflow,
-};
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -160,7 +137,7 @@ export function DiagramFigure({
           )}
           {current !== undefined && added.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              <span className="font-semibold" style={{ color: "var(--dg-green)" }}>
+              <span className="font-semibold" style={{ color: toneText("green") }}>
                 New:
               </span>{" "}
               {added.join(", ")}
@@ -169,7 +146,15 @@ export function DiagramFigure({
         </div>
       )}
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div style={{ minWidth }} className="relative rounded-xl border border-hairline bg-paper p-3 sm:p-5">
+        <div
+          style={{ minWidth, maxWidth: Math.max(minWidth, Math.min(1040, Math.max(width + 48, 880))) }}
+          // The play/pause button sits in its own band above the drawing, so it never covers a label or a box in
+          // the top-right corner (at 375 px the drawing scales down but the button does not).
+          className={cn(
+            "relative w-full rounded-xl border border-hairline bg-paper p-3 sm:p-5",
+            !reduced && "pt-12 sm:pt-12"
+          )}
+        >
           {!reduced && (
             <button
               type="button"
@@ -188,7 +173,7 @@ export function DiagramFigure({
             aria-label={info ? `${label}: step ${current}, ${info.title}` : label}
             data-running={running}
             data-reduced-motion={reduced || undefined}
-            className="dg h-auto w-full font-sans"
+            className="dg h-auto w-full overflow-visible font-sans"
           >
             <title>{label}</title>
             {alt && <desc>{alt}</desc>}
@@ -246,11 +231,11 @@ function StepButton({
   );
 }
 
-/** Arrowhead markers, one per tone: url(#<uid>-arrow-<tone>). */
-export function Defs({ uid }: { uid: string }) {
+/** Arrowhead markers, one per tone: url(#<uid>-arrow-<tone>). Layout diagrams pass extra tones they use. */
+export function Defs({ uid, tones = TONES }: { uid: string; tones?: readonly LayoutTone[] }) {
   return (
     <defs>
-      {TONES.map((t) => (
+      {tones.map((t) => (
         <marker
           key={t}
           id={`${uid}-arrow-${t}`}
@@ -268,10 +253,10 @@ export function Defs({ uid }: { uid: string }) {
   );
 }
 
-export function Zone({ zone, phase, dim = false }: { zone: DiagramZone; phase: Phase; dim?: boolean }) {
+export function Zone({ zone, phase, dim = false }: { zone: LayoutGroup; phase: Phase; dim?: boolean }) {
   const cls = dim ? "dg-dim" : undefined;
   if (zone.kind) return <BoundaryZone zone={zone} phase={phase} className={cls} />;
-  const tabW = zone.title.length * 8.2 + 28;
+  const tabW = zoneTabWidth(zone.title);
   return (
     <g opacity={phaseOpacity(phase)} className={cls} data-dim={dim || undefined}>
       <rect
@@ -301,7 +286,7 @@ export function Zone({ zone, phase, dim = false }: { zone: DiagramZone; phase: P
         textAnchor="middle"
         fontSize={14}
         fontWeight={600}
-        style={{ fill: stroke(zone.tone) }}
+        style={{ fill: toneText(zone.tone) }}
       >
         {zone.title}
       </text>
@@ -310,7 +295,7 @@ export function Zone({ zone, phase, dim = false }: { zone: DiagramZone; phase: P
 }
 
 // Deployment boundaries: a Region outline, a solid tinted VPC, and tinted subnet bands with an inline label.
-function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Phase; className?: string }) {
+function BoundaryZone({ zone, phase, className }: { zone: LayoutGroup; phase: Phase; className?: string }) {
   const t = zone.tone;
   const opacity = phaseOpacity(phase);
   if (zone.kind === "subnet") {
@@ -332,7 +317,7 @@ function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Ph
           fontSize={11.5}
           fontWeight={700}
           letterSpacing={0.6}
-          style={{ fill: stroke(t) }}
+          style={{ fill: toneText(t) }}
         >
           {zone.title.toUpperCase()}
         </text>
@@ -340,7 +325,7 @@ function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Ph
     );
   }
   const region = zone.kind === "region";
-  const tabW = zone.title.length * 7.6 + 24;
+  const tabW = boundaryTabWidth(zone.title);
   return (
     <g opacity={opacity} className={className}>
       <rect
@@ -359,7 +344,7 @@ function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Ph
         width={tabW}
         height={24}
         rx={6}
-        style={{ fill: region ? "var(--paper)" : stroke(t), stroke: stroke(t) }}
+        style={{ fill: region ? "var(--paper)" : toneText(t), stroke: stroke(t) }}
         strokeWidth={1.2}
       />
       <text
@@ -368,7 +353,7 @@ function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Ph
         textAnchor="middle"
         fontSize={13}
         fontWeight={700}
-        style={{ fill: region ? stroke(t) : "var(--paper)" }}
+        style={{ fill: region ? toneText(t) : "var(--paper)" }}
       >
         {zone.title}
       </text>
@@ -376,12 +361,17 @@ function BoundaryZone({ zone, phase, className }: { zone: DiagramZone; phase: Ph
   );
 }
 
-/** Pulsing dashed outline and "NEW" tag around an element added in the current build step. */
-export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
+/**
+ * Pulsing dashed outline and "NEW" tag around an element added in the current build step. `tag` is where the tag
+ * goes (from placeNewTags in ./new-tags, which keeps it off neighbouring labels); without it the tag sits on the
+ * ring's top-right corner, and `null` draws the ring alone (a touching neighbour's tag covers this one).
+ */
+export function NewRing({ bounds, pad = 7, tag }: { bounds: Bounds; pad?: number; tag?: TagSpot }) {
   const x = bounds.x1 - pad;
   const y = bounds.y1 - pad;
   const w = bounds.x2 - bounds.x1 + pad * 2;
   const h = bounds.y2 - bounds.y1 + pad * 2;
+  const spot = tag === undefined ? { x: x + w - TAG_W, y: y - TAG_H / 2 } : tag;
   return (
     <g data-new="true">
       <rect
@@ -396,18 +386,30 @@ export function NewRing({ bounds, pad = 7 }: { bounds: Bounds; pad?: number }) {
         strokeWidth={2}
         strokeDasharray="5 4"
       />
-      <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: stroke("green") }} />
-      <text
-        x={x + w - 20}
-        y={y + 4}
-        textAnchor="middle"
-        fontSize={10.5}
-        fontWeight={700}
-        letterSpacing={0.6}
-        style={{ fill: "var(--paper)" }}
-      >
-        NEW
-      </text>
+      {spot && (
+        <>
+          <rect
+            x={spot.x}
+            y={spot.y}
+            width={TAG_W}
+            height={TAG_H}
+            rx={TAG_H / 2}
+            style={{ fill: toneText("green") }}
+            data-new-tag="true"
+          />
+          <text
+            x={spot.x + TAG_W / 2}
+            y={spot.y + 13}
+            textAnchor="middle"
+            fontSize={10.5}
+            fontWeight={700}
+            letterSpacing={0.6}
+            style={{ fill: "var(--paper)" }}
+          >
+            NEW
+          </text>
+        </>
+      )}
     </g>
   );
 }
@@ -420,7 +422,7 @@ export function HighlightRing({
   rx = 14,
 }: {
   bounds: Bounds;
-  tone: Tone;
+  tone: LayoutTone;
   pad?: number;
   rx?: number;
 }) {
@@ -453,7 +455,7 @@ export function Packet({
   cycle,
 }: {
   d: string;
-  tone: Tone;
+  tone: LayoutTone;
   begin: number;
   dur: number;
   cycle?: number;
@@ -508,10 +510,10 @@ export function LabelPill({
   x: number;
   y: number;
   text: string;
-  tone: Tone;
+  tone: LayoutTone;
   bold?: boolean;
 }) {
-  const w = textWidth(text) + 14;
+  const w = pillWidth(text, bold);
   return (
     <g>
       <rect
@@ -529,7 +531,7 @@ export function LabelPill({
         textAnchor="middle"
         fontSize={11.5}
         fontWeight={bold ? 600 : 500}
-        style={{ fill: stroke(tone) }}
+        style={{ fill: toneText(tone) }}
       >
         {text}
       </text>
@@ -549,7 +551,7 @@ export function IconAt({
   size,
 }: {
   name?: string;
-  tone: Tone;
+  tone: LayoutTone;
   cx: number;
   cy: number;
   size: number;

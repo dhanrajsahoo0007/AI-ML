@@ -1,92 +1,236 @@
 ---
 title: "Bloom Filters and Probabilistic Structures"
 description: "Answering 'have I seen this?' in tiny memory: Bloom filters, counting variants, HyperLogLog and Count-Min Sketch."
+icon: binary
+updated: 2026-11-16
 ---
 
-Some questions do not need exact answers, just cheap ones: is this URL already crawled, is this key definitely not in the table, how many unique visitors today?
+Is this URL already crawled, is this key definitely not in the table, how many unique visitors today? Answered exactly, each costs a disk read or a set of every key, too big at a billion keys.
 
-## TL;DR
+- Interviewers ask about Bloom filters to see whether you can trade a small, stated error rate for memory, and name the exact lookup that follows every "maybe".
+
+## Overview
 
 - A **Bloom filter** answers "possibly in the set" or "definitely not", using a bit array and several hashes.
-- No false negatives; a tunable rate of **false positives**.
-- It cannot delete (use a **counting Bloom filter** or cuckoo filter).
+- It gives no **false negatives** and a tunable rate of **false positives**: about 9.6 bits per item buys a 1 % rate.
+- It cannot delete; use a **counting Bloom filter** or a **cuckoo filter** for that.
 - **HyperLogLog** estimates unique counts; **Count-Min Sketch** estimates frequencies.
-- Typical use: avoid expensive lookups for items that are not there.
+- Typical use: avoid expensive lookups for items that are not there, in front of a cache, a database or a disk read.
 
-## The idea in plain English
+## Mental model
 
-A bouncer with a rough memory of faces: if they say "never seen you", that is certain; if they say "you look familiar", check the guest list to be sure.
+- A bouncer with a rough memory of faces stands at the door of a private party.
+- If the bouncer says "never seen you", that is certain; if they say "you look familiar", someone checks the guest list to be sure.
+- The bouncer is the filter, the guest list is the database, and "you look familiar" for a stranger is a false positive.
+- The bouncer's memory never forgets a face that came in, which is why the filter never gives a false negative.
 
 ## Core concepts
 
-1. **Structure.** `m` bits, `k` hash functions. Insert sets `k` bits; lookup checks all `k`.
-2. **Sizing.** About 10 bits per item gives roughly 1% false positives with `k` near 7.
-3. **No deletes.** Clearing a bit may affect other items; counting filters keep counters instead.
-4. **HyperLogLog.** Uses the longest run of leading zeros in hashes to estimate distinct counts in kilobytes.
-5. **Count-Min Sketch.** A grid of counters; estimates item frequency, never under-counts.
-6. **Where it sits.** In front of a cache, database or disk lookup.
+- The running example is Brightpost's catalogue filter: **1,000,000 products**, a **1 %** false-positive rate, in front of the product database that takes **2,300 reads/s** at peak.
+
+### Structure
+
+- The filter is `m` bits, all 0 at the start, and `k` hash functions that each map a key to one bit.
+- **Insert** sets the key's `k` bits to 1. **Lookup** checks all `k`: any 0 means "definitely not", all 1 means "maybe".
+- An inserted key always finds its own bits set, so a false negative is impossible.
+- A key never inserted can find all its bits set by other keys: that is the false positive.
+
+### Sizing
+
+- The false-positive rate after `n` inserts is about **p = (1 − e^(−kn/m))^k**.
+- The best `k` is **(m/n) ln 2**, and the bits per item for a target `p` are **m/n = −ln p ÷ (ln 2)²**.
+- For `p` = 1 %: m/n = 9.585 bits and k = 6.64, rounded to 7. About 10 bits per item gives roughly 1 % with `k` near 7.
+- Every 4.8 more bits per item cuts the rate ten times: 14.4 bits for 0.1 %, 19.2 for 0.01 %.
+- Size for the expected number of items: an overfilled filter degrades quickly.
+
+The figure follows the 1.2 MB catalogue filter as the catalogue grows past the size it was built for.
+
+<AnimatedDiagram spec="animated/patterns/bloom-fp-curve" caption="Sized for 1 million products, the filter is right at 1 %; at twice that it answers “maybe” wrongly 16 times as often." />
+
+**How to read it:**
+
+- The green curve is the filter sized for 1 M products: 1.2 MB, 7 hashes. It is flat until 1 M, then bends sharply upwards.
+- The blue curve has twice the bits. At 2 M products it is back at 1 %.
+
+**The numbers:**
+
+- m = 1,000,000 × 9.585 = 9,585,059 bits = 1.2 MB.
+- At 1 M products p = 1.0 %; at 1.5 M, 5.8 %; at 2 M, 15.7 %; at 2.5 M, 29 %.
+- Doubling the bits to 2.4 MB holds 2 M products at 1.0 %, so sizing for growth costs memory, not accuracy.
+
+<PremiumBreak />
+
+### No deletes
+
+- Clearing a bit may affect other items that share it, and would turn their "maybe" into a false "no".
+- A **counting Bloom filter** keeps a small counter per position instead of a bit; insert adds 1, delete subtracts 1, at several times the memory.
+- A **cuckoo filter** stores short fingerprints in a cuckoo hash table and supports deletes. Fan et al. (2014) show it uses less space than a space-optimised Bloom filter when the target rate is below 3 %.
+
+### Other probabilistic structures
+
+- **HyperLogLog** uses the longest run of leading zeros in hashes to estimate distinct counts in kilobytes.
+- HyperLogLog sketches from many shards merge into one, so each shard counts locally and a reader merges.
+- **Count-Min Sketch** is a grid of counters that estimates item frequency and never under-counts.
+- Count-Min with a heap finds the most frequent items: see [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Q["Lookup key"] --> BF{"Bloom filter"}
-    BF -->|"definitely not present"| NO["Return not found (no disk read)"]
-    BF -->|"maybe present"| STORE[("Disk / DB lookup")]
-    STORE --> RES["Found or false positive"]
-```
+Brightpost's product service asks the filter before the database; here is that filter at toy size, 16 bits and three hashes.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/bloom-bits" stepper caption="A 0 in any checked bit proves the key was never added; three 1s set by other keys give the one wrong answer, a false positive." />
+
+<StepCards>
+  <StepCard n={1} title="An empty filter: 16 bits, 3 hashes">
+    Without a filter, every lookup for a missing product goes to the database and finds nothing. The filter starts as 16 bits, all 0, and three hash functions. It knows no products yet.
+  </StepCard>
+  <StepCard n={2} title="Add kettle: three bits set">
+    The three hashes of "kettle" give positions 1, 4 and 6, and those bits become 1. The filter does not store the word, only the bits.
+  </StepCard>
+  <StepCard n={3} title="Add toaster: three more bits">
+    "Toaster" sets bits 9, 12 and 14. Six of the 16 bits are now 1, and every new key makes a stray match more likely.
+  </StepCard>
+  <StepCard n={4} title="Look up mug: a 0 bit means no">
+    "Mug" hashes to bits 1, 3 and 6. Bit 3 is 0, so mug was never added: the service answers "not found" without reading the database.
+  </StepCard>
+  <StepCard n={5} title="Look up lamp: a false positive">
+    "Lamp" was never added, but its bits 6, 9 and 12 were all set by kettle and toaster. The filter says "maybe", the database read finds nothing, and the only cost is that wasted read.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Hashing and layout
+
+- RocksDB keeps all probe bits of a key inside one CPU cache line, so a lookup touches one line of memory, not `k` scattered ones.
+- A filter is a plain bit array, so it can be copied to every server, saved with a file, or sent over the network.
+
+### Try it
+
+- Add a few products, then test a word you never added: watch the "probably" answers appear as the bits fill.
+- Raise `k` past the best value the widget shows and the rate gets worse, not better: each key sets more bits, so the array fills faster.
+
+<BloomFilterSim bits={32} hashes={3} words={["kettle", "toaster", "teapot", "blender"]} />
 
 ### LSM trees
 
-Databases built on [LSM trees and SSTables](/system-design/databases/lsm-trees) keep a Bloom filter per SSTable so reads skip files that cannot contain the key.
+- Databases built on [LSM trees and SSTables](/system-design/databases/lsm-trees) keep a Bloom filter per SSTable so reads skip files that cannot contain the key.
+- A read for a missing key would otherwise open every SSTable; with 1 % filters it opens about 1 in 100 of the files that lack it.
+- The same trick serves other stores: a metrics store skips files that hold no points for a series, and a search index skips shards for a term it has never seen.
+
+### Per-user filters
+
+- "Has this shopper seen this recommendation?" is a membership test per shopper.
+- A filter per shopper for 500 items at 1 % is 500 × 9.585 = 4,793 bits, about 600 bytes (illustrative 500 items).
+- For 2,000,000 shoppers that is 1.2 GB, against 8 GB for 500 eight-byte ids each. A false positive hides one recommendation, which nobody notices.
 
 ### Choosing rates
 
-False positives only cost an extra lookup, so a few percent is often fine. Size for the expected number of items; an overfilled filter degrades quickly.
+- A false positive only costs an extra lookup, so a few percent is often fine.
+- Where the follow-up read is expensive, such as a remote disk or another region, pay the extra bits for 0.1 %.
+
+### Worked example: a missing product at peak
+
+At 12:00 Brightpost's product service takes 2,300 reads/s. Follow a lookup through the filter, as in the Architecture figure.
+
+1. **Build.** A nightly job reads 1,000,000 product ids and builds a 1.2 MB filter with k = 7. Each of the 40 app servers loads a copy.
+2. **Add.** A new product is added to the filter on every server before its page goes live.
+3. **Missing ids.** 10 % of lookups are for ids not in the catalogue: deleted products, old email links and bots (illustrative).
+4. **A 0 bit.** For 99 % of those, one of the 7 bits is 0 and the server answers "not found" from memory.
+5. **A false positive.** For 1 %, all 7 bits are 1 and the server reads the database, which finds nothing.
+
+**The numbers:**
+
+- Bits per item: −ln 0.01 ÷ (ln 2)² = 4.605 ÷ 0.4805 = 9.585; m = 9,585,059 bits ≈ 1.2 MB. k = 9.585 × 0.693 = 6.64, so 7.
+- Missing-id lookups: 2,300 × 0.10 = 230/s. With the filter, 230 × 0.01 = 2.3/s reach the database, 100 times fewer.
+- Memory: 40 copies × 1.2 MB = 48 MB in total. An exact set needs at least 8 MB of raw eight-byte ids per server, about 7 times the filter.
+- The 2,070 lookups/s for real products still read the database or cache; the filter only saves the misses.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Bloom filter | Tiny memory, fast | False positives, no delete |
-| Exact set | Exact answers | Much more memory |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Bloom filter | Tiny memory, fast, no false negatives | False positives, no delete, fixed size | Most lookups are for keys that are not there |
+| Exact set | Exact answers, deletes | Much more memory | The set fits and a wrong "maybe" is costly |
+| Counting Bloom filter | Supports deletes | Several times the memory of bits | Items come and go, such as a cache's contents |
+| Cuckoo filter | Deletes; less space below 3 % | Inserts can fail when nearly full | Deletes plus low rates |
+| Scalable Bloom (sub-filters) | Grows past its first size | Each lookup checks every sub-filter | The item count is unknown |
 
-## Real-world examples
+## Production systems
 
-- Seen-URL check: [Web Crawler](/system-design/case-studies/web-crawler).
-- Skipping disk reads for missing keys: [Key Value Store](/system-design/case-studies/key-value-store), [S3](/system-design/case-studies/s3).
-- Unique counts and top-k trends: [Metrics and Logging](/system-design/case-studies/metrics-and-logging), [Typeahead](/system-design/case-studies/typeahead).
-- Avoiding repeats in feeds and swipes: [Tinder](/system-design/case-studies/tinder), [TikTok](/system-design/case-studies/tiktok).
+- **Cassandra** (as of November 2026): `bloom_filter_fp_chance` is set per table between 0 and 1, and 1.0 disables the filter. The default is 0.01, or 0.1 for LeveledCompactionStrategy, and filters live off-heap.
+- **Redis Bloom** (as of November 2026): `BF.RESERVE key error_rate capacity` creates a filter; past `capacity` it adds a sub-filter `EXPANSION` times larger (default 2), and `NONSCALING` returns an error instead. A 1 % rate needs 7 hashes and 9.585 bits per item.
+- **RocksDB**: a per-SST full filter at 9.9 bits per key gives about 1 %. Its Ribbon filter saves about 30 % of the Bloom filter's memory at the same rate.
+- **Redis HyperLogLog**: `PFADD`, `PFCOUNT` and `PFMERGE`, at most 12 KB per key with a standard error of 0.81 %.
+- Seen-URL check: [Web Crawler](/system-design-case-studies/case-studies/web-crawler). Skipping disk reads for missing keys: [Key-Value Store](/system-design-case-studies/case-studies/key-value-store), [S3](/system-design-case-studies/case-studies/s3).
+- Unique counts and top-k trends: [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging), [Typeahead](/system-design-case-studies/case-studies/typeahead). Avoiding repeats in feeds and swipes: [Tinder](/system-design-case-studies/case-studies/tinder), [TikTok](/system-design-case-studies/case-studies/tiktok).
+- **Used in our case studies:** [Typeahead](/system-design-case-studies/case-studies/typeahead) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Using it where a false positive is unacceptable without a confirm step.
-- Never resizing as data grows.
-- Expecting deletion support.
+- **A false positive where it is unacceptable.** A "maybe" treated as "yes" bans a user or skips a payment. Always confirm a positive with the exact lookup.
+- **Never resizing as data grows.** At twice its planned size a 1 % filter gives 15.7 %. Rebuild it larger, or use a scalable filter, before it fills.
+- **Expecting deletion support.** Clearing bits creates false negatives for other keys. Use a counting or cuckoo filter, or rebuild from the source.
+- **A stale copy.** A product added to the database but not yet to a server's filter is "definitely not" there: a false negative caused by the system. Add to the filter before the item becomes visible, and rebuild on a schedule.
+- **Too many hashes.** Each extra hash costs a memory probe, and past (m/n) ln 2 the rate rises again. Use the computed `k`.
 
-## How to answer in an interview
+## Interview framework
 
-Mention it when you need cheap membership tests at huge scale; give the "no false negatives" property and name the exact lookup that follows a positive.
+1. Say what lookup is expensive and what share of lookups are for keys that are not there.
+2. Pick the rate from the cost of a wasted lookup, then compute bits per item and `k`.
+3. Give the property: no false negatives, and name the exact lookup that follows a positive.
+4. Plan growth and deletes: rebuild, a scalable filter, or a counting or cuckoo filter.
+5. Mention the neighbours: HyperLogLog for distinct counts, Count-Min for frequencies.
 
-## Related patterns
+**What interviewers listen for:** a computed size (bits per item, `k`, total memory) and the confirm step behind every "maybe".
 
-[Caching](/system-design/patterns/caching) · [Sharding](/system-design/patterns/sharding) · [LSM Trees](/system-design/databases/lsm-trees)
+**Red flags:** treating "maybe" as "yes", or a filter that never grows while the data does.
 
 ## Further reading
 
 - [Space/Time Trade-offs in Hash Coding with Allowable Errors (Bloom, 1970)](https://dl.acm.org/doi/10.1145/362686.362692)
+- [Cuckoo Filter: Practically Better Than Bloom (Fan et al., CoNEXT 2014)](https://www.cs.cmu.edu/~dga/papers/cuckoo-conext2014.pdf)
+- [RocksDB Bloom filter (RocksDB wiki)](https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter)
+- [BF.RESERVE (Redis docs)](https://redis.io/docs/latest/commands/bf.reserve/)
 - [HyperLogLog in Practice (Google)](https://research.google/pubs/hyperloglog-in-practice-algorithmic-engineering-of-a-state-of-the-art-cardinality-estimation-algorithm/)
+- Related pages: [Caching](/system-design/patterns/caching) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards) · [Tries, Prefix Trees and Typeahead](/system-design/patterns/tries-and-typeahead) · [LSM Trees](/system-design/databases/lsm-trees) · [SSTables](/system-design/databases/sstables)
 
 <InterviewQuestions>
   <InterviewQuestion question="Can a Bloom filter return a false negative?" category="Concepts" level="Junior">
-    No. If an item was inserted, all its bits are set, so lookup says "maybe present". It can return false positives.
+    - No. If an item was inserted, all its bits are set, so lookup says "maybe present".
+    - It can return false positives: a key never inserted whose bits were all set by other keys.
+    - In practice a false negative appears only through the system around it, such as a stale copy that missed an insert.
   </InterviewQuestion>
   <InterviewQuestion question="How would you support deletes?" category="Concepts" level="Mid">
-    Use a counting Bloom filter (counters instead of bits) or a cuckoo filter, accepting more memory.
+    - Use a counting Bloom filter: counters instead of bits, so a delete subtracts 1, at several times the memory.
+    - Or use a cuckoo filter, which stores fingerprints and deletes them, with less space than a Bloom filter below a 3 % rate.
+    - Or keep a plain filter and rebuild it from the source on a schedule, accepting deleted keys as extra false positives until then.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you count unique visitors across billions of events?" category="Design" level="Senior">
-    Use HyperLogLog, which estimates distinct counts in a few kilobytes with around 1% error and supports merging sketches from many shards.
+  <InterviewQuestion question="How do you count unique visitors across billions of events?" category="Architecture" level="Senior">
+    - Use HyperLogLog, which estimates distinct counts in a few kilobytes with around 1 % error.
+    - Redis's version uses at most 12 KB per key with a standard error of 0.81 %.
+    - Sketches merge, so each shard keeps its own and a reader merges them for the total.
+    - An exact set of visitor ids would grow with the visitors; the sketch stays the same size.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many bits and hash functions do you need for 1,000,000 items at a 1 % false-positive rate?" category="Scaling" level="Mid">
+    - Bits per item: −ln 0.01 ÷ (ln 2)² = 9.585, so about 9.6 million bits, 1.2 MB.
+    - Hashes: k = 9.585 × ln 2 = 6.64, rounded to 7.
+    - Each tenfold lower rate costs about 4.8 more bits per item: 14.4 bits for 0.1 %.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens when a Bloom filter holds more items than it was sized for?" category="Failure modes" level="Senior">
+    - More bits are 1, so stray matches climb fast: a 1 % filter at twice its size gives about 15.7 %.
+    - Nothing errors; the database load from false positives grows quietly.
+    - Rebuild it larger from the source, or use a scalable filter that adds sub-filters (Redis Bloom's default), at the cost of checking each one.
+    - Alert on the number of inserts against the planned capacity.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does a Bloom filter save reads in an LSM-tree database?" category="Architecture" level="Mid">
+    - Each SSTable carries a filter of its keys, held in memory.
+    - A read checks the filters first and opens only files that answer "maybe", so a missing key rarely touches the disk.
+    - Cassandra tunes the rate per table with `bloom_filter_fp_chance`, trading memory for fewer wasted reads.
+  </InterviewQuestion>
+  <InterviewQuestion question="After you add a Bloom filter in front of the product database, a new product shows as not found on some servers. Why?" category="Failure modes" level="Senior">
+    - Those servers hold a copy of the filter built before the product was added, so its bits are 0 there.
+    - That is a false negative created by the system, not by the filter.
+    - Add the product to every copy before its page goes live, or route "not found" for recent ids to the database.
+    - Rebuild the filter on a schedule so copies never drift far.
   </InterviewQuestion>
 </InterviewQuestions>

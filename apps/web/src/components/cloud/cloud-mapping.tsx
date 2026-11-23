@@ -25,7 +25,7 @@ export function CloudMapping({ diagram, lead = "aws" }: { diagram: string; lead?
               <th
                 key={p}
                 className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.06em]"
-                style={{ color: `var(--dg-${PROVIDER_TONE[p]})` }}
+                style={{ color: `var(--dg-${PROVIDER_TONE[p]}-text)` }}
               >
                 {PROVIDER_BY_ID[p].name}
               </th>

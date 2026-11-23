@@ -1,0 +1,465 @@
+---
+title: "Loop Engineering & Verification Loops"
+description: "Designing autonomous execution loops: test-driven verification, exit criteria, step and token budgets, and circuit breakers for spin loops."
+icon: repeat
+---
+
+A coding agent that stops after every turn and waits for you to type "continue" has turned you into its loop.
+
+- **Loop engineering** is designing the program that does that job instead: it starts each round of work, checks the result against a goal, and decides whether to go round again, stop or ask a person.
+- Interviewers use it to test three things: how you know an agent is done, how you stop one that is not getting anywhere, and what happens when a long run crashes.
+- This page sits one level above [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering): the harness decides what one turn can do, and the loop decides whether there is another.
+
+## Overview
+
+- A loop has four parts: a **goal** a program can test, a round of work (**act**), a **check** against the goal and a **decision**: go on, stop or ask.
+- "The agent says it is done" is a claim, not a proof. The check must rest on evidence the agent did not write: an exit code, a test report, a second model's verdict.
+- Write the goal as a test and run it **before** the first edit. A goal you cannot test is not ready for a loop.
+- Cap every loop with **budgets** for turns, tokens, time and money, checked before each turn.
+- Add a **circuit breaker**: when the same failure comes back three times, more turns will not help. Stop, save state and escalate.
+- Prefer **deterministic exit criteria**. Use a model-graded check only for what code cannot judge, and run it on a different model with a fresh context.
+- **Checkpoint** after every round that passes its checks, so a crash costs one round, not the run.
+
+## Mental model
+
+- A thermostat does not ask you whether the room is warm enough.
+- You set a target, 21 °C. It measures the room, switches the heater, measures again and stops when the target is met.
+- If the heater breaks, a good thermostat does not run the boiler all night: it trips and shows an error.
+
+- An agent loop is the same machine. You set a goal, such as "all 18 tests pass".
+- The loop runs the agent, measures the result with the test suite, and runs it again until the suite passes.
+- If the same test keeps failing in the same way, the loop trips and calls a person.
+- Your work moves from typing prompts to choosing the goal, the check and the limits.
+
+## Core concepts
+
+- Every figure on this page follows the bug-fix coding agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#worked-example-fixing-the-csv-bug-step-by-step).
+- It works on `brightpost-orders`, the order-import code of the Brightpost shop, on the issue "Order import drops the last line of a CSV file".
+- The bug is in `src/parser.ts`, and the repository has 18 tests.
+- The loop's goal is **all 18 tests pass, with lint and types clean**.
+
+### From single-turn prompting to closed-loop execution
+
+- A plain agent run is already a loop: the model calls tools until it answers without one (see [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture)).
+- But the model decides when that loop ends. It is an **open loop**: nothing outside the model checks whether the work is done.
+
+- A **closed loop** adds a check the model does not control.
+- After each **round** the harness tests the result against the goal.
+- If the goal is not met, the loop starts another round with the failure attached.
+- A round is one pass through act, check and decide; it can hold several **turns**, where a turn is one model response and the tool calls it asks for, as agent SDKs count them.
+
+Anthropic's June 2026 guide to loops sorts them by what you hand over:
+
+| Kind       | Starts when      | Stops when                           | You hand over                  |
+| ---------- | ---------------- | ------------------------------------ | ------------------------------ |
+| Turn-based | You prompt       | The agent judges it done             | Routine checking within a turn |
+| Goal-based | You state a goal | The goal is met or a turn cap is hit | The decision to stop           |
+| Time-based | A clock fires    | You cancel it or the work completes  | The decision to start          |
+| Proactive  | An event fires   | Each task's goal is met              | The prompt itself              |
+
+- Each row down gives you more time back and removes a moment where a person would have noticed a problem.
+- Move down one row at a time. This page is mostly about the goal-based loop, the one interviewers ask you to design.
+
+### Machine-verifiable goals and TDD agent loops
+
+- A **machine-verifiable goal** is one a program can check without judgement: a test suite exits 0, a type checker reports no errors, a queue is empty, a file is under 400 lines.
+- "Make the parser better" is a wish. "All 18 tests pass, and no test file changes" is a goal.
+
+- Test-driven development (TDD) gives an agent loop its shape: write or find a failing test, change the code, run the test, repeat until it passes.
+- The order matters. Run the test **before** the first edit, so you know the bug is real and the goal is testable.
+- In this loop the harness runs it as round 0, before the model's first turn.
+
+<AnimatedDiagram
+  spec="animated/agents/tdd-loop"
+  stepper
+  minWidth={620}
+  caption="The loop reads every check result before it decides. A different failure means the last edit moved the code forward; only a passing suite ends the loop."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Round 0: the test fails first">
+    Before the model's first turn the harness runs the suite. "keeps the last line" fails, so the bug is real and the goal can be
+    checked. A test that passes here would mean the test does not capture the bug: fix the test first.
+  </StepCard>
+  <StepCard n={2} title="Round 1: edit the loop bound">
+    The model searches, reads the file and changes `< n - 1` to `< n` in `src/parser.ts`, and the harness runs the suite again.
+  </StepCard>
+  <StepCard n={3} title="Still failing, but on a new test">
+    "keeps the last line" now passes, and "parses an empty file" fails. The goal is not met, but the failure changed,
+    so the last edit made progress. The ringed decision is "go on", with the new error attached.
+  </StepCard>
+  <StepCard n={4} title="Round 2: handle empty input">
+    The model returns `[]` when the input is empty, and the suite runs a third time.
+  </StepCard>
+  <StepCard n={5} title="Every check passes: stop">
+    18 passed, lint and types clean. The goal is met, so the loop stops and opens a pull request for a person.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Three rounds, two edits, and the suite ran three times: 3 × 18 = 54 test runs.
+- The nine-step trace on [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#worked-example-fixing-the-csv-bug-step-by-step) has the same six model turns; the loop adds round 0 and a decision after every check.
+
+Here is the message that starts round 2, as the loop sends it back to the model (Anthropic Messages API shape). It carries the check result, not the raw test output, and says where the loop stands:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "text",
+      "text": "Goal not met after round 1 (4 of 20 turns used). 17 passed, 1 failed: parses an empty file. Error: empty input has no lines (src/parser.ts). The failure changed since round 0. Continue."
+    }
+  ]
+}
+```
+
+<Callout tone="red" title="What breaks">
+  An agent that games the check. Told to make the tests pass, it can delete the failing test or weaken its assertion,
+  and the goal is met with worse code. Put "no test file changes" in the goal, write-protect the tests, and have the
+  loop reject any diff that touches them. [AI-First
+  Environment](/ai-system-design/genai-system-design/ai-first-environment-and-tool-scaffolding#deterministic-feedback-linters-typechecks-and-schema-validators)
+  shows the checks themselves.
+</Callout>
+
+### Budgets: steps, tokens, wall-clock time and cost caps
+
+A **budget** is a limit the harness checks before every turn. A loop needs one for each way it can run away: turns, tokens in the window, wall-clock time and money.
+
+<AnimatedDiagram
+  spec="animated/agents/budgets-and-breakers"
+  stepper
+  minWidth={620}
+  caption="Budgets cap how much a loop may spend; the breaker stops it early when more turns would only repeat the same failure. The turn cap and the time are illustrative."
+/>
+
+**How to read it:**
+
+- Step 1 shows the bug-fix run against its three budgets.
+- It used 6 of 20 model turns (the 5 tool calls and the summary), 24,000 of 32,000 tokens and 2 of 10 minutes.
+- Step 2 is a variant run, described in the next section, where the second fix keeps failing. Step 3 is the breaker.
+
+**The numbers:**
+
+- Turns 6 / 20 = 30 %. Tokens 24,000 / 32,000 = 75 %.
+- Time 2 / 10 = 20 %. The token budget is closest to its cap, so a longer task would need [compaction](/ai-system-design/genai-system-design/context-compaction-resets-and-state) before it needed more turns.
+
+- Turn and money caps are built into agent SDKs.
+- The Claude Agent SDK takes `max_turns` and `max_budget_usd`, both unlimited by default, and ends the run with a result whose `subtype` says which cap was hit.
+- The OpenAI Agents SDK raises `MaxTurnsExceeded`.
+- When the turn cap ends a run, the SDK result looks like this (shape from the Claude Agent SDK docs; values illustrative):
+
+```json
+{
+  "type": "result",
+  "subtype": "error_max_turns",
+  "num_turns": 20,
+  "total_cost_usd": 1.84,
+  "session_id": "3f1c…",
+  "is_error": true
+}
+```
+
+There is no `result` text on an error subtype, but the cost, the turn count and the session id are always there, so the loop can log the spend and resume later.
+
+<Callout tone="red" title="What breaks">
+  A money cap treated as a hard ceiling. The Agent SDK compares spend with the cap after each model response arrives, so
+  the response that crosses it still completes, and running subagents can add more before they stop. Set the cap below
+  what you can afford by at least one response, and add a separate cap per day across runs.
+</Callout>
+
+### Circuit breakers and detecting repeated failure loops
+
+- A budget stops a loop that runs too long. It does not notice a loop that is going nowhere.
+- A **circuit breaker** does. The pattern comes from distributed systems: after a set number of failures, the breaker trips and further calls fail at once instead of reaching the broken service (Martin Fowler, 2014, after Michael Nygard's _Release It!_).
+
+- In an agent loop, the breaker watches failures, not calls.
+- The harness takes a **fingerprint** of each failure, such as the test name plus the error message with line numbers and timestamps removed, and counts how many times in a row the same fingerprint comes back.
+- In the variant run of the figure, the second fix fails "parses an empty file" with the same error at turns 6, 7 and 8.
+- On the third the breaker trips: the loop saves its state, stops and asks a person.
+
+- **The numbers:** The breaker trips at turn 8 of 20. Without it, the turn cap would have allowed 20 − 8 = **12 more turns** of the same failure.
+
+Three signals are worth a breaker each:
+
+- **The same failure** three times in a row, by fingerprint.
+- **The same tool call** with the same arguments three times in a row: the agent is re-reading or re-running instead of changing anything.
+- **No tool use** for several turns: the agent is talking instead of working. Claude Code's `/goal` stops the loop and hands control back when this happens.
+
+<Callout tone="red" title="What breaks">
+  A fingerprint taken from the raw error text. If the message includes a timestamp, a temporary path or a line number
+  that moves with each edit, no two failures look the same and the breaker never trips. Normalise the error before you
+  hash it.
+</Callout>
+
+## Architecture
+
+Here is the whole loop around the coding agent, one part at a time.
+
+<AnimatedDiagram
+  spec="animated/agents/loop-anatomy"
+  stepper
+  minWidth={620}
+  caption="A loop is a goal, a round of work, a check and a decision. Only the check knows whether the goal is met, so the loop is only as good as the check."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A goal a program can test">
+    "All 18 tests pass" is set before the first round and never changes during the run. The model can read it; it cannot
+    edit it.
+  </StepCard>
+  <StepCard n={2} title="Act: the agent takes its turns">
+    The harness assembles the context (the goal, the last check result, the state so far), calls the model and runs the
+    tool calls it proposes. A round can hold several turns. This is the agent loop of [Agent
+    Architectures](/ai-system-design/genai-system-design/agent-architectures), unchanged.
+  </StepCard>
+  <StepCard n={3} title="Check the result against the goal">
+    The harness, not the model, runs the check: here the test suite, lint and types. The ringed box is the part that
+    decides whether the loop is any good. [The verification
+    ladder](/ai-system-design/genai-system-design/harness-engineering#core-concepts) covers which checks to run and in
+    what order.
+  </StepCard>
+  <StepCard n={4} title="Decide: go round again, or leave">
+    The decision reads the verdict, the budgets and the breaker. Not met, with budget left and no repeated failure: the
+    next round starts with the failure attached (dashed arrow). Otherwise the loop leaves by one of three exits: done,
+    stop and report, or ask a person.
+  </StepCard>
+</StepCards>
+
+The order inside the decision matters. Here is a sketch of it in TypeScript:
+
+```ts
+async function decide(run: Run): Promise<"done" | "next" | "stop" | "ask"> {
+  const verdict = await check(run.goal); // tests, lint, types: run by the harness
+  if (verdict.met) return "done"; // a goal met on the last allowed round is done, not over budget
+  if (run.breaker.record(verdict.fingerprint) >= 3) return "ask"; // same failure three times
+  if (run.turns >= run.caps.turns || run.costUsd >= run.caps.usd) return "stop";
+  if (isRisky(run.nextStep)) return "ask"; // merge, deploy, delete: always a person
+  await saveCheckpoint(run); // only after the checks have run
+  return "next";
+}
+```
+
+- Goal first, so a run that succeeds on its last round reports success.
+- Breaker before budgets, so a stuck run asks for help instead of reporting "out of turns".
+- The risky-step gate last, because it applies even to a healthy run.
+
+## Technical mechanics
+
+### Worked example: the CSV fix as a goal-based loop
+
+- This follows the [TDD loop figure](#machine-verifiable-goals-and-tdd-agent-loops) round by round, with what the decision saw each time.
+- The goal is "all 18 tests pass, lint and types clean, no test file changes"; the caps are 20 turns and 32,000 tokens.
+
+| Round | Act                                              | Check                           | Breaker             | Turns used | Decision                       |
+| ----- | ------------------------------------------------ | ------------------------------- | ------------------- | ---------- | ------------------------------ |
+| 0     | Harness runs `run_tests()`                       | 1 failed: keeps the last line   | 1 (new fingerprint) | 0          | Not met: go on                 |
+| 1     | Search, read, edit the loop bound, `run_tests()` | 1 failed: parses an empty file  | 1 (new fingerprint) | 4          | Not met, new failure: go on    |
+| 2     | Return `[]` for empty input; summary             | 18 passed, lint and types clean | reset               | 6          | Met: stop, open a pull request |
+
+**The numbers:**
+
+- 3 rounds held the 6 model turns of the harness trace: 0 + 4 + 2.
+- The breaker never reached 2, because each failure was new.
+- Tokens grew from 3,800 to 24,000 (illustrative, from the [context window figure](/ai-system-design/genai-system-design/harness-engineering#core-concepts)), so the loop ended with 6 of 20 turns and 8,000 tokens to spare.
+
+Three things to take from it:
+
+- **A changing failure is progress.** Round 1 failed, but on a different test. A loop that only counted failures would have treated it like round 0.
+- **The model never decided it was done.** The suite decided, and the person who merges the pull request decides whether it ships.
+- **The variant run is the same loop.** Had the second fix failed the same way at turns 6, 7 and 8, the breaker would have stopped it with 12 turns unspent, as in the [budgets figure](#budgets-steps-tokens-wall-clock-time-and-cost-caps).
+
+### Designing deterministic vs. LLM-graded exit criteria
+
+An **exit criterion** is the condition that ends the loop with success. It can be checked by code or by a model.
+
+<AnimatedDiagram
+  spec="animated/agents/exit-criteria"
+  stepper
+  minWidth={620}
+  caption="An exit code cannot be argued with, but it checks only what the tests encode. An evaluator model can judge prose, but only from what the agent chose to show it."
+/>
+
+**How to read it:**
+
+- Step 1: the deterministic check reads the test runner's exit code; a script decides, and the answer is met or not met.
+- Step 2: the model-graded check gives the goal condition and the transcript to an evaluator model, which answers met, not yet or impossible, with a reason.
+- Here it judges something the tests cannot: whether the pull-request summary names the empty-file case. The ringed cell is its blind spot.
+
+- Claude Code's `/goal` command is a model-graded loop.
+- After every turn a small, fast model (Haiku by default on the Claude API) checks the condition against the conversation.
+- It cannot run commands or read files, so the docs advise writing the condition as something the agent's own output can show, such as "`npm test` exits 0", and bounding it with a clause like "or stop after 20 turns".
+
+Four rules for choosing:
+
+1. **Deterministic first.** Anything a test, a type checker or a script can check, check that way. It costs no tokens and gives the same answer every time.
+2. **Model-graded only for what code cannot judge:** a summary's accuracy, a design's quality, whether a fix addresses the issue as written.
+3. **Never let the worker grade itself.** Anthropic found that agents "reliably skew positive when grading their own work"; a separate evaluator with a sceptical brief is easier to tune than a self-critical worker. See [Planner, Generator & Evaluator Loops](/ai-system-design/genai-system-design/planner-generator-evaluator-loops).
+4. **Combine them with AND.** The suite must pass **and** the evaluator must say met. The cheap check runs every round; the model-graded one runs only once the cheap one passes, as on the [verification ladder](/ai-system-design/genai-system-design/harness-engineering#core-concepts).
+
+<Callout tone="red" title="What breaks">
+  An evaluator that believes a sentence. If the agent writes "all tests pass" without running them, an evaluator that
+  reads only the transcript may accept it. Require the evidence itself in the transcript (the test runner's output, not
+  the agent's summary of it), or have the harness run the suite and hand the evaluator the result.
+</Callout>
+
+### Handling partial progress and checkpoint resumption
+
+- A long loop will crash: a container is recycled, a rate limit hits, the laptop sleeps.
+- A **checkpoint** is saved state from which a new run can carry on.
+- For a coding loop the cheapest checkpoint is a git commit plus a line in a progress file.
+
+<AnimatedDiagram
+  spec="animated/agents/checkpoint-resume"
+  stepper
+  minWidth={620}
+  caption="Save state after every round that passes its checks. A crash then costs one round, not the whole run. The run is illustrative."
+/>
+
+**How to read it:**
+
+- Step 1: the loop commits after each round whose checks pass, here after rounds 2 and 4.
+- Round 5 crashes. Step 2: the resumed run loads the last checkpoint (ringed) and repeats only round 5.
+- Restarting from the beginning would repeat 5 rounds; resuming repeats 1.
+
+- Anthropic's harness for long-running coding agents (November 2025) works this way.
+- A first session writes a JSON feature list in which every feature starts as failing, a progress file and an initial commit.
+- Every later session reads the git log and the progress file, picks one unfinished feature, tests it end to end and commits.
+- The model may change only each feature's `passes` field; the post says it is "unacceptable to remove or edit tests".
+
+Two rules make resumption safe:
+
+- **Checkpoint only after the checks.** A checkpoint taken mid-edit resumes into broken code.
+- **Keep budgets outside the session.** When you resume a Claude Code session with an active `/goal`, the condition carries over but the turn count, timer and token baseline reset. A loop that crashes and resumes every hour never hits its cap. Keep the run's total spend in your own store.
+
+The full picture (threads, runs, checkpoint records and how they link) is on [State Persistence & Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval).
+
+### When to stop, pivot strategy or escalate to a human
+
+Every decision the loop makes falls into one of four actions. Map each signal to one in advance:
+
+| Signal                                                         | Action                                                                                | Why                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Goal met, every check passes                                   | **Stop**: report and hand over                                                        | The only good exit                           |
+| Not met, and the failure changed                               | **Continue** with the new error attached                                              | The last round made progress                 |
+| The same failure twice                                         | **Pivot**: revert to the last checkpoint, start a fresh context, try another approach | A third identical try rarely differs         |
+| The same failure three times, or no tool use for several turns | **Escalate**: breaker trips, save state, ask a person                                 | More turns only cost money                   |
+| A budget is nearly spent                                       | **Wrap up**: commit what passes, write a summary                                      | A clean partial result beats a cut-off one   |
+| The evaluator judges the goal impossible                       | **Stop and report** the reason                                                        | The goal or the environment is wrong         |
+| The next step is a merge, deploy, delete or payment            | **Ask a person**, every time                                                          | Irreversible actions are not the loop's call |
+
+- The pivot is the step most loops miss. A loop that only retries keeps the context full of failed attempts, and the agent starts repeating them.
+- Reverting to the checkpoint and starting a fresh context with a short note ("approach A failed twice with this error") gives the next try a clean start.
+- [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) covers what the person sees when the loop asks.
+
+## Trade-offs
+
+| Decision                                      | Option A                                | Option B                          | Guidance                                                               |
+| --------------------------------------------- | --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| Deterministic vs model-graded exit            | Certain, free, repeatable               | Judges prose and intent           | Deterministic for everything code can check; add a graded check on top |
+| Tight vs loose turn cap                       | Cheap failures, more human resumes      | Finishes more tasks unattended    | Start tight; raise it when traces show runs ending one turn short      |
+| Breaker at 2 vs 3 repeats                     | Stops waste early                       | Gives one retry after a pivot     | 3 with a pivot after 2                                                 |
+| Fresh context per round vs one long session   | No stale attempts, needs state in files | Keeps reasoning, fills the window | Fresh context for long loops; one session for short ones               |
+| Checkpoint every round vs every passing round | Nothing lost                            | Never resumes into broken code    | Only after checks pass                                                 |
+
+## Production systems
+
+- **Ralph** (Geoffrey Huntley, July 2025) is the smallest loop: `while :; do cat PROMPT.md | claude-code ; done`. Each round starts with a fresh context and reads its plan from files. It has a goal, an act and a check (the tests), and no stop: Huntley watches it.
+- **Anthropic's long-running harness** (November 2025) runs coding sessions against a JSON feature list of over 200 features, with a progress file and git commits as checkpoints, and end-to-end browser tests as the check.
+- **Claude Code's `/goal`** (2026) keeps a session working until an evaluator model judges the condition met or impossible; it stops by itself when the agent stops using tools.
+- **Agent SDKs** cap loops in code: the Claude Agent SDK with `max_turns` and `max_budget_usd`, the OpenAI Agents SDK with `max_turns` and `MaxTurnsExceeded`, LangGraph with `recursion_limit` and `GraphRecursionError`.
+- **Adoption is early.** Lulla et al. (arXiv, August 2026) sampled 36,710 repositories and found autonomous loops in 217. None of the default branches they scanned held a committed loop state file, although published advice recommends one.
+
+## Failure modes & pitfalls
+
+- A goal that only the model can judge ("the code is clean").
+- No turn or money cap, so a stuck loop runs all night.
+- Letting the agent edit the tests, the lint config or the goal.
+- Counting failures without looking at whether they changed.
+- Retrying in the same crowded context instead of pivoting from a checkpoint.
+- A model-graded exit check run by the same model that did the work.
+- Budgets that reset on every resume.
+
+## Interview framework
+
+1. Name the four parts: goal, act, check, decide. Say which part the model owns (the act) and which the harness owns (the rest).
+2. Make the goal machine-verifiable, and run it before the first edit.
+3. Set budgets for turns, tokens, time and money, and a breaker on repeated failures.
+4. Choose deterministic exit criteria first; add a model-graded check on a separate model only for what code cannot judge.
+5. Checkpoint after passing rounds, and say when the loop escalates to a person.
+
+**What interviewers listen for:** a check the agent cannot write or edit, and more than one way out of the loop.
+
+**Red flags:** "the agent tells us when it is done", or a loop with no cap.
+
+## Further reading
+
+- [Loop engineering: getting started with loops (Anthropic, 2026)](https://claude.com/blog/getting-started-with-loops)
+- [Loop Engineering (Addy Osmani, 2026)](https://addyosmani.com/blog/loop-engineering/)
+- [Loop Engineering: Building Blocks, Adoption, and Impact (Lulla et al., 2026)](https://arxiv.org/abs/2608.21884)
+- [Effective harnesses for long-running agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [Harness design for long-running application development (Anthropic, 2026)](https://www.anthropic.com/engineering/harness-design-long-running-apps)
+- [Keep Claude working toward a goal: `/goal` (Claude Code documentation)](https://code.claude.com/docs/en/goal)
+- [How the agent loop works: turns, budgets and results (Claude Agent SDK documentation)](https://code.claude.com/docs/en/agent-sdk/agent-loop)
+- [Running agents: max turns (OpenAI Agents SDK documentation)](https://openai.github.io/openai-agents-python/running_agents/)
+- [Graph API: recursion limit (LangGraph documentation)](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- [CircuitBreaker (Martin Fowler, 2014)](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [Ralph Wiggum as a software engineer (Geoffrey Huntley, 2025)](https://ghuntley.com/ralph/)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What is the difference between an agent loop and a verification loop?"
+    category="Concepts"
+    level="Junior"
+  >
+    - An agent loop is the model calling tools until it answers without one, so the model decides when it is finished.
+    - A verification loop wraps that in a check the model does not control: after each round the harness tests the result against a goal, such as a passing test suite, and starts another round with the failure attached if the goal is not met.
+    - The first is an open loop; the second is closed, because evidence the agent did not write decides when it stops.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make an agent's goal machine-verifiable?" category="Concepts" level="Mid">
+    - Write the goal as something a program can check without judgement: a test suite exits 0, a type check is clean, a queue is empty, a file is under a size limit.
+    - Add the constraints that must hold on the way, such as "no test file changes".
+    - Then run the check before the first edit: if it already passes, the check does not capture the problem.
+    - If no program can say whether the goal is met, the task is not ready for an unattended loop.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Design the stopping logic for an unattended coding loop."
+    category="Architecture"
+    level="Senior"
+  >
+    - After every round the harness runs the check first, so a goal met on the last allowed round counts as success.
+    - Then a circuit breaker compares the failure's fingerprint with the last ones and escalates after three identical failures, with a pivot from the last checkpoint after two.
+    - Then budgets on turns, tokens, wall-clock time and money stop the run, and a gate always asks a person before a merge, deploy or delete.
+    - State is checkpointed only after checks pass, and the run's total spend is kept outside the session so a resume does not reset it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you use a model-graded exit criterion instead of a deterministic one?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - Only for what code cannot judge, such as whether a summary is accurate or a fix matches the issue as written.
+    - Deterministic checks are free, repeatable and hard to argue with, so they run first and every round.
+    - A model-graded check costs tokens, can vary between runs and judges only the evidence it is shown.
+    - Run it on a separate model with a fresh context and a sceptical brief, because agents grade their own work too kindly, and require both checks to pass.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your loop ran all night and spent its whole budget. How do you diagnose and prevent it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Read the trace and group the turns by failure fingerprint.
+    - Usually one failure repeated for hundreds of turns, often a test that depends on something the agent cannot reach, or the context filled with failed attempts.
+    - Prevent it with a breaker on repeated fingerprints, normalised so timestamps and line numbers do not hide repeats, a no-progress rule for turns without tool use, a pivot to a fresh context from the last checkpoint, and caps on turns and money per run and per day.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does an agent game its verification loop, and how do you stop it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Told to make tests pass, it can delete or weaken the failing test, skip it, or claim success without running the suite.
+    - Put the constraint in the goal, write-protect the tests and check config, and reject any diff that touches them.
+    - Have the harness run the check and hand over the real output, rather than trusting the agent's report.
+    - A separate reviewer model reading the diff catches the subtler cases, such as an assertion loosened in the code under test.
+  </InterviewQuestion>
+</InterviewQuestions>

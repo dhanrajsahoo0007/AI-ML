@@ -17,7 +17,8 @@ which fails on an invalid prop. When a prop changes, update the example here in 
 Contents:
 
 1. [Teaching components](#1-teaching-components): KeyIdea, Term, Glossary, Compare, ProsCons, Tabs/Tab, Quiz/QuizItem,
-   DecisionTree, RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
+   DecisionTree, SpotTheFlag, GuessTheLevel, WhichPrinciple, StoryBuilder, StoryMatrix, MockLoop, PrepChecklist,
+   RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
 2. [Interactive widgets](#2-interactive-widgets): eleven lazy islands, at most two per page
 3. [Diagrams](#3-diagrams): the `<AnimatedDiagram>` tag, sidecars, the three spec kinds, `composeSpecs`, lint rules
 4. [Glyphs](#4-glyphs): the 77 drawn icons for diagram nodes and lanes
@@ -105,12 +106,12 @@ Renders the whole glossary, sorted by term, one anchor per id (`#latency`). No p
 Comparison table. Booleans render as a green tick or red cross (with "Yes"/"No" for screen readers). The first column
 is a row header and stays visible while the table scrolls sideways on phones. Always put numbers in the cells.
 
-| Prop      | Type                   | Rule                                               |
-| --------- | ---------------------- | -------------------------------------------------- |
-| `columns` | `string[]`             | header row; the first one may be `""`              |
+| Prop      | Type                    | Rule                                               |
+| --------- | ----------------------- | -------------------------------------------------- |
+| `columns` | `string[]`              | header row; the first one may be `""`              |
 | `rows`    | `(string\|boolean)[][]` | each row has exactly `columns.length` cells        |
-| `caption` | `string`, optional     | shown under the table                              |
-| children  | optional               | a plain markdown table instead of `columns`/`rows` |
+| `caption` | `string`, optional      | shown under the table                              |
+| children  | optional                | a plain markdown table instead of `columns`/`rows` |
 
 Give either `columns` + `rows` or a markdown table as children (with a blank line before and after it).
 
@@ -127,9 +128,9 @@ Give either `columns` + `rows` or a markdown table as children (with a blank lin
 
 <Compare caption="Same thing as a markdown table.">
 
-| | Cache-aside | Write-through |
-| --- | --- | --- |
-| Write latency | Unchanged | Higher |
+|               | Cache-aside | Write-through |
+| ------------- | ----------- | ------------- |
+| Write latency | Unchanged   | Higher        |
 
 </Compare>
 ```
@@ -159,12 +160,8 @@ server-rendered (inactive ones are `hidden`).
 
 ```mdx
 <Tabs title="Two ways to shard">
-  <Tab label="By user id">
-    Every user's data lives on one shard, so a user's reads hit one machine.
-  </Tab>
-  <Tab label="By region">
-    Data stays near its users, but a global query fans out to every region.
-  </Tab>
+  <Tab label="By user id">Every user's data lives on one shard, so a user's reads hit one machine.</Tab>
+  <Tab label="By region">Data stays near its users, but a global query fans out to every region.</Tab>
 </Tabs>
 ```
 
@@ -179,8 +176,12 @@ Self-check questions with a "Show answer" toggle (plain `<details>`, no JS).
 
 ```mdx
 <Quiz>
-  <QuizItem question="Why is p99 latency more useful than the average?" hint="Think about pages that call many services.">
-    A page that calls 50 services waits for the slowest one, so it sees the tail far more often than the average suggests.
+  <QuizItem
+    question="Why is p99 latency more useful than the average?"
+    hint="Think about pages that call many services."
+  >
+    A page that calls 50 services waits for the slowest one, so it sees the tail far more often than the average
+    suggests.
   </QuizItem>
   <QuizItem question="What does a write-ahead log protect against?">
     Losing committed writes in a crash: the change is on disk in the log before the data files are updated.
@@ -209,6 +210,155 @@ it), and "Start over". A lazy client island; counts towards the two-widgets-per-
     },
     no: "Scale the primary first",
   }}
+/>
+```
+
+### SpotTheFlag
+
+A weak interview answer, one sentence per row. The reader selects the sentences that would cost the candidate points,
+then checks: every sentence is marked and explained and the picks are scored ("You caught 2 of 3 red flags, with 1
+false alarm"). "Try again" clears it. A lazy client island; counts towards the two-widgets-per-page limit. Used on the
+behavioral pages, where it replaces a reveal-only `Quiz` with an exercise that has a right answer.
+
+- `prompt` (required string): the interviewer's question, shown above the answer.
+- `sentences` (required, 3 to 12): `{ text, flag?, note? }[]`. `flag` marks a red flag and says why it costs points.
+  `note`, on a sentence that is fine, says why; it shows when the reader flags that sentence by mistake. A sentence
+  takes `flag` or `note`, not both. At least one sentence needs a `flag` and at least one must be fine.
+- `title` (optional string, default `"Spot the red flags"`).
+
+```mdx
+<SpotTheFlag
+  prompt="Tell me about a time you made a system faster."
+  sentences={[
+    {
+      text: "Our company started in 2015 and the monolith has had four owners.",
+      flag: "Backstory. The interviewer cannot score any of it.",
+    },
+    {
+      text: "I profiled the checkout path and found one query doing a full table scan.",
+      note: "A first-person action with a cause. This is what gets scored.",
+    },
+    {
+      text: "We added an index and some caching.",
+      flag: "'We' hides what you did, and there is no reason for the choice.",
+    },
+    { text: "p99 fell from 900 ms to 120 ms and the error rate stayed flat." },
+  ]}
+/>
+```
+
+### GuessTheLevel
+
+Answers to one interview question, each to be matched to the level it shows. The reader picks a level for every
+answer, then checks: each answer is marked, the right level is shown with the reason, and the picks are scored. A lazy
+client island (shared with `WhichPrinciple`); counts towards the two-widgets-per-page limit.
+
+- `prompt` (required string): the interviewer's question, shown above the answers.
+- `levels` (required, 2 to 5 different strings): the choices, lowest first.
+- `answers` (required, 1 to 5): `{ text, level, why }[]`. `level` must be one of `levels`; `why` says what in the
+  answer shows that level.
+- `title` (optional string, default `"Guess the level"`).
+
+```mdx
+<GuessTheLevel
+  prompt="Tell me about a time you improved something."
+  levels={["Mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "Our retries were hammering a slow dependency, so I added backoff and a retry budget to our client.",
+      level: "Mid",
+      why: "One person changed one component inside their own service.",
+    },
+    {
+      text: "I wrote the retry standard, built the shared client with two teams, and moved four services onto it.",
+      level: "Staff",
+      why: "Several teams changed how they work because of it.",
+    },
+  ]}
+/>
+```
+
+### WhichPrinciple
+
+Interview questions to be matched to the principle, value or focus area each one tests. Same island and scoring as
+`GuessTheLevel`; counts towards the two-widgets-per-page limit.
+
+- `principles` (required, 2 to 8 different strings): the choices.
+- `prompts` (required, 2 to 8): `{ text, principle, why }[]`. `principle` must be one of `principles`; `why` says how
+  to tell.
+- `title` (optional string, default `"Which principle is this?"`).
+- `instruction` (optional string): the line under the title. Set it when the items are not interview questions, for
+  example answers to sort into kinds. Default: "Read each question. Which one is the interviewer testing?"
+
+```mdx
+<WhichPrinciple
+  principles={["Ownership", "Dive Deep", "Bias for Action"]}
+  prompts={[
+    {
+      text: "Tell me about a problem you fixed that was not your team's.",
+      principle: "Ownership",
+      why: "The words 'not your team's' ask whether you act beyond your own area.",
+    },
+    {
+      text: "Tell me about a time a metric looked fine but something was wrong.",
+      principle: "Dive Deep",
+      why: "It asks whether you check the detail behind a summary number.",
+    },
+  ]}
+/>
+```
+
+### StoryBuilder, StoryMatrix and MockLoop
+
+The Practice Lab tools (`/behavioral/practice-lab/*`). `StoryBuilder` and `MockLoop` take **no props**;
+`StoryMatrix` takes `builder`, the path of the page that holds the story builder. Each is meant for a page of its own, so
+an article links to the tool's page and does not embed it. All three are lazy client islands that keep the reader's
+data in the browser (`src/lib/stories.ts`, `src/lib/practice.ts`) and copy it to the account when the reader is signed
+in (`src/lib/practice-sync.ts`, `src/features/practice/`).
+
+- `<StoryBuilder />`: four text boxes (situation and task, action, result, learning) with a live speaking-time
+  estimate against the 15/60/15/10 budget, an "I" against "we" count, and a warning when the result has no number.
+  A link such as `/behavioral/practice-lab/story-builder?for=conflict` starts a new story already ticked for that
+  competency (a slug from `content/question-bank/signals.yaml`, group `Competencies`).
+- `<StoryMatrix builder="/behavioral/practice-lab/story-builder" />`: the reader's stories against the signals of `signals.yaml`, one view per group. Rows with no
+  story are marked as gaps.
+- `<MockLoop />`: the reader picks a company and a level and gets five prompts drawn from the leadership-track
+  question bank, each with the two-minute timer, the follow-ups one at a time, and a 1 to 5 rating. Only prompts are
+  sent to the browser, never answers. Put it after `<PremiumBreak />` on a premium page.
+
+```mdx
+<StoryBuilder />
+```
+
+### PrepChecklist
+
+A preparation plan the reader ticks off, with a progress bar. Ticks are kept in the browser only
+(`src/lib/checklist.ts`). A lazy client island; counts towards the two-widgets-per-page limit.
+
+- `id` (required): lowercase letters, digits and dashes. It names the list in the browser's storage, so do not change
+  it after the page is published.
+- `title` (required string).
+- `groups` (required, 1 to 12): `{ title, items }[]`, where `items` (1 to 20) is `{ id, text, href? }[]`. Item ids
+  must be different across the whole list. `href`, a site path, adds an "Open" link.
+
+```mdx
+<PrepChecklist
+  id="three-day-plan"
+  title="Three-day plan"
+  groups={[
+    {
+      title: "Day 1: stories",
+      items: [
+        { id: "pick-stories", text: "Pick the five projects you know best." },
+        {
+          id: "write-two",
+          text: "Write two of them in the story builder.",
+          href: "/behavioral/practice-lab/story-builder",
+        },
+      ],
+    },
+    { title: "Day 2: practice", items: [{ id: "mock-one", text: "Run one mock loop out loud." }] },
+  ]}
 />
 ```
 
@@ -285,8 +435,12 @@ Where a pattern shows up in other pages. The list is explicit for now (it is not
 <PatternUses
   pattern="consistent hashing"
   uses={[
-    { title: "Design a key-value store", href: "/system-design/case-studies/key-value-store", note: "Spreads keys across nodes" },
-    { title: "Design a distributed cache", href: "/system-design/case-studies/distributed-cache" },
+    {
+      title: "Design a key-value store",
+      href: "/system-design-case-studies/case-studies/key-value-store",
+      note: "Spreads keys across nodes",
+    },
+    { title: "Design a rate limiter", href: "/system-design-case-studies/case-studies/rate-limiter" },
   ]}
 />
 ```
@@ -311,6 +465,36 @@ An ordered reading list with numbered steps and the total time.
 ```
 
 ---
+
+### InterviewPrompt
+
+The interview question at the top of a case study (`## The interview question`), as the interviewer asks it. A
+server component: the bank is read at build time.
+
+- `prompt` (required string, 20+ characters): the question in the interviewer's words.
+- `level` (required): `Junior`, `Mid`, `Senior` or `Staff`. `minutes` (required integer, 15–120): the round length.
+- `bankId` (optional): the `id` of a question in `content/question-bank/*.yaml`. Its `companies` show as "Reported
+  at" chips. Company names come only from the bank; never type one into the page (§5.2 says what the tags mean).
+  An unknown id is an error.
+- `tests` (required, 2–5 strings): what the question tests.
+- `clarify` (required, 2–8): `{ q, a }[]`, the clarifying questions a strong candidate asks and the answer the page
+  assumes for each.
+- `outOfScope` (optional, up to 6 strings).
+
+```mdx
+<InterviewPrompt
+  prompt="Design a ticket booking system for concerts. Fans pick seats on a map, and a big on-sale can bring millions of people at once."
+  level="Senior"
+  minutes={45}
+  bankId="design-ticket-booking"
+  tests={["Contention on one seat", "Surviving a spike far above capacity", "Payment that never double-charges"]}
+  clarify={[
+    { q: "Assigned seats or general admission?", a: "Assigned seats on a seat map." },
+    { q: "How long is a seat held while the fan pays?", a: "Ten minutes." },
+  ]}
+  outOfScope={["Resale", "Dynamic pricing"]}
+/>
+```
 
 ## 2. Interactive widgets
 
@@ -352,17 +536,25 @@ Back-of-the-envelope calculator. Readers edit DAU, requests per user per day, pe
 reads per write. It shows QPS (average, peak, read and write), storage per day, per year and for the whole retention,
 and read and write bandwidth, with the working for every result in a static table.
 
-| Prop             | Type   | Default    | Allowed                          |
-| ---------------- | ------ | ---------- | -------------------------------- |
-| `dau`            | number | `10000000` | > 0, at most 1e10                |
-| `actionsPerUser` | number | `10`       | > 0, at most 1e5                 |
-| `peakFactor`     | number | `3`        | 1–100                            |
-| `payloadBytes`   | number | `1000`     | > 0, at most 1e10 (bytes/write)  |
-| `retentionDays`  | number | `1825`     | > 0, at most 36500               |
-| `readWriteRatio` | number | `10`       | 0–10000 (reads per write)        |
+| Prop             | Type   | Default    | Allowed                         |
+| ---------------- | ------ | ---------- | ------------------------------- |
+| `dau`            | number | `10000000` | > 0, at most 1e10               |
+| `actionsPerUser` | number | `10`       | > 0, at most 1e5                |
+| `peakFactor`     | number | `3`        | 1–100                           |
+| `payloadBytes`   | number | `1000`     | > 0, at most 1e10 (bytes/write) |
+| `retentionDays`  | number | `1825`     | > 0, at most 36500              |
+| `readWriteRatio` | number | `10`       | 0–10000 (reads per write)       |
 
 ```mdx
-<EstimateCalculator title="Chat app estimates" dau={50000000} actionsPerUser={40} peakFactor={3} payloadBytes={200} retentionDays={3650} readWriteRatio={5} />
+<EstimateCalculator
+  title="Chat app estimates"
+  dau={50000000}
+  actionsPerUser={40}
+  peakFactor={3}
+  payloadBytes={200}
+  retentionDays={3650}
+  readWriteRatio={5}
+/>
 ```
 
 ### NinesCalculator
@@ -370,10 +562,10 @@ and read and write bandwidth, with the working for every result in a static tabl
 Two availability targets side by side: the downtime each allows per day, week, month (30 days) and year, "X allows N×
 less downtime than Y", and a note on what each level usually needs.
 
-| Prop | Type   | Default | Allowed                                           |
-| ---- | ------ | ------- | ------------------------------------------------- |
-| `a`  | number | `99.9`  | `99`, `99.5`, `99.9`, `99.95`, `99.99`, `99.999`  |
-| `b`  | number | `99.99` | same as `a`                                       |
+| Prop | Type   | Default | Allowed                                          |
+| ---- | ------ | ------- | ------------------------------------------------ |
+| `a`  | number | `99.9`  | `99`, `99.5`, `99.9`, `99.95`, `99.99`, `99.999` |
+| `b`  | number | `99.99` | same as `a`                                      |
 
 ```mdx
 <NinesCalculator a={99.9} b={99.99} />
@@ -403,12 +595,12 @@ replayed through round robin, least connections (ties go to the server with the 
 (smooth weighted round robin, weights editable with +/−) or IP hash. Controls: Play / Pause / Replay, Step, Reset. It
 shows requests per server and, for least connections, the open requests on each server.
 
-| Prop        | Type      | Default         | Allowed                                                             |
-| ----------- | --------- | --------------- | ------------------------------------------------------------------- |
-| `servers`   | integer   | `4`             | 3–6                                                                 |
-| `algorithm` | string    | `"round-robin"` | `"round-robin"`, `"least-connections"`, `"weighted"`, `"ip-hash"`   |
-| `requests`  | integer   | `20`            | 10–40                                                               |
-| `weights`   | integer[] | `[3,2,1,1,1,1]` | up to 6 entries, each 1–5; missing entries use the default          |
+| Prop        | Type      | Default         | Allowed                                                           |
+| ----------- | --------- | --------------- | ----------------------------------------------------------------- |
+| `servers`   | integer   | `4`             | 3–6                                                               |
+| `algorithm` | string    | `"round-robin"` | `"round-robin"`, `"least-connections"`, `"weighted"`, `"ip-hash"` |
+| `requests`  | integer   | `20`            | 10–40                                                             |
+| `weights`   | integer[] | `[3,2,1,1,1,1]` | up to 6 entries, each 1–5; missing entries use the default        |
 
 ```mdx
 <LoadBalancerSim servers={3} algorithm="weighted" requests={24} weights={[3, 1, 1]} />
@@ -421,11 +613,11 @@ order (leftmost is evicted next; LFU slots show their use count), running hits, 
 the final hit ratio of all three policies on the same sequence. Readers can edit the sequence (keys separated by
 spaces or commas, at most 40 used, upper-cased).
 
-| Prop       | Type    | Default                         | Allowed                     |
-| ---------- | ------- | ------------------------------- | --------------------------- |
-| `policy`   | string  | `"lru"`                         | `"lru"`, `"lfu"`, `"fifo"`  |
-| `capacity` | integer | `4`                             | 4–8                         |
-| `sequence` | string  | `"A B C D A B E A B C D E A B"` | 1–200 characters            |
+| Prop       | Type    | Default                         | Allowed                    |
+| ---------- | ------- | ------------------------------- | -------------------------- |
+| `policy`   | string  | `"lru"`                         | `"lru"`, `"lfu"`, `"fifo"` |
+| `capacity` | integer | `4`                             | 4–8                        |
+| `sequence` | string  | `"A B C D A B E A B C D E A B"` | 1–200 characters           |
 
 ```mdx
 <CacheSim policy="lfu" capacity={4} sequence="A B A C A D E A F B G A B H A B" />
@@ -438,13 +630,13 @@ bucket, a sliding window log or a fixed window (1 s windows). A timeline shows a
 rejected ones (bottom lane), with counts, the peak accepted in any 1 s, and a table comparing all three algorithms.
 The fixed window lets about twice the limit through around the boundary.
 
-| Prop         | Type    | Default          | Allowed                                                      |
-| ------------ | ------- | ---------------- | ------------------------------------------------------------ |
-| `algorithm`  | string  | `"token-bucket"` | `"token-bucket"`, `"sliding-window"`, `"fixed-window"`       |
-| `limit`      | integer | `5`              | 1–10 (requests per second, also the token refill rate)       |
-| `bucketSize` | integer | `5`              | 1–20 (token bucket only)                                     |
-| `steadyRps`  | integer | `3`              | 0–10                                                         |
-| `burst`      | integer | `10`             | 0–30                                                         |
+| Prop         | Type    | Default          | Allowed                                                |
+| ------------ | ------- | ---------------- | ------------------------------------------------------ |
+| `algorithm`  | string  | `"token-bucket"` | `"token-bucket"`, `"sliding-window"`, `"fixed-window"` |
+| `limit`      | integer | `5`              | 1–10 (requests per second, also the token refill rate) |
+| `bucketSize` | integer | `5`              | 1–20 (token bucket only)                               |
+| `steadyRps`  | integer | `3`              | 0–10                                                   |
+| `burst`      | integer | `10`             | 0–30                                                   |
 
 ```mdx
 <RateLimiterSim algorithm="fixed-window" limit={5} bucketSize={5} steadyRps={3} burst={12} />
@@ -457,11 +649,11 @@ which outlines the k bits it checks. The verdict is "definitely not in the set",
 the set, but never added: a false positive". It shows n, the bits set, the expected false-positive rate
 (1 − e^(−kn/m))^k and the best k.
 
-| Prop     | Type     | Default                         | Allowed                          |
-| -------- | -------- | ------------------------------- | -------------------------------- |
-| `bits`   | integer  | `32`                            | 8–64, a multiple of 8 (slider)   |
-| `hashes` | integer  | `3`                             | 1–6                              |
-| `words`  | string[] | `["apple", "banana", "cherry"]` | up to 20 words, each 1–24 chars  |
+| Prop     | Type     | Default                         | Allowed                         |
+| -------- | -------- | ------------------------------- | ------------------------------- |
+| `bits`   | integer  | `32`                            | 8–64, a multiple of 8 (slider)  |
+| `hashes` | integer  | `3`                             | 1–6                             |
+| `words`  | string[] | `["apple", "banana", "cherry"]` | up to 20 words, each 1–24 chars |
 
 ```mdx
 <BloomFilterSim bits={32} hashes={3} words={["alice", "bob", "carol", "dave"]} />
@@ -473,10 +665,10 @@ A leader and two followers; follower 2 lags twice as much as follower 1. The clo
 when the reader presses Wait. Buttons: Write vN, Read from follower 1, Read from follower 2, Wait 250 ms, Reset. With
 read-your-writes off, a read from a lagging follower returns a stale version; with it on, the read goes to the leader.
 
-| Prop             | Type    | Default | Allowed                                     |
-| ---------------- | ------- | ------- | ------------------------------------------- |
-| `lagMs`          | integer | `800`   | 0–3000 (follower 1's lag; follower 2 = 2×)  |
-| `readYourWrites` | boolean | `false` |                                             |
+| Prop             | Type    | Default | Allowed                                    |
+| ---------------- | ------- | ------- | ------------------------------------------ |
+| `lagMs`          | integer | `800`   | 0–3000 (follower 1's lag; follower 2 = 2×) |
+| `readYourWrites` | boolean | `false` |                                            |
 
 ```mdx
 <ReplicationLagDemo lagMs={1000} readYourWrites={false} />
@@ -489,10 +681,10 @@ column, types a value and turns the index on or off (`id` is always indexed). It
 binary-search steps, matches, the plan (full scan or index seek), a 100-cell grid lighting up the rows read (10 rows
 per cell) and the first 5 matches.
 
-| Prop      | Type    | Default   | Allowed                                                 |
-| --------- | ------- | --------- | ------------------------------------------------------- |
-| `column`  | string  | `"email"` | `"id"`, `"email"`, `"country"`, `"age"`                 |
-| `indexed` | boolean | `false`   | starts with an index on `column` (ignored for `id`)     |
+| Prop      | Type    | Default   | Allowed                                             |
+| --------- | ------- | --------- | --------------------------------------------------- |
+| `column`  | string  | `"email"` | `"id"`, `"email"`, `"country"`, `"age"`             |
+| `indexed` | boolean | `false`   | starts with an index on `column` (ignored for `id`) |
 
 ```mdx
 <IndexPlayground column="country" indexed={true} />
@@ -505,11 +697,11 @@ on the first W replicas and the worst-case read asking the last R; replicas in b
 verdict (whether R + W > N, and the overlap), illustrative write and read latency, how many failed replicas writes and
 reads survive, and notes on the trade-offs.
 
-| Prop | Type    | Default | Allowed                |
-| ---- | ------- | ------- | ---------------------- |
-| `n`  | integer | `3`     | 1–7                    |
-| `r`  | integer | `2`     | 1–7, at most `n`       |
-| `w`  | integer | `2`     | 1–7, at most `n`       |
+| Prop | Type    | Default | Allowed          |
+| ---- | ------- | ------- | ---------------- |
+| `n`  | integer | `3`     | 1–7              |
+| `r`  | integer | `2`     | 1–7, at most `n` |
+| `w`  | integer | `2`     | 1–7, at most `n` |
 
 ```mdx
 <QuorumPicker n={5} r={2} w={2} title="Can this read be stale?" />
@@ -536,20 +728,24 @@ examples of each kind, not files that exist yet; `messenger/architecture` and `d
 ### The MDX tag
 
 ```mdx
-<AnimatedDiagram spec="animated/patterns/cache-aside-read" caption="Cache-aside: read the cache, fall back to the database" stepper />
+<AnimatedDiagram
+  spec="animated/patterns/cache-aside-read"
+  caption="Cache-aside: read the cache, fall back to the database"
+  stepper
+/>
 ```
 
-| Prop        | Type       | Kinds             | Meaning                                                                                                                                                                                                                         |
-| ----------- | ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spec`      | string     | all               | Asset ID: `"animated/<group>/<name>"`. The `diagrams/` prefix is optional.                                                                                                                                                      |
-| `name`      | string     | all               | Older form of `spec`: `"<group>/<name>"`. Use one of `spec` or `name`.                                                                                                                                                          |
-| `caption`   | string     | all               | Text under the figure. Also the SVG's accessible name.                                                                                                                                                                          |
-| `step`      | number     | all               | Draws the diagram as it stands after build step N: elements added in step N get a green NEW ring, earlier ones are faded, later ones hidden. The header reads "Step N of M".                                                     |
-| `stepper`   | boolean    | all               | Adds numbered step buttons plus "Full design". On its own, or with `step` to choose the starting step.                                                                                                                          |
-| `minWidth`  | number     | all               | Minimum width in px before the figure scrolls sideways on phones. Default: 560 for every kind.                                                                                                  |
-| `highlight` | string[]   | architecture only | Node ids that stay bright; every other node and edge fades to about 0.25 opacity and the highlighted nodes get a soft pulsing ring. An edge stays bright when both its nodes are highlighted; a zone when it holds one.          |
-| `path`      | string     | architecture only | Node ids joined by `>`, such as `"client>lb>cache"`. Those nodes stay bright with a ring; only the edges between consecutive ids (either direction) stay bright, drawn heavier. Combines with `highlight`, `step` and `stepper`. |
-| `cloud`     | string     | architecture only | Provider the Services toggle starts on: `"aws"`, `"gcp"` or `"azure"` (default: Generic). Nodes with `cloud` refs show that provider's service from the first render; the reader can still switch. See the notes below.          |
+| Prop        | Type     | Kinds             | Meaning                                                                                                                                                                                                                          |
+| ----------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec`      | string   | all               | Asset ID: `"animated/<group>/<name>"`. The `diagrams/` prefix is optional.                                                                                                                                                       |
+| `name`      | string   | all               | Older form of `spec`: `"<group>/<name>"`. Use one of `spec` or `name`.                                                                                                                                                           |
+| `caption`   | string   | all               | Text under the figure. Also the SVG's accessible name.                                                                                                                                                                           |
+| `step`      | number   | all               | Draws the diagram as it stands after build step N: elements added in step N get a green NEW ring, earlier ones are faded, later ones hidden. The header reads "Step N of M".                                                     |
+| `stepper`   | boolean  | all               | Adds numbered step buttons plus "Full design". On its own, or with `step` to choose the starting step.                                                                                                                           |
+| `minWidth`  | number   | all               | Minimum width in px before the figure scrolls sideways on phones. Default: 560 for every kind.                                                                                                                                   |
+| `highlight` | string[] | architecture only | Node ids that stay bright; every other node and edge fades to about 0.25 opacity and the highlighted nodes get a soft pulsing ring. An edge stays bright when both its nodes are highlighted; a zone when it holds one.          |
+| `path`      | string   | architecture only | Node ids joined by `>`, such as `"client>lb>cache"`. Those nodes stay bright with a ring; only the edges between consecutive ids (either direction) stay bright, drawn heavier. Combines with `highlight`, `step` and `stepper`. |
+| `cloud`     | string   | architecture only | Provider the Services toggle starts on: `"aws"`, `"gcp"` or `"azure"` (default: Generic). Nodes with `cloud` refs show that provider's service from the first render; the reader can still switch. See the notes below.          |
 
 ```mdx
 <AnimatedDiagram spec="animated/messenger/architecture" />
@@ -595,6 +791,26 @@ created: 2026-11-09 # YYYY-MM-DD
 Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the default). Each has a stroke and a soft fill
 (`--dg-<tone>`, `--dg-<tone>-soft`) that switch automatically in dark mode. Suggested: clients and edge `neutral` or
 `blue`, app/compute `teal`, data stores `violet`, caches and queues `orange`, failure `red`, new or healthy `green`.
+Tone-coloured text (zone titles, edge label pills, layout `text` shapes, sequence message labels) uses
+`--dg-<tone>-text` (`toneText()` in `diagram-style.ts`), which is at least 4.5:1 on paper and on every tone's soft
+fill in both themes. Never colour text with the stroke token: several strokes are below 4.5:1 in light mode.
+
+Layout specs (shapes and groups) and architecture specs (nodes, zones and edges) may also use two diagram-only tones,
+`pink` and `lime` (type `LayoutTone`), and a third, stronger value per tone, the pastel block fill `--dg-<tone>-fill`
+(layout shape `fill: "pastel"`, architecture card node `fill: "pastel"`). Sequence lanes keep the seven tones. Pink and
+lime are not section tones. Three figure families have a fixed legend in code:
+
+- Transformer: `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts` (embeddings `pink`, attention
+  `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
+- RAG: `RAG_TONE` in `src/components/diagrams/presets/rag.ts` (documents and chunks `blue`, embeddings and vectors
+  `pink`, vector index and stores `violet`, keyword index and filters `teal`, the question `orange`, ranking `lime`,
+  the LLM and the answer `green`, failure `red`, user and orchestration `neutral`). At most four tones plus neutral in
+  one figure; red only where something breaks. Case-study architectures keep the zone table in
+  `CASE-STUDY-FORMAT.md`.
+- Agents: `AGENT_TONE` in `src/components/diagrams/presets/agents.ts` (the model, a thought and the answer `green`,
+  the user's task and a human approver `orange`, a tool call or tool `teal`, a tool result or observation `blue`,
+  memory and state `violet`, a check, grader or guardrail `lime`, failure `red`, harness and instructions `neutral`,
+  embeddings `pink`). Sequence lanes use `SEQUENCE_TONE` from the same file (no lime or pink on lanes).
 
 Zone `kind`:
 
@@ -613,7 +829,9 @@ below; its box is about 76 wide and reaches 62 below the centre. `icon` is a [gl
 name from `src/lib/icons.ts`.
 
 Node fields: `id`, `label`, `sub?` (second line), `icon?`, `tone?`, `accent?` (solid fill, for the component the
-diagram is about), `variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
+diagram is about), `fill?: "paper" | "soft" | "pastel"` (card background: `"paper"` is the default outline card,
+`"soft"` the pale tint, `"pastel"` a coloured block with ink text; ignored with `accent`, not allowed on glyph nodes),
+`variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
 from `src/lib/cloud-catalog.ts` or `{ label, id? }`; adds the Generic/AWS/Google Cloud/Azure toggle, which the tag's
 `cloud` prop can start on a provider, and feeds `<CloudMapping>`), `x`, `y`, `w?`, `h?`.
 
@@ -635,10 +853,7 @@ const spec: DiagramSpec = {
   title: "Read path with a cache",
   width: 880,
   height: 320,
-  steps: [
-    { title: "Clients call the API" },
-    { title: "Add a cache in front of the database", covers: "NFR: latency" },
-  ],
+  steps: [{ title: "Clients call the API" }, { title: "Add a cache in front of the database", covers: "NFR: latency" }],
   zones: [
     { id: "clients", title: "Clients", tone: "neutral", x: 20, y: 50, w: 180, h: 240 },
     { id: "app", title: "Application", tone: "teal", x: 240, y: 50, w: 200, h: 240 },
@@ -677,9 +892,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 import { composeSpecs } from "@/components/diagrams/geometry";
 import limiter from "../patterns/rate-limiter";
 
-const base: DiagramSpec = {
-  /* title, width, height, steps, zones, nodes, edges as above */
-};
+const base: DiagramSpec = {/* title, width, height, steps, zones, nodes, edges as above */};
 
 // The limiter's zones, nodes and edges are shifted by (dx, dy), their ids get the "rl-" prefix, and the whole part
 // appears in build step 3 of the base. The base keeps its title and steps, and the canvas grows to fit.
@@ -759,18 +972,36 @@ export default spec;
 
 ### Kind 3: layout (`LayoutSpec`)
 
-A static drawing for data structures (B-tree pages, hash buckets, rings, log segments), revealed step by step. No
-packets unless an arrow sets `packet: true`.
+A static drawing for data structures (B-tree pages, hash buckets, rings, log segments) and paper-style figures (the
+Transformer), revealed step by step. No packets unless an arrow sets `packet: true`.
 
-Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`.
+Shape `type`: `"box"`, `"cell"`, `"circle"`, `"text"`, `"arrow"`, `"path"`.
 
 - `box`, `cell`, `text`: `x`,`y` is the **top-left** corner; text is centred in its `w`×`h` box.
 - `circle`: `x`,`y` is the **centre** and `w` is the diameter.
+- `path`: `x`,`y` are ignored (set them to 0); the line runs through `points`.
 - Default sizes: box 120×48, cell 40×40, circle 40, text 80×20.
 
 Shape fields: `id`, `type`, `x`, `y`, `w?`, `h?`, `label?`, `sub?` (second line on a box or cell), `tone?`, `step?`
 (default 1), `highlight?: true` (a pulsing ring in the shape's tone and a solid fill, for the element the paragraph is
 about).
+
+Paper-figure fields (all optional; a spec that sets none of them renders exactly as before):
+
+| Field    | On                      | Meaning                                                                                                                                                                         |
+| -------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`  | box, cell, circle, text | `"\n"` splits it into up to 3 centred lines: `"Multi-Head\nAttention"`. The stepper announces it on one line.                                                                   |
+| `fill`   | box, cell, circle       | `"paper"` (box default), `"soft"` (cell and circle default) or `"pastel"`, a coloured block with ink text (`--dg-<tone>-fill`). `highlight` still wins with its solid fill.     |
+| `symbol` | circle                  | `"plus"` (⊕ adder), `"times"` (⊗) or `"sine"` (the positional-encoding wave), drawn in the tone. The symbol replaces the label in the drawing; the label is still announced.    |
+| `weight` | cell                    | 0–1: fill in the tone's stroke colour at this strength over paper, for attention weights and heatmaps. Labels stay ink; the strength is capped per theme so they stay readable. |
+| `weight` | path                    | 0–1: stroke width 1–4 and opacity 0.25–1, for attention arcs.                                                                                                                   |
+| `head`   | arrow, path             | Arrowhead at the end. Arrows default to `true` (`head: false` is a plain line: brackets, residual taps); paths default to `false`.                                              |
+| `quiet`  | any                     | No NEW ring and no stepper announcement when it appears: for the many cells of a matrix or vector (the Transformer `matrix()` and `vector()` builders set it). Give the step one labelled shape that is not quiet. |
+| `points` | path                    | `[x, y][]`, at least two. Compute them in the spec (`Math.sin` for a wave).                                                                                                     |
+| `smooth` | path                    | A smooth curve through every point instead of straight segments.                                                                                                                |
+| `dashed` | arrow, path             | Dashed line.                                                                                                                                                                    |
+
+Paths and arrows are drawn under every other shape. Lines never make a group appear.
 
 Arrow fields:
 
@@ -779,8 +1010,40 @@ Arrow fields:
   other end.
 - `via?: [x, y][]`, `label?` (a pill at the midpoint), `dashed?`, `packet?`, `tone?`, `step?`.
 
-`groups?` are dotted zones drawn like architecture zones, with the same fields and tones. A group appears once any
-shape inside it does.
+`groups?` are dotted zones drawn like architecture zones, with the same fields and tones (plus `pink` and `lime`). A
+group appears once any box, cell, circle or text inside it does.
+
+Transformer figures build their shapes with the helpers in `src/components/diagrams/presets/transformer.ts`
+(`block`, `vector`, `matrix`, `residual`, `architectureShapes`, `miniMap`) instead of writing coordinates and tones by
+hand, so every figure keeps the same legend and proportions. `assets/diagrams/animated/transformer/architecture.ts` is
+the reference spec.
+
+RAG figures (`assets/diagrams/animated/rag/`) build theirs with `src/components/diagrams/presets/rag.ts`: the legend
+`RAG_TONE`, the running example (the Brightpost help centre: `CORPUS`, `QUESTIONS`, `RESULTS`, `METRICS`, `TOP_K`,
+`PROMPT`, `LATENCY_MS` and the Wave 2 constants, each with its working in a comment) and builders `docStrip` (a
+document as token cells with chunk marks), `chunkRow`, `scatter` (a 2-D embedding space with a top-k ring),
+`rankList` (ranked results with scores and a top-k cut), `funnel` (stage widths proportional to candidate counts)
+and `stageStrip` (the six-stage locator). A number that appears in two figures must come from one constant there.
+`assets/diagrams/animated/rag/pipeline.ts` is the reference architecture spec.
+
+Agents figures (`assets/diagrams/animated/agents/`) build theirs with `src/components/diagrams/presets/agents.ts`: the
+legend `AGENT_TONE`, the two running examples (the Brightpost support agent: `BRIGHTPOST`, `TOOLS`, `HAPPY_PATH`,
+`LATENCY_S`, `AUTONOMY_LADDER`; the bug-fix coding agent: `CODING_TASK`, `CODING_STEPS`, `CODING_CONTEXT`), the shared
+arithmetic (`COMPOUNDING`, `PASS_K`, `passAtK`, `passHatK`) and five builders: `loopRing` (the agent loop as stations
+on a ring with an exit to "Done"), `miniLoop` (the loop as a small locator row with one station coloured),
+`traceRows` (one row per step, chips in legend colours; columns size themselves to their labels), `contextBar` (the
+context window as a stacked token bar with free space) and `patternTile` (the five workflow patterns with identical
+node sizes). `assets/diagrams/animated/agents/agent-loop.ts` is the reference architecture spec.
+
+Production figures (Fine-Tuning, Evaluation, Inference & Serving, LLMOps, Safety and Multimodal pages) build theirs
+with `src/components/diagrams/presets/production.ts`: the legend `PROD_TONE` (with `FINETUNE_TONE` and
+`MODALITY_TONE` for the two local rules), the Brightpost running example (`TRAFFIC`, `TOKENS`, `LATENCY`, `DATASETS`,
+`REFUND_CASE`, each with its working in a comment) and seven builders: `lifecycleMap` (the whole track as one picture,
+stages in `LIFECYCLE_STAGES`), `miniLifecycle` (the same map as a small locator with stages ringed), `waterfall` (a
+request as timed spans on a millisecond axis), `meter` (a fill against a limit, red past it), `gate` (a change, its
+checks, promote or block), `confusionGrid` (counts with metrics beside them; `precision`, `recall`, `accuracy`,
+`falsePositiveRate` and `cohensKappa` compute them) and `curve` (a small plot with marked points, "shape only" when
+not computed). Each placeable builder has a size helper. Page-only builders go in `presets/production-<short>.ts`.
 
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
@@ -801,8 +1064,28 @@ const spec: LayoutSpec = {
     { id: "b3", type: "cell", x: 470, y: 80, label: "3", tone: "orange", highlight: true },
     { id: "b4", type: "cell", x: 520, y: 80, label: "4", tone: "teal" },
     { id: "b5", type: "cell", x: 570, y: 80, label: "5", tone: "teal" },
-    { id: "h", type: "arrow", x: 0, y: 0, from: "key", to: "b3", via: [[490, 200]], label: "hash % 6 = 3", tone: "blue", step: 2, packet: true },
-    { id: "cap", type: "text", x: 300, y: 205, w: 320, label: "Six buckets; collisions chain inside one", tone: "neutral" },
+    {
+      id: "h",
+      type: "arrow",
+      x: 0,
+      y: 0,
+      from: "key",
+      to: "b3",
+      via: [[490, 200]],
+      label: "hash % 6 = 3",
+      tone: "blue",
+      step: 2,
+      packet: true,
+    },
+    {
+      id: "cap",
+      type: "text",
+      x: 300,
+      y: 205,
+      w: 320,
+      label: "Six buckets; collisions chain inside one",
+      tone: "neutral",
+    },
   ],
   steps: [{ title: "An empty table of six buckets" }, { title: "The key hashes to bucket 3" }],
 };
@@ -818,6 +1101,17 @@ export default spec;
 
 Source: `src/components/diagrams/spec-lint.ts`. It must return no problems for every spec.
 
+Text widths. Every "fits" rule below measures text with `measureText` from `src/components/diagrams/text-width.ts`,
+the same model the renderers use to size edge-label pills, zone tabs, lane headers and sequence label boxes. It holds
+the advance width of each character of Inter (the site font) measured in Chromium, at weights 400 and 700 (500 and
+600 are interpolated), so narrow letters (i, l, t, punctuation) count for less and capitals, digits and symbols (M, W,
+%, →, ×) for more: "fill illicit list" fits a box that "WARM MEMORY 100%" overflows by 46. The model is within 0.7
+units of the browser for 99% of the labels in the specs, at full width and at 375 px. Sizes by role: node and lane
+labels 13.5 px semibold, node sub lines 11.5 px regular, layout box and cell labels 13 px semibold, layout sub lines
+11 px regular, zone titles 14 px semibold. A rough guide: a 13.5 px label averages about 7 px per character, an
+11.5 px sub line about 5.6. `tests/unit/diagrams/text-width.test.ts` pins the calibration; re-measure if the font or
+the renderer sizes change.
+
 All kinds:
 
 - Ids are unique within their list: nodes, zones, lanes, shapes and groups.
@@ -832,24 +1126,42 @@ Architecture:
 - Every node box lies inside `width`×`height`. A card is x±w/2, y±h/2; a glyph node is ±38 wide and reaches 27 up and
   62 down.
 - No two node boxes overlap (touching is fine).
-- Labels fit: label length × 6.2 px ≤ w − 48 with an icon, or w − 16 without; the `sub` line is length × 4.8 px with
-  the same room. A default 116-wide node with an icon fits about 11 label characters, so set `w: 150` for "Session
-  registry" (16 characters).
+- Labels fit with 2 units to spare: the label's width ≤ w − 54 when the icon draws (the text starts at x + 52), or
+  w − 4 centred without one; the `sub` line gets the same room. An `icon` name that resolves to no glyph or Lucide
+  icon draws nothing, so its text is centred. A default 116-wide node with an icon holds about 62 units (8 or 9
+  characters); "Session registry" (106 units) needs `w: 162`.
+- Zone titles end inside their zone: the tab starts 16 in and pads the title by 14, so 30 + the title's width ≤ w
+  (region and VPC tabs: 26 +, subnet labels: 12 +). A 170-wide zone holds a title of about 140 units, such as
+  "Drivers and garages".
 - Card height is at least 36.
+- `fill` only on card nodes, and not together with `accent`.
 
 Sequence:
 
 - Every message's `from`/`to` and every note's `lane` is an existing lane; there is at least one lane.
 - `duration` is greater than 0.
-- Lane labels fit the header: length × 6.2 ≤ 96 with an icon (about 15 characters), or ≤ 134 without.
+- Lane labels fit the header, which grows to 156: the label's width ≤ 108 with an icon (the text starts at +46), or
+  ≤ 152 without. "Socket gateway" (105 units) is about the longest that fits beside an icon.
 - Lanes are at least 120 apart, so a fixed `width` is at least 120 × lanes + 40.
 
 Layout:
 
 - Arrow `from`/`to` name existing shapes; an arrow without `from`/`to` needs a `w` or `h`.
-- Every non-arrow shape lies inside the canvas.
-- Box and cell shapes do not overlap each other (text and circles may overlap anything).
-- Box and cell labels fit: length × 6.2 ≤ shape width − 8.
+- A path has at least two `points`.
+- Every non-arrow shape lies inside the canvas (a path: every point).
+- Box and cell shapes do not overlap each other (text, circles and paths may overlap anything).
+- Box and cell labels fit, centred with 2 units each side: the widest line ≤ shape width − 4, and the `sub` line too.
+  "[MASK]" needs a 53-wide cell, "Fundamentals" a 94-wide box.
+- Group titles end inside the group, as zone titles do.
+- A label has at most 3 lines. A box or cell with two or more lines is at least 15 × lines + 6 tall (+14 with a
+  `sub`): a 44-tall box holds two lines.
+- `weight` is between 0 and 1; `symbol` only on circles; `fill` only on boxes, cells and circles.
+
+NEW tags. In a step view the renderer places each NEW tag itself (`src/components/diagrams/new-tags.ts`): the ring's
+top-right corner when that is clear, else the first clear spot among the other corners, the edge middles, the sides
+and the band above the ring, else the spot that covers least (box edges before text). New elements whose rings touch,
+such as a row of cells added together, share one tag. Nothing to set in the spec, but leave a little room around a
+new element in a crowded figure so its tag has somewhere to go.
 
 Before committing, check the diagram in the browser at desktop width, at 375 px, in dark mode and with reduced motion
 (packets are hidden, rings and dashes stop moving).
@@ -868,85 +1180,96 @@ Drawn icons for architecture nodes and sequence lanes, picked by name through th
 icon from `src/lib/icons.ts`. Colour comes from the node's `tone`. Use `variant: "glyph"` for a large drawing with the
 label underneath (data stores, logs), or the default `"card"` for a boxed node with the glyph on the left (services).
 
-| Name            | Drawing                                                                               |
-| --------------- | ------------------------------------------------------------------------------------- |
-| `database`      | Filled cylinder with two band lines and a lighter lid                                 |
-| `cache`         | Three stacked isometric layers, fading downwards                                      |
-| `queue`         | Horizontal segmented tube with an open end                                            |
-| `blob`          | Bucket with a lighter rim and a zigzag "object" mark                                  |
-| `cdn`           | Globe: circle with meridian ellipse and three latitude lines                          |
-| `load-balancer` | Circle with one input dot fanning out to three arrows                                 |
-| `phone`         | Phone outline with a screen and two message pills                                     |
-| `server`        | Three stacked rack units, each with a line and an LED dot                             |
-| `chat`          | Two overlapping speech bubbles, the front one filled with dots                        |
-| `registry`      | Clipboard-like card with a filled header and three bullet rows                        |
-| `presence`      | Circle with a heartbeat line and a status dot at top right                            |
-| `bell`          | Filled bell with a clapper arc and a badge circle                                     |
-| `workers`       | Two meshed gears                                                                      |
-| `users`         | Two people (head and shoulders), one in front                                         |
-| `gateway`       | Shield with a check mark                                                              |
-| `media`         | Picture frame with mountains and a sun                                                |
-| `history`       | Clock face with a counter-clockwise return arrow                                      |
-| `bag`           | Filled shopping bag with a handle and two lines                                       |
-| `card`          | Payment card with a magnetic stripe and a chip                                        |
-| `dns`           | Signpost: a pole with two opposite-pointing name boards                               |
-| `lock`          | Padlock: shackle arc over a rounded body with a keyhole                               |
-| `key`           | Key: round bow with a hole, diagonal shaft with two teeth                             |
-| `shield`        | Shield, right half filled, with a centre seam (security or policy, no check mark)     |
-| `timer`         | Stopwatch: circle with a top button, side button and a swept quarter wedge            |
-| `clock`         | Clock face with four tick marks and hour and minute hands                             |
-| `cpu`           | Chip: square with an inner filled die and three pins on each side                     |
-| `gpu`           | Graphics card: wide board with two fans and a connector edge underneath               |
-| `disk`          | Hard drive: square case with a platter, hub and read arm                              |
-| `file`          | Document: page with a folded corner and three text lines                              |
-| `folder`        | Folder with a tab, front panel lighter                                                |
-| `log`           | Tall page of bullet rows with an append arrow at the bottom (append-only log)         |
-| `search`        | Magnifying glass with a thick handle                                                  |
-| `tree`          | Hierarchy of boxes: one root, two children, two leaves (org chart or B-tree)          |
-| `map`           | Folded three-panel map with a dashed route and a location pin                         |
-| `chart`         | Axes with three rising bars and a dashed trend line                                   |
-| `link`          | Two interlocking chain links                                                          |
-| `globe`         | Desk globe on a stand: tilted axis, equator, meridians and two land blobs             |
-| `robot`         | Robot head: antenna, two eyes, mouth bar, side ears and neck posts                    |
-| `feed`          | RSS symbol (dot and two arcs) in a rounded square                                     |
-| `video`         | Film frame: wide rectangle with sprocket strips and a play triangle                   |
-| `ticket`        | Ticket with side notches, a dashed tear line and a stub dot                           |
-| `ledger`        | Bound book: dark spine, ruled rows and a right-hand amounts column                    |
-| `browser`       | Browser window: title bar with two dots and an address bar over a content block       |
-| `api`           | Rounded panel with `{ }` curly braces around a dot                                    |
-| `coordinator`   | Filled centre node with a check mark linked to three satellite nodes (leader)         |
-| `trie`          | Branching tree of small circles; filled circles mark terminal nodes                   |
-| `hash`          | Bold `#` in a rounded square                                                          |
-| `ring`          | Consistent-hashing ring: five nodes on a circle (one filled) and a dashed arrow       |
-| `firewall`      | Brick wall with a flame on top                                                        |
-| `router`        | Rounded box with a centre dot and four arrows pointing out                            |
-| `nat`           | Three source dots merging through a tall box into one outgoing arrow (many to one)    |
-| `tunnel`        | Pipe with an open end between two endpoint dots, a dashed line running through it     |
-| `building`      | Office block with windows, a door and a lower annex (on-premises data centre)         |
-| `webhook`       | Line leaving a hollow dot, looping round and arriving back at a filled dot            |
-| `image`         | Three outlined stacked layers with a filled tag (container image)                     |
-| `container`     | Shipping container: wide box with filled top and bottom rails, five ribs, two feet    |
-| `pod`           | Wide capsule holding two small boxes, one filled                                      |
-| `node`          | Machine case with an LED strip, holding three upright capsules (two filled)           |
-| `function`      | Lightning bolt in a rounded square                                                    |
-| `controller`    | Two loop arrows circling a dial with a centre dot (reconcile loop)                    |
-| `folder-share`  | Folder on a network line: a stem down to a filled node between two end dots           |
-| `appliance`     | Rugged case with a carry handle, corner guards, two latches and a status LED          |
-| `proxy`         | Tall box with a filled core between an incoming and an outgoing arrow                 |
-| `partition`     | Bar cut into three slices by two dashed lines, the middle slice filled                |
-| `topic`         | One input dot into a filled upright bar, three arrows out                             |
-| `snapshot`      | Disk platter inside four camera-frame corner marks                                    |
-| `vault`         | Safe: door with a spoked dial, a handle bar, two hinges and two feet                  |
-| `certificate`   | Landscape document with three text lines and a round seal with ribbon tails           |
-| `radar`         | Round scope with two range rings, a swept wedge and a blip                            |
-| `signal`        | Rising metric line over a soft area and a baseline, ending in a dot                   |
-| `trace`         | Three staggered span bars joined by elbow lines (trace waterfall), the first filled   |
-| `flag`          | Filled swallow-tail flag on a pole with a base                                        |
-| `meter`         | Half-dial gauge with tick marks, a needle and a readout bar underneath                |
-| `coin`          | Coin at an angle: face with an inner ring and a diamond mark, filled edge behind      |
-| `model`         | Small neural net: two, three and two dots in layers, each layer joined to the next    |
-| `policy`        | Page with three check-list rows and a filled shield over the bottom corner            |
-| `pipeline`      | Three stage boxes in a row joined by small arrows, the first filled with a check      |
+| Name            | Drawing                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `database`      | Filled cylinder with two band lines and a lighter lid                               |
+| `cache`         | Three stacked isometric layers, fading downwards                                    |
+| `queue`         | Horizontal segmented tube with an open end                                          |
+| `blob`          | Bucket with a lighter rim and a zigzag "object" mark                                |
+| `cdn`           | Globe: circle with meridian ellipse and three latitude lines                        |
+| `load-balancer` | Circle with one input dot fanning out to three arrows                               |
+| `phone`         | Phone outline with a screen and two message pills                                   |
+| `server`        | Three stacked rack units, each with a line and an LED dot                           |
+| `chat`          | Two overlapping speech bubbles, the front one filled with dots                      |
+| `registry`      | Clipboard-like card with a filled header and three bullet rows                      |
+| `presence`      | Circle with a heartbeat line and a status dot at top right                          |
+| `bell`          | Filled bell with a clapper arc and a badge circle                                   |
+| `workers`       | Two meshed gears                                                                    |
+| `users`         | Two people (head and shoulders), one in front                                       |
+| `gateway`       | Shield with a check mark                                                            |
+| `media`         | Picture frame with mountains and a sun                                              |
+| `history`       | Clock face with a counter-clockwise return arrow                                    |
+| `bag`           | Filled shopping bag with a handle and two lines                                     |
+| `card`          | Payment card with a magnetic stripe and a chip                                      |
+| `dns`           | Signpost: a pole with two opposite-pointing name boards                             |
+| `lock`          | Padlock: shackle arc over a rounded body with a keyhole                             |
+| `key`           | Key: round bow with a hole, diagonal shaft with two teeth                           |
+| `shield`        | Shield, right half filled, with a centre seam (security or policy, no check mark)   |
+| `timer`         | Stopwatch: circle with a top button, side button and a swept quarter wedge          |
+| `clock`         | Clock face with four tick marks and hour and minute hands                           |
+| `cpu`           | Chip: square with an inner filled die and three pins on each side                   |
+| `gpu`           | Graphics card: wide board with two fans and a connector edge underneath             |
+| `disk`          | Hard drive: square case with a platter, hub and read arm                            |
+| `file`          | Document: page with a folded corner and three text lines                            |
+| `folder`        | Folder with a tab, front panel lighter                                              |
+| `log`           | Tall page of bullet rows with an append arrow at the bottom (append-only log)       |
+| `search`        | Magnifying glass with a thick handle                                                |
+| `tree`          | Hierarchy of boxes: one root, two children, two leaves (org chart or B-tree)        |
+| `map`           | Folded three-panel map with a dashed route and a location pin                       |
+| `chart`         | Axes with three rising bars and a dashed trend line                                 |
+| `link`          | Two interlocking chain links                                                        |
+| `globe`         | Desk globe on a stand: tilted axis, equator, meridians and two land blobs           |
+| `robot`         | Robot head: antenna, two eyes, mouth bar, side ears and neck posts                  |
+| `feed`          | RSS symbol (dot and two arcs) in a rounded square                                   |
+| `video`         | Film frame: wide rectangle with sprocket strips and a play triangle                 |
+| `ticket`        | Ticket with side notches, a dashed tear line and a stub dot                         |
+| `ledger`        | Bound book: dark spine, ruled rows and a right-hand amounts column                  |
+| `browser`       | Browser window: title bar with two dots and an address bar over a content block     |
+| `api`           | Rounded panel with `{ }` curly braces around a dot                                  |
+| `coordinator`   | Filled centre node with a check mark linked to three satellite nodes (leader)       |
+| `trie`          | Branching tree of small circles; filled circles mark terminal nodes                 |
+| `hash`          | Bold `#` in a rounded square                                                        |
+| `ring`          | Consistent-hashing ring: five nodes on a circle (one filled) and a dashed arrow     |
+| `firewall`      | Brick wall with a flame on top                                                      |
+| `router`        | Rounded box with a centre dot and four arrows pointing out                          |
+| `nat`           | Three source dots merging through a tall box into one outgoing arrow (many to one)  |
+| `tunnel`        | Pipe with an open end between two endpoint dots, a dashed line running through it   |
+| `building`      | Office block with windows, a door and a lower annex (on-premises data centre)       |
+| `webhook`       | Line leaving a hollow dot, looping round and arriving back at a filled dot          |
+| `image`         | Three outlined stacked layers with a filled tag (container image)                   |
+| `container`     | Shipping container: wide box with filled top and bottom rails, five ribs, two feet  |
+| `pod`           | Wide capsule holding two small boxes, one filled                                    |
+| `node`          | Machine case with an LED strip, holding three upright capsules (two filled)         |
+| `function`      | Lightning bolt in a rounded square                                                  |
+| `controller`    | Two loop arrows circling a dial with a centre dot (reconcile loop)                  |
+| `folder-share`  | Folder on a network line: a stem down to a filled node between two end dots         |
+| `appliance`     | Rugged case with a carry handle, corner guards, two latches and a status LED        |
+| `proxy`         | Tall box with a filled core between an incoming and an outgoing arrow               |
+| `partition`     | Bar cut into three slices by two dashed lines, the middle slice filled              |
+| `topic`         | One input dot into a filled upright bar, three arrows out                           |
+| `snapshot`      | Disk platter inside four camera-frame corner marks                                  |
+| `vault`         | Safe: door with a spoked dial, a handle bar, two hinges and two feet                |
+| `certificate`   | Landscape document with three text lines and a round seal with ribbon tails         |
+| `radar`         | Round scope with two range rings, a swept wedge and a blip                          |
+| `signal`        | Rising metric line over a soft area and a baseline, ending in a dot                 |
+| `trace`         | Three staggered span bars joined by elbow lines (trace waterfall), the first filled |
+| `flag`          | Filled swallow-tail flag on a pole with a base                                      |
+| `meter`         | Half-dial gauge with tick marks, a needle and a readout bar underneath              |
+| `coin`          | Coin at an angle: face with an inner ring and a diamond mark, filled edge behind    |
+| `model`         | Small neural net: two, three and two dots in layers, each layer joined to the next  |
+| `policy`        | Page with three check-list rows and a filled shield over the bottom corner          |
+| `pipeline`      | Three stage boxes in a row joined by small arrows, the first filled with a check    |
+| `chunk`         | A page cut into three strips, the middle strip filled and shifted out               |
+| `vector`        | A row of six cells in brackets, shaded at different strengths (an embedding)        |
+| `embedder`      | Text page into a filled funnel, out comes a column of shaded cells (text → vector)  |
+| `vector-index`  | Points in a rounded frame, a dashed nearest-neighbour ring round a query cross      |
+| `reranker`      | Three list rows with a curved arrow lifting the bottom one to the top               |
+| `prompt`        | A framed stack: instruction band, a context block with lines, a filled question bar |
+| `graph`         | Six nodes joined by edges, the centre node filled (a knowledge graph)               |
+| `tool`          | Wrench: a round head with an open jaw on a diagonal handle (a tool the agent calls) |
+| `plan`          | Clipboard with three check boxes, the first two ticked (a plan or checklist)        |
+| `approval`      | A person with a filled check-mark badge (a human approver)                          |
+| `sandbox`       | A small box inside a dashed boundary (an isolated run environment)                  |
 
 ---
 
@@ -972,16 +1295,17 @@ Answers are **MDX** in both places they come from, and the same text renders on 
     - How do you keep message order per conversation?
 
     **Watch out for.** Polling the database for new messages. It does not scale past a few thousand users.
+
   </InterviewQuestion>
 </InterviewQuestions>
 ```
 
-| Prop        | Required (authoring rule) | Values                                                                    |
-| ----------- | ------------------------- | ------------------------------------------------------------------------- |
-| `question`  | yes                       | the question as the interviewer would ask it, in double quotes            |
-| `level`     | yes                       | `"Junior"`, `"Mid"` or `"Senior"`                                         |
-| `category`  | yes                       | a short topic chip label: `"Consistency"`, `"Data modeling"`, `"Cloud"`   |
-| `companies` | no                        | names that exist in `content/companies/companies.yaml`                    |
+| Prop        | Required (authoring rule) | Values                                                                  |
+| ----------- | ------------------------- | ----------------------------------------------------------------------- |
+| `question`  | yes                       | the question as the interviewer would ask it, in double quotes          |
+| `level`     | yes                       | `"Junior"`, `"Mid"` or `"Senior"`                                       |
+| `category`  | yes                       | a short topic chip label: `"Consistency"`, `"Data modeling"`, `"Cloud"` |
+| `companies` | no                        | names that exist in `content/companies/companies.yaml`                  |
 
 - `companies` takes company **names** (`"Meta"`, not `"meta"`); they become company tags on the page and in the
   library. An unknown name fails content-check.
@@ -1054,7 +1378,7 @@ contains a comma (an unquoted comma ends the value in a YAML flow mapping; conte
   - `<Compare columns={[...]} rows={[...]} caption="..." />`, or `<Compare caption="...">` around a markdown table.
   - `<Tabs title="Two ways"><Tab label="A">...</Tab><Tab label="B">...</Tab></Tabs>`
 - **Not allowed:** `Figure`, `Img`, `Mermaid`, widgets, `Term` and every other article component, and any
-  ```` ```mermaid ```` fence. Each fails `npm run content-check -w web`, naming the file and question id.
+  ` ```mermaid ` fence. Each fails `npm run content-check -w web`, naming the file and question id.
 
 Inside an answer these blocks lose their article margins and fit the answer column. On a premium page only the
 question text and props reach a reader without access. In the library, a premium category's answer is replaced by the
@@ -1072,6 +1396,52 @@ These existed before the curriculum work; listed here so this file is the one pl
 `<PremiumBreak />` marks the end of the free preview on a premium page: everything above it is shown to everyone,
 everything below only to Pro readers. One per page, on its own line with a blank line above and below. Placement per
 page type is in `PAGE-TEMPLATES.md` §1.6. On a free page it renders nothing.
+
+### PatternUseCaseExplorer
+
+The use-case explorer at the top of the patterns hub (`content/system-design/patterns.mdx`, on the line before the
+first `<ModelCategory>`). No props: its data is `src/lib/pattern-catalog.ts` (`PATTERNS`, `USE_CASES`). A tier
+toggle and 13 single-select use-case chips highlight the matching `<ModelCard>`s below (role badge and a one-line
+reason) and dim the rest; each `<ModelCategory>` shows "N match". The highlight is shared through
+`src/lib/pattern-filter.client.ts` and cleared when the hub unmounts. One per hub; use it only on the patterns hub.
+
+```mdx
+<PatternUseCaseExplorer />
+```
+
+### ModelCard `tier`
+
+`<ModelCard tier="advanced" … />` adds the "Advanced · Interview edge" pill beside "Mark done". The page itself
+carries `tier: advanced` in its frontmatter (the article header shows the same pill), and the card in `_index.yaml`
+carries `tier: advanced` after `status`. content-check fails when card and page disagree. Absent means
+foundational; never write `tier: core`.
+
+```mdx
+<ModelGrid>
+  <ModelCard title="Transactional Outbox and Change Data Capture" icon="database" description="One transaction, then a log-tailed relay, so no event is lost." href="/system-design/patterns/outbox-and-cdc" tier="advanced" />
+</ModelGrid>
+```
+
+### ModelCard `logo` and SystemLogo
+
+`<ModelCard logo="systems/ticketmaster" … />` shows the system's logo in place of the lucide icon tile (case-study
+hub). The page carries the same `logo` in its frontmatter (the article header shows it to the left of the title), and
+the card in `_index.yaml` carries `logo` after `tier`; content-check fails when card and page disagree. Ids are paths
+under `assets/logos` without the extension: `systems/<slug>` (asset type `system-logo`: Simple Icons brand marks in
+their own hex, and original glyph marks for generic systems, tagged `glyph-mark`), `companies/<slug>` (a company logo
+reused for a product, such as OpenAI for ChatGPT) or `tech/oss/<slug>` (monochrome technology marks, also used with
+`<TechIcon id="oss/<slug>" />` in tables). A generic page's `modelledOn` frontmatter (up to three ids) shows as a
+"Modelled on" row under the lead.
+
+`SystemLogo` (`src/components/case-studies/system-logo.tsx`) is the server component behind both: it inlines the SVG
+from the asset manifest on a white rounded tile with a hairline border, so a black mark still reads in dark mode, and
+falls back to a monogram tile when the id has no asset. It is not an MDX component.
+
+```mdx
+<ModelGrid>
+  <ModelCard title="Design Ticketmaster" icon="star" description="Seat selection, holds under heavy contention and fair queuing." href="/system-design-case-studies/case-studies/ticketmaster" logo="systems/ticketmaster" />
+</ModelGrid>
+```
 
 ### CloudOnly
 

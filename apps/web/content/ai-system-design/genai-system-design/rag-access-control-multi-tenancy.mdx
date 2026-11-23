@@ -1,0 +1,253 @@
+---
+title: "Access Control & Multi-Tenancy in RAG"
+description: "Making sure a RAG system only retrieves what the asking user may see, across tenants, roles and document permissions."
+icon: lock
+---
+
+A RAG system reads documents on the user's behalf, so it must read only what that user could open themselves.
+
+- This page covers how permissions travel from the source system into the index, where the check has to run, how to keep one customer's data away from another's, and the quieter ways data still leaks.
+
+## Overview
+
+- **Copy each document's permissions onto its chunks** at ingestion (an access-control list, or ACL, of group ids), and resolve the asking user's groups from the identity provider at query time.
+- **Filter inside retrieval.** A check after the search returns too few results; a check on the answer is too late, because the model has already read the text.
+- **Tenants** (separate customers of one product) can get an index each, a namespace each, or share an index with a `tenant_id` filter. Isolation falls and cost falls in that order.
+- **Permissions go stale.** A changed ACL is enforced only after the connector syncs it; size that window and patch metadata without re-embedding.
+- Leaks also come through **caches, summaries and memory**, and you cannot prove anything without an **audit log** of who retrieved which chunk.
+
+## Mental model
+
+- Picture a librarian who fetches books for you.
+- A good librarian checks your library card before going to the shelves and only brings back books you are allowed to borrow.
+- A bad one brings everything, reads it to you, and then crosses out the title of the restricted book on the slip.
+- You have already heard what was in it. In RAG the model is the one reading aloud, so the card check belongs at the shelves: in retrieval.
+
+## Core concepts
+
+- The running example is Brightpost's help centre: **1,200 articles**, **3,600 chunks**.
+- One internal page, "Runbook: unlock a locked account", may be read by support staff only.
+- Customers ask about locked accounts all the time, and the runbook is the closest chunk to their question, which is what makes it dangerous.
+
+### Document-level permissions and ACL sync
+
+- Every source system already has a permission model: wiki spaces, drive folders, ticket queues.
+- The connector reads each document's ACL along with its text and writes it onto every chunk as metadata, for example `allowed_groups: ["support-staff"]`.
+- Store **group ids, not user lists**: groups change membership without touching the index, and a chunk readable by every customer would otherwise need one entry per customer.
+- Map source principals to the identity provider's ids during sync, flatten nested groups, and treat a chunk with no ACL as visible to nobody (fail closed).
+- At query time the app takes the user from the session, asks the identity provider (IdP) for their groups, and turns them into a filter.
+
+<AnimatedDiagram
+  spec="animated/rag/acl-filtering"
+  stepper
+  caption="The filter comes from the user's groups and runs inside the search; checking the answer afterwards cannot take back what the model has read."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The app asks the identity provider who is asking">
+    The question arrives with a session token. The app never trusts a group list sent by the browser; it asks the IdP,
+    which answers "customers". The groups are known, but nothing has been searched yet.
+  </StepCard>
+  <StepCard n={2} title="The filter runs inside retrieval">
+    The search carries the filter `allowed_groups` contains "customers" or "everyone". The runbook fails it, so it is
+    never a candidate and never scored. The top 5 are public chunks, and the answer cites "Locked out after failed
+    sign-ins".
+  </StepCard>
+  <StepCard n={3} title="A support agent's search does find the runbook">
+    Same code, different user: the IdP returns "support-staff", the filter admits the runbook, and it ranks first.
+    Access control is a property of the request, not of the deployment.
+  </StepCard>
+  <StepCard n={4} title="Failure: filtering after generation is too late">
+    Here the app searches without a filter and checks permissions on the output. The runbook is in the prompt, the model
+    paraphrases its unlock steps, and dropping the citation removes the link but not the words.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Any design where restricted text reaches the prompt before the permission check: an unfiltered search, a reranker or
+  summariser that sees all candidates, or an output filter as the only control. Fix: filter in the retrieval call
+  itself, with the filter built server-side from the IdP, and add output checks only as a second layer.
+</Callout>
+
+### Pre-filtering versus post-filtering
+
+- **Post-filtering** searches first and drops forbidden results afterwards.
+- **Pre-filtering** restricts the candidates before or during the search, so only permitted chunks can be returned.
+- Post-filtering leaks nothing into the prompt if done right, but it quietly returns fewer results than asked for.
+- Here is the same customer question against an index that also holds staff chunks.
+
+<AnimatedDiagram
+  spec="animated/rag/filtered-search"
+  stepper
+  caption="Filtering after the search throws away 3 of 5 results; filtering inside the search keeps looking until it has 5."
+/>
+
+**How to read it:**
+
+- Step 1 is the question plus the filter "visible to customers".
+- Step 2 filters after the search: 3 of the 5 nearest chunks are staff-only and are dropped.
+- Step 3 filters during the search: the index walk skips chunks that fail the filter and keeps going until 5 pass.
+
+**The numbers:**
+
+- After: 5 − 3 = **2 chunks**, and the answer misses the backup-code step.
+- During: **5 chunks**. The staff chunks' scores are illustrative.
+- When a filter matches very few vectors (a small tenant, a rare group), graph indexes can struggle to find enough neighbours; engines then fall back to exact search over the matching subset.
+- [Vector Databases](/ai-system-design/genai-system-design/vector-databases) covers the index side.
+
+### Tenant isolation: per-tenant indexes versus a shared index
+
+- Now suppose the help-centre assistant is a product sold to many shops, and Brightpost is one **tenant**.
+- Tenant isolation is a stronger promise than document permissions: no query from one customer may ever touch another's data.
+
+<AnimatedDiagram
+  spec="animated/rag/tenant-isolation"
+  caption="Moving from separate indexes to one shared index lowers cost and moves the isolation guarantee from the infrastructure into every query."
+/>
+
+**How to read it:**
+
+- Left to right, the same 3,600 Brightpost vectors live in their own index, in their own namespace inside one index, or mixed with everyone's chunks behind a `tenant_id` filter.
+- Read down a column for its trade-offs. Only the shared index depends on every query carrying the right filter, which is why that cell is red.
+
+**The numbers:**
+
+- Pinecone's multi-tenancy guide compares searching one 1 GB tenant namespace (1 read unit) with filtering inside one 100 GB namespace (100 read units): a namespace scans only its own tenant.
+- Brightpost's raw vectors are about 22 MB, so a per-tenant index would be mostly fixed overhead.
+
+## Architecture
+
+Permissions enter with the chunks at ingestion and are enforced where retrieval runs. Nothing else in the pipeline should decide access.
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  highlight={["sources", "index", "retrieve"]}
+  caption="ACLs are read at the source, stored on every chunk in the index, and applied when retrieval returns the top 5 permitted chunks."
+/>
+
+- Three pieces carry the design. The **connector** captures each document's ACL with its text (see [Data Sources & Connectors](/ai-system-design/genai-system-design/data-sources-connectors)).
+- The **index** stores the ACL as a filterable field on every chunk; a chunk inherits its document's ACL.
+- The **retrieval service** builds the filter from the IdP's answer, never from the client, and is the only path to the index: the LLM, agents and tools call it, not the database.
+
+## Technical mechanics
+
+### Keeping permissions fresh
+
+- Group membership is resolved at query time, so removing someone from "support-staff" takes effect on their next question.
+- A change to a **document's** ACL is different: it lives in the index and is only as fresh as the last sync.
+
+<AnimatedDiagram
+  spec="animated/rag/permission-sync"
+  stepper
+  caption="A permission change is not enforced when it is saved; until the connector syncs it, retrieval filters with the old ACL."
+/>
+
+**How to read it:**
+
+- The runbook was published to "everyone" by mistake, and an admin restricts it.
+- Steps 1 to 5 carry the change: the connector sees it on its next permission sync, maps wiki groups to IdP ids, patches the ACL field on the runbook's chunks and the index serves it.
+- Step 6 is the window: a customer who asks before the patch lands still gets the runbook.
+
+**The numbers:**
+
+- The window is the sync interval plus a few seconds: up to about **15 minutes** with a 15-minute permission sync (illustrative).
+- The patch touches **3 chunks** and re-embeds none, because the text did not change.
+- A webhook or change feed from the source cuts the window to seconds; a daily full sync stretches it to a day.
+
+<Callout tone="red" title="What breaks">
+  Revocations are the dangerous direction: a grant that arrives late annoys a user, a removal that arrives late leaks.
+  Sync permissions more often than content, push revocations as events where the source offers them, and for the most
+  sensitive sources check the live ACL against the source at query time for the few chunks you return.
+</Callout>
+
+### Leaks through caches, summaries and memory
+
+- **Answer caches.** A [semantic cache](/ai-system-design/genai-system-design/semantic-caching) keyed only on the question will serve a support agent's runbook answer to the next customer who asks something similar. Put the user's permission scope (a hash of their sorted group ids, and the tenant) into the cache key.
+- **Summaries and derived text.** A summary of five chunks, a [GraphRAG](/ai-system-design/genai-system-design/graphrag) community summary or an extracted entity carries the content of every source. Give it the **intersection** of its sources' ACLs, so only users who could read all of them can read it.
+- **Memory.** An assistant that writes facts to [long-term memory](/ai-system-design/genai-system-design/agent-memory) can repeat a runbook step in a later session. Scope memory to one user and tenant, and filter memory reads like any other retrieval.
+
+### Auditing who retrieved what
+
+- When someone asks "did any customer see the runbook last Tuesday?", the answer must come from a log, not from memory.
+- For every request, record the user id, tenant, resolved groups, the exact filter, the returned chunk ids with their ACL version, and the answer id.
+- That is enough to replay a decision, to find every user exposed during a sync window, and to prove a deleted tenant's chunks stopped appearing.
+- Keep it with your other [audit logs](/ai-system-design/genai-system-design/compliance-audit-logging), and never log the chunk text itself if the log has wider access than the documents.
+
+## Trade-offs
+
+| Decision         | Option A                      | Option B              | Guidance                                                                                     |
+| ---------------- | ----------------------------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| Where to check   | Inside retrieval              | On the answer         | Inside retrieval always; output checks only as a second layer                                |
+| ACL on chunks    | Group ids                     | User ids              | Group ids; resolve membership at query time                                                  |
+| Tenant isolation | Index or namespace per tenant | Shared index + filter | Namespace per tenant by default; a shared index only with the filter enforced in one service |
+| Permission sync  | Events or webhooks            | Scheduled polling     | Events where the source has them; poll revocations more often than content                   |
+
+## Production systems
+
+- **Azure AI Search** documents a security-filter pattern: a filterable `group_ids` string collection on each document and a `search.in` filter built from the caller's groups. Its newer built-in document-level access (preview) reads ACLs from sources such as ADLS Gen2 and SharePoint, and it states that source permission changes appear in results only after the metadata is synchronised.
+- **Pinecone** recommends one namespace per tenant on a serverless index: tenants are stored separately, offboarding is deleting the namespace, and metadata filtering is the alternative when you need cross-tenant search.
+- **Microsoft 365 Copilot** only surfaces content the user can at least view, which means existing oversharing in SharePoint becomes oversharing in the assistant. Permission hygiene in the source is part of the RAG design.
+
+## Failure modes & pitfalls
+
+- Checking permissions on the generated answer instead of in retrieval.
+- Taking the user's groups or tenant id from the client request.
+- Forgetting the cache, summaries, memory and evaluation datasets, which all hold retrieved text.
+- Logging nothing, so a leak can be neither scoped nor disproved.
+
+## Interview framework
+
+1. Ask who the users are (customers, staff, many tenants) and where permissions live today.
+2. Ingestion: capture each document's ACL in the connector, store group ids on every chunk, fail closed.
+3. Query: resolve groups from the IdP server-side and filter inside retrieval; explain why post-filtering and output checks fail.
+4. Tenancy: pick index, namespace or shared index with a reason, and say who enforces the tenant filter.
+5. Freshness and leaks: size the permission-sync window, scope caches and memory, log every retrieval.
+
+**What interviewers listen for:** that you put the check before the model reads anything, and that you treat stale permissions and caches as part of the problem.
+
+**Red flags:** "the LLM will be told not to reveal confidential data", or filtering only the final answer.
+
+## Further reading
+
+- [Security filters for trimming results (Azure AI Search)](https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search) and [Document-level access control (Azure AI Search)](https://learn.microsoft.com/en-us/azure/search/search-document-level-access-overview)
+- [Implement multitenancy (Pinecone)](https://docs.pinecone.io/guides/index-data/implement-multitenancy)
+- [Data, privacy and security for Microsoft 365 Copilot](https://learn.microsoft.com/en-us/copilot/microsoft-365/microsoft-365-copilot-privacy)
+- [Access Control & RBAC](/ai-system-design/genai-system-design/access-control-rbac), [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) and [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why must permission checks run inside retrieval rather than on the generated answer?" category="Architecture" level="Junior">
+    - Because the model reads everything in its prompt.
+    - If a restricted chunk is retrieved and placed in the prompt, the answer can paraphrase it, summarise it or combine it with other facts, and no output filter can reliably find every trace.
+    - Removing the citation hides the source but not the content.
+    - Filtering inside the retrieval call means a forbidden chunk is never a candidate, so it never reaches the reranker, the prompt or the logs of the model call.
+    - Output checks are still useful as a second layer, for example to catch personal data, but they are not the access control.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you store document permissions in a vector index, and how do you build the filter at query time?" category="Implementation" level="Mid">
+    - The connector reads each document's ACL from the source system along with its text, maps the source's users and groups to the identity provider's ids, and writes the allowed group ids onto every chunk of that document as a filterable metadata field.
+    - A chunk with no ACL is treated as visible to nobody.
+    - At query time the server takes the user from the authenticated session, asks the identity provider for their groups, and builds a filter such as "allowed_groups contains any of these ids", which the vector search applies while it walks the index.
+    - Storing groups rather than users keeps the field small and lets membership changes take effect immediately, because membership is resolved on every request rather than copied into the index.
+  </InterviewQuestion>
+  <InterviewQuestion question="You serve many customers from one RAG product. How do you isolate tenants, and what are the trade-offs?" category="Trade-offs" level="Mid">
+    - There are three common options. An index per tenant gives the strongest isolation, separate keys and easy deletion, but each index has fixed overhead, which hurts with thousands of small tenants.
+    - A namespace per tenant keeps one index but the engine scopes every query to one namespace, so isolation is still enforced by the database, small tenants are cheap, and offboarding is deleting the namespace.
+    - A shared index with a tenant_id filter is the cheapest and allows cross-tenant search, but its isolation is only as good as the filter on every single query, and tiny tenants turn the filter into a very selective one that some ANN indexes handle poorly.
+    - I would default to a namespace per tenant, use separate indexes for large or regulated customers, and if I used a shared index I would add the tenant filter in one retrieval service that every caller must go through.
+  </InterviewQuestion>
+  <InterviewQuestion question="A document's permissions were tightened in the source system. How long can the RAG system keep leaking it, and how do you shorten that window?" category="Failure modes" level="Senior">
+    - Until the new ACL reaches the chunks in the index.
+    - The window is the connector's permission-sync interval plus the time to patch the metadata, so with a 15-minute poll it is up to about 15 minutes, and with a nightly full sync up to a day.
+    - To shorten it, subscribe to permission-change events or webhooks where the source offers them, sync permissions more often than content, and patch only the ACL field of the affected chunks without re-embedding.
+    - Resolve group membership at query time so membership changes need no sync at all.
+    - For the most sensitive sources, check the live ACL against the source for the handful of chunks you are about to return.
+    - Finally, log each retrieval with the ACL version so you can find every user who saw the document inside the window.
+  </InterviewQuestion>
+  <InterviewQuestion question="Retrieval is filtered correctly, but restricted content still leaked. Where would you look?" category="Failure modes" level="Senior">
+    - Everywhere retrieved text is stored or reused outside the filtered search.
+    - A semantic or answer cache keyed only on the question can serve one user's answer to another; the key needs the tenant and a hash of the user's groups.
+    - Precomputed summaries, entity extractions or graph community summaries combine several documents and must carry the intersection of their ACLs.
+    - Agent memory can carry a fact from one session into another unless it is scoped per user and filtered on read.
+    - Evaluation datasets, traces and logs often hold prompts with retrieved chunks and have wider access than the source.
+    - I would also check whether the user's groups or tenant id could be supplied by the client, and whether any tool or agent can query the index directly instead of through the retrieval service.
+  </InterviewQuestion>
+</InterviewQuestions>

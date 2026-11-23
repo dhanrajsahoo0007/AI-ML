@@ -1,0 +1,260 @@
+---
+title: "Tail-Latency Hedging, Deadlines and Degradation"
+description: "Why a page that fans out is slow more often than any service it calls, and how hedged requests, deadline budgets and brownouts fix it."
+icon: trending-down
+updated: 2026-11-16
+tier: advanced
+---
+
+Every service behind the product page answers within 100 ms 99 % of the time, yet four page views in ten are slow, because the page waits for 50 of them.
+
+- Interviewers ask about tail latency to see whether you can do the fan-out arithmetic, and then cut the tail without doubling the load or taking the site down with a fallback.
+
+## Overview
+
+- **Tail latency** is the slow end of the latency distribution: the **p99** is the time 99 % of calls beat, and 1 % do not.
+- A request that waits for **n** calls is slow if any one of them is: the chance is 1 − 0.99^n, so 50 calls make **39.5 %** of pages slow.
+- A **hedged request** sends a second copy of a slow call after the p95 delay and keeps the first answer: about 5 % extra load for a much shorter tail.
+- A **deadline** is the moment the caller stops waiting. Passed down the chain, it stops every hop from working on an answer nobody will read.
+- **Degradation** drops optional work under stress: a slow panel is left out, and a **brownout** switches whole panels off as load rises.
+- A **fallback** path that only runs during an outage is untested code that runs at the worst moment: degrade by doing less, not by doing something different.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Each service has a 100 ms p99, so the page is fast."
+  - **Why the interviewer pushes back:** "The page calls 50 of them. How often is at least one slow?"
+  - **The answer that stands out:** 1 − 0.99^50 = 39.5 % of pages hit a slow call, so hedge idempotent reads after the p95 delay, pass one 800 ms deadline down the chain, and switch off optional panels first. Name the costs: about 5 % more calls, and a degraded page you must test as often as the full one.
+</Callout>
+
+## Mental model
+
+- Ten friends share a taxi to the airport. Each is late one morning in a hundred, but the taxi leaves only when the last one is in.
+- With ten friends, about one trip in ten starts late; with fifty, four in ten. The group is slower than anyone in it.
+- The fixes: phone a second friend to bring the late one's bag (hedge), leave at 8:00 whoever is missing (deadline), and leave the golf clubs behind when the boot is full (brownout).
+- In the system the taxi is the product page, the friends are the services it calls, and the golf clubs are the optional panels.
+
+## Core concepts
+
+- The running example: Brightpost's product page at the **2,300 reads/s** peak, fanning out to **50 services** for the kettle's page, each slow (past its 100 ms p99) **1 %** of the time; the shopper's budget is **800 ms**.
+
+### Why the tail grows with fan-out
+
+- If each call is slow with chance p, independently, all n calls are fast with chance (1 − p)^n. The page is slow otherwise.
+- The p99 of the page is therefore set by the slowest of its calls, not by a typical one.
+- Dean and Barroso's example: servers slow one time in 100, and a request that needs 100 of them is slow 63 % of the time.
+- For what one call costs in the first place, see [Latency numbers that matter](/system-design/fundamentals/latency-numbers).
+
+The curve below plots 1 − 0.99^n for fan-outs from 1 to 100.
+
+<AnimatedDiagram spec="animated/patterns/tail-fanout-math" caption="Each service is slow one time in 100, but a page that waits for 50 of them is slow 39.5 % of the time." />
+
+**How to read it:**
+
+- The red line is 1 − 0.99^n: the share of pages that wait on at least one call slower than its p99.
+- The green dashed line is the same page when each call is slow only 0.1 % of the time: what a thinner per-call tail buys.
+
+**The numbers:**
+
+- 1 call: 1 %. 10 calls: 1 − 0.99^10 = 9.6 %. 50 calls: 39.5 %. 100 calls: 63.4 %.
+- At 0.1 % a call, 50 calls give 4.9 % and 100 give 9.5 %: a tail ten times thinner per call is about eight times better per page at 50.
+- Brightpost at peak: 2,300 pages/s × 39.5 % = about 908 slow pages every second.
+
+<PremiumBreak />
+
+### Hedged and tied requests
+
+- Slowness is usually not in the request itself but in the replica: a garbage-collection pause, a busy disk, a noisy neighbour. Another replica is likely fast.
+- **Hedged request:** send the call to one replica; if no answer arrives by the p95 latency, send the same call to a second replica, keep the first answer and cancel the other.
+- Waiting for the p95 means only about 5 % of calls get a second copy, so the extra load is about 5 %.
+- **Tied request:** send the call to two replicas about 1 ms apart, each tagged with the other. The one that starts first tells its twin to drop its copy, so the duplicate rarely runs.
+- Hedge only **idempotent** calls (safe to run twice), such as reads. A hedged payment can charge twice.
+
+The figure follows one price call from the kettle's page through the three cases.
+
+<AnimatedDiagram spec="animated/patterns/tail-hedge" stepper caption="A hedge waits for the p95 before sending a second copy, so it adds about 5 % load; a tied request lets the replicas cancel each other." />
+
+<StepCards>
+  <StepCard n={1} title="One slow replica holds the page">
+    The page asks replica A for the kettle's price, and A stalls in a 400 ms garbage-collection pause. The page has nothing else to do, so it waits 400 ms for £42 that replica B could have given in 8 ms.
+  </StepCard>
+  <StepCard n={2} title="Hedge after the p95 delay">
+    No answer by the price service's p95 of 20 ms, so the page sends the same call to B. B answers in 8 ms, the page keeps that answer and cancels A: 28 ms instead of 400 ms.
+  </StepCard>
+  <StepCard n={3} title="Tied requests cancel their twin">
+    The page sends both copies up front, 1 ms apart, each naming the other. B starts first and tells A to drop its queued copy, so the page gets the faster queue without paying for two full calls.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Illustrative price-service latencies: p50 8 ms, p95 20 ms, a slow tail of 400 ms. When A stalls, the hedge answers in 20 + 8 = 28 ms.
+- If the two copies are slow independently, a hedged call is slow 1 % × 1 % = 0.01 % of the time.
+
+### Deadline budgets
+
+- A **timeout** is a duration; a **deadline** is a point in time. Each hop that adds its own fresh timeout lets the total exceed what the shopper will wait.
+- **Propagate the deadline:** each hop passes on the time left, minus its own work. gRPC sends it as a timeout so the two servers' clocks need not agree (see [RPC and gRPC](/system-design/fundamentals/rpc)).
+- A hop with less time left than the callee's p99 should not make the call: the answer would arrive after nobody is waiting.
+- Retries spend the same budget. A retry that cannot finish before the deadline is wasted load.
+
+The waterfall follows the kettle's 800 ms budget through four hops.
+
+<AnimatedDiagram spec="animated/patterns/tail-deadline" stepper caption="Every hop gets the time that is left, not a fresh timeout, and a call that cannot finish in that time is not made." />
+
+<StepCards>
+  <StepCard n={1} title="The budget shrinks hop by hop">
+    Each bar runs from the moment the call reaches that hop to the shared deadline at 800 ms, so its length is the budget the hop receives. The gateway, the page service and recommendations each spend some of it and pass on the rest.
+  </StepCard>
+  <StepCard n={2} title="Too little time left: skip the call">
+    The feature store's answer is bad, and a retry would start at 690 ms with 110 ms left, under the store's 150 ms p99. Recommendations skips the retry, and the page renders without that panel.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 800 − 20 (gateway) = 780; 780 − 60 (page service) = 720; 720 − 200 (recommendations) = 520 for the feature store.
+- Retry at 690 ms: 800 − 690 = 110 ms left, and 110 < 150, so the call is skipped and the panel is left out.
+
+<Callout tone="red" title="What breaks">
+  gRPC sets no deadline by default, so a client can wait forever. A service that drops the incoming deadline and calls on with its own 30 s timeout keeps working, and holding threads, long after the shopper has left.
+</Callout>
+
+## Architecture
+
+The product page's degradation ladder, switched by load.
+
+<AnimatedDiagram spec="animated/patterns/tail-brownout" stepper caption="A degradation ladder: as load rises the switch turns off the costliest optional panels first, and price and stock always render." />
+
+<StepCards>
+  <StepCard n={1} title="Every panel on">
+    The page service calls all six panels, 50 services in all, for each of 2,300 pages a second. That is 115,000 calls a second, and 39.5 % of pages wait on a slow one.
+  </StepCard>
+  <StepCard n={2} title="Load 70 %: recommendations off">
+    The brownout switch reads the page service's load and sets a flag. Recommendations, the costliest panel at 20 services, is left out: 30 calls a page.
+  </StepCard>
+  <StepCard n={3} title="Load 80 %: recently viewed and questions off">
+    Two more optional panels go, 15 services between them. The page now makes 15 calls.
+  </StepCard>
+  <StepCard n={4} title="Load 90 %: reviews off, the core stays">
+    Reviews go too, and only price and stock and product details are called: 10 calls a page. The shopper can still see the kettle, its price and buy it.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Choosing the hedge delay
+
+- Hedge at the p95 of the call's own latency, measured live: a fixed delay drifts out of date as the service changes.
+- Cap the extra copies. gRPC's hedging policy sends at most `maxAttempts` copies (capped at 5), `hedgingDelay` apart.
+- Stop hedging under overload: a hedge adds load exactly when the service is slowest. gRPC's retry throttling sends hedges only while its token count is above half.
+
+### Degrading without a fallback path
+
+- **Good enough:** give each optional panel a cut-off inside the deadline and render the page without it if it is late. Google's web search skips ads or spelling correction when they do not answer in time.
+- **Brownout:** switch panels off by load (CPU, queue length or p99), most expensive and least valuable first, with per-panel flags.
+- An empty panel is a smaller page, not a different code path, so it is cheap to test: run with panels off in a regular drill.
+- A **fallback** to a second system is different: it runs only in an outage, so its bugs and its load surface then. Amazon's advice is to improve the primary, or convert the fallback into a failover path that runs in production all the time.
+
+### Worked example: the kettle's page at peak
+
+Follow the four steps of the Architecture figure, with hedging and the deadline in place throughout.
+
+1. **Every panel on.** 2,300 pages/s × 50 calls = 115,000 calls/s, and 39.5 % of pages, about 908 a second, wait on a slow call.
+2. **Hedge after the p95.** At most 5 % of calls get a second copy, and a page is slow only if some call is slow twice.
+3. **The 800 ms deadline.** No page waits past 800 ms: a panel whose calls are late is left out, and no hop calls a service it cannot hear back from in time.
+4. **Load passes 70 %, 80 %, 90 %.** The switch drops recommendations, then recently viewed and questions, then reviews.
+
+**The numbers:**
+
+- Hedging: at most 0.05 × 115,000 = 5,750 extra calls/s; a call is slow 0.01 % of the time (if the copies are independent), so 1 − 0.9999^50 = 0.5 % of pages, about 11 a second.
+- Ladder: 50 → 30 → 15 → 10 calls a page; 115,000 → 69,000 → 34,500 → 23,000 calls/s at the same 2,300 pages/s.
+- Without hedging, the chance of a slow page falls with each rung: 39.5 % → 26.0 % → 14.0 % → 9.6 %.
+- The split of 50 services across panels (20, 7, 8, 5, 4, 6) and the 70/80/90 % thresholds are illustrative.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Hedged requests | Cuts the tail for about 5 % extra load | Idempotent calls only; adds load under overload | Reads fanned out over replicas |
+| Tied requests | Duplicate rarely runs; helps the median too | Servers must talk to each other to cancel | Queue-heavy back ends you control |
+| Deadline propagation | No work after the caller gives up | Every hop must read and pass it on | Every call chain deeper than one hop |
+| Good-enough cut-off | Page time capped; slow panels dropped | Some pages miss a panel | Panels the shopper can live without |
+| Brownout ladder | Cuts calls and CPU as load rises | Lost revenue from dropped panels | Load spikes such as the noon sale |
+| Fallback to a second system | Something answers in an outage | Untested path; can overload its target | Rarely; prefer an always-on failover |
+
+## Production systems
+
+- **Google Bigtable, hedged requests** (Dean and Barroso, CACM 2013): reading 1,000 keys spread over 100 servers, a hedge after 10 ms cut the 99.9th-percentile latency from 1,800 ms to 74 ms for 2 % more requests.
+- **Google's cluster file system, tied requests** (same paper): a tied copy sent after 1 ms cut median read latency by 16 % and the 99.9th percentile by 38 % on a mostly idle cluster, for under 1 % extra disk use.
+- **gRPC** (as of November 2026): no deadline by default; a passed deadline fails the call with `DEADLINE_EXCEEDED`; some implementations propagate it to outgoing calls. On success, its hedging policy cancels the other copies.
+- **Amazon retail** (Builders' Library, 2019): when per-server caches of shipping speeds failed together, web servers fell back to querying the database directly, and the fallback turned a partial outage into a full-site one.
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt)
+
+## Failure modes & pitfalls
+
+- **Hedging everything at once.** Two copies of every call double the load. Wait for the p95, cap the copies, and throttle hedges under overload.
+- **Hedging writes.** A second copy of a non-idempotent call runs twice. Hedge reads, or add an idempotency key first.
+- **Timeouts that do not shrink.** Each hop adds its own 1 s timeout and the page takes 4 s. Propagate one deadline and pass on the time left.
+- **Working past the deadline.** A server finishes a request its caller abandoned. Check the deadline before starting, and drop expired requests from the queue.
+- **An untested fallback.** It runs for the first time in an outage and overloads the database behind it. Prefer failover that runs all the time, and test degraded pages in drills.
+- **Degrading the core.** The switch turns off the price. Classify panels as core or optional up front, and never flag the core.
+
+## Interview framework
+
+1. Do the fan-out maths: n calls, p slow each, 1 − (1 − p)^n slow pages; 50 calls at 1 % is 39.5 %.
+2. Cut the per-call tail: hedge idempotent reads after the p95, or tie them; state the 5 % extra load.
+3. Bound the whole: one deadline from the edge, passed down as time left; no call that cannot finish in time.
+4. Plan the degradation ladder: core against optional panels, cut-offs per panel, brownout thresholds.
+5. Say how you test it, and why you avoid a fallback that only runs in an outage.
+
+**What interviewers listen for:** the 1 − 0.99^n arithmetic, a hedge delay tied to the p95, and a deadline that shrinks hop by hop.
+
+**Red flags:** "each service has a good p99, so we are fine", hedging writes, or a fallback that has never run in production.
+
+## Further reading
+
+- [The Tail at Scale (Dean and Barroso, CACM 2013)](https://research.google/pubs/the-tail-at-scale/)
+- [Deadlines (gRPC docs)](https://grpc.io/docs/guides/deadlines/)
+- [Request hedging (gRPC docs)](https://grpc.io/docs/guides/request-hedging/)
+- [Avoiding fallback in distributed systems (Amazon Builders' Library)](https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/)
+- Related pages: [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) · [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is a page that calls many services slower than any one of them?" category="Concepts" level="Junior">
+    - The page waits for every call, so it is as slow as its slowest call.
+    - If each call is slow 1 % of the time, all n calls are fast with chance 0.99^n.
+    - At 50 calls that is 60.5 %, so 39.5 % of pages hit at least one slow call.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a hedged request, and when do you send the hedge?" category="Concepts" level="Mid">
+    - Send the call to one replica; if it has not answered by a delay, send the same call to another and keep the first answer.
+    - Set the delay at the call's p95, so only about 5 % of calls get a second copy.
+    - Cancel the losing copy, and hedge only calls that are safe to run twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why propagate a deadline instead of setting a timeout on each call?" category="Architecture" level="Mid">
+    - Per-hop timeouts add up: four hops with 1 s each can hold a request for 4 s while the shopper waited 800 ms.
+    - A propagated deadline passes on the time left, so every hop stops when the caller does.
+    - A hop with less time left than the callee's p99 skips the call, and servers drop requests whose deadline has passed.
+  </InterviewQuestion>
+  <InterviewQuestion question="A product page calls 50 services, each slow 1 % of the time, at 2,300 pages a second. Bring the slow-page rate down." category="Scaling" level="Senior">
+    - Today: 1 − 0.99^50 = 39.5 % of pages, about 908 a second, wait on a slow call.
+    - Hedge idempotent reads after the p95: at most 5,750 extra calls a second, and if the copies are slow independently, about 0.5 % of pages stay slow.
+    - Give the page an 800 ms deadline, propagate it, and leave out any optional panel that is late.
+    - Cut the fan-out itself: batch calls to the same service and cache panels that change rarely.
+  </InterviewQuestion>
+  <InterviewQuestion question="When does hedging make latency worse?" category="Failure modes" level="Senior">
+    - When the service is slow because it is overloaded, every hedge adds load and makes every replica slower.
+    - When the slowness is in the request itself (a huge query), the second copy is as slow and doubles the work.
+    - Throttle hedges when errors or latency rise, cap the copies, and tag hedges at lower priority.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design a degradation ladder for a product page under a load spike." category="Architecture" level="Senior">
+    - Split panels into core (price, stock, details) and optional (recommendations, recently viewed, questions, reviews).
+    - Order the optional ones by cost against value, and switch them off at load thresholds, such as 70 %, 80 % and 90 % CPU.
+    - Use per-panel flags read on every request, so the switch acts in seconds and never touches the core.
+    - Test the degraded page in drills, and alert when the ladder engages.
+  </InterviewQuestion>
+  <InterviewQuestion question="Amazon advises avoiding fallback. How does that fit with degrading a page?" category="Trade-offs" level="Senior">
+    - A fallback to a second system runs only in an outage, so its bugs and its load appear at the worst moment.
+    - In Amazon's shipping-speed example, the fallback to the database turned a cache failure into a full-site outage.
+    - Leaving a panel out is less work, not different work, so it cannot overload anything and is easy to test.
+    - Where a second path is needed, run it all the time as a failover, so it is always exercised.
+  </InterviewQuestion>
+</InterviewQuestions>

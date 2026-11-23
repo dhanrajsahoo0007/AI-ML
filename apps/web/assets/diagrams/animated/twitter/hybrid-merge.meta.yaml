@@ -1,0 +1,15 @@
+title: "One timeline page: cached ids, big accounts merged on read, a cursor"
+alt: >-
+  A sequence diagram with five lanes: an orange reader, a green timeline service, a violet timeline cache, a teal post
+  service and a green fan-out service, built in three steps. Step 1: the reader asks for 20 posts; the timeline service
+  reads the first 40 ids from the cache, asks the post service for the recent ids of 3 big accounts, merges them by id
+  because ids sort by time, hydrates the newest 20, drops one deleted post and returns 19 posts with a cursor set to the
+  oldest id shown. Step 2: the next request sends the cursor and gets only older ids, so new posts cannot repeat a post.
+  Step 3: a reader away for 45 days misses the cache; the service builds the first page from the recent posts of 200
+  accounts and asks the fan-out service to write the newest 500 ids to the cache.
+caption: >-
+  A page is one list read, a few big-account reads and one batched hydrate; the cursor keeps the next page stable
+  while new posts arrive.
+tags: [case-studies, twitter, sequence, fan-out, pagination]
+source: original
+created: 2026-11-17

@@ -1,0 +1,488 @@
+---
+title: "Progressive Disclosure & Instruction Files (AGENTS.md & Skills)"
+description: "Keeping root prompts lean by loading repository rules, skills and tool definitions on demand instead of stuffing mega-prompts."
+icon: file-text
+---
+
+An agent that knows everything up front reads everything on every call.
+
+- Progressive disclosure is the opposite habit: keep a small set of instructions always loaded, and let the rest (scoped rules, skills, tool definitions) enter the context only when a task needs them.
+- Interviewers use this topic to test whether you treat the context window as a budget, and whether you know how the loading actually works in tools such as Claude Code.
+- It goes one level below [Context Engineering](/ai-system-design/genai-system-design/context-engineering), which covers what goes into the window; this page covers how instructions and capabilities get there.
+
+## Overview
+
+- A **mega-prompt** puts every rule, guide and tool into every call. It costs tokens on every call and dilutes the model's attention: the more instructions, the fewer it follows.
+- **Instruction files** such as `AGENTS.md` and `CLAUDE.md` give an agent standing rules for a repository. Keep the root file short and point to **scoped files** that load only when the agent works in their folder.
+- **Skills** are folders of instructions, references and scripts. Only each skill's name and description (about 100 tokens) load at start. The body loads when a task matches the description.
+- **Tool search** keeps tool definitions out of the window until the model searches for them. It replaces 50,000+ tokens of definitions with the three to five a task needs.
+- **Prompt caching** rewards a stable prefix. Put the static layers first and append whatever loads later, or one early edit makes every following token full price.
+
+## Mental model
+
+- A new engineer does not read the whole wiki on day one.
+- They get a one-page README: how to build, how to test, where things live.
+- When they open the payments service, they read its own README.
+- When they cut a release, they follow the release checklist.
+- The README points; the details wait until they are needed.
+
+- Agents work the same way, with one difference: the agent re-reads its whole context on every model call.
+- A 12,000-token handbook in the system prompt is paid for again on each of the agent's eight calls, and every rule in it competes with the task for the model's attention.
+
+## Core concepts
+
+- Every figure on this page follows the bug-fix coding agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering).
+- The issue in the `brightpost-orders` repository is "Order import drops the last line of a CSV file".
+- The bug is in `src/parser.ts`, and the fix must pass all 18 tests in `parser.test.ts`.
+- All token counts are illustrative unless a source is named.
+
+### Why mega-prompts fail: attention dilution and token cost
+
+Two costs grow with every instruction you add to the always-loaded part.
+
+- **Token cost.** The coding agent's repository has 11,800 tokens of guidance in all: the harness prompt (900), the root `AGENTS.md` (800), scoped rules for `src/` (400) and `web/` (1,200), an architecture doc (3,000) and three skill bodies (5,500). Pasted into one system prompt, they ride on all 7 model calls of the fix: 7 × 11,800 = **82,600 tokens**, most of which the fix never uses.
+- **Attention dilution.** Anthropic describes a model's "attention budget": every token attends to every other, so each added token thins the attention left for the rest.
+  - Instruction-following measures show the effect.
+  - In the IFScale benchmark (Jaroslawicz et al., July 2025), even the best of 20 models followed only 68 % of 500 simultaneous instructions, with a bias towards instructions that appear early.
+  - Claude Code's documentation gives the same advice in practice: keep each `CLAUDE.md` under 200 lines, because longer files "reduce adherence".
+
+The fix is not a shorter handbook. It is a handbook that loads in pieces.
+
+### Layered instruction files (AGENTS.md, rules, scoped overrides)
+
+- `AGENTS.md` is an open format, "a README for agents", read by many coding agents, among them Codex, Cursor, Gemini CLI and GitHub Copilot's coding agent; Claude Code reads its own `CLAUDE.md` and falls back to `AGENTS.md` when a repository has no `CLAUDE.md`. Both work in layers:
+
+1. **Organisation and user files** hold rules for every project, such as a company's security policy.
+2. **The root file** holds what every task in the repository needs: build and test commands, conventions, and pointers.
+3. **Scoped files** sit in subfolders. Claude Code loads a subfolder's instruction file only when the agent works with a file in that folder. `.claude/rules/` files with a `paths` field load only when the agent touches a matching file.
+
+Here is the coding agent's root file. It is 60 lines in full; this is the top. Note what it does not contain: the front-end rules, the architecture and the skill bodies are pointers, not text.
+
+```markdown
+# brightpost-orders
+
+Order import and fulfilment for Brightpost. TypeScript, Node 22.
+
+## Commands
+
+- Install: `npm ci`
+- Test: `npm test` (vitest; 18 tests in parser.test.ts)
+- Lint and types: `npm run lint && npm run typecheck`
+
+## Where things live
+
+- `src/`: importers and parsers. Read `src/AGENTS.md` before changing them.
+- `web/`: the admin site. It has its own `web/AGENTS.md`.
+- Architecture and data flow: `docs/architecture.md` (read when a change crosses modules).
+- Skills in `.claude/skills/`: run-tests, release-notes, db-migration.
+```
+
+- How precedence works differs by tool, so check yours.
+- The AGENTS.md format says the file nearest to the edited file wins, and the user's chat instructions override everything.
+- Claude Code does not override: it concatenates every file it loads, from the filesystem root down to the working directory, so the more specific file is read last.
+- If two instructions contradict each other, its documentation warns, Claude may pick one arbitrarily.
+- The [Technical mechanics](#auditing-instruction-conflicts-across-scopes) covers how to find such conflicts.
+
+<Callout tone="red" title="What breaks">
+  A rule that must always hold, placed in a scoped file. A rule in `src/payments/AGENTS.md` is not in the window until
+  the agent reads a file in that folder, so a shell command that touches payments without reading a file there runs
+  without it. Instruction files are guidance, not enforcement: Claude Code's documentation points to hooks and
+  permission settings for anything that must be blocked.
+</Callout>
+
+### Skills and on-demand capability loading
+
+- A skill is a folder with a `SKILL.md` file: YAML frontmatter with a `name` (at most 64 characters) and a `description` (at most 1,024), then a body of instructions, plus any reference files and scripts.
+- The Agent Skills documentation defines three levels, each loaded at a different time.
+
+<AnimatedDiagram
+  spec="animated/agents/skill-loading"
+  stepper
+  minWidth={620}
+  caption="Only names and descriptions are paid for up front. A skill's body costs tokens only when a task matches it, and a bundled script costs only its output. Counts illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Level 1: names and descriptions at start">
+    The harness puts each installed skill's name and description into the system prompt, about 100 tokens a skill. The
+    coding agent has three skills, so 300 tokens. The description is all the model has to decide with, so it must say
+    what the skill does and when to use it.
+  </StepCard>
+  <StepCard n={2} title="Level 2: the body loads when the task matches">
+    The fix is ready to test. The model sees that "run the test suite and read failures" matches and reads
+    `run-tests/SKILL.md` with its file or shell tool. Only now do the body's 1,500 tokens enter the window. The docs ask
+    for bodies under 5,000 tokens.
+  </StepCard>
+  <StepCard n={3} title="Level 3: a script runs; only its output enters">
+    The body tells the agent to run `scripts/failing.sh`. The script's 600 tokens of code never enter the window; its
+    40-token output does: "1 failed: parses an empty file".
+  </StepCard>
+  <StepCard n={4} title="Everything else stays on disk">
+    The flaky-tests reference is never read. The release-notes and db-migration descriptions did not match, so their
+    bodies never load.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- In the window: 300 + 1,500 + 40 = **1,840 tokens**.
+- On disk and never read: 2,000 (reference) + 600 (script code) + 1,800 + 2,200 (other bodies) = **6,600 tokens**.
+- Loading all three skills in full up front would cost 8,400 tokens on every call.
+
+Here is the top of the skill file. The first four lines are level 1; everything under them is level 2:
+
+```markdown
+---
+name: run-tests
+description: Run the test suite and read failures. Use when running, adding or debugging tests.
+---
+
+# Run tests
+
+1. Run `scripts/failing.sh`. It runs vitest and prints only the failing tests.
+2. Read each failure's first assertion before you open any file.
+3. A test that fails, then passes on a re-run, is flaky: see `reference/flaky-tests.md`.
+4. Done means all tests pass and `npm run lint && npm run typecheck` is clean.
+```
+
+<Callout tone="red" title="What breaks">
+  A skill is code you run. Its instructions can tell the agent to call tools or send data somewhere, and its scripts run
+  with the agent's access. The Agent Skills documentation says to use skills only from trusted sources and to audit
+  every bundled file first, like installing software. See [Agent Security &
+  Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing).
+</Callout>
+
+### Dynamic tool discovery vs. loading 100 tool schemas
+
+- Every tool definition (name, description and parameter schema) normally rides on every call.
+- Connect the coding agent to five popular MCP servers and the definitions alone fill much of the window, as the [MCP page measures](/ai-system-design/genai-system-design/model-context-protocol#tool-overload-and-context-cost).
+- Tool search keeps them out until the model asks.
+
+<AnimatedDiagram
+  spec="animated/agents/tool-discovery"
+  stepper
+  minWidth={620}
+  caption="Deferred definitions still travel with every request, but the model only reads the few a search returns. Server sizes from Anthropic; per-tool size illustrative."
+/>
+
+**How to read it:**
+
+- Step 1: all 62 definitions sit in the window on every call.
+- Step 2: the same definitions are marked `defer_loading: true`.
+- The harness still sends them with each request, but the API keeps them out of the window; the model sees its 4 own tools and the search tool.
+- Step 3: the agent wants to comment on the GitHub issue, so it searches with a regex.
+- The API searches names, descriptions and argument names, and returns three references (up to 5 by default).
+- Step 4: the API expands the three references into full definitions, and the model calls one.
+
+**The numbers:**
+
+- Anthropic measured the five servers in November 2025: 58 tools, **55,000 tokens**.
+- With the agent's own 1,500, that is 56,500 tokens up front.
+- Behind search, one search loads 3 × 743 = 2,229 tokens (GitHub's average definition, illustrative): 3,729 in the window, 93 % less.
+- Anthropic reports a cut of over 85 % in typical use.
+- The MCP page applies that figure to the same five servers.
+
+- Accuracy matters as much as tokens. Claude's tool search documentation says the model's ability to pick the right tool degrades past 30 to 50 tools.
+- In Anthropic's evaluations, tool search raised Claude Opus 4's accuracy from 49 % to 74 % on MCP tasks.
+
+- Here are the search call and its result as they come back in the Claude Messages API response (tool search runs on Anthropic's servers, so the harness returns no result for it; ids and two of the three references left out):
+
+```json
+[
+  {
+    "type": "server_tool_use",
+    "name": "tool_search_tool_regex",
+    "input": { "pattern": "github.*(issue|pull)", "limit": 3 }
+  },
+  {
+    "type": "tool_search_tool_result",
+    "content": {
+      "type": "tool_search_tool_search_result",
+      "tool_references": [{ "type": "tool_reference", "tool_name": "github_get_issue" }, "…two more"]
+    }
+  }
+]
+```
+
+- The documentation adds three rules. Keep the 3 to 5 tools used most often non-deferred, so the agent can call them without searching.
+- Prefix tool names by service (`github_`, `slack_`), so one search finds the group.
+- And never defer every tool: at least one, normally the search tool, must load.
+
+## Architecture
+
+Here is the whole loading system for one run of the coding agent: what lives in the repository, what triggers each load, and what reaches the window.
+
+<AnimatedDiagram
+  spec="animated/agents/instruction-layers"
+  stepper
+  minWidth={620}
+  caption="The root file is small and always loaded; everything else waits for a trigger. For this bug, 63,200 tokens never reach the window. Counts illustrative; MCP sizes from Anthropic."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The always-loaded layer">
+    At start the harness loads its own prompt (900 tokens), the root `AGENTS.md` (800), the three skill descriptions
+    (300) and the agent's 4 tools plus the search tool (1,500): 3,500 tokens. The root file's dashed lines are its
+    pointers. The 58 MCP definitions are deferred.
+  </StepCard>
+  <StepCard n={2} title="A file read loads a scoped file">
+    The agent reads `src/parser.ts`. Because it touched a file in `src/`, Claude Code loads `src/AGENTS.md` (400 tokens)
+    with it. One of its rules is "Parsers return [] for empty input; never throw." `web/AGENTS.md` stays on disk: the
+    agent never opens a file in `web/`.
+  </StepCard>
+  <StepCard n={3} title="A matching task loads a skill body">
+    When the fix is ready to test, the task matches the run-tests description and the model reads the skill's body
+    (1,500 tokens). By the end of the run, 5,400 tokens have loaded; 63,200 never do.
+  </StepCard>
+</StepCards>
+
+- Three triggers, three owners. The **harness** decides what is always loaded.
+- The **file system** decides when a scoped file loads: a read in its folder.
+- The **model** decides when a skill body or a deferred tool loads, from a description it read at start.
+- The last two only work if the always-loaded layer says enough for the trigger to fire: a pointer the model never sees cannot be followed.
+
+## Technical mechanics
+
+### Worked example: one bug fix, eight model calls
+
+- This follows the [Architecture figure](#architecture) through the whole fix.
+- "Instructions" counts the harness prompt, instruction files, skill descriptions and skill bodies in each call; tools and the conversation come on top.
+
+| Call | The model asks for                        | Loaded since the last call              | Instructions in this call |
+| ---- | ----------------------------------------- | --------------------------------------- | ------------------------- |
+| 1    | `search("last line")`                     | Start: harness, root file, descriptions | 2,000                     |
+| 2    | `read_file("src/parser.ts")`              | Search results                          | 2,000                     |
+| 3    | Edit: loop bound `< n - 1` → `< n`        | The file, and `src/AGENTS.md` (400)     | 2,400                     |
+| 4    | Read `run-tests/SKILL.md`                 | The edit's result                       | 2,400                     |
+| 5    | Run `scripts/failing.sh`                  | The skill body (1,500)                  | 3,900                     |
+| 6    | Edit: return `[]` for empty input         | "1 failed: parses an empty file"        | 3,900                     |
+| 7    | Run `scripts/failing.sh` again            | The edit's result                       | 3,900                     |
+| 8    | Nothing: it writes the summary for review | "18 passed", lint and types clean       | 3,900                     |
+
+**The numbers:**
+
+- Layered: 2 × 2,000 + 2 × 2,400 + 4 × 3,900 = **24,400** instruction tokens.
+- Mega-prompt: everything (11,800) on each of 7 calls, one fewer because no skill needs reading: 7 × 11,800 = **82,600**.
+- Layering cuts instruction tokens by 70 % and costs one extra model call.
+- With all 58 MCP definitions loaded too, the mega-prompt would add 55,000 tokens to every call.
+
+Three things to take from it:
+
+- **The scoped file paid for itself.** Call 6's fix, return `[]` for empty input, is the rule `src/AGENTS.md` loaded at call 3. A rule that loads with the code it governs arrives when it is needed.
+- **Loading costs a call.** Call 4 exists only to read the skill. Progressive disclosure trades a little latency for a lot of tokens; a skill that every task uses belongs in the root file instead.
+- **Everything that loaded was appended.** The scoped file and the skill body arrived as tool results at the end of the conversation. Nothing before them changed, so the cache stayed valid; see [below](#prefix-cache-friendliness-of-static-vs-dynamic-layers).
+
+### Structuring a small root index with pointers
+
+Write the root file for the task you cannot predict. It holds what every task needs and a map to the rest:
+
+- **In the root file:** what the project is, the commands to build, test and lint, conventions that apply everywhere, and one line per pointer that says when to follow it ("read `docs/architecture.md` when a change crosses modules").
+- **In a scoped file:** rules for one folder or file type. If a rule mentions a path, it probably belongs in that path's file.
+- **In a skill:** a procedure with steps, such as running tests, writing a migration or drafting release notes. A procedure with a script belongs here, so the script runs without being read.
+- **In code, not prose:** anything that must always hold. A hook or permission rule enforces; an instruction only asks.
+
+- Keep the root file under about 200 lines, as Claude Code's documentation advises.
+- Imports (`@docs/style.md` in `CLAUDE.md`) help organise a long file but do not shrink it: an imported file loads with the file that imports it.
+
+### Prefix-cache friendliness of static vs. dynamic layers
+
+- Prompt caching stores the processed form of a request's prefix and reuses it when the next request starts with the same bytes.
+- The Claude API builds the prefix in a fixed order: tools, then system, then messages.
+- A change at one level invalidates that level and every level after it.
+
+<AnimatedDiagram
+  spec="animated/agents/prefix-cache"
+  stepper
+  minWidth={620}
+  caption="The cache matches a prefix, block by block, in the order tools, system, messages. Anything that changes belongs at the end. Counts illustrative; multipliers for Claude Opus 5.5, November 2026."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Call 6 writes the prefix">
+    The request is tools (1,500), the system prompt (2,000) and the messages so far (4,500): 8,000 tokens, written to
+    the cache at 1.25 times the base input price.
+  </StepCard>
+  <StepCard n={2} title="Call 7 reads it">
+    Call 7 is call 6 plus a 1,000-token tool call and result (the edit and its output in the worked example). The first
+    8,000 tokens match and are read at 0.05 times (Claude Opus 5.5); only the new 1,000 cost full price, plus the write
+    premium.
+  </StepCard>
+  <StepCard n={3} title="An early edit breaks it">
+    Suppose the harness puts the current time into the system prompt. The tools still match, so 1,500 tokens are read.
+    The system prompt differs, so it and everything after it, 7,500 tokens, are processed and written again.
+  </StepCard>
+  <StepCard n={4} title="The same edit, at the end">
+    The time goes in a message after the new tool result. The 8,000-token prefix matches again.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- In base-price input tokens, at Claude Opus 5.5's multipliers as of November 2026: a stable call 7 costs 8,000 × 0.05 + 1,000 × 1.25 = **1,650**, against 9,000 uncached.
+- With the time in the system prompt it costs 1,500 × 0.05 + 7,500 × 1.25 = **9,450**: more than no cache at all, because every call pays the write premium and reads almost nothing.
+- On most other Claude models a cache read costs 0.1 times; the order of the effect is the same.
+
+- Here is the request shape that keeps the static layers cacheable (Claude Messages API, other fields left out).
+- The breakpoint sits on the last static block; a top-level `cache_control` caches the growing conversation too:
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "cache_control": { "type": "ephemeral" },
+  "tools": [
+    "…4 own tools, sorted by name…",
+    { "type": "tool_search_tool_regex_20251119", "name": "tool_search_tool_regex" }
+  ],
+  "system": [
+    { "type": "text", "text": "…prompt, root file, skill descriptions…", "cache_control": { "type": "ephemeral" } }
+  ],
+  "messages": ["…task, history, tool results (scoped files and skill bodies arrive here)…"]
+}
+```
+
+Progressive disclosure and caching fit together when every on-demand layer is **appended**:
+
+- **Skills and scoped files** arrive as tool results, at the end. The prefix before them is untouched.
+- **Tool search** keeps deferred definitions out of the prefix, and the API adds discovered tools inline in the conversation, so the tools block never changes. Adding or removing a tool in the `tools` array instead invalidates the whole cache.
+- **Anything that changes per call** (the time, a request id, a user's name) goes last, never in the system prompt.
+
+- The cache lives 5 minutes by default, refreshed each time it is read, or 1 hour at a higher write price (2 times).
+- On Claude Opus 5.5, a prefix under 512 tokens is not cached at all.
+- More on cache economics is on [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
+
+<Callout tone="red" title="What breaks">
+  A prefix that changes without anyone editing it. Tool definitions serialised from an unordered map, a list of
+  connected servers in a different order each call, or a skill list that changes when someone installs a skill: each
+  rewrites the start of the prefix and silently turns every read into a write. Sort tools by name, and check that
+  repeated calls report cache reads (`cache_read_input_tokens` in the usage block).
+</Callout>
+
+### Auditing instruction conflicts across scopes
+
+- Layers make conflicts easy to create and hard to see: no one reads the root file, the scoped file and a user's own file side by side.
+- Suppose the root `AGENTS.md` says "run `npm test`", and `src/AGENTS.md`, written later, says "run `npx vitest run src`".
+- Under the AGENTS.md convention the nearer file wins inside `src/`.
+- In Claude Code both are in the window, and the model may follow either.
+
+To audit:
+
+1. **List what loads for a path.** For each folder the agent works in, list every instruction file that would load: organisation, user, root, every folder on the way down, and every rule whose `paths` match.
+2. **Diff the rules by topic.** Commands, test policy, style, security. Two files that both mention the test command are a conflict waiting to happen; keep each topic in one file.
+3. **Run a tool.** As of November 2026, Claude Code's `/doctor prompt-audit` reviews `CLAUDE.md`, `AGENTS.md`, rules, skills and sub-agents for outdated and conflicting instructions.
+4. **Test behaviour, not text.** Keep a few evaluation tasks per folder ("fix a parser bug", "change an admin page") and check which command the agent runs. A conflict shows up as a coin flip across repeated runs.
+
+## Trade-offs
+
+| Decision                            | Option A                           | Option B                              | Guidance                                                                   |
+| ----------------------------------- | ---------------------------------- | ------------------------------------- | -------------------------------------------------------------------------- |
+| One big prompt vs layered files     | Simple, every rule always visible  | Fewer tokens, better adherence        | Layer once instructions pass a few hundred lines or one team owns a folder |
+| Rule in root vs scoped file         | Always loaded, always paid for     | Loaded with the code it governs       | Root for what every task needs; scoped for one folder's rules              |
+| Skill vs root-file section          | Body loads on demand, costs a call | Always loaded, no extra call          | Skill for procedures some tasks need; root for what most tasks need        |
+| All tool definitions vs tool search | No search step, every tool visible | Scales to thousands, better selection | Search past about 10 tools or 10,000 tokens of definitions                 |
+| Dynamic text in system vs messages  | One place for all instructions     | Prefix stays cacheable                | Static first; anything that changes goes last                              |
+
+## Production systems
+
+- **AGENTS.md**: as of November 2026, the format's site lists use in more than 60,000 open-source projects and a long list of supporting agents. It is stewarded by the Agentic AI Foundation under the Linux Foundation.
+- **Claude Code** loads `CLAUDE.md` files from the directories above the working directory at start and from subdirectories on demand, scopes `.claude/rules/` files with `paths`, and reads `AGENTS.md` when a repository has no `CLAUDE.md` (from v2.1.277). After `/compact`, it re-reads the root file from disk; nested files load again on demand.
+- **Agent Skills**: Anthropic introduced skills in October 2025 and published them as an open standard in December 2025. As of November 2026 they run in Claude Code, claude.ai and the Claude API.
+- **Tool search**: Anthropic's November 2025 post on advanced tool use reported an 85 % cut in definition tokens. The tool search tool now accepts up to 10,000 deferred tools per request.
+
+## Failure modes & pitfalls
+
+- A root file that grows into a handbook, because adding a line is easier than finding the right scoped file.
+- Skill descriptions that say what a skill is but not when to use it, so the skill never triggers.
+- Rules that must always hold, kept only in a scoped file or a skill.
+- Two files that both set the test command, the style or the review policy.
+- Deferring every tool, including the three the agent uses on every task.
+- A timestamp, user name or sorted-at-random tool list at the top of the prompt, which defeats prompt caching.
+- Installing third-party skills without reading their scripts.
+
+## Interview framework
+
+1. Name the two costs of a mega-prompt: tokens on every call and diluted attention. Give a number.
+2. Describe the layers: organisation and user, root, scoped, skills, tools. Say what triggers each load and who owns the trigger.
+3. Explain skill loading in three levels and tool search with deferred definitions.
+4. Tie it to prompt caching: static first, appended on demand, nothing dynamic in the prefix.
+5. Cover conflicts and enforcement: one topic per file, audits, and hooks or permissions for hard rules.
+
+**What interviewers listen for:** a token budget for the always-loaded layer, a trigger for every on-demand layer, and awareness that loading changes what the cache sees.
+
+**Red flags:** "put everything in the system prompt, the window is big enough", or treating an instruction file as a security control.
+
+## Further reading
+
+- [Effective context engineering for AI agents (Anthropic, 29 September 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- [Equipping agents for the real world with Agent Skills (Anthropic, 16 October 2025; open standard update 18 December 2025)](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)
+- [Agent Skills overview (Claude docs)](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
+- [Tool search tool (Claude docs)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)
+- [Introducing advanced tool use (Anthropic, 24 November 2025)](https://www.anthropic.com/engineering/advanced-tool-use)
+- [Prompt caching (Claude docs)](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+- [How Claude remembers your project: CLAUDE.md, rules and AGENTS.md (Claude Code docs)](https://code.claude.com/docs/en/memory)
+- [AGENTS.md](https://agents.md/)
+- [How Many Instructions Can LLMs Follow at Once? (Jaroslawicz et al., 2025)](https://arxiv.org/abs/2507.11538)
+- Related on this site: [Context Engineering](/ai-system-design/genai-system-design/context-engineering), [Model Context Protocol](/ai-system-design/genai-system-design/model-context-protocol), [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching), [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering), [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state), [System Prompt Design](/ai-system-design/genai-system-design/system-prompt-design)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Why not put all of an agent's instructions into one system prompt?"
+    category="Concepts"
+    level="Junior"
+  >
+    - Because the agent re-reads its whole context on every model call.
+    - A 12,000-token prompt costs 12,000 tokens on each of the run's calls, most of it unused.
+    - It also dilutes attention: benchmarks such as IFScale show that the more instructions a model holds at once, the fewer it follows.
+    - A small always-loaded layer with pointers, plus files and skills that load when needed, keeps both costs down.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you organise instruction files for a monorepo with 40 services?"
+    category="Architecture"
+    level="Mid"
+  >
+    - A short root file with what every task needs: build and test commands, global conventions, and one-line pointers.
+    - Each service gets its own scoped file, owned by that service's team, that loads only when the agent works in that folder.
+    - Procedures some tasks need, such as migrations or releases, become skills.
+    - Rules that must always hold go into hooks or permission settings, not prose.
+    - Then audit for conflicts: each topic, such as the test command, lives in one file.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a skill get loaded, and what makes one trigger reliably?"
+    category="Concepts"
+    level="Mid"
+  >
+    - At start only each skill's name and description, about 100 tokens, sit in the system prompt.
+    - When a task matches a description, the model reads the SKILL.md body, and bundled files load only when the body points to them; scripts run and only their output enters the window.
+    - Since the description is all the model sees, it must say what the skill does and when to use it, in the words a task would use.
+    - Test triggering with a few tasks that should and should not match.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent has 300 tools across 12 MCP servers. How do you give it access without flooding the context?"
+    category="Architecture"
+    level="Senior"
+  >
+    - First cut the list: give each agent only the servers its job needs.
+    - Put the rest behind tool search with deferred definitions, keep the three to five most used tools loaded, and prefix names by server so one search finds a group.
+    - Anthropic measured five popular servers at about 55,000 tokens and found selection accuracy falls past 30 to 50 tools, so search helps both cost and accuracy.
+    - Then measure tool selection on an evaluation set before and after.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you keep prompt caching working when instructions and tools load on demand?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - The cache matches the prefix in the order tools, system, messages, and a change invalidates everything after it.
+    - So keep the tools block and system prompt identical across calls: sort tools, keep skill descriptions fixed, and put nothing per-call such as the time in the system prompt.
+    - Load everything on demand by appending: skill bodies and scoped files arrive as tool results, and tool search adds discovered tools inline instead of changing the tools array.
+    - Check the usage block for cache reads on repeated calls.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Two instruction files give the agent contradictory rules. How do you find and fix it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Know your tool's precedence first: AGENTS.md says the nearest file wins, while Claude Code concatenates every loaded file and may follow either.
+    - List every file that loads for the path in question, including user, organisation and path-scoped rules, and diff them by topic.
+    - Move each topic into exactly one file and delete the other copy.
+    - Confirm with repeated evaluation runs: a conflict shows up as the agent choosing differently from run to run.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,91 +1,206 @@
 ---
 title: "Consistency Models and CAP"
-description: "Strong, eventual and causal consistency, CAP and PACELC, and quorum reads and writes."
+description: "Strong, eventual and causal consistency, CAP and PACELC, quorum reads and writes, and read-your-writes on followers."
+icon: scale
+updated: 2026-11-16
 ---
 
-Once data is replicated, you must decide what a reader is allowed to see. This choice shapes latency, availability and complexity.
+Once data is replicated, every read has to decide which copy to trust, and a shopper who changes their address and sees the old one thinks the save failed.
 
-## TL;DR
+- Interviewers ask about consistency to see whether you choose a model per feature, and whether you know how to deliver it: leader reads, quorums or session tokens.
 
-- **CAP:** during a network partition you choose between consistency and availability.
-- **PACELC:** even without partitions you trade latency against consistency.
-- **Strong consistency:** reads see the latest write. **Eventual:** replicas converge over time. **Causal:** related events keep their order.
+## Overview
+
+- **CAP:** during a network partition, a replicated system chooses between consistency (refuse some requests) and availability (answer, possibly stale).
+- **PACELC:** even without a partition, it trades latency against consistency on every request.
+- **Linearizable (strong):** reads see the latest write, as if there were one copy. **Eventual:** replicas converge over time. **Causal:** effects are never seen before their causes.
+- **Session guarantees** fix the surprises users notice first: **read-your-writes** and **monotonic reads**.
 - **Quorums** (`R + W > N`) tune the trade-off per request.
-- Choose **per feature**, not per company.
+- Choose **per feature**, not per company: stock at checkout and a view counter need different answers.
 
-## The idea in plain English
+## Mental model
 
-A bank balance must be exact; a "likes" counter can lag a few seconds. Same system, different needs.
+- A bank balance must be exact; a likes counter can lag a few seconds. Same system, different needs.
+- Think of a shop with a noticeboard copied to three branches by a courier.
+- Phoning head office (the leader) always gets today's notice; reading a branch board is quicker but may show yesterday's.
+- If you just pinned a notice yourself, you expect to see it: that is read-your-writes, and it is the guarantee users notice first.
 
 ## Core concepts
 
-1. **Strong (linearizable).** Behaves like one copy. Needs coordination, so it costs latency.
-2. **Eventual.** Fast and available; readers may see stale data.
-3. **Read-your-writes, monotonic reads.** Session guarantees that fix the worst surprises of eventual consistency.
-4. **Causal.** If A caused B, everyone sees A before B.
-5. **Quorum.** With `N` replicas, writing to `W` and reading from `R` with `R + W > N` guarantees overlap with the latest write.
-6. **Conflict resolution.** Last-write-wins, vector clocks, or CRDTs when replicas accept concurrent writes.
+- The running example is a Brightpost shopper changing their delivery address and reloading after **1 second**, while the follower database is **2 seconds** behind the leader (illustrative lag).
+
+### The models
+
+- **Strong (linearizable).** Behaves like one copy. Needs coordination (a leader read or a quorum), so it costs latency.
+- **Causal.** If A caused B (a reply to a review), everyone sees A before B. Unrelated writes may appear in any order.
+- **Read-your-writes, monotonic reads.** Session guarantees: you always see your own writes, and you never see time go backwards.
+- **Eventual.** Fast and available; readers may see stale data, and in any order, until replicas converge.
+
+<AnimatedDiagram spec="animated/patterns/cons-spectrum" caption="Each step to the right is cheaper and allows one more surprise; pick the weakest model each feature can live with." />
+
+**How to read it:**
+
+- Strongest on the left, cheapest on the right. Each row asks the same question of all four models.
+- Read-your-writes is ringed: it is cheap and removes the surprise users report most.
+- The red cell is what eventual consistency allows that users call a bug: data that is stale and out of order.
+
+**The numbers:**
+
+- DynamoDB prices it plainly: an eventually consistent read costs half a strongly consistent one, and reads from a global secondary index can only be eventually consistent.
+
+<PremiumBreak />
+
+### Quorums
+
+- With `N` replicas, writing to `W` and reading from `R` with `R + W > N` guarantees that the read set and the write set overlap in at least one replica.
+- `N = 3, W = 2, R = 2` is the common choice: any one replica can fail and both reads and writes still succeed.
+- `W = 1, R = 1` is fast and available but can read stale data. Try the combinations:
+
+<QuorumPicker n={3} r={2} w={2} />
+
+- Overlap is not the whole story: sloppy quorums, concurrent writes and clock-based conflict resolution can still return surprises (see [Replication Quorums](/system-design/databases/replication-quorums)).
+
+### Conflict resolution
+
+- When replicas accept concurrent writes (multi-leader or leaderless), they must agree on a winner.
+- **Last-write-wins** keeps the write with the highest timestamp and silently drops the other ([Last-Write-Wins](/system-design/databases/last-write-wins)).
+- **Version vectors** detect concurrent writes so the application can merge them; **CRDTs** are data types that merge automatically.
+- Why timestamps cannot order writes across machines: [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    C["Client"] --> CO["Coordinator"]
-    CO -->|"write W=2"| R1[("Replica 1")]
-    CO -->|"write W=2"| R2[("Replica 2")]
-    CO -.->|"async"| R3[("Replica 3")]
-    CO -->|"read R=2"| R1
-    CO -->|"read R=2"| R2
-```
+A shopper's address change, read from a lagging follower and then with read-your-writes.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/cons-stale-read" stepper caption="A follower two seconds behind shows a shopper their old address; carrying the write's log position lets the app read from the leader until the follower catches up." />
+
+<StepCards>
+  <StepCard n={1} title="Read from a follower: the old address">
+    The write goes to the leader, which replicates to the follower with a 2 s lag. The shopper reloads after 1 s, the app reads from the follower, and the old address comes back. The save worked, but the shopper thinks it did not.
+  </StepCard>
+  <StepCard n={2} title="Carry a version: read your own write">
+    The app returned the write's log position (LSN 4471) in the session. On reload it asks whether the follower has replayed past that position; it has not, so the app reads from the leader and shows the new address.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Follower reads and read-your-writes
+
+- Reading from followers spreads load and keeps reads close to users. The cost is replication lag.
+- Three ways to give a user their own writes:
+  - **Read from the leader for a short time after a write**, say 5 s, or for data the user can edit (their own profile, basket and address).
+  - **Carry a version token.** The write returns its log position; later reads go to a follower only if it has replayed past it (PostgreSQL exposes this as `pg_last_wal_replay_lsn()`).
+  - **Pin the session** to one replica, so at least the user never sees time go backwards (monotonic reads).
+- A second device (the shopper's phone) has no token, so it may still see the old address: read-your-writes is per session, not global.
 
 ### Reading CAP correctly
 
-Partitions happen, so the real choice is what to do during one. A CP system refuses some requests to stay correct; an AP system answers with possibly stale data and reconciles later.
+- Partitions happen, so the real choice is what to do during one.
+- A **CP** system refuses some requests to stay correct; an **AP** system answers with possibly stale data and reconciles later.
+- Outside partitions the trade is latency: PACELC's "else, latency or consistency".
 
 ### Replication styles
 
-Single-leader gives simple ordering; multi-leader and leaderless boost availability and write locality but need conflict handling. See [Single Leader](/system-design/databases/single-leader-replication), [Leaderless](/system-design/databases/leaderless-replication) and [Replication Quorums](/system-design/databases/replication-quorums).
+- **Single-leader** gives simple ordering; every write goes through one node.
+- **Multi-leader** and **leaderless** boost availability and write locality but need conflict handling.
+- See [Single Leader](/system-design/databases/single-leader-replication), [Leaderless](/system-design/databases/leaderless-replication), [Replication Quorums](/system-design/databases/replication-quorums), and for regions [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover).
+
+### Worked example: a new delivery address
+
+A shopper changes their address at 12:00:00 and reloads at 12:00:01. The follower applies the change at 12:00:02.
+
+1. **Eventual, follower read:** the reload shows the old address. A second reload at 12:00:03 shows the new one.
+2. **Read-your-writes with a token:** the reload goes to the leader and shows the new address. The shopper's phone, without the token, still shows the old one until 12:00:02.
+3. **Linearizable (leader or quorum read for everyone):** every device shows the new address from 12:00:00, at the cost of every read going through the leader.
+4. **Checkout uses the address:** checkout reads from the leader, because shipping a kettle to the old house is worse than 2 ms of extra latency.
+
+**The numbers:**
+
+- With a 2 s lag and a reload 1 s after the write, a follower read is stale with certainty; at a 100 ms lag it would almost never be.
+- Sending only "own data shortly after a write" to the leader adds a tiny share of reads to it: if 1 % of sessions edit something and read it back, the leader takes about 1 % more reads, not all of them.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Strong | Simple mental model | Latency, lower availability under partition |
-| Eventual | Speed, availability | Stale reads, conflicts |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Linearizable reads | Simple mental model | Latency; lower availability under partition | Stock, payments, uniqueness |
+| Read-your-writes | Fixes the surprise users see; cheap | Only per session | Profiles, baskets, settings |
+| Causal | Replies never before posts | Dependency tracking | Comments, chat threads |
+| Eventual | Speed, availability | Stale reads, conflicts | Counters, feeds, analytics |
+| Quorum `R + W > N` | Tunable per request | Latency of the slowest replica in the set | Leaderless stores |
 
-## Real-world examples
+## Production systems
 
-- Inventory and seats need strong guarantees: [Ticketmaster](/system-design/case-studies/ticketmaster), [Hotel Booking](/system-design/case-studies/hotel-booking).
-- Dynamo-style tunable consistency: [Key Value Store](/system-design/case-studies/key-value-store).
-- Counters and feeds tolerate eventual consistency: [Twitter](/system-design/case-studies/twitter), [Instagram](/system-design/case-studies/instagram).
-- Message ordering in chat: [WhatsApp](/system-design/case-studies/whatsapp).
+- **DynamoDB** (as of November 2026): eventually consistent reads by default, at half the cost of strongly consistent reads; global secondary indexes and streams are eventually consistent only; global tables offer multi-Region strong consistency as a mode.
+- **MongoDB**: causally consistent sessions give read-your-writes, monotonic reads, monotonic writes and writes-follow-reads; all four are guaranteed only with majority read and write concern.
+- **Cassandra**: consistency per request (ONE, QUORUM, LOCAL_QUORUM, ALL), Dynamo-style.
+- **Spanner**: externally consistent (linearizable) transactions across regions, using synchronised clocks.
+- Inventory and seats need strong guarantees: [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster), [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking). Counters and feeds tolerate eventual consistency: [Twitter](/system-design-case-studies/case-studies/twitter), [Instagram](/system-design-case-studies/case-studies/instagram). Message ordering in chat: [WhatsApp](/system-design-case-studies/case-studies/whatsapp).
+- **Used in our case studies:** [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Instagram](/system-design-case-studies/case-studies/instagram) · [S3](/system-design-case-studies/case-studies/s3)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Saying "CAP says pick two" without mentioning partitions.
-- Using strong consistency everywhere.
-- Ignoring read-your-writes, which users notice immediately.
+- **"CAP says pick two"** without mentioning partitions. The choice only exists during a partition.
+- **Strong consistency everywhere.** Every read pays the leader's latency. Classify data first.
+- **Ignoring read-your-writes.** Users see their change vanish and retry, creating duplicates. Read your own writes from the leader or with a token.
+- **Followers that fall far behind.** Lag grows under load, and a minute-old read is worse than a slow one. Alert on lag and stop routing reads to a lagging follower.
+- **Last-write-wins on data that matters.** Concurrent edits are silently lost. Use version checks or merge.
 
-## How to answer in an interview
+## Interview framework
 
-Classify each data type by how wrong it can be, pick a model for it, and say how you would achieve it (leader reads, quorums, session stickiness).
+1. Classify each data type by how wrong it can be: stock, money, a user's own data, counters.
+2. Pick a model for each and say why.
+3. Say how you deliver it: leader reads, quorums, session tokens or sticky sessions.
+4. State what happens during a partition: which features refuse requests and which serve stale data.
+5. Cover conflicts if replicas accept writes.
 
-## Related patterns
+**What interviewers listen for:** a model per feature, read-your-writes named unprompted, and a mechanism for each.
 
-[Sharding](/system-design/patterns/sharding) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Saga](/system-design/patterns/saga)
+**Red flags:** "use strong consistency everywhere", or eventual consistency for stock.
 
 ## Further reading
 
 - [Consistency Tradeoffs in Modern Distributed Database System Design (Abadi)](https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf)
 - [Jepsen consistency models](https://jepsen.io/consistency)
+- [Read consistency (DynamoDB docs)](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html)
+- [Causal consistency and read and write concerns (MongoDB docs)](https://www.mongodb.com/docs/manual/core/causal-consistency-read-write-concerns/)
+- Related pages: [Sharding](/system-design/patterns/sharding) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Saga](/system-design/patterns/saga) · [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) · [Replication Quorums](/system-design/databases/replication-quorums)
 
 <InterviewQuestions>
   <InterviewQuestion question="Explain CAP in practice." category="Concepts" level="Mid">
-    When a partition splits the replicas, you either reject some requests to remain consistent (CP) or serve possibly stale data to remain available (AP). Outside partitions you can have both, though PACELC notes the latency cost of consistency.
+    - When a partition splits the replicas, you either reject some requests to remain consistent (CP) or serve possibly stale data to remain available (AP).
+    - Outside partitions you can have both.
+    - PACELC adds that, even then, consistency costs latency.
   </InterviewQuestion>
-  <InterviewQuestion question="What does R + W > N guarantee?" category="Design" level="Senior">
-    Read and write sets overlap in at least one replica, so a read includes the latest acknowledged write, provided conflicts and sloppy quorums are handled.
+  <InterviewQuestion question="What does R + W > N guarantee?" category="Architecture" level="Senior">
+    - The read and write sets overlap in at least one replica.
+    - So a read includes the latest acknowledged write.
+    - That holds only if conflicts and sloppy quorums are handled.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is read-your-writes, and how do you provide it with read replicas?" category="Concepts" level="Junior">
+    - It means a user always sees their own changes, even if other users see them later.
+    - With replicas, read the user's own data from the leader for a few seconds after a write, or carry the write's log position and read a replica only once it has caught up.
+    - Without it, users see their change vanish and try again.
+  </InterviewQuestion>
+  <InterviewQuestion question="A shopper changes their address and the page shows the old one. Explain and fix it." category="Failure modes" level="Mid">
+    - The write went to the leader and the reload was served by a follower that had not yet replicated it.
+    - Read the user's own profile from the leader for a short time after a write, or pass a version token so only a caught-up replica serves the read.
+    - Checkout should always read the address from the leader.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which Brightpost data needs which consistency model?" category="Trade-offs" level="Mid">
+    - Stock at checkout and payments: linearizable, or a single writer, because overselling and double charges cost money.
+    - A shopper's own address and basket: read-your-writes.
+    - Reviews and replies: causal, so a reply never appears before its review.
+    - View counts and recommendations: eventual.
+  </InterviewQuestion>
+  <InterviewQuestion question="What goes wrong with last-write-wins?" category="Failure modes" level="Senior">
+    - Two concurrent writes both succeed, and the one with the lower timestamp is silently dropped.
+    - Clock skew between machines means "last" may not even be the later write.
+    - Use version checks so the second writer is told, or version vectors and merges where both edits matter.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is causal consistency useful, and what does it cost?" category="Trade-offs" level="Senior">
+    - It keeps cause before effect, such as a review before its reply or a message before its answer, without paying for linearizability.
+    - It stays available during partitions, unlike linearizable reads.
+    - The cost is tracking dependencies (version vectors or session tokens), and unrelated writes may still appear in different orders to different readers.
   </InterviewQuestion>
 </InterviewQuestions>

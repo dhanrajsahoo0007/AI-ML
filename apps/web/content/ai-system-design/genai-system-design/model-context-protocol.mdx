@@ -1,0 +1,590 @@
+---
+title: "Model Context Protocol (MCP)"
+description: "The open protocol that connects models to tools and data: hosts, clients, servers, transports, primitives and security."
+icon: link2
+---
+
+The Model Context Protocol (MCP) is an open standard for connecting AI applications to tools and data.
+
+- Interviewers use it to test whether you know where the model ends and the application begins: who discovers a tool, who runs it, who signs in, and who is to blame when a tool description lies.
+- This page goes one level below [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp), which covers the model's side of a tool call.
+
+## Overview
+
+- MCP splits tool access into three roles. The **host** is the AI application. It runs one **client** per **server**, and each server offers tools, data or templates.
+- A server offers three **primitives**. **Tools** are chosen by the model, **resources** by the application and **prompts** by the user.
+- Messages are JSON-RPC 2.0. They travel over **stdio** for a local server or **Streamable HTTP** for a remote one.
+- As of November 2026 the current revision is **2026-07-28**, and it is **stateless**. There is no handshake and no session: every request carries its protocol version and capabilities in `_meta`.
+- Remote servers that need sign-in use **OAuth 2.1**. The server checks a token issued for it alone, and never passes tokens on to other services.
+- Every connected server's tool definitions ride on every model call. Too many servers **crowd the context window** and lower tool-selection accuracy.
+- Tool descriptions are untrusted text the model reads. **Tool poisoning** hides instructions in them. Review and pin servers, and check every call in the host.
+
+## Mental model
+
+- Before USB, every printer needed its own cable and driver.
+- MCP is the USB port for AI applications. A service writes one MCP server, and every MCP-capable application can plug it in.
+- Without a standard, 4 applications and 3 services need 4 × 3 = 12 custom integrations.
+- With MCP, they need 4 clients and 3 servers: 7 pieces, and the next application costs one more client, not three more integrations.
+
+- The model does not speak MCP. It still sees ordinary tool definitions and writes ordinary tool calls.
+- MCP is how the **application** finds those tools and reaches them.
+
+## Core concepts
+
+- Every figure on this page follows the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures).
+- Customer 1847 writes: "My kettle arrived cracked.
+- It's order 4471. Can I get my money back?" The four tools now live on three MCP servers:
+
+- an **orders server** with `get_order` and `create_refund`, running on the same machine as the chat service;
+- a **help centre server** with `search_help` and the help articles, running as a remote service;
+- an **email server** with `send_email` and email templates, also remote.
+
+Protocol facts and messages follow the MCP specification **revision 2026-07-28**, the current revision as of November 2026.
+
+### Hosts, clients and servers
+
+- **Host.** The application the user talks to: here, Brightpost's chat service. It holds the conversation, calls the model, starts the clients and enforces consent and policy.
+- **Client.** A connector inside the host. Each client talks to exactly one server, and it attaches the protocol version and its capabilities to every request.
+- **Server.** A program that offers primitives. It can be a local process or a remote service.
+
+- One design rule explains the shape: a server must not be able to read the whole conversation or look into other servers.
+- The orders server sees only the requests its own client sends.
+- It never sees the help centre's traffic or the customer's chat.
+- The [Architecture](#architecture) figure steps through all three roles.
+
+- Clients can offer features to servers too. A server that needs more input, such as a confirmation from the user, returns an `input_required` result, and the client retries the request with the answer.
+- Revision 2026-07-28 deprecates sampling (a server borrowing the host's model) and roots (a server asking which folders it may use).
+
+### Primitives: tools, resources and prompts
+
+The three primitives differ in who decides when to use them.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-primitives"
+  minWidth={620}
+  caption="The three primitives differ in who pulls the trigger. Only tools are chosen by the model, so only tools need a check before they run."
+/>
+
+**How to read it:**
+
+- Read down a column. The spec calls tools "model-controlled": the model decides to call `get_order`.
+- Resources are "application-driven": the host decides to attach the "Damaged on arrival" article, by its URI.
+- Prompts are "user-controlled": a support agent picks the "Refund confirmation" template from a menu or a slash command.
+- The ringed cell is the one that needs guarding.
+- Only there does text the model read turn into an action.
+
+Here is the host reading the help article as a resource. Every MCP result carries `resultType`, and list and read results say how long they may be cached:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "result": {
+    "resultType": "complete",
+    "contents": [
+      {
+        "uri": "help://articles/damaged-on-arrival",
+        "mimeType": "text/markdown",
+        "text": "# Damaged on arrival\nFull refund within 30 days of delivery."
+      }
+    ],
+    "ttlMs": 3600000,
+    "cacheScope": "public"
+  }
+}
+```
+
+### Transports: stdio and streamable HTTP
+
+The messages are the same JSON-RPC either way; the transport is how the bytes travel.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-transports"
+  stepper
+  minWidth={620}
+  caption="Same JSON-RPC messages, two ways to carry them: a child process's standard streams on one machine, or one HTTPS POST per message across the network."
+/>
+
+<StepCards>
+  <StepCard n={1} title="stdio: the host starts the server">
+    The host launches the orders server as a child process. Each message is one line of JSON on the server's standard
+    input or output. Logs go to standard error; standard output carries only MCP messages. Nothing crosses the network,
+    so no other machine can reach the server.
+  </StepCard>
+  <StepCard n={2} title="Streamable HTTP: one POST per message">
+    The help centre server has one endpoint, `/mcp`. The client sends every message as its own HTTPS POST to that
+    endpoint. Headers repeat the protocol version, the method and the tool name, so load balancers and gateways can
+    route without reading the body.
+  </StepCard>
+  <StepCard n={3} title="The reply comes back on the same request">
+    The server answers with one JSON object, or with a Server-Sent Events stream for that request only: progress
+    messages first, then the result. Closing the stream cancels the request. There is no session id and no long-lived
+    GET stream in this revision.
+  </StepCard>
+</StepCards>
+
+Here is step 2 on the wire. The `MCP-Protocol-Version` header must match the version in the body's `_meta` (left out here), or the server rejects the request:
+
+```http
+POST /mcp HTTP/1.1
+Host: help.brightpost.example
+Content-Type: application/json
+Accept: application/json, text/event-stream
+MCP-Protocol-Version: 2026-07-28
+Mcp-Method: tools/call
+Mcp-Name: search_help
+
+{"jsonrpc": "2.0", "id": 21, "method": "tools/call",
+ "params": {"name": "search_help", "arguments": {"query": "damaged item refund"}, "_meta": {…}}}
+```
+
+<Callout tone="red" title="What breaks">
+  A local server on HTTP that skips the `Origin` check. Through DNS rebinding, a web page the support agent opens can
+  send it requests. The spec says servers must check `Origin` on every request, and local ones should listen on
+  127.0.0.1, not on every network interface. For a server on the same machine, stdio avoids the problem: only the
+  process that started it can talk to it.
+</Callout>
+
+### Authorization and OAuth
+
+- Authorisation is optional in MCP and applies only to HTTP.
+- A stdio server takes its credentials from its environment, as the orders server does.
+- A remote server that acts for a person needs to know who that person is.
+- Brightpost's support agents use a desktop AI assistant (a second host) that connects to the remote email server, which sends mail in the agent's name.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-authorization"
+  stepper
+  minWidth={620}
+  caption="The server never sees a password: it only checks a token that was issued for it, with the scope this call needs."
+/>
+
+<StepCards>
+  <StepCard n={1} title="No token: the server says where to sign in">
+    The assistant calls `send_email` with no token. The email server answers HTTP 401, and its `WWW-Authenticate` header
+    gives the address of its resource metadata. In OAuth terms the MCP server is a resource server: it checks tokens but
+    never issues them.
+  </StepCard>
+  <StepCard n={2} title="Find the sign-in server">
+    - The resource metadata (RFC 9728) names the sign-in server.
+    - The assistant fetches that server's own metadata (RFC 8414 or OpenID Connect Discovery) to learn its endpoints.
+    - It identifies itself with a client ID that is the URL of a metadata document about the assistant.
+    - The spec prefers this over dynamic client registration, which revision 2026-07-28 deprecates.
+  </StepCard>
+  <StepCard n={3} title="The support agent signs in and consents">
+    The assistant opens a browser with a PKCE challenge and a `resource` parameter naming the email server (RFC 8707).
+    The support agent signs in and allows `email:send`. The sign-in server redirects back with a code and its issuer,
+    `iss`, which the assistant checks against the server it chose (RFC 9207).
+  </StepCard>
+  <StepCard n={4} title="Swap the code for a token">
+    The assistant sends the code with its PKCE verifier. The token it gets back is issued for the email server only. A
+    stolen code is useless without the verifier, which never left the assistant.
+  </StepCard>
+  <StepCard n={5} title="Call again with the token">
+    The assistant repeats the call with `Authorization: Bearer …`, on every HTTP request from now on. The email server
+    checks that the token was issued for it and carries `email:send`. A call that needs more scope gets HTTP 403
+    `insufficient_scope`, and the assistant asks for the extra scope.
+  </StepCard>
+</StepCards>
+
+Here are the messages of steps 1 and 2. The 401 names the metadata and the scope this call needs:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://email.brightpost.example/.well-known/oauth-protected-resource/mcp",
+                         scope="email:send"
+```
+
+The metadata document points at the sign-in server:
+
+```json
+{
+  "resource": "https://email.brightpost.example/mcp",
+  "authorization_servers": ["https://login.brightpost.example"],
+  "scopes_supported": ["email:send"]
+}
+```
+
+<Callout tone="red" title="What breaks">
+  Token passthrough. Suppose the email server accepted any token the assistant sent and forwarded it to Brightpost's
+  mail provider. A token stolen from another service would then work here, and the mail provider's logs would show the
+  wrong caller. The spec forbids it: a server must reject tokens not issued for it, and must get its own credentials for
+  anything downstream.
+</Callout>
+
+## Architecture
+
+- Here is the whole system: Brightpost's chat service as the host, with one client for each of the three servers.
+- The same figure opens the MCP part of [Tool Use](/ai-system-design/genai-system-design/tool-use-and-mcp#architecture); here the steps point at the boundaries.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-architecture"
+  stepper
+  minWidth={620}
+  caption="The host owns the conversation and the model; each server sees only its own client's requests."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The conversation stays in the host">
+    The customer's message, the history and every model call live in the host. This is the boundary that matters most:
+    no server receives the conversation unless the host puts part of it into a request.
+  </StepCard>
+  <StepCard n={2} title="One client, one transport, one trust decision per server">
+    The host starts a client for each server it allows: stdio for the local orders server, Streamable HTTP for the two
+    remote ones. Adding a server is a configuration change and a review, not new code.
+  </StepCard>
+  <StepCard n={3} title="Discovery happens at run time">
+    Each client asks its server for its tools. The host merges four tools from three servers into one list for the
+    model. When a server adds a tool, the host sees it on the next `tools/list`, with no redeploy.
+  </StepCard>
+  <StepCard n={4} title="The host routes every call">
+    The model asks for `get_order`. The host checks that order 4471 belongs to customer 1847, then sends `tools/call`
+    through the orders client. The model never learns which server answered.
+  </StepCard>
+  <StepCard n={5} title="The host attaches data the model did not ask for">
+    The host reads the "Damaged on arrival" article as a resource and adds it to the context. Resources let the
+    application decide what the model reads.
+  </StepCard>
+</StepCards>
+
+Now one client and one server, message by message. There is no handshake to draw: revision 2026-07-28 removed the `initialize` exchange, so the first request can be any request.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-session"
+  stepper
+  minWidth={620}
+  caption="There is no handshake: each request says which protocol version it speaks, so any request can be the first."
+/>
+
+**How to read it:**
+
+- Solid arrows are requests and dashed arrows are replies.
+- The middle lane is the host with its orders client.
+- Steps 1 and 2 are MCP, step 3 is the model API, and steps 4 and 5 are MCP again. Each step's message follows.
+
+**Step 1: discover the server:**
+
+- Servers must implement `server/discover`; clients may skip it.
+- The reply gives the versions the server speaks, what it offers and how it describes itself. The host caches it for an hour (`ttlMs`):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "resultType": "complete",
+    "supportedVersions": ["2026-07-28"],
+    "capabilities": { "tools": {} },
+    "instructions": "Brightpost orders. Order numbers are digits, such as 4471.",
+    "_meta": { "io.modelcontextprotocol/serverInfo": { "name": "brightpost-orders", "version": "1.4.0" } },
+    "ttlMs": 3600000,
+    "cacheScope": "public"
+  }
+}
+```
+
+**Step 2: list the tools:**
+
+- The reply holds both tools (one shown). MCP spells the schema field `inputSchema`; the host renames it to `input_schema` for the Claude API.
+- `readOnlyHint` is a hint from the server, which the host may trust because Brightpost wrote the server:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "resultType": "complete",
+    "tools": [
+      {
+        "name": "get_order",
+        "description": "Look up one of the signed-in customer's orders by its number. Returns the item, price, delivery date and status.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "order_id": { "type": "string" } },
+          "required": ["order_id"]
+        },
+        "annotations": { "readOnlyHint": true }
+      }
+    ],
+    "ttlMs": 300000,
+    "cacheScope": "public"
+  }
+}
+```
+
+**Step 3: the model picks a tool.** This step is the model API, not MCP. The request and the `tool_use` reply are the ones on [Tool Use](/ai-system-design/genai-system-design/tool-use-and-mcp#core-concepts).
+
+**Step 4: call the tool.** The orders client sends `tools/call`. Version and capabilities ride in `_meta` on this request, as on every request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "get_order",
+    "arguments": { "order_id": "4471" },
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { "name": "brightpost-chat", "version": "3.2.0" },
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  }
+}
+```
+
+**Step 5: hand the result to the model.** The server identifies itself in the result's `_meta`. The host copies the text into a `tool_result` for `toolu_01` and calls the model again:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "resultType": "complete",
+    "content": [{ "type": "text", "text": "Order 4471: kettle, £42.00, delivered 12 Nov, status delivered" }],
+    "isError": false,
+    "_meta": { "io.modelcontextprotocol/serverInfo": { "name": "brightpost-orders", "version": "1.4.0" } }
+  }
+}
+```
+
+<Callout tone="red" title="What breaks">
+  State hidden in the connection. A server written for revision 2025-11-25 might keep a customer's draft refund under
+  its `Mcp-Session-Id`. Revision 2026-07-28 has no session, and behind a load balancer the next request can reach
+  another replica. Keep state under an explicit handle the server returns, such as a refund draft id, and check on every
+  call that the handle belongs to the caller.
+</Callout>
+
+## Technical mechanics
+
+### Worked example: one refund across three servers
+
+This follows the [exchange figure](#architecture) through the whole refund, from first message to reply. "Model" means one model call; every other row is an MCP request.
+
+| #   | Who                 | Message                    | Server             | What happens                                                                                                    |
+| --- | ------------------- | -------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| 1   | Host, at start-up   | `server/discover` × 3      | all three          | Versions and capabilities, cached 1 hour                                                                        |
+| 2   | Host, at start-up   | `tools/list` × 3           | all three          | 2 + 1 + 1 = 4 tools, cached 5 minutes                                                                           |
+| 3   | Model call 1 → host | `tools/call get_order`     | orders (stdio)     | Kettle, £42, delivered 12 Nov                                                                                   |
+| 4   | Model call 2 → host | `tools/call search_help`   | help centre (HTTP) | "Damaged on arrival": full refund                                                                               |
+| 5   | Host                | `resources/read`           | help centre (HTTP) | The full article, added to the context                                                                          |
+| 6   | Model call 3 → host | `tools/call create_refund` | orders (stdio)     | £42 is over £30: the host waits for the support agent, who approves at 10:20. Then the call runs: refund R-2291 |
+| 7   | Model call 4 → host | `tools/call send_email`    | email (HTTP)       | Confirmation sent                                                                                               |
+| 8   | Model call 5        | none                       | none               | "Your £42 refund for order 4471 is on its way."                                                                 |
+
+**The numbers:**
+
+- Start-up costs 3 + 3 = 6 requests. Each refund then costs 4 tool calls + 1 resource read = **5 MCP requests** and 5 model calls.
+- While the caches are fresh, discovery costs nothing per refund.
+
+Three things to take from it:
+
+- **The approval is not an MCP feature.** The £30 rule lives in the host, which holds the `create_refund` call until a person approves. See [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
+- **No request depends on an earlier one.** Each carries its own version and capabilities. If the orders server process restarts between rows 3 and 6, the host restarts it and sends row 6 as normal.
+- **The model saw none of this.** It saw four tool definitions and five tool results, exactly as without MCP.
+
+### Designing a good MCP server
+
+- The rules for one tool (a clear name, a description that says when to use it, a strict schema, useful errors) are on [Tool Use](/ai-system-design/genai-system-design/tool-use-and-mcp#designing-a-tool-the-model-uses-correctly). A server adds rules of its own:
+
+- **Expose tasks, not endpoints.** `create_refund(order_id, amount)` beats wrapping all 40 endpoints of the payments API. Every tool you add costs tokens on every call, for every host that connects.
+- **Make names unique across servers.** Names only have to be unique within one server, so the spec tells hosts to disambiguate, for example by prefixing the server's name. Choose names that will not collide in the first place: `orders_get`, not `get`.
+- **Keep the list stable.** Return tools in the same order every time, as the spec asks, so the host's cache and the model's prompt cache stay valid.
+- **Say what a tool does to the world.** Set `readOnlyHint`, `destructiveHint` and `idempotentHint`. Hosts treat them as hints from servers they trust, not as guarantees.
+- **Return errors the model can fix.** A bad argument is a result with `isError: true` and a sentence the model can act on. A JSON-RPC error is for a broken request, such as an unknown tool.
+- **Take identity from the credentials, never from the arguments.** The email server knows the support agent from the token. A tool that takes a `user_id` argument lets a tricked model act as anyone.
+
+### Tool overload and context cost
+
+Every connected server's tool definitions are sent with every model call, whether the task needs them or not.
+
+<AnimatedDiagram
+  spec="animated/agents/tool-overload"
+  stepper
+  minWidth={620}
+  caption="Every connected server's definitions ride along on every request. A search tool loads only the few a task needs. Window size and the search figure are illustrative."
+/>
+
+**How to read it:**
+
+- Each bar is the request before the customer has typed a word.
+- Step 1: Brightpost's own four tools are a sliver.
+- Step 2: five popular servers add 58 tools, and GitHub's alone (ringed) is nearly ten times Brightpost's whole setup.
+- Step 3: the same 58 tools sit behind a search tool.
+- The model sees the search tool, searches, and only the definitions it finds are loaded.
+
+**The numbers:**
+
+- Anthropic measured the five servers in November 2025: GitHub 26,000 + Slack 21,000 + Sentry 3,000 + Grafana 3,000 + Splunk 2,000 = **55,000 tokens** for 58 tools.
+- With Brightpost's 2,696, that is 57,696 tokens, **29 %** of an illustrative 200,000-token window, before any work.
+- Anthropic has seen tool definitions reach 134,000 tokens in its own setup.
+- Its tool-search tool cut token use by 85 %; applied here, 55,000 × 0.15 = **8,250 tokens**, 5 % of the window.
+
+Three ways to keep the list small:
+
+1. **Connect fewer servers per agent.** Give each agent the servers its job needs. A support agent does not need GitHub.
+2. **Load definitions on demand.** A search tool, or a short list of names whose full definitions load on request. See [Progressive Disclosure & Agent Instructions](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions).
+3. **Call tools from code.** Anthropic's "code execution with MCP" presents servers as code files the agent reads only when needed. In its example, token use fell from about 150,000 to about 2,000.
+
+<Callout tone="red" title="What breaks">
+  Accuracy, not only cost. Anthropic reports that the most common failures with large tool sets are picking the wrong
+  tool and filling in the wrong arguments, above all when tool names look alike. Turning on tool search raised Claude
+  Opus 4's accuracy in its MCP evaluations from 49 % to 74 %. Fifty-eight definitions are fifty-eight chances to pick
+  the wrong one.
+</Callout>
+
+### Security: tool poisoning and confused deputies
+
+A tool description is text the model reads and the user usually does not. Tool poisoning hides instructions in that text.
+
+<AnimatedDiagram
+  spec="animated/agents/tool-poisoning"
+  stepper
+  minWidth={620}
+  caption="The attacker's tool is never called: its description alone steers a trusted one. Catch it when definitions arrive or change, and again when the call is made."
+/>
+
+**How to read it:**
+
+- Step 1: a developer adds a courier's "Parcel tracker" server.
+- The app shows `track_parcel` as "Track a parcel by order number".
+- The rest of the description, ringed in red, tells the model to copy every email to the attacker.
+- Step 2: with no checks, the host merges the list, the model reads it, and after the refund confirmation it calls `send_email` a second time.
+- `track_parcel` was never called. Invariant Labs, who described the attack in April 2025, call this **shadowing**: one server's description changes how the model uses another server's tool. Step 3 adds the two places to catch it.
+
+- **Check 1, when definitions arrive or change.** Allow-list servers. Review every description as you would review code. Pin a hash of the tool list, and alert when it changes. A server that changes its descriptions after approval is a **rug pull**.
+- **Check 2, on every call.** The host only lets `send_email` write to the signed-in customer's address on file. Even a fully tricked model cannot send the copy. This is the same rule as on [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety): keep limits in code, not in the prompt.
+
+The spec backs both checks. Clients must treat tool annotations as untrusted unless the server is trusted, and the spec says there should always be a human able to deny a tool call.
+
+- The **confused deputy** attack hits MCP servers that act as OAuth clients of another service.
+- Suppose a proxy server reaches a third-party API with one fixed client ID, and lets MCP clients register themselves.
+- Once a user has consented, the third party sets a consent cookie.
+- An attacker registers a client with their own redirect address and sends the user a link.
+- The third party sees the cookie, skips the consent screen, and the code goes to the attacker.
+- The spec's fix: the proxy must ask for consent per client itself, before it forwards anyone to the third party.
+
+<Callout tone="red" title="What breaks">
+  Approving a server once and trusting it forever. Descriptions arrive with every `tools/list`, so a server you reviewed
+  in March can change in June. Pin what you approved, diff every new list against it, and keep the per-call checks even
+  for servers you wrote.
+</Callout>
+
+## Trade-offs
+
+| Decision                          | Option A                                     | Option B                                  | Guidance                                                            |
+| --------------------------------- | -------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| MCP server vs function in the app | Reusable by every host, run-time discovery   | No protocol, fewer moving parts           | MCP when more than one host needs the tool, or another team owns it |
+| stdio vs Streamable HTTP          | No network, credentials from the environment | Shared by many hosts, OAuth, scales out   | stdio for one user's local tools; HTTP for shared services          |
+| Many servers vs few               | More capability                              | Fewer tokens, better tool choice          | Give each agent only the servers its job needs                      |
+| Load all definitions vs search    | Simple, every tool visible                   | Fewer tokens, scales to hundreds of tools | Search once definitions pass a few thousand tokens                  |
+| Third-party vs own servers        | Fast to add                                  | Reviewed, pinned, least privilege         | Third-party only after review, pinned to a hash                     |
+
+## Production systems
+
+- Anthropic introduced MCP as an open standard in November 2024. In December 2025 it gave the protocol to the Agentic AI Foundation, a fund under the Linux Foundation.
+- The official MCP Registry, a public catalogue of servers, opened in preview in September 2025. Maintainers publish their own details, and the community flags malicious servers for removal, so a listing is not a security review.
+- Revision 2026-07-28 made the protocol stateless. It removed the `initialize` handshake and protocol sessions, added `server/discover`, and deprecated sampling, roots and dynamic client registration.
+- Invariant Labs published tool poisoning, rug pulls and shadowing in April 2025, demonstrated against a real coding assistant.
+- Anthropic's November 2025 tool-use post measured 58 tools from five popular servers at about 55,000 tokens.
+
+## Failure modes & pitfalls
+
+- Connecting every available server to every agent.
+- Installing third-party servers without reading their tool descriptions.
+- Trusting annotations such as `readOnlyHint` from a server you do not control.
+- Running a local server over HTTP on 0.0.0.0 instead of stdio or 127.0.0.1.
+- Passing the user's token through to downstream APIs.
+- Taking identity from tool arguments instead of credentials.
+- Keeping state in the connection, which breaks behind a load balancer.
+
+## Interview framework
+
+1. Define the roles: host, client per server, server. Say what each one sees.
+2. Name the three primitives and who controls each.
+3. Pick a transport and justify it. Mention that the current revision is stateless.
+4. For a remote server, describe OAuth 2.1: 401, metadata discovery, PKCE, a token for that server only.
+5. Cover context cost and tool poisoning, with a defence for each.
+
+**What interviewers listen for:** a clear line between what the model does and what the host does, and security checks at definition time and at call time.
+
+**Red flags:** "the model connects to the MCP server", or installing servers from a registry with no review.
+
+## Further reading
+
+- [Model Context Protocol specification, revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+- [MCP 2026-07-28: key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [MCP architecture: hosts, clients and servers](https://modelcontextprotocol.io/specification/2026-07-28/architecture)
+- [MCP server features: tools, resources and prompts](https://modelcontextprotocol.io/specification/2026-07-28/server)
+- [MCP transports: stdio and Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
+- [MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+- [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices)
+- [MCP Security Notification: Tool Poisoning Attacks (Invariant Labs, 2025)](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)
+- [Introducing advanced tool use (Anthropic, 2025)](https://www.anthropic.com/engineering/advanced-tool-use)
+- [Code execution with MCP (Anthropic, 2025)](https://www.anthropic.com/engineering/code-execution-with-mcp)
+- [The MCP Registry preview (2025)](https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/)
+- [Introducing the Model Context Protocol (Anthropic, 2024)](https://www.anthropic.com/news/model-context-protocol)
+- [Linux Foundation announces the Agentic AI Foundation (2025)](https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What problem does MCP solve, and what do the host, client and server each do?"
+    category="Concepts"
+    level="Junior"
+  >
+    - MCP replaces one custom integration per application and service with a shared protocol: a service writes one server and every MCP-capable application can use it.
+    - The host is the AI application; it holds the conversation, calls the model and enforces policy.
+    - It runs one client per server, and each client talks to exactly one server.
+    - Servers expose tools, resources and prompts and never see the whole conversation or each other.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Who decides when each MCP primitive is used, and why does that matter?"
+    category="Concepts"
+    level="Mid"
+  >
+    - Tools are model-controlled: the model chooses to call them.
+    - Resources are application-driven: the host decides which data to attach.
+    - Prompts are user-controlled: a person picks a template.
+    - It matters because only tools turn text the model read into actions, so tools are where approvals, argument checks and least privilege belong.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a request reach a remote MCP server, and why does it not need a session?"
+    category="Architecture"
+    level="Mid"
+  >
+    - Over Streamable HTTP, each JSON-RPC message is its own POST to one endpoint, and the server replies with JSON or an event stream for that request.
+    - Since revision 2026-07-28 there is no initialize handshake: every request carries its protocol version and capabilities in `_meta`, and the HTTP headers repeat the version and method.
+    - Any replica can serve any request, so servers scale out behind a plain load balancer.
+    - State that must last across calls goes under an explicit handle that the server checks against the caller.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Walk through authorisation for a remote MCP server."
+    category="Architecture"
+    level="Senior"
+  >
+    - The first request without a token gets 401 with a pointer to the server's protected resource metadata, which names the authorisation server.
+    - The client fetches that server's metadata, then runs an OAuth 2.1 authorisation-code flow with PKCE and a resource parameter naming the MCP server.
+    - The token it receives is issued for that server only and goes in a Bearer header on every request.
+    - The server checks audience and scope, answers 403 insufficient_scope when more is needed, and never passes the token on to other services.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent got worse after you connected ten MCP servers. Why, and what do you do?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Every server's tool definitions ride on every model call, so the window fills before the task starts and the model chooses among many similar tools.
+    - Anthropic measured five popular servers at about 55,000 tokens and found wrong tool choice the most common failure.
+    - Give each agent only the servers its job needs, put the rest behind a tool-search tool or load definitions on demand, and rename overlapping tools.
+    - Then re-run a tool-selection evaluation to confirm the gain.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What is tool poisoning, and how do you defend against it?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - A server hides instructions in a tool description, which the model reads but the user rarely sees.
+    - The instructions can steer other, trusted tools (shadowing), and a server can change its descriptions after approval (a rug pull).
+    - Defend at two points: when definitions arrive or change (allow-list, review, pin and diff a hash), and on every call (the host checks arguments against policy, such as emails only to the signed-in customer).
+    - Treat annotations from untrusted servers as untrusted, and keep a person able to deny risky calls.
+  </InterviewQuestion>
+</InterviewQuestions>

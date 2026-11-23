@@ -28,7 +28,7 @@ const spec: SequenceSpec = {
       kind: "call",
       step: 3,
     },
-    { from: "lead", to: "guard", label: "Writes blameless COE: why staging missed table lock", kind: "call", step: 3 },
+    { from: "lead", to: "guard", label: "Writes blameless review: why staging missed the lock", kind: "call", step: 3 },
     {
       from: "lead",
       to: "guard",

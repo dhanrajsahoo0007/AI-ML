@@ -21,8 +21,8 @@ const spec: DiagramSpec = {
     { id: "shop", title: "Your shop", tone: "green", x: 590, y: 50, w: 240, h: 400 },
   ],
   nodes: [
-    { id: "payments", label: "Payments", sub: "card approved", icon: "card", tone: "teal", x: 110, y: 120 },
-    { id: "eventlog", label: "Event log", sub: "outbox table", icon: "log", tone: "violet", x: 110, y: 250 },
+    { id: "payments", label: "Payments", sub: "card approved", icon: "card", tone: "teal", x: 110, y: 120, w: 136 },
+    { id: "eventlog", label: "Event log", sub: "outbox table", icon: "log", tone: "violet", x: 110, y: 250, w: 126 },
     {
       id: "queue",
       label: "Delivery queue",
@@ -31,9 +31,9 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 305,
       y: 120,
-      w: 140,
+      w: 156,
     },
-    { id: "senders", label: "Senders", sub: "sign and POST", icon: "workers", tone: "orange", x: 480, y: 120 },
+    { id: "senders", label: "Senders", sub: "sign and POST", icon: "workers", tone: "orange", x: 480, y: 120, w: 138 },
     {
       id: "retry",
       label: "Retry timer",
@@ -42,7 +42,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 480,
       y: 250,
-      w: 124,
+      w: 134,
       step: 2,
     },
     {
@@ -53,7 +53,7 @@ const spec: DiagramSpec = {
       tone: "red",
       x: 480,
       y: 380,
-      w: 126,
+      w: 136,
       step: 2,
     },
     {
@@ -75,7 +75,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 710,
       y: 250,
-      w: 124,
+      w: 142,
     },
     {
       id: "worker",
@@ -85,7 +85,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 710,
       y: 380,
-      w: 126,
+      w: 144,
     },
   ],
   edges: [

@@ -1,93 +1,250 @@
 ---
 title: "Unique ID Generation"
 description: "Generating unique, scalable identifiers: auto-increment, UUIDs, Snowflake-style IDs, ticket servers and base62 short codes."
+icon: fingerprint
+updated: 2026-11-16
 ---
 
-Almost every design needs IDs for rows, messages, orders or short links. At scale, a single auto-increment column stops working.
+Almost every design needs IDs for rows, messages, orders or short links. At scale, a single auto-increment column stops working: one database becomes the bottleneck for every insert.
 
-## TL;DR
+- Interviewers ask about ID generation to see whether you can name the properties you need (unique, sortable, short, unguessable) and say who coordinates, how often, and what happens when a clock or a node id is wrong.
+
+## Overview
 
 - Requirements: **unique**, often **roughly time-sortable**, generated **without a central bottleneck**.
-- **UUID v4:** no coordination, but 128 bits and random (poor index locality).
+- **UUID v4:** no coordination, but 128 bits and random (poor index locality). **UUIDv7** puts a millisecond timestamp first and fixes the locality.
 - **Snowflake-style:** timestamp + machine id + sequence in 64 bits; sortable and fast.
 - **Ticket server / ranges:** a counter hands out blocks of IDs to app servers.
 - For short URLs, encode a counter in **base62** or use hashing with collision checks.
 
-## The idea in plain English
+## Mental model
 
-Give each cashier their own ticket roll with a unique prefix and a time stamp. Nobody has to ask a central desk for each number, and tickets still sort roughly by time.
+- Give each cashier their own ticket roll with a unique prefix and a time stamp.
+- Nobody has to ask a central desk for each number, and tickets still sort roughly by time.
+- The prefix is the **node id**, the stamp is the **timestamp**, and the number on the roll is the **sequence**.
+- Two cashiers handed the same prefix, or a stamp that runs backwards, print duplicate tickets: the two ways the scheme breaks.
 
 ## Core concepts
 
-1. **Auto-increment.** Simple and ordered, but single-writer and exposes volume.
-2. **UUID / ULID.** Collision-free by randomness; ULID and UUIDv7 add a time prefix for sortability.
-3. **Snowflake layout.** 41 bits time (ms), 10 bits machine id, 12 bits sequence: about 4096 IDs per ms per machine.
-4. **Machine id assignment.** Via a coordination service or config; two machines with the same id break uniqueness.
-5. **Range allocation.** Each server fetches a block (for example 1000 IDs) from a counter and serves from memory.
-6. **Base62 encoding.** Digits plus letters to shorten numeric IDs for URLs.
+- The running example is Brightpost's order service: **300 orders/s** at the sale peak, **200,000 orders/day**, **40 app servers**, and **1,000,000 products** that need short links.
+
+### Four ways to make an id
+
+- **Auto-increment.** Simple and ordered, but single-writer and exposes volume.
+- **UUID / ULID.** Collision-free by randomness; ULID and UUIDv7 add a time prefix for sortability.
+- **Snowflake layout.** 41 bits time (ms), 10 bits machine id, 12 bits sequence: about 4096 IDs per ms per machine.
+- **Range allocation.** Each server fetches a block (for example 1000 IDs) from a counter and serves from memory.
+
+The four schemes, compared on the same questions.
+
+<AnimatedDiagram spec="animated/patterns/id-options" caption="Each scheme pays for uniqueness somewhere: a single writer, 128 random bits, a trusted clock, or gaps." />
+
+**How to read it:**
+
+- Each green column is one scheme; the red row is what breaks it.
+- Only UUID needs no coordination at all; Snowflake coordinates once per server start, ranges once per block, auto-increment on every insert.
+- Three of the four fit a 64-bit integer (`bigint`); a UUID needs 128 bits.
+
+**The numbers:**
+
+- UUIDv4: 122 random bits plus 6 bits of version and variant = 128.
+- UUIDv7: a 48-bit Unix millisecond timestamp, then 74 random bits; the timestamp lasts until the year 10889.
+- Ranges of 1,000: one call to the counter per 1,000 ids, so 300 orders/s costs 0.3 counter calls a second.
+
+<PremiumBreak />
+
+### Why random ids hurt an index
+
+- A **B-tree** index keeps keys in order, so a random key lands on a random page.
+- Random inserts split pages all over the tree and keep cold pages in memory; time-ordered ids append near the right-hand edge.
+- RFC 9562 says non-time-ordered versions such as UUIDv4 have poor database-index locality, and recommends storing UUIDs as 128-bit binary, not text.
+
+### Machine id assignment
+
+- Assign machine ids via a coordination service or config; two machines with the same id break uniqueness.
+- Twitter's original Snowflake server claimed its worker id as an ephemeral ZooKeeper node at start-up, and failed to start if the node was still held after three tries.
+- An **ephemeral node** or a **lease** frees the id when the server dies, so the id can be reused only after the old holder is gone (see [Leader Election and Consensus](/system-design/patterns/leader-election)).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph ID["64-bit Snowflake ID"]
-        T["timestamp (41 bits)"] --- M["machine id (10 bits)"] --- S["sequence (12 bits)"]
-    end
-    APP["App server"] --> ID
-    COORD[("Coordination service")] -. "assign machine id" .-> APP
-```
+A Snowflake id built one field at a time, with where each field comes from.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/id-snowflake-bits" stepper caption="Time in the high bits makes ids sort by when they were made; the node id and the sequence keep two ids from the same millisecond apart." />
 
-### Clock problems
+<StepCards>
+  <StepCard n={1} title="41 bits of time">
+    The top bit stays 0 so the id is a positive signed 64-bit number. The next 41 bits hold milliseconds since a custom epoch, read from the server's clock: 2⁴¹ ms is about 69.7 years.
+  </StepCard>
+  <StepCard n={2} title="10 bits of node id">
+    Each generator claims a node id once at start-up, from config or a coordination service. Ten bits allow 1,024 generators, and no two may share one.
+  </StepCard>
+  <StepCard n={3} title="12 bits of sequence">
+    A counter in memory numbers the ids made in the same millisecond and goes back to 0 when the millisecond changes. Twelve bits allow 4,096 ids per millisecond per node; the 4,097th waits for the next millisecond.
+  </StepCard>
+  <StepCard n={4} title="One order id taken apart">
+    A sale-day order at 12:00 on app server 17, the fourth id that millisecond, becomes 119,769,189,580,869,635. Shifting it right by 22 bits gives back the milliseconds since the epoch.
+  </StepCard>
+</StepCards>
 
-Snowflake depends on a monotonic clock. If the clock moves backwards, wait or refuse to issue IDs until it catches up, and use NTP slewing rather than jumps.
+## Technical mechanics
 
-### Counter vs hash for short links
+### Generating a Snowflake id
 
-A counter guarantees uniqueness but is predictable and needs coordination. A hash of the URL is stateless but needs collision handling. Many systems use range-allocated counters with base62.
+- Shift and join: `id = (ms << 22) | (node << 12) | seq`; no network call, no lock beyond the process.
+- If two requests read the same millisecond, the sequence increments; if it wraps past 4,095, the generator spins until the next millisecond.
+- Ids are **k-sorted**: ordered by time across nodes only to within the clock skew between them, not strictly.
+- Reading the time back out is one shift: `ms = id >> 22`, which lets you paginate "since this id" without loading the rows.
+
+### Clocks going backwards
+
+- Snowflake depends on a monotonic clock. If the clock moves backwards, wait or refuse to issue IDs until it catches up.
+- Use NTP slewing rather than jumps, so a correction slows the clock instead of stepping it back.
+- Skew, slewing and ordering across machines are covered in [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks).
+
+### Ticket servers and ranges
+
+- Flickr's ticket server is a MySQL table, `Tickets64`, with one row; `REPLACE INTO` bumps the auto-increment and `LAST_INSERT_ID()` returns it.
+- Two ticket servers avoid a single point of failure: one hands out odd numbers, the other even (`auto-increment-increment = 2`, offsets 1 and 2).
+- The two sides drift apart, so ids are unique but not in strict order across servers.
+- Fetching a block of 1,000 at a time cuts the calls by 1,000 ×; a crash wastes the rest of the block as a gap.
+
+### Short codes: counter, base62 or hash
+
+- A counter guarantees uniqueness but is predictable and needs coordination. A hash of the URL is stateless but needs collision handling.
+- Many systems use range-allocated counters with base62.
+- **Base62** writes a number in the digits 0–9, a–z and A–Z, so each character carries 62 values instead of 10.
+
+Base62 applied to Brightpost's short product links.
+
+<AnimatedDiagram spec="animated/patterns/id-base62" caption="Seven base62 characters hold about 3.5 trillion codes; a 64-bit Snowflake id needs up to eleven." />
+
+**How to read it:**
+
+- Left: divide by 62 until nothing is left; the remainders, read upwards, are the code.
+- Right: each extra character multiplies the codes by 62.
+
+**The numbers:**
+
+- Product 1,000,000 becomes `4c92`; four characters hold 62⁴ = 14,776,336 codes, enough for the catalogue 14 times over.
+- 62⁷ = 3,521,614,606,208, about 3.5 trillion: 48,000 years of orders at 200,000 a day.
+- A 64-bit id needs up to 11 characters (62¹⁰ ≈ 8.4 × 10¹⁷ is less than 2⁶³ ≈ 9.2 × 10¹⁸), so a short link wants a counter, not a Snowflake id.
+
+<Callout tone="red" title="What breaks">
+  - A counter in base62 is guessable: `4c92` tells anyone that `4c93` exists. Shuffle the counter with a reversible mixing function, or add random characters, where links must not be enumerable.
+</Callout>
+
+### Worked example: order ids at the 300 orders/s sale peak
+
+Follow the four steps of the Architecture figure for one sale-day order.
+
+1. The order service reads its clock: 27 November 2026 at 12:00:00.000 UTC (illustrative) is 28,555,200,000 ms after Brightpost's epoch of 1 January 2026.
+2. App server 17 claimed node id 17 at start-up; the 40 app servers use 40 of the 1,024 node ids.
+3. This is the fourth order on server 17 in that millisecond, so the sequence is 3.
+4. The service joins the fields: `(28,555,200,000 << 22) | (17 << 12) | 3` = 119,769,189,580,869,635, stored as a `bigint`.
+
+**The numbers:**
+
+- Load: 300 orders/s ÷ 40 servers = 7.5 orders a second per server, against a ceiling of 4,096 per millisecond (4,096,000 a second).
+- One node alone could serve 4,096,000 ÷ 300 = 13,653 × the whole sale peak.
+- Lifetime: 69.7 years from a 2026 epoch, so the time bits run out in 2095.
+- Index size: 200,000 orders a day × 365 = 73,000,000 keys a year; 8 bytes each is 584 MB of key data, against 1,168 MB for 16-byte UUIDs.
+- In base62 the id is `8QxJKjktsT`, 10 characters: short enough for an order reference in an email.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Auto-increment | Simple, compact | Bottleneck, guessable |
-| UUID v4 | No coordination | Large, random index writes |
-| Snowflake | Sortable, fast | Needs machine ids and good clocks |
-| Ranges | Fast, simple | Gaps, counter is a dependency |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Auto-increment | Simple, compact, ordered | Bottleneck, guessable | One database, internal ids |
+| UUID v4 | No coordination | Large, random index writes | Ids made offline or on clients |
+| UUID v7 | No coordination, time-ordered | 128 bits | A UUID column that is also a primary key |
+| Snowflake | Sortable, fast, 64 bits | Needs machine ids and good clocks | High write rates that need time order |
+| Ranges | Fast, simple | Gaps, counter is a dependency | Dense numeric ids, short-link counters |
+| Hash for short links | Stateless | Collisions to check | Same URL should get the same code |
 
-## Real-world examples
+## Production systems
 
-- Short codes: [URL Shortener](/system-design/case-studies/url-shortener).
-- Message ids ordered per chat: [WhatsApp](/system-design/case-studies/whatsapp), [Facebook Messenger](/system-design/case-studies/facebook-messenger).
-- Tweet and post ids with time order: [Twitter](/system-design/case-studies/twitter), [Instagram](/system-design/case-studies/instagram).
-- Order and booking ids: [Uber Eats](/system-design/case-studies/uber-eats), [Hotel Booking](/system-design/case-studies/hotel-booking).
+- **Twitter Snowflake** (2010): 41 bits of millisecond time with a custom epoch ("69 years"), a 10-bit machine id (1,024 machines), a 12-bit sequence; at least 10,000 ids per second per process, k-sorted within a promised 1 s. The original release is retired, as of November 2026.
+- **Instagram** (2012): 41 bits of millisecond time, a 13-bit logical shard id and a 10-bit sequence (`nextval` modulo 1,024), made by a PL/pgSQL function inside each PostgreSQL shard, with no separate service.
+- **Flickr ticket servers** (2010): two MySQL servers handing out odd and even ids; Flickr chose them over GUIDs because GUIDs "are big, and they index badly in MySQL".
+- **MongoDB ObjectId**: 12 bytes: a 4-byte timestamp in seconds, a 5-byte random value per process, and a 3-byte counter that starts at a random value.
+- **RFC 9562** (May 2024) replaces RFC 4122, defines UUIDv7, and says implementations should use v7 instead of v1 and v6 where possible.
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Duplicate machine ids after a redeploy.
-- Trusting wall-clock time across machines for strict ordering.
-- Exposing sequential ids that leak business volume or allow enumeration.
-- Using random UUIDs as a clustered primary key on a write-heavy table.
+- **Duplicate machine ids after a redeploy.** Two nodes make identical ids in the same millisecond. Claim ids through a lease or an ephemeral node, never from a hand-edited config alone.
+- **Trusting wall-clock time across machines for strict ordering.** Snowflake ids are only k-sorted. Use a per-chat sequence or a logical clock where order must be exact.
+- **Exposing sequential ids** that leak business volume or allow enumeration. Show a random or shuffled public id and keep the sequential one internal.
+- **Using random UUIDs as a clustered primary key on a write-heavy table.** Page splits and cache misses grow with the table. Use UUIDv7 or a 64-bit time-ordered id.
+- **A clock stepped backwards.** The generator would reissue old timestamps. Refuse to issue until the clock passes the last one, and slew rather than step.
+- **Running out of time bits.** A 41-bit timestamp counted from the Unix epoch of 1970 runs out in 2039. Pick a custom epoch near launch.
 
-## How to answer in an interview
+## Interview framework
 
-State the requirements (sortable? short? unguessable?), pick a scheme, and explain machine-id assignment and clock handling.
+1. State the requirements: sortable? short? unguessable? how many ids a second, at peak?
+2. Pick a scheme and say its size: 64-bit Snowflake or ranges, or 128-bit UUIDv7.
+3. Explain machine-id assignment: who hands out node ids, and what stops two nodes sharing one.
+4. Explain clock handling: what the generator does when the clock moves backwards.
+5. Do the capacity arithmetic: ids per millisecond per node, nodes, and years of time bits.
 
-## Related patterns
+**What interviewers listen for:** the 41 + 10 + 12 split with its limits computed, and a node-id assignment that cannot hand out the same id twice.
 
-[Sharding](/system-design/patterns/sharding) · [Idempotency](/system-design/patterns/idempotency) · [Leader Election and Consensus](/system-design/patterns/leader-election)
+**Red flags:** "UUIDs, done" for a high-write clustered key, or a single auto-increment database for a global service.
 
 ## Further reading
 
 - [Announcing Snowflake (Twitter Engineering)](https://blog.x.com/engineering/en_us/a/2010/announcing-snowflake)
+- [Snowflake README and source, snowflake-2010 tag (GitHub)](https://github.com/twitter-archive/snowflake/tree/snowflake-2010)
 - [RFC 9562: UUIDs (including v7)](https://www.rfc-editor.org/rfc/rfc9562)
+- [Ticket servers: distributed unique primary keys on the cheap (Flickr)](https://code.flickr.net/2010/02/08/ticket-servers-distributed-unique-primary-keys-on-the-cheap/)
+- [ObjectId (MongoDB manual)](https://www.mongodb.com/docs/manual/reference/method/ObjectId/)
+- Related pages: [Sharding and Partitioning](/system-design/patterns/sharding) · [Idempotency](/system-design/patterns/idempotency) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) · [B-Trees](/system-design/databases/b-trees)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you generate unique IDs across many servers?" category="Design" level="Mid">
-    Use a Snowflake-style ID combining a timestamp, a machine id and a per-millisecond sequence, or allocate ID ranges from a central counter, or use UUIDs when ordering does not matter.
+  <InterviewQuestion question="How do you generate unique IDs across many servers?" category="Architecture" level="Mid">
+    - Use a Snowflake-style ID combining a timestamp, a machine id and a per-millisecond sequence.
+    - Or allocate ID ranges from a central counter, so each server calls it once per block.
+    - Or use UUIDs when ordering does not matter (UUIDv7 when it does).
+    - Whichever you pick, say who assigns machine ids and what happens when a clock moves backwards.
   </InterviewQuestion>
   <InterviewQuestion question="Why can UUIDv4 hurt database performance?" category="Trade-offs" level="Mid">
-    Random values insert at random places in a B-tree index, causing page splits and poor cache locality; time-ordered IDs append near the end.
+    - Random values insert at random places in a B-tree index, causing page splits and poor cache locality.
+    - Time-ordered IDs append near the end, so the hot pages stay in memory.
+    - A UUID is also 16 bytes against 8 for a `bigint`, so every index that carries the key grows.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do the three parts of a 64-bit Snowflake id give you?" category="Concepts" level="Junior">
+    - 41 bits of milliseconds since a custom epoch: about 69.7 years of ids, sorted by time.
+    - 10 bits of node id: up to 1,024 generators with no coordination per id.
+    - 12 bits of sequence: up to 4,096 ids per millisecond on each node.
+    - The leftover top bit stays 0, so the id is a positive signed 64-bit integer.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why should a public order number not be a sequential id?" category="Trade-offs" level="Junior">
+    - Two orders a day apart tell a competitor how many orders you took in between.
+    - Anyone can guess the next number and try to fetch other people's orders.
+    - Keep the sequential id internal and show a random or shuffled public reference.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you generate seven-character short codes for a URL shortener?" category="Architecture" level="Mid">
+    - Seven base62 characters hold 62⁷ ≈ 3.5 trillion codes.
+    - Give each server a range of counter values and encode each value in base62: no collisions and no per-link coordination.
+    - A hash of the URL needs no counter but must check for collisions and retry.
+    - Shuffle the counter if codes must not be guessable.
+  </InterviewQuestion>
+  <InterviewQuestion question="An NTP correction steps the clock on a Snowflake node back by 5 ms. What happens, and what do you do?" category="Failure modes" level="Senior">
+    - The node would reuse timestamps it has already issued, and with the same node id and sequence it could repeat ids.
+    - The generator compares with the last timestamp it used and refuses to issue (or waits) until the clock passes it.
+    - Run NTP so it slews the clock instead of stepping it, and alert on refusals.
+    - A long jump means the node should leave the pool rather than block callers.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two app servers start with the same node id. How do you prevent it?" category="Failure modes" level="Senior">
+    - Claim the id at start-up as an ephemeral node or a lease in a coordination service, and fail to start if it is taken.
+    - Renew the lease, and stop issuing ids if renewal fails, so a paused server cannot keep using an id that was handed on.
+    - Wait at least the lease time before reusing a released id.
+    - Never rely on a hand-edited config file alone across redeploys.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost needs order ids for a 300 orders/s sale peak that sort by time and fit a bigint. Which scheme, and how much headroom is there?" category="Scaling" level="Senior">
+    - Snowflake: 41 bits of time, 10 of node id, 12 of sequence, generated in each of the 40 app servers.
+    - Per server: 300 ÷ 40 = 7.5 orders a second, against 4,096 ids per millisecond.
+    - The fleet uses 40 of 1,024 node ids, and a 2026 epoch lasts until 2095.
+    - The risks are not capacity but duplicate node ids and clocks moving backwards.
   </InterviewQuestion>
 </InterviewQuestions>

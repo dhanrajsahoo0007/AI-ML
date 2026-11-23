@@ -113,10 +113,12 @@ function List({
 }) {
   if (items.length === 0) return <div className="hidden sm:block" />;
   const tone = kind === "good" ? "var(--dg-green)" : kind === "bad" ? "var(--dg-red)" : "var(--dg-orange)";
+  const text =
+    kind === "good" ? "var(--dg-green-text)" : kind === "bad" ? "var(--dg-red-text)" : "var(--dg-orange-text)";
   const Icon = kind === "good" ? Check : kind === "bad" ? X : AlertTriangle;
   return (
     <div className={first ? "border-b border-hairline p-4 sm:border-b-0 sm:border-r sm:p-5" : "p-4 sm:p-5"}>
-      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: tone }}>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: text }}>
         {title}
       </div>
       <div className="mt-2.5 space-y-2">

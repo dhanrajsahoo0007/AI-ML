@@ -1,0 +1,14 @@
+title: "Dispatch: claim a courier, offer, time out, try the next"
+alt: >-
+  A sequence diagram in three steps with five lanes: a teal dispatch service, a violet location store, orange couriers
+  A and B, and a violet orders database. Step 1: dispatch asks the location store for free couriers within 3 km of the
+  restaurant and gets A at 1.1 km and B at 1.8 km; it claims A with SET NX and a 30 second expiry and offers order 7,
+  drawn red because A does not answer in 30 seconds; the claim on A expires, dispatch claims B, B accepts, and a
+  conditional update in the orders database sets courier B only where no courier is set, changing one row. Step 2:
+  another worker tries to claim B for order 9, gets nil because B is taken, and claims C instead. Step 3: A accepts
+  order 7 at 34 seconds; the same conditional update changes 0 rows, so A is told the offer expired.
+caption: >-
+  A short claim stops two orders taking one courier; the conditional update in the orders DB decides who really got the order.
+tags: [case-studies, uber-eats, dispatch, concurrency]
+source: original
+created: 2026-11-17

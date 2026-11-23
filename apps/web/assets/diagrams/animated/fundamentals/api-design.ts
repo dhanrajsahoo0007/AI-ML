@@ -26,7 +26,7 @@ const spec: DiagramSpec = {
   ],
   nodes: [
     { id: "app", label: "Phone app", sub: "app v2.3", icon: "phone", x: 100, y: 120, w: 140 },
-    { id: "partner", label: "Partner script", sub: "nightly sync", icon: "robot", x: 100, y: 240, w: 140 },
+    { id: "partner", label: "Partner script", sub: "nightly sync", icon: "robot", x: 100, y: 240, w: 148 },
     {
       id: "gateway",
       label: "API gateway",
@@ -60,7 +60,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 780,
       y: 120,
-      w: 170,
+      w: 180,
     },
     { id: "db", label: "Orders DB", sub: "orders table", icon: "database", tone: "violet", x: 780, y: 240, w: 170 },
   ],

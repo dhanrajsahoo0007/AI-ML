@@ -1,0 +1,182 @@
+---
+title: Data Sources & Connectors
+description: Patterns and trade-offs for integrating structured, unstructured, and streaming data into ML and analytics systems.
+---
+
+A connector sits between a source system and your pipeline to authenticate, fetch changes within rate limits, and emit one clean document.
+
+- Because every RAG index and feature pipeline is only as fresh and accurate as its connectors, this guide covers what they must do and how they fail.
+
+## Overview
+
+- Production systems read from many sources at once: **operational databases, object stores of documents, event streams, SaaS APIs and ad hoc files**. Connectors are the boundary between them and your pipelines.
+- The hard part is not reading once but **staying in sync** with acceptable lag, cost and correctness.
+- Three ways to learn about changes: **change data capture** (CDC) from a database log, **webhooks** pushed by the source, and **polling** with a saved cursor.
+- Every connector has five duties: **auth, incremental sync, rate limits, deletes and permissions**. Missing deletes and permissions are the two that cause incidents.
+- Output **one normalised document format**, and land raw payloads so you can replay. Buy connectors for common sources, build them for proprietary or tightly secured ones.
+
+## Mental model
+
+- **Full re-read vs. incremental:** Imagine a newspaper clipping service that could either re-read every newspaper ever printed each morning or simply ask each paper, "What did you print since yesterday?"
+- **The cursor requirement:** Asking only for new pages is far cheaper, but it only works if each paper keeps a reliable list of new pages.
+- **The retraction blind spot:** Incremental lists never tell you which old stories were retracted.
+- **The connector's role:** A connector is that clipping service for your data—it decides how to ask each source what changed, and it must find out about retractions (deletes) some other way.
+
+## Core concepts
+
+- The running example is Brightpost's help assistant, whose knowledge comes from four sources: the help-centre CMS (**1,200 articles**), a ticketing system with solved tickets, an internal wiki with support runbooks, and a shared drive of PDFs and slides.
+
+### Sources and what they give you
+
+- **Diverse inputs:** Production ML systems rarely sit on a single tidy table; they ingest operational databases, object stores full of documents, event streams, SaaS APIs, and ad hoc files.
+- **Structured data:** Usually arrives with explicit schemas ready for validation.
+- **Unstructured data:** Formats such as PDFs, HTML, images, and chat logs require parsing, normalisation, and often enrichment before they are model-ready ([Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking) covers that step).
+
+### Three ways to learn about changes
+
+- **Change data capture (CDC)** reads a relational database's transaction log. It minimises load on the primary database and captures inserts, updates **and deletes** in order, which matters when downstream features depend on temporal consistency.
+- **Webhooks** (push subscriptions) let the source call you when something changes. They cut latency but need a durable endpoint, signature verification, and replay handling when delivery fails.
+- **Scheduled polling** is for APIs and legacy systems that only expose pull. It is simpler to reason about but costs more, and it can miss rapid changes between polls unless you track high watermarks carefully.
+
+### Incremental sync with a cursor
+
+- **Cursor definition:** A **cursor** (or high watermark) is the last position a connector has read—usually the largest `updated_at` value it saw, or an opaque token returned by the API.
+- **Incremental fetch:** The next run asks only for records past the cursor and then saves the new watermark, dramatically cutting work for the help centre:
+
+<AnimatedDiagram
+  spec="animated/rag/connectors-incremental"
+  stepper
+  caption="A cursor cuts a week's work from 8,400 fetches to 12, but it only sees rows that still exist; deletes need their own path."
+/>
+
+**How to read it:**
+
+- **Step 1 (Full sync):** Re-reads all 1,200 articles every night.
+- **Step 2 (Incremental sync):** Runs every night too, but each run fetches only what changed since the previous run's cursor (the dashed ticks); across the week that is the 12 changed articles.
+- **Step 3 (The delete gap):** An article deleted in the CMS is no longer there to be listed as changed.
+
+**The numbers:**
+
+- **Full sync:** 7 nights × 1,200 = **8,400 fetches** a week.
+- **Incremental:** **12 fetches** (1% of the articles changed this week; the nightly schedule is illustrative).
+
+<Callout tone="red" title="What breaks">
+  Cursor-based sync never sees a hard delete, so the deleted article's 3 chunks stay in the index and keep being cited.
+  Two more traps: two records with the same `updated_at` across a page boundary (compare with "greater than or equal"
+  and de-duplicate by id), and a source whose clock or `updated_at` is not updated by every kind of edit. Fix deletes
+  with delete events or tombstones from the source, or by listing all ids periodically and diffing against the index.
+</Callout>
+
+### Schema evolution
+
+- **Additive vs. breaking changes:** Schema evolution is a first-class concern; additive columns are easy, whereas renames, type changes, and nested structure drift break naive consumers.
+- **Contract safeguards:** Version your data contracts, run compatibility checks in CI, and keep transformation layers that tolerate several schema generations during a rollout.
+- **Document schemas:** For document sources, the "schema" is the API's JSON shape and the HTML template—a CMS redesign can break a parser as surely as a renamed column.
+
+## Architecture
+
+Each source gets its own connector, and every connector does the same five jobs around one fetch loop.
+
+<AnimatedDiagram
+  spec="animated/rag/connectors"
+  stepper
+  caption="Every source speaks its own API; the connector absorbs the differences so ingestion sees one document format with permissions and deletes already attached."
+/>
+
+**How to read it:**
+
+- **Step 1 (Sources):** Four sources with four different APIs feed one fetch loop.
+- **Steps 2–6 (Connector duties):** Each step adds a duty: a scoped, read-only credential; changes since the saved cursor; back-off when the API answers HTTP 429 (Too Many Requests); deletions recorded as tombstones; and each document's access-control list.
+- **Step 7 (Output contract):** Emits one normalised document (`id`, `source`, `URL`, `title`, `text`, `updated time`, `ACL`, `deleted flag`) that the ingestion pipeline parses, chunks, embeds, and indexes.
+
+The connector is the first stage of the [RAG pipeline](/ai-system-design/genai-system-design/rag-fundamentals): everything after it inherits a missed delete or a missing ACL, all the way to the answer.
+
+## Technical mechanics
+
+### Rate limits, retries and idempotency
+
+- **Handling HTTP 429:** SaaS APIs cap requests per minute and return HTTP 429 when you exceed the cap, often with a `Retry-After` header.
+- **Backoff and queuing:** Back off with jitter, keep a request budget per source and per tenant, and run work through a durable queue or workflow engine so a retry repeats a single step instead of the whole sync.
+- **Idempotent writes:** Upsert by document id and version so fetching the same page twice changes nothing.
+- **Backfill math:** A first backfill is where limits bite—at an illustrative 100 requests a minute, fetching 1,200 articles one by one takes about 12 minutes, while a 50,000-ticket history takes over 8 hours.
+
+### Deletes and permissions
+
+- **Propagating deletes:** Deletes and permissions are the two duties a "fetch new content" connector forgets; a delete must reach the index as a tombstone, or the chunk lives on (see [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates)).
+- **Syncing permissions:** Permissions must be captured with the content and synced on their own schedule because an ACL change does not always touch `updated_at`.
+- **Security impact:** Brightpost's runbook is only safe if the wiki connector copies its "support staff only" ACL onto every chunk; [Access Control & Multi-Tenancy](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy) shows what happens in the gap.
+
+### Landing raw data
+
+- **Lake vs. warehouse pattern:** Teams often land raw data in a data lake for flexibility and keep a warehouse or curated marts for query performance and governance.
+- **RAG raw storage:** Store each raw payload (the API's JSON, the original PDF) before parsing, keyed by source, id, and version.
+- **Fast replay:** When the parser or chunker improves, you rebuild from the lake instead of re-crawling every source within its rate limits, keeping raw payloads only as long as your retention policy allows.
+
+### Watching connectors
+
+- **Silent failures:** Connectors fail quietly—an expired token or a changed API does not break the answer, it only stops new content from arriving.
+- **Key metrics per source:** Track the age of the cursor (now minus the newest change read), records fetched per run against their usual range, the rate of 429 and 5xx responses, and the gap between the source's id count and the index's (1,200 articles in the CMS should mean 1,200 documents in the index).
+- **Primary alert:** Alert on the cursor age first, as it is the one number that catches every kind of stall.
+
+## Trade-offs
+
+| Decision         | Option A                   | Option B              | Guidance                                                                                           |
+| ---------------- | -------------------------- | --------------------- | -------------------------------------------------------------------------------------------------- |
+| Change detection | CDC or webhooks            | Polling with a cursor | Push where the source supports it; poll with a cursor otherwise, and reconcile periodically        |
+| Sync scope       | Incremental                | Full                  | Incremental for every run; a periodic full id listing to catch deletes and drift                   |
+| Buy vs build     | Managed connector platform | Custom connector      | Buy for common SaaS sources; build for proprietary protocols, strict cost or tight security models |
+| Raw landing      | Keep raw payloads          | Parse and discard     | Keep them: replays are cheaper than re-crawls                                                      |
+
+- **Managed connector platforms:** Frameworks such as Airbyte and Fivetran shorten time to value with prebuilt sources, scheduling, and monitoring.
+- **Custom connectors:** Win when you need proprietary protocols, aggressive cost control, or tight coupling to internal security models.
+- **Operational burden vs. control:** Frameworks reduce engineering toil but can hide failure modes, lock in certain semantics, and charge per row or per connector in ways that do not scale for very high-cardinality streams.
+
+## Production systems
+
+- **Airbyte's** incremental sync filters on a cursor field such as `updated_at`, roughly "rows where the cursor is at least the last value seen", and points to log-based CDC for the cases a cursor cannot handle.
+- **Debezium** connectors read a database's transaction log (the MySQL binlog, the PostgreSQL logical replication stream) and publish each change, deletes included, to Kafka.
+- **Enterprise search and RAG products** (Azure AI Search indexers, Microsoft Graph connectors) sync content and permission metadata from sources such as SharePoint, and show results only to users the synced permissions allow.
+
+## Failure modes & pitfalls
+
+- Treating the first full load as the design and bolting on incremental sync later.
+- Cursor sync with no delete path, so removed documents keep being retrieved.
+- Dropping the source's permissions at the connector.
+- No raw landing, so every parser fix means re-crawling every source.
+- Retries that are not idempotent and create duplicate documents.
+
+## Interview framework
+
+1. List the sources and, for each, how it can report changes (log, webhook, pull-only API).
+2. Describe the connector duties: auth, cursor-based incremental sync, rate limits, deletes, permissions.
+3. Define the normalised document and where raw payloads land.
+4. Say how you detect a broken connector: lag per source, error rate, and a periodic reconciliation of ids.
+5. Give a buy-versus-build call with a reason.
+
+**What interviewers listen for:** deletes and permissions mentioned without prompting, and a cursor that survives restarts.
+
+**Red flags:** "we re-crawl everything nightly" with no cost estimate, or no answer for deleted data.
+
+## Further reading
+
+- [Incremental sync, append (Airbyte docs)](https://docs.airbyte.com/platform/using-airbyte/core-concepts/sync-modes/incremental-append)
+- [Debezium architecture](https://debezium.io/documentation/reference/stable/architecture.html)
+- [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) and [Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you prefer CDC over nightly batch extracts from an OLTP database?" category="Architecture">
+    - **When CDC wins:** Prefer CDC when you need fresher features or analytics with lower load on the production database, when deletes matter for correctness, or when row-level ordering is important for downstream deduplication.
+    - **When nightly batch fits:** Nightly batches are simpler and cheaper for low-freshness requirements and small tables.
+    - **Batch drawbacks:** Large batch scans stress the primary database and miss intraday changes unless you add incremental cursor logic anyway.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you integrate a SaaS API that rate-limits aggressively and returns paginated JSON?" category="Integration">
+    - **Durable execution and cursors:** Run fetches through a durable queue or workflow engine so retries are idempotent, and persist cursors or `updated_at` watermarks per object type.
+    - **Rate-limit handling:** Back off with jitter on HTTP 429 responses and shard work across workers while respecting per-tenant budgets.
+    - **Staging and raw retention:** Normalize responses into a staging schema, validate against a data contract, and log raw payloads briefly for forensic replay within your retention policy.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main trade-offs between buying a connector platform and building custom ingestion?" category="Trade-offs">
+    - **Managed platform pros:** Purchased platforms cut engineering time, ship built-in monitoring and prebuilt sources, and centralize connector maintenance.
+    - **Custom build pros:** Custom connectors optimize for proprietary formats, strict latency or cost targets, and tight security constraints such as air-gapped deployments.
+    - **Core trade-off:** Platforms risk opaque failure handling, volume-based pricing spikes, and limited backpressure control, whereas custom code trades faster feature iteration for ongoing maintenance whenever an upstream API changes.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,11 +1,325 @@
 ---
 title: "Managed NoSQL: Partition Keys, Capacity Units and Global Tables"
-description: "How to choose a partition key, how request-based capacity is counted, and what copying a table to several regions gives you."
-status: outline
+description: "How to pick a partition key from your reads, why one hot key throttles a whole table, what capacity modes cost, and what a second region adds."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the managed NoSQL shapes as the cloud sells them: you pick a partition key, you pay in request units, and you can replicate a table to several regions. The page teaches the partition-key skill and the capacity-unit maths, and links out for data-model theory.
+<KeyIdea>
+  A managed NoSQL table spreads your data over many machines by one field you choose, and that choice decides its speed, its cost and how it fails.
+</KeyIdea>
 
-**Related reading on this site:** [Key-Value & In-Memory](/system-design/databases/key-value-stores) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Databases on AWS](/cloud/aws/databases)
+## The story
+
+Brightpost's spring sale starts at 9:00. Asha has added a live counter to the sale banner: "1,240 posters sold, 300 people looking now". The counter is one item in a NoSQL table, stored under the key `sale-42`. Every page view and every basket add adds 1 to it. At 9:00 about 2,000 shoppers arrive, and by 9:01 the counter takes about 400 writes a second. The table is set for 1,000 writes a second, so Asha expects no trouble. Instead, about 150 writes a second are refused. Adding to the basket waits for the counter write, so from 9:01 to 9:19 about 1 in 3 basket adds shows an error. At 9:19 Asha switches the counter off. About 160 orders are lost.
+
+The table had room to spare. All of it sat on the wrong machines. The steps below show why, and how to design keys so it cannot happen again.
+
+## How it works
+
+Four words first. A **NoSQL table** here is a managed store of **items**, each a bundle of named fields, found by its key; the provider runs every machine. A <Term id="partition">partition</Term> is one slice of the table, kept and served by one group of machines. The **partition key** is the field the table uses to decide which partition holds an item. **Throttling** is the table refusing a request because a limit is reached; the caller is told to slow down and try again.
+
+### Step 1: The key picks the partition
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={1} minWidth={620} caption="The partner's updates and the shop's reads name an order id; the table hashes it and sends each one to a single partition." />
+
+Brightpost already keeps one NoSQL table. The printing partner sends three updates per order: printed, shipped, delivered. That is about 1,200 writes a day, and the shop reads them by order id. So the partition key is the order id.
+
+The table runs the key through a hash, a function that turns any value into a number that looks random. The number picks one of the partitions, four in Brightpost's table. Order 1042 always lands on the same one, so a read for order 1042 asks one partition and no other. That is why such a read takes about the same few milliseconds at 1,000 items or 1 billion.
+
+The table adds partitions as it grows and moves items for you. [Sharding and Partitioning](/system-design/patterns/sharding) teaches how keys map to machines, and [Key-Value & In-Memory](/system-design/databases/key-value-stores) the data model.
+
+<PremiumBreak />
+
+### Step 2: Choose the key from the questions you will ask
+
+A relational database lets you ask new questions later. A NoSQL table answers well only the questions its keys were built for. So write down the reads first, then choose the key.
+
+Many tables add a second part, the **sort key**. Items with the same partition key sit together, in order of the sort key. Brightpost's tracking items use order id plus update time, so one read returns all three updates of an order, oldest first.
+
+<Compare
+  columns={["Candidate key", "How it spreads", "Answers \"status of order 1042\"?", "Verdict"]}
+  rows={[
+    ["Order id", "About 400 new values a day", true, "Use it"],
+    ["Status", "3 values: printed, shipped, delivered", false, "3 busy partitions, the rest idle"],
+    ["Date", "1 value per day", false, "Today's partition takes every write"],
+    ["Customer id", "90,000 values", false, "Good for \"my orders\", wrong for this read"],
+  ]}
+  caption="Four ways to key Brightpost's tracking table. A good key has many values and matches the main read."
+/>
+
+Every service also caps the size of one item. Keep photos and files in a bucket, and store only the link in the item.
+
+### Step 3: Capacity: paying per request
+
+A NoSQL table bills by work, not by server. Each read and write costs some **capacity units**, more for a bigger item. You buy them in one of two ways.
+
+<Compare
+  columns={["", "Provisioned", "On-demand"]}
+  rows={[
+    ["You set", "Reads and writes per second", "Nothing"],
+    ["You pay for", "The capacity, used or not", "Each request"],
+    ["Above the limit", "Throttled", "Scales up; still has per-partition ceilings"],
+    ["Fits", "Steady, known traffic", "New, spiky or quiet tables"],
+    ["Brightpost", "Not the 1,200-a-day tracking table", "The tracking table: about 1 write every 70 seconds"],
+  ]}
+  caption="Two ways to buy capacity. Autoscaling sits between them: it moves a provisioned number up and down, a few minutes late."
+/>
+
+A throttled request is retried by the client library, with growing pauses called backoff. If retries pile up, callers time out. [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries) covers that shape.
+
+### Step 4: The failure: one hot key
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={2} minWidth={620} caption="The failure: every page view adds 1 to the same item, so all 400 writes a second land on partition 3 and the excess is refused." />
+
+A table's capacity is shared out across its partitions. Brightpost's 1,000 writes a second were spread over 4 partitions, about 250 each. Some clouds lend unused capacity to a busy partition. None lets one partition pass its own ceiling, and one key always lives on one partition. A key that gets far more traffic than the rest is a <Term id="hot-key">hot key</Term>.
+
+<Callout tone="red" title="What breaks">
+  Every page view writes to `sale-42`, so all 400 writes a second go to partition 3. It takes about 250 and refuses about 150. Partitions 1, 2 and 4 sit almost idle. The basket add waits for the counter write, so 1 in 3 basket adds fails from 9:01 to 9:19. Switching the table to on-demand would not have helped: the ceiling is per partition, not per table.
+</Callout>
+
+### Step 5: Spread the writes, add up on read
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={3} minWidth={620} caption="The counter is split into ten keys that land on every partition, and the banner reader adds the ten values up." />
+
+The fix is **write sharding**: one busy key becomes several quiet ones. Each write adds a random digit, so `sale-42` becomes `sale-42#0` to `sale-42#9`. The ten keys hash to different partitions. At 400 writes a second each key takes about 40.
+
+Reading now costs more. The banner reader fetches all ten items, adds them up and keeps the total for 5 seconds: 2 reads a second, whatever the traffic. The banner can be 5 seconds behind, which nobody notices.
+
+Two more changes go in. The basket add no longer waits for the counter. And each app server adds up page views in memory and writes once a second.
+
+### Step 6: A second way in: secondary indexes
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={4} minWidth={620} caption="The table copies each item's status into an index, so the support agent can ask by status instead of by order id." />
+
+The support agent asks a new question: which parcels were shipped more than 5 days ago and are not yet delivered? No order id is known. Without help, the table must **scan**: read every item and throw most away. A scan bills for every item it reads.
+
+A **secondary index** is a second copy of some fields, keyed differently: here by status, sorted by update time. The table updates it on every write. Each <Term id="index">index</Term> costs extra write units and storage, and on some clouds lags the table by a moment. Its key needs a good spread too: "shipped" is fine at 1,200 writes a day and a hot key at 1,000 a second.
+
+### Step 7: Expiry, change streams and transactions
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={5} minWidth={620} caption="Every write appears on the change stream; a delivered status starts the email to the customer." />
+
+Each tracking item carries an expiry time, 90 days after delivery, and the table's <Term id="ttl">TTL</Term> setting deletes expired items in the background. Deletion can come hours or days late, so reads still check the date.
+
+A **change stream** is an ordered record of every write to the table. Brightpost's email sender reads it and emails the customer when a status becomes "delivered". Streams deliver each change at least once, so the sender must be <Term id="idempotent">idempotent</Term>: a repeated change sends no second email.
+
+Most services also offer a <Term id="transaction">transaction</Term> over a few items: all the writes happen, or none. It costs more units than separate writes, and on some clouds works only inside one partition key.
+
+### Step 8: Consistency and a second region
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={6} minWidth={620} caption="A replica table in a second region accepts writes, and each region copies its changes to the other." />
+
+Inside one region, the table keeps several copies of each partition, and many services let you choose per read. A default read may be a moment behind, which is <Term id="eventual-consistency">eventual consistency</Term>. A strong read always sees the latest write and costs more.
+
+Brightpost runs in one region today. For its Australian customers it could add a **global table**: a copy in each region, both accepting writes. Each region copies its changes to the other, usually within a second or two.
+
+The risk is two writes to the same item at once in two regions. Most services keep the one with the later timestamp, called **last writer wins**, and the other is silently lost. So give each item a home region that does all its writes, or store each update as its own item. [Last Write Wins](/system-design/databases/last-write-wins) and [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) go further.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a key spreads items over partitions, you pay by request, and a hot key throttles. The products differ in how much of that they show you.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Key design:** Amazon DynamoDB. A partition key and an optional sort key. Items have a maximum size.
+    - **Capacity:** on-demand, or provisioned read and write capacity units with auto scaling. A strongly consistent read costs more.
+    - **Indexes:** global secondary indexes, with their own keys, eventually consistent. Local secondary indexes keep the table's partition key and are defined at creation.
+    - **Change stream and expiry:** DynamoDB Streams, often read by Lambda. Time to live deletes expired items in the background.
+    - **Regions and consistency:** global tables: every replica accepts writes, and the last writer wins. A newer mode offers strong consistency across regions, with its own limits.
+
+    **The difference that changes a design.** An index can slow its own table. When a global secondary index cannot keep up with writes, DynamoDB throttles writes to the base table too. So a low-spread index key, such as a status, can repeat Brightpost's counter failure. Give every index a key with many values.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Key design:** Firestore stores documents in collections and picks partitions itself. Bigtable sorts rows by one row key that you design.
+    - **Capacity:** Firestore bills per document read, write and delete. Bigtable capacity is nodes per cluster, set by hand or by autoscaling.
+    - **Indexes:** Firestore indexes each field by default; you add composite indexes for multi-field queries. Bigtable indexes only the row key.
+    - **Change stream and expiry:** Firestore triggers through Eventarc, and TTL policies. Bigtable change streams and garbage collection rules.
+    - **Regions and consistency:** Firestore's location is a region or a multi-region, chosen at creation, with strongly consistent reads. Bigtable replicates between clusters, eventually consistent.
+
+    **The difference that changes a design.** Firestore hides partitions, so hot spots move to single documents and ordered values. One document takes only a low steady write rate, so counters are sharded as in Step 5. In Bigtable, a row key that starts with a timestamp sends every new write to one machine. Put a spread-out field, such as the order id, first.
+  </Tab>
+  <Tab label="Azure">
+    - **Key design:** Azure Cosmos DB. A container's partition key is chosen at creation. Items sharing a key value form a logical partition, which has a size cap.
+    - **Capacity:** request units (RUs) per operation. Provisioned RU/s, manual or autoscale, or serverless.
+    - **Indexes:** every property is indexed by default. Trim the indexing policy to cut each write's RU cost.
+    - **Change stream and expiry:** the change feed lists inserts and updates in order per key value. Time to live per container or item.
+    - **Regions and consistency:** five consistency levels, session by default. Multi-region writes resolve conflicts by last writer wins or by your own code.
+
+    **The difference that changes a design.** Provisioned RU/s are divided evenly across the physical partitions behind a container. A hot key value therefore throttles at a fraction of what you pay for, Brightpost's story in Cosmos DB terms. The partition key cannot be changed later; changing it means copying the data to a new container.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/nosql-partitions" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Is this a good partition key?"
+  tree={{
+    q: "Does almost every main read name this field's exact value?",
+    yes: {
+      q: "Does the field have many values, far more than the table has partitions?",
+      yes: {
+        q: "Can one value get more writes a second than one partition takes, like a sale counter?",
+        yes: "Keep the key, but shard that one value: add a suffix such as #0 to #9 and add the items up when you read.",
+        no: "A good partition key. Add a sort key if one read must return several items in order.",
+      },
+      no: "Too few values: a handful of partitions get all the traffic. Combine the field with one that has many values.",
+    },
+    no: {
+      answer: "Not a partition key. Key the table by what the main read asks for, and add a secondary index for the other question.",
+      href: "/system-design/patterns/sharding",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's tracking table takes about 1,200 writes a day. Provisioned or on-demand?" hint="Work out the writes per second.">
+    On-demand. 1,200 writes a day is about 1 write every 70 seconds. Provisioned capacity would bill for every idle second, and on-demand bills only for the 1,200 writes.
+  </QuizItem>
+  <QuizItem question="The counter is split into 10 keys. At 400 writes a second, how many does each key take, and what does reading cost now?" hint="The reader keeps the total for 5 seconds.">
+    About 40 writes a second per key. Each read of the total fetches 10 items, but the reader keeps it for 5 seconds, so it makes about 2 reads a second. The banner can be up to 5 seconds behind.
+  </QuizItem>
+  <QuizItem question="With a global table, region A writes &quot;delivered&quot; for order 1042. A moment later, a delayed &quot;shipped&quot; update reaches region B and is written there. Under last writer wins, what does the item show?">
+    "Shipped", because that write has the later timestamp. The delivered status is silently lost. Writing each order only in its home region, or keeping every update as its own item, avoids it.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One counter key", "10 sharded keys", "Add up in memory, write once a second"]}
+  rows={[
+    ["Writes a second at the sale's peak", "400 on one partition", "About 40 per key, on every partition", "1 per app server"],
+    ["Reads to show the total", "1", "10, kept for 5 seconds", "1"],
+    ["Banner can be behind by", "0 seconds", "Up to 5 seconds", "Up to 1 second"],
+    ["Survives an app server crash", true, true, "Loses up to 1 second of views"],
+    ["Breaks at", "About 250 writes a second, Brightpost's partition share", "About 2,500 writes a second", "Very many app servers"],
+  ]}
+  caption="Brightpost's counter, three ways. Numbers are the shop's sale-day load with its table's partition share."
+/>
+
+Brightpost uses the last two together: each server writes once a second to one of 10 keys. A single key wins only while traffic stays far below one partition's share.
+
+## Common pitfalls
+
+- **Keying by the data, not the reads.** A key that looks natural may match no real question. List the main reads, then key for the busiest one.
+- **A scan in the request path.** A scan reads, and bills, every item, and slows as the table grows. Add an index, or a second table keyed for that read.
+- **Low-spread keys: status, date, region.** A handful of values means a handful of busy partitions. Combine such a field with one that has many values.
+- **An index on every field "in case".** Each index costs write units and storage on every write. Add one only when a real read needs it.
+- **Writing the same item in two regions.** Last writer wins drops one of the two writes without an error. Give each item one home region for its writes.
+
+## How to say it in an interview
+
+"A managed NoSQL table spreads items over partitions by a key I choose, so I start from the reads, not the data. I pick a partition key with many values that the main read names, and a sort key when one read must return several items in order. Capacity is paid per request: on-demand for spiky or quiet tables, provisioned when traffic is steady and known. One key lives on one partition, so a hot key throttles even when the table has room; I shard very busy keys and add them up on read. Other questions get a secondary index, which costs writes. For two regions I use a global table, but each item keeps one home region, because last writer wins drops writes silently."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a partition key do in a managed NoSQL table?" level="Junior" category="Cloud">
+    **Short answer.** It decides which partition stores an item. The table hashes the key's value and sends the item to one partition. A read that names the key goes straight to that partition, so it stays fast as the table grows.
+
+    **Why.** Brightpost keys its tracking table by order id, so a read for order 1042 asks one of four partitions and no other. The key also decides how load spreads: many values keep every partition busy, few leave most idle.
+
+    <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={1} path="partner>router>p1" caption="One key, one hash, one partition." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is a sort key for?
+    - What happens when one partition fills up?
+
+    **Watch out for.** Calling the partition key "the primary key, like in SQL". In SQL it identifies a row. Here it also decides where data lives and how much load each machine takes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your table throttles at a tenth of its provisioned capacity. Why, and what do you change?" level="Mid" category="Cloud">
+    **Short answer.** One key, or a few, get most of the traffic. Capacity is shared out across partitions, and one key lives on one partition, so that partition hits its ceiling while the others sit idle. Fix the key, not the capacity.
+
+    **Why.** Brightpost's sale counter took 400 writes a second on one key. The table had 1,000 a second, but about 250 per partition. More capacity or on-demand barely helps, because the ceiling is per partition. Find the hot key in the provider's metrics. Then shard it and add up on read, batch writes in memory, or cache hot reads.
+
+    <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={2} highlight={["app", "router", "p3"]} caption="All the writes land on partition 3; the others stay idle." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find which key is hot?
+    - Could a secondary index cause the same throttling?
+
+    **Watch out for.** Answering "buy more capacity". That raises the bill and leaves the hot partition stuck.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Provisioned or on-demand capacity for a new table: how do you decide?" level="Mid" category="Cloud">
+    **Short answer.** Start on-demand when traffic is new, spiky or small. Move to provisioned, with autoscaling, once traffic is steady and known, because steady provisioned capacity costs less per request.
+
+    **Why.** Brightpost's tracking table takes 1,200 writes a day, about 1 every 70 seconds, so provisioned capacity would bill mostly for idle time. Autoscaling follows a slow daily curve but reacts minutes late, so a sale that starts at 9:00 sharp still gets throttled. Neither mode removes the per-partition ceiling.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you handle a sale that starts at a known minute?
+    - What do you watch after switching modes?
+
+    **Watch out for.** Saying on-demand "never throttles". It scales the table, but a hot key still hits its partition's ceiling.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you add a secondary index, and what does it cost?" level="Mid" category="Cloud">
+    **Short answer.** When a frequent read asks by a field that is not the partition key. The index is a second copy keyed by that field. It costs extra write units and storage on every write, and it may lag the table by a moment.
+
+    **Why.** Brightpost's support agent needs parcels shipped more than 5 days ago and not yet delivered. The table is keyed by order id, so without an index that is a scan, billed per item read. An index keyed by status, sorted by update time, answers it with one query. Its key needs a good spread too.
+
+    <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={4} path="agent>index>router" caption="The agent asks the index by status; the table keeps the index up to date." />
+
+    **Follow-ups the interviewer may ask.**
+    - When is a second table better than an index?
+    - What happens if the index cannot keep up with writes?
+
+    **Watch out for.** Indexing every field up front. Each index adds cost to every write, whether anyone reads it or not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the keys for Brightpost's orders so a customer's order history and the support agent's 'stuck parcels' view are each one query." level="Senior" category="Cloud">
+    **Short answer.** Partition key: customer id. Sort key: order date plus order id. Then "my orders, newest first" is one query on one partition. Add a secondary index keyed by status plus a day bucket, sorted by ship time, for the stuck parcels view.
+
+    **Why.** 90,000 customers give many key values with few orders each, so items spread well. The status index needs care, because "shipped" is one value. Adding the ship day splits it into one value per day, and the agent's view reads a few day keys. Tracking updates stay in their own table, keyed by order id, with a 90-day expiry.
+
+    **Follow-ups the interviewer may ask.**
+    - A seller dashboard needs orders per poster. What do you add?
+    - How do you change the key once the table holds data?
+
+    **Watch out for.** Designing one key for every read. A NoSQL table answers a few reads well. Name them, and give each one a key or an index.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You replicate a table to a second region and both regions take writes. What can go wrong, and how do you design around it?" level="Senior" category="Cloud">
+    **Short answer.** Two regions can write the same item before either sees the other's change. Most services then keep the write with the later timestamp, last writer wins, and silently drop the other. Design so that conflicts cannot happen, or do not matter.
+
+    **Why.** Suppose region A writes "delivered" for order 1042 and a delayed "shipped" lands in region B a moment later. The later timestamp wins, and the parcel looks shipped again. Three designs help. Give each item a home region that does all its writes. Store each update as its own item, keyed by order id plus time, so nothing overwrites. Or keep values that only grow, such as counters split by region.
+
+    <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={6} highlight={["router", "replica"]} caption="Both copies accept writes and send their changes to each other." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a region outage do to writes that were not yet copied?
+    - When would you choose one write region with read-only replicas instead?
+
+    **Watch out for.** Assuming two writable regions behave like one database. Unless the service offers a strongly consistent multi-region mode, they are two copies that agree later.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud)
+- [Managed Relational Databases: Replicas, Standbys, Proxies and Serverless SQL](/cloud/data/managed-relational)
+- [Queues, Topics, Streams, Event Buses and Workflows on the Cloud](/cloud/data/streaming-and-messaging-services)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Databases on AWS](/cloud/aws/databases)
+- [Databases on Google Cloud](/cloud/gcp/databases)
+- [Databases on Azure](/cloud/azure/databases)
+- [Sharding and Partitioning](/system-design/patterns/sharding)
+- [Consistent Hashing](/system-design/patterns/consistent-hashing)
+- [Wide-Column Stores](/system-design/databases/wide-column-stores)
+- [Multi-Leader Replication](/system-design/databases/multi-leader-replication)
+
+## Further reading
+
+- [Amazon DynamoDB Developer Guide](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html): keys, capacity modes and global tables.
+- [Firestore documentation](https://cloud.google.com/firestore/docs): data model, indexes and locations.
+- [Bigtable schema design](https://cloud.google.com/bigtable/docs/schema-design): row keys that spread writes.
+- [Azure Cosmos DB partitioning overview](https://learn.microsoft.com/azure/cosmos-db/partitioning-overview): logical and physical partitions.

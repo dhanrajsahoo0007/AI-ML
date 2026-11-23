@@ -1,0 +1,15 @@
+title: "A Raft election: timeout, candidate, votes, leader"
+alt: >-
+  A sequence diagram in four steps with an orange order service and three teal nodes, A, B and C. Step 1: the order
+  service asks leader A to reserve a kettle; A appends entry 812 in term 4 to B and C, replies that the reservation is
+  stored on 2 of 3 nodes, then crashes, drawn as a red heartbeat that never arrives. Step 2: B hears nothing for 210
+  milliseconds, moves to term 5, becomes a candidate and votes for itself. Step 3: B asks C for a vote in term 5,
+  sending its last entry, term 4 index 812; C's own last entry is the same, so it is not newer, and C votes yes: 2 of
+  3 is a majority. Step 4: B, now leader of term 5, commits a no-op entry with C, takes the order service's retried
+  reservation, and rejects a term 4 message from A when A restarts, so A steps down.
+caption: >-
+  The first node to hear nothing for its random timeout starts a new term and asks for votes; a majority makes it
+  leader, and the higher term silences the old one.
+tags: [patterns, leader-election, raft, consensus]
+source: original
+created: 2026-11-16

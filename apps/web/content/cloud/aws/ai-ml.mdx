@@ -19,16 +19,22 @@ AI on AWS splits into two jobs. **Using foundation models** (Claude and others) 
 
 ## A RAG assistant on AWS
 
-```mermaid
-flowchart LR
-    U["User"] --> API["API (ECS / Lambda)"]
-    API -->|"retrieve"| KB["Bedrock Knowledge Base"]
-    KB --> VS[("Vector store: OpenSearch / S3 Vectors")]
-    DOCS[("S3 documents")] -->|"sync, chunk, embed"| KB
-    API -->|"prompt + context"| BR["Bedrock: Claude"]
-    BR -->|"Guardrails"| API
-    API -->|"stream tokens"| U
-```
+This is the same retrieval-augmented generation (RAG) pipeline as on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with each role played by an AWS service. Switch the Services toggle to compare clouds.
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  cloud="aws"
+  stepper
+  caption="On AWS, Bedrock Knowledge Bases do the parsing, chunking and retrieval; your code only builds the prompt and calls the model."
+/>
+
+**How to read it.** The top lane runs when documents change: files in S3 are synced into a Bedrock Knowledge Base, which parses and chunks them, embeds each chunk with Titan Text Embeddings V2 and writes the vectors to a vector store such as OpenSearch Serverless or S3 Vectors. The bottom lane runs per question: your API (Lambda or ECS) asks the Knowledge Base to retrieve the nearest chunks, builds the prompt and calls a model on Bedrock, with Guardrails checking the input and the output.
+
+**The numbers** (the running example): 1,200 help articles become 3,600 chunks and about 22 MB of raw vectors at 1,536 dimensions; each answer sends a prompt of about 2,200 tokens.
+
+<Callout tone="red" title="What breaks">
+  The sync is not instant. An article edited in S3 is not in answers until the Knowledge Base's next ingestion job finishes, so schedule or trigger syncs on change and watch the job's failures.
+</Callout>
 
 ## Services
 
@@ -46,9 +52,9 @@ flowchart LR
 
 ## Where this shows up in system design
 
-- **[ChatGPT](/system-design/case-studies/chatgpt)-style assistants:** streaming responses from Bedrock over SSE or WebSockets; conversations in DynamoDB; per-user token quotas.
+- **[ChatGPT](/system-design-case-studies/case-studies/chatgpt)-style assistants:** streaming responses from Bedrock over SSE or WebSockets; conversations in DynamoDB; per-user token quotas.
 - **RAG and agents:** the [GenAI system design](/ai-system-design) articles map directly onto Knowledge Bases, AgentCore and Guardrails.
-- **Recommendations and ranking ([TikTok](/system-design/case-studies/tiktok), [YouTube](/system-design/case-studies/youtube)):** models trained on SageMaker AI, features from the data lake, real-time scoring on endpoints.
+- **Recommendations and ranking ([TikTok](/system-design-case-studies/case-studies/tiktok), [YouTube](/system-design-case-studies/case-studies/youtube)):** models trained on SageMaker AI, features from the data lake, real-time scoring on endpoints.
 - **Media understanding:** Rekognition, Transcribe and Textract for moderation, captions and document extraction.
 
 ## Common mistakes

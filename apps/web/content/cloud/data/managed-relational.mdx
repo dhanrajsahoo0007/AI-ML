@@ -1,11 +1,373 @@
 ---
 title: "Managed Relational Databases: Replicas, Standbys, Proxies and Serverless SQL"
-description: "What a managed SQL database takes off your hands, and the four pieces a cloud adds: standby, read replicas, proxy and serverless."
-status: outline
+description: "What a managed SQL database runs for you, and the copies around it: a standby for failover, replicas for reads, a proxy for connections, serverless SQL."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what managed buys you (patching, backups and failover) and the four building blocks the cloud adds to a relational engine: a synchronous standby for availability, asynchronous read replicas for read scale, a connection proxy for pooling and fast failover, and serverless or autoscaling compute. SQL itself is not taught here.
+<KeyIdea>
+  A managed database runs the engine, the backups and the spare copy for you, and you still decide which copy each request should talk to.
+</KeyIdea>
 
-**Related reading on this site:** [Relational (SQL)](/system-design/databases/relational-databases) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Databases on AWS](/cloud/aws/databases)
+## The story
+
+Brightpost's orders database is PostgreSQL on a managed engine. A standby waits in a second zone, and a read copy in a third serves the finance lead's monthly report. Before the next sale, Asha sends every page that only reads to the copy, to spare the main one. That includes the order page, which shoppers reload right after paying: about 50 reads a second at the peak. The copy has 2 processors, half the main copy's 4, because it was sized for one report. At 9 a.m. it must replay ten times the usual writes as well. By 9:20 it trails by up to 40 seconds. Shoppers who have paid read "payment pending", and many press "Pay now" again. When Asha moves the order page back at 10:30, about 130 shoppers have paid twice. No order is lost, but a support agent spends two days on refunds.
+
+Every step below shows one thing the managed engine does, and one decision it leaves to you.
+
+## How it works
+
+Three words first. An **instance** is one database server that the provider runs for you: processors, memory and a disk. The **primary** is the copy that accepts writes. An **endpoint** is the name your app connects to, a <Term id="dns" /> name that the provider can point at a different machine.
+
+### Step 1: What the managed engine runs for you
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={1} minWidth={620} caption="Brightpost's database today: one primary in zone A, a standby in zone B, and a nightly backup with a log of every change." />
+
+You choose the engine, PostgreSQL here, and a size. The provider then does five jobs on its own machines.
+
+1. **Patching.** Engine and operating-system fixes, in a weekly **maintenance window** you pick. Brightpost's is Sunday 04:00.
+2. **Backups.** A full copy at 03:00 each night, plus the change log, the <Term id="wal" />, saved every few minutes.
+3. **Storage growth.** If you switch it on, the disk grows before it fills.
+4. **Failover.** The standby takes over if the primary dies, in about 2 minutes.
+5. **Monitoring.** Processor, connections, free disk, replica lag and slow queries.
+
+How a relational engine keeps rows correct is taught in [Relational Databases](/system-design/databases/relational-databases). This page covers what the cloud adds around it.
+
+<PremiumBreak />
+
+### Step 2: What stays yours
+
+<ResponsibilityGrid set="databases" />
+
+Five jobs stay on Brightpost's list.
+
+- **Schema, queries and indexes.** A slow query is slow on any machine.
+- **Size and limits.** 4 processors, and 200 connections at most.
+- **Major upgrades.** A new major version changes behaviour. The provider runs the upgrade; you pick the date and test first.
+- **Access and network.** Who may log in, and from where.
+- **Proof.** A restore or failover works only if someone has tried it.
+
+### Step 3: Backups and point-in-time restore
+
+A nightly copy alone can lose up to 24 hours of orders. The change log closes that gap. To restore, the engine loads the last nightly copy, then replays the log up to the second you name. That is a **point-in-time restore**.
+
+<Compare
+  columns={["", "Nightly copy only", "Nightly copy plus change log"]}
+  rows={[
+    ["Restore to", "03:00 of some day", "Any second in the last 14 days"],
+    ["Orders you can lose (RPO)", "Up to 24 hours", "About 5 minutes in Brightpost's setup"],
+    ["Use it for", "Keeping a copy for a year", "Undoing a bad deploy at 09:41"],
+  ]}
+  caption="Brightpost keeps 14 days of log. Real retention limits and log intervals differ by cloud."
+/>
+
+The amount you can lose is the <Term id="rpo" />. The time to get back is the <Term id="rto" />: for Brightpost, about 30 minutes. One fact surprises most teams: a restore builds a **new** database with a new endpoint. Someone must point the app at it, so write that step down.
+
+### Step 4: Standby and read replica: two different jobs
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={2} minWidth={620} caption="A read replica in zone C copies changes without making the primary wait. It takes the report and, now, the order page." />
+
+Both are copies of the primary, kept up to date by <Term id="replication" />, with different jobs.
+
+<Compare
+  columns={["", "Standby", "Read replica"]}
+  rows={[
+    ["Its job", "Take over when the primary dies", "Answer reads"],
+    ["How it copies", "Synchronous: a write waits for it", "Asynchronous: the primary does not wait"],
+    ["Serves reads", "No, on most engines", "Yes"],
+    ["Behind the primary by", "Nothing that was committed", "Seconds, sometimes more"],
+    ["Its address", "The primary's endpoint moves to it", "Its own endpoint"],
+  ]}
+  caption="Same data, two jobs. You usually pay for each copy as a full instance."
+/>
+
+Why not read from the standby? It must take over at full strength in about 2 minutes. On most engines the provider keeps it closed to queries, so no report can slow it. A few products do let a standby serve reads; the tabs name them. [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication) explains the two kinds of copy.
+
+### Step 5: Replica lag and the read after a write
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={3} minWidth={620} caption="The failure: the replica falls 40 seconds behind, and shoppers who have paid read 'payment pending'." />
+
+**Replica lag** is how many seconds a replica trails the primary. It grows when changes arrive faster than the replica can replay them. Three things cause that: a replica smaller than the primary, a burst of writes, and heavy queries on the replica. Brightpost's sale day had all three.
+
+<Callout tone="red" title="What breaks">
+  At 9:42:00 a shopper pays for order 5121, and the primary commits it. One second later the order page asks the replica, which is still replaying 9:41:20. It answers "pending", a <Term id="stale-read" />. The page offers "Pay now", and the shopper pays again at 9:42:20. Between 9:20 and 10:30 this happens to about 130 shoppers.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/replica-lag-read-after-write" stepper caption="A write lands on the primary; a read from a replica 40 seconds behind does not see it. Step 4 is the fix." />
+
+### Step 6: Read your own writes from the primary
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={4} minWidth={620} caption="Reads that must show the shopper's own write go to the primary. History pages stay on the replica, and an alarm watches the lag." />
+
+The fix keeps the replica and changes which reads go there. The rule is <Term id="read-your-writes" />: after you change something, you see the change.
+
+1. When a shopper writes, the app notes the time in their session. For 60 seconds, their reads go to the primary.
+2. Order history and other older pages stay on the replica.
+3. "Pay" checks the status on the primary and sends an [idempotency key](/system-design/patterns/idempotency), so a second press finds the first payment.
+4. An alarm pages Asha when lag passes 10 seconds. Above 30, every read goes to the primary.
+
+Only shoppers who wrote in the last minute load the primary: a few reads a second, not 50.
+
+### Step 7: A proxy shares the connections
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={5} minWidth={620} caption="The app servers and the resize function connect to a proxy, which lends out at most 150 of the database's 200 connections." />
+
+Every open connection costs the database memory, so the engine caps them: 200 for Brightpost. On many managed engines the cap grows with the instance's memory.
+
+A **connection proxy** is a managed service between the app and the database. It keeps a set of database connections open and lends one to a caller for each transaction. Brightpost's proxy keeps at most 150. The app servers and the resize function connect to it, not to the database. The function keeps its cap of 20 copies, so it borrows at most 20. [Serverless Functions](/cloud/compute/serverless-functions) shows why a burst of functions needs this.
+
+One catch: a session that changes its own settings can pin its connection, and a pinned connection is not shared.
+
+### Step 8: Failover, seen from the app
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={6} minWidth={620} caption="In a failover drill the standby becomes the primary. The endpoint moves to it, and the proxy reconnects." />
+
+In a <Term id="failover" />, the provider promotes the standby and points the endpoint at it. Committed orders are safe, because the standby had every one. The app sees four things.
+
+1. Open connections break, and any half-done <Term id="transaction" /> is rolled back.
+2. New connections fail for about 2 minutes, until the endpoint moves.
+3. The app must look up the name again. The record's <Term id="ttl" /> is short, but some runtimes cache answers longer. Set that cache to seconds.
+4. The app retries with growing waits, and each payment carries its idempotency key. [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries) covers the pattern.
+
+Behind a proxy, the app often keeps its connections and sees a pause instead of errors. Brightpost runs a failover drill once a month at 06:00.
+
+### Step 9: Cloud-native engines: one storage layer for every copy
+
+A plain managed engine gives each copy its own disk. A **cloud-native engine** splits the database in two: compute instances on top and one shared storage layer underneath, copied across three zones.
+
+<Compare
+  columns={["", "Plain managed engine", "Cloud-native engine"]}
+  rows={[
+    ["Storage", "One disk per copy", "One storage layer shared by all copies"],
+    ["Adding a replica", "Copies all the data first", "Attaches to the storage that exists"],
+    ["Replica lag", "Seconds, can grow under load", "Usually much smaller"],
+    ["Failover target", "The standby", "Any replica"],
+    ["Engine", "The open-source engine", "Compatible with it, with its own differences"],
+  ]}
+  caption="The storage split changes how copies behave, not the SQL you write."
+/>
+
+Brightpost stays on the plain engine. Its 400 orders a day fit with room to spare, and changing engines is a [migration](/cloud/data/database-migration).
+
+### Step 10: Serverless SQL and scale to zero
+
+**Serverless SQL** sizes the database for you. Capacity moves in small units with the load, between a minimum and a maximum you set, and you pay by the second. Some products also **pause** after a quiet spell. The next connection waits while the database resumes, often several seconds.
+
+Brightpost's test database is busy 8 a.m. to 7 p.m. on weekdays: 55 of 168 hours. Paused, it costs almost nothing for the other 113. The shop's primary stays a fixed instance: its load is steady, and the 9 a.m. rush cannot wait for a wake-up.
+
+### Step 11: Sizing the engine and its copies
+
+1. **Engine.** Keep the one the team knows. Changing it is a project, not a setting.
+2. **Memory.** Enough for the hot data: the last 90 days of orders and all 2,000 products.
+3. **Processors.** Below about 60% busy at the sale-day peak.
+4. **Copies.** A replica that serves shoppers gets the primary's size. A report-only one can be smaller.
+
+Beyond one region, a copy in a second region is asynchronous, so losing a region can lose the last seconds of writes. Writes in several regions need distributed SQL. [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) covers both; Brightpost needs neither yet.
+
+## On AWS, Google Cloud and Azure
+
+The pieces are the same on all three clouds: a primary, a synchronous standby, asynchronous replicas, a pooler, and a backup you can restore to the second.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Standby:** RDS Multi-AZ keeps a synchronous standby in another zone that serves no reads. The Multi-AZ DB cluster option keeps two standbys that do serve reads.
+    - **Read copies:** RDS read replicas are asynchronous, in the same or another region, each with its own endpoint. You can promote one by hand.
+    - **Pooling:** RDS Proxy pools connections for RDS and Aurora, and keeps the app's connections open through a failover.
+    - **Cloud-native engine:** Aurora, compatible with MySQL and PostgreSQL. One storage volume, copied across three zones, serves the writer and every Aurora Replica.
+    - **Serverless:** Aurora Serverless v2 changes capacity in small steps. Recent versions can pause at zero capacity; the first connection waits while it resumes.
+
+    **The difference that changes a design.** In Aurora, a replica is also the standby: a failover promotes one of them. So place replicas in other zones, and size one like the writer. On RDS, the standby and the read replicas are separate copies with separate jobs.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Standby:** Cloud SQL high availability keeps a primary and a standby in two zones of one region, written synchronously. The standby serves no reads.
+    - **Read copies:** Cloud SQL read replicas are asynchronous, in the same or another region. AlloyDB read pool instances put several read nodes behind one address.
+    - **Pooling:** the Cloud SQL Auth Proxy and the language connectors secure connections but do not pool them. Pool in the app, or run a pooler such as PgBouncer yourself.
+    - **Cloud-native engine:** AlloyDB for PostgreSQL keeps compute apart from a regional storage layer. Its primary has a standby node in a second zone, and read pools share the storage.
+    - **Serverless:** Cloud SQL and AlloyDB run on instances you size; neither scales to zero by itself. You can stop a Cloud SQL instance by hand, and its storage is still billed.
+
+    **The difference that changes a design.** Pooling is your job here, so plan it with the compute. A Cloud Run instance serves many requests at once, which keeps connections low. Functions that take one request per copy need a pool in front, and you run it.
+  </Tab>
+  <Tab label="Azure">
+    - **Standby:** Azure Database for PostgreSQL flexible server with zone-redundant high availability keeps a synchronous standby in another zone. The standby serves no reads.
+    - **Read copies:** read replicas are asynchronous, in the same or another region, each with its own server name.
+    - **Pooling:** PgBouncer is built into flexible server. You switch it on and connect to its port instead of the database's.
+    - **Cloud-native engine:** for the SQL Server engine, Azure SQL Database Hyperscale keeps compute apart from shared page servers and a log service.
+    - **Serverless:** the Azure SQL Database serverless tier scales between a minimum and a maximum and can pause after an idle time you set. Flexible server does not pause by itself.
+
+    **The difference that changes a design.** The engine picks the product: PostgreSQL means flexible server, the SQL Server engine means Azure SQL Database. Features follow the product. Pausing and Hyperscale belong to Azure SQL Database, built-in PgBouncer to flexible server. In Azure SQL Database every tier has high availability built in, and Business Critical can send read-only connections to a replica.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/managed-relational-ha" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this read go?"
+  tree={{
+    q: "Did this user change something in the last 60 seconds that this read must show?",
+    yes: "The primary. Read your own writes from the copy that has them.",
+    no: {
+      q: "Is the read part of a write, such as checking stock before taking an order?",
+      yes: "The primary, inside the same transaction.",
+      no: {
+        q: "Can the reader live with data a few seconds old?",
+        yes: {
+          answer: "A read replica. Alarm on lag, and fall back to the primary when it grows.",
+          href: "/system-design/databases/single-leader-replication",
+        },
+        no: "The primary. A replica can always be some seconds behind.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The replica trails by 40 seconds. A shopper pays at 9:42:00. When can the replica first show the order as paid?" hint="Add the lag to the write time.">
+    At about 9:42:40. Until then, any read from the replica shows the order as pending.
+  </QuizItem>
+  <QuizItem question="A failover moves the endpoint to the new primary in about 2 minutes. One app server caches the old address for 10 minutes. How long is that server cut off?" hint="Which runs out later, the failover or the cache?">
+    About 10 minutes. The new primary is ready after 2, but the server keeps calling the old address until its cache expires. Set the cache to seconds.
+  </QuizItem>
+  <QuizItem question="Brightpost's test database is busy 55 of 168 hours a week. For how many hours could a pausing serverless database sit idle?">
+    113 hours, about two thirds of the week. Storage is still paid for while it sleeps.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Primary and standby", "Plus a read replica", "Cloud-native cluster", "Serverless SQL"]}
+  rows={[
+    ["Copies you pay for", "2", "3", "Writer plus each replica", "Capacity used"],
+    ["Reads off the primary", false, true, true, false],
+    ["Copy behind the primary", "Never, for the standby", "Seconds; 40 s on sale day", "Usually much less", "No copy needed"],
+    ["Failover", "About 2 minutes", "About 2 minutes", "To a replica, often faster", "Depends on the product"],
+    ["Cost while idle", "Full instance", "Two full instances", "Full instances", "Near zero when paused"],
+    ["First query after idle", "Instant", "Instant", "Instant", "Waits several seconds after a pause"],
+    ["Use it for", "Brightpost's shop today", "Reports and history pages", "Heavy reads, fast-growing data", "Test and rarely used databases"],
+  ]}
+  caption="Brightpost's numbers where it has them. Failover times and pause behaviour differ by product."
+/>
+
+Every copy adds a cost and a place where data can be old. Send only reads that can be old to a replica.
+
+## Common pitfalls
+
+- **Reading your own write from a replica.** A shopper who has paid sees "pending" and pays again. Send a user's reads to the primary for a short time after they write.
+- **A report-sized replica serving shoppers.** Brightpost's 2-processor copy fell 40 seconds behind. Size any replica that serves the shop like the primary.
+- **Caching the database's address.** After a failover the name points somewhere new, and a long DNS cache keeps calling the dead machine. Cache for seconds.
+- **A restore nobody has tried.** A restore builds a new database with a new endpoint. Practise it, time it, and write down the switch-over.
+- **Pausing the production database.** Its first caller waits for the wake-up. Pause test databases, not the shop.
+
+## How to say it in an interview
+
+"A managed database runs the engine, patching, backups and failover; I own the schema, the size and which copy each request reads. A synchronous standby in a second zone is for failover, and on most engines it serves no reads. Asynchronous replicas take reads that can be a few seconds old. What a user wrote in the last minute I read from the primary, and I alarm on lag. A proxy shares a fixed set of connections between many callers. The app uses the endpoint name, keeps its DNS cache short, and retries with idempotency keys."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a standby and a read replica?" level="Junior" category="Cloud">
+    **Short answer.** A standby is a synchronous copy that waits to take over when the primary dies. A read replica is an asynchronous copy that answers reads. They solve different problems: one is for availability, the other for read load.
+
+    **Why.** Every write waits for the standby, so it holds every committed order and can be promoted in about 2 minutes. On most engines it serves no queries. A replica gets changes without making the primary wait, so it can trail: Brightpost's fell 40 seconds behind on sale day. It has its own endpoint and suits reports and history pages.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={2} highlight={["primary", "standby", "replica"]} caption="The standby gets a synchronous copy and waits; the replica gets an asynchronous copy and serves reads." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can a read replica become the primary, and what might you lose?
+    - Which products let a standby serve reads?
+
+    **Watch out for.** Counting the standby as extra read capacity. On most engines it serves nothing until a failover.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A shopper pays, and the next page says 'payment pending'. What happened, and what are three fixes?" level="Mid" category="Cloud">
+    **Short answer.** The write went to the primary, and the read went to a replica that had not caught up. Three fixes. Route a user's reads to the primary for a short time after they write. Check status on the primary before taking money. Alarm on lag, and fall back to the primary when it grows.
+
+    **Why.** Replication to a replica is asynchronous. Brightpost's replica had half the primary's processors and fell 40 seconds behind under sale-day writes. A page read 1 second after payment showed "pending", and about 130 shoppers paid twice. An idempotency key on the payment stops a second charge even if a stale page slips through.
+
+    <AnimatedDiagram spec="animated/cloud/replica-lag-read-after-write" step={2} caption="The order page reads the replica one second after the payment, and the replica has not replayed it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you route by the replica's replay position instead of a fixed 60 seconds?
+    - What does this cost the primary at the sale peak?
+
+    **Watch out for.** "Make the replica faster." Lag shrinks with a bigger replica, but it never reaches zero.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does a fleet of serverless functions need a database proxy?" level="Mid" category="Cloud">
+    **Short answer.** Each running copy opens its own connection, and a burst starts hundreds of copies against a fixed cap. A proxy keeps a small set of connections open and lends them out per transaction, so the copies share them.
+
+    **Why.** Brightpost's database allows 200 connections, and the app servers need most of them on a sale day. The proxy uses at most 150, and the resize function borrows at most 20. It also hides a failover: callers keep their connections to the proxy while it reconnects to the new primary.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={5} highlight={["fn", "proxy", "primary", "app"]} caption="The function and the app servers share the proxy's connections instead of opening their own." />
+
+    **Follow-ups the interviewer may ask.**
+    - What makes a connection impossible to share?
+    - Where would you put the limit: in the function, in the proxy, or both?
+
+    **Watch out for.** Raising the database's connection cap instead. Each connection costs memory, and the next burst is bigger.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does the app see during a managed database failover, and how should it behave?" level="Mid" category="Cloud">
+    **Short answer.** Open connections break and half-done transactions roll back. New connections fail until the endpoint points at the promoted standby. The app should look the name up again, reconnect with growing waits, and retry writes with idempotency keys.
+
+    **Why.** Committed data is safe, because the standby was written synchronously. For Brightpost the gap lasts about 2 minutes. A runtime that caches DNS for 10 minutes stays cut off for 10. A proxy keeps the app's connections open and reconnects behind them. A monthly drill proves it all.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={6} path="app>proxy>standby" caption="After the failover, requests reach the new primary through the proxy, under the same endpoint." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which writes are safe to retry, and which are not?
+    - How do you run a failover drill without hurting customers?
+
+    **Watch out for.** Hard-coding the database's IP address. It changes on failover, and the app never follows.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you move from a plain managed engine to a cloud-native one such as Aurora or AlloyDB?" level="Senior" category="Cloud">
+    **Short answer.** When read load, data growth or failover time outgrow the plain engine, and the team accepts some engine differences and a migration. For Brightpost's 400 orders a day, the plain engine is enough.
+
+    **Why.** The writer and its replicas share one storage layer, copied across zones. Adding a replica copies no data, lag is usually much smaller, and any replica can take over. The costs: a different price shape, some behaviour that differs from the open-source engine, and a cutover to plan. Measure first: lag at peak, failover time and storage growth.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you move with minutes of downtime?
+    - What would you test before trusting the new engine with payments?
+
+    **Watch out for.** Moving to fix one slow query. A missing index is slow on every engine.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should a production database scale to zero when nobody is using it?" level="Senior" category="Cloud">
+    **Short answer.** Rarely. A paused database makes the next caller wait several seconds while it resumes. That suits a test database used in office hours, not a shop.
+
+    **Why.** Brightpost's test database is busy 55 of 168 hours a week, so pausing saves compute for 113. The shop's primary has steady load all day, so a fixed instance costs about the same and never makes anyone wait. Serverless capacity that never pauses can still help production: it grows within limits you set when load jumps.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you warm the database before a planned sale?
+    - What happens to connection limits as serverless capacity shrinks?
+
+    **Watch out for.** Comparing only the bill. The wake-up delay lands on a real customer.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Databases on AWS](/cloud/aws/databases)
+- [Databases on Google Cloud](/cloud/gcp/databases)
+- [Databases on Azure](/cloud/azure/databases)
+- [Single-Leader Replication](/system-design/databases/single-leader-replication)
+- [NewSQL Databases](/system-design/databases/newsql-databases)
+
+## Further reading
+
+- [Amazon RDS User Guide](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html): Multi-AZ, read replicas and RDS Proxy.
+- [Cloud SQL for PostgreSQL](https://cloud.google.com/sql/docs/postgres): high availability, replicas and backups.
+- [AlloyDB for PostgreSQL overview](https://cloud.google.com/alloydb/docs/overview): compute, storage and read pools.
+- [Azure Database for PostgreSQL flexible server](https://learn.microsoft.com/azure/postgresql/flexible-server/overview): high availability, replicas and PgBouncer.

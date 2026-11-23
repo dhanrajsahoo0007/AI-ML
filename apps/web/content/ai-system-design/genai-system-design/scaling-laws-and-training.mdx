@@ -5,7 +5,9 @@ description: Pre-training to post-training, Kaplan and Chinchilla scaling laws, 
 
 This topic separates people who have used LLMs from people who understand how they are built. Expect questions on the training pipeline, compute-optimal model sizing, and how training is split across thousands of GPUs.
 
-## TL;DR
+One example runs through the page: a compute budget of **8.4 × 10²² floating-point operations (FLOPs)**, enough to train a 7-billion-parameter model on 2 trillion tokens. We spend it three ways, then turn it into GPU-days and gigabytes.
+
+## Overview
 
 - LLMs are built in stages: **pre-training** on huge text corpora, then **supervised fine-tuning**, then **preference tuning** (RLHF or DPO).
 - **Scaling laws** show loss falls predictably as a power law in parameters, data and compute.
@@ -13,11 +15,16 @@ This topic separates people who have used LLMs from people who understand how th
 - Training compute is roughly **6 x parameters x tokens** floating-point operations.
 - **Mixed precision** (bf16), **data parallelism with sharding** (ZeRO, FSDP), **tensor parallelism** and **pipeline parallelism** make large-scale training possible.
 
-## The idea in plain English
+<KeyIdea>Training compute is about 6 × parameters × tokens, and for a fixed budget the lowest loss comes from roughly 20 tokens per parameter; production teams then shift that budget towards smaller models trained longer, because those models are cheaper to serve.</KeyIdea>
 
-Training an LLM is like educating a student in three stages. First, they read most of a library (pre-training) and learn language and facts. Then a tutor shows them thousands of good question-and-answer examples (supervised fine-tuning). Finally, people compare two of the student's answers and say which is better, and the student adjusts (preference tuning).
+## Mental model
 
-Scaling laws are the school's budget rules: for a fixed amount of teaching time, they tell you how big a brain to train and how many books it should read.
+- Training an LLM is like educating a student in three stages.
+- First, they read most of a library (pre-training) and learn language and facts.
+- Then a tutor shows them thousands of good question-and-answer examples (supervised fine-tuning).
+- Finally, people compare two of the student's answers and say which is better, and the student adjusts (preference tuning).
+
+- Scaling laws are the school's budget rules: for a fixed amount of teaching time, they tell you how big a brain to train and how many books it should read.
 
 ## Core concepts
 
@@ -45,19 +52,32 @@ Scaling laws are the school's budget rules: for a fixed amount of teaching time,
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    DATA["Raw corpora<br/>(web, code, books)"] --> CLEAN["Filter, deduplicate,<br/>mix domains"]
-    CLEAN --> TOK["Tokenize"]
-    TOK --> PT["Pre-training<br/>(next-token prediction)"]:::accent
-    PT --> BASE["Base model"]
-    BASE --> SFT["Supervised fine-tuning<br/>(instruction data)"]
-    SFT --> PREF["Preference tuning<br/>(RLHF or DPO)"]
-    PREF --> SAFE["Safety tuning and evals"]
-    SAFE --> REL["Released assistant model"]
-```
+Step through the pipeline to see where the budget goes: nearly all of it into one stage.
 
-The pipeline stage by stage:
+<AnimatedDiagram
+  spec="animated/transformer/training-pipeline"
+  stepper
+  caption="Pre-training on trillions of tokens spends most of the compute and yields a base model; fine-tuning, preference tuning (RLHF or DPO) and safety work turn it into an assistant at a small fraction of that cost."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Data: clean, deduplicate and tokenize">
+    Raw web, code and books are filtered, deduplicated and mixed by domain, then a [tokenizer](/ai-system-design/genai-system-design/tokenization) turns them into ids. Llama 3 chose its mixture by training small models on candidate mixes first.
+  </StepCard>
+  <StepCard n={2} title="Pre-training: next-token prediction">
+    The model predicts every next token over the whole corpus until the FLOP budget is spent. This is our 8.4 × 10²² FLOPs. The result is a base model: it knows language and facts but continues text rather than answering it.
+  </StepCard>
+  <StepCard n={3} title="Post-training: SFT, then RLHF or DPO">
+    Supervised fine-tuning on demonstrations teaches the format; InstructGPT used about 13k prompts. Preference tuning then takes one of two routes: a reward model (33k prompts) plus PPO (31k prompts), or one DPO loss on preference pairs. Llama 3 ran several rounds of SFT, rejection sampling and DPO.
+  </StepCard>
+  <StepCard n={4} title="Release: safety tuning and evaluations">
+    Red-teaming, safety tuning and benchmarks gate the release. The gap this leaves: none of these stages can add knowledge the base model never learned in step 2.
+  </StepCard>
+</StepCards>
+
+**The numbers:** InstructGPT's 175B SFT run took 4.9 petaflop/s-days and its PPO run 60, against 3,640 for GPT-3's pre-training: post-training was 1.8 % of the bill.
+
+The same pipeline in brief:
 
 1. Build a large, clean, deduplicated dataset with a deliberate mix of domains.
 2. Pre-train with next-token prediction until the compute budget is spent.
@@ -65,35 +85,83 @@ The pipeline stage by stage:
 4. Align with preference data so outputs match what people prefer.
 5. Evaluate on capability and safety benchmarks before release.
 
-## Deep dive
+The [preference learning](/ai-system-design/genai-system-design/reinforcement-preference-learning) and [fine-tuning](/ai-system-design/genai-system-design/fine-tuning-llms) pages cover steps 3 and 4 in depth.
+
+## Technical mechanics
+
+### Counting the FLOPs: 6ND
+
+Each parameter takes part in one multiply and one add per token on the forward pass, 2 FLOPs. The backward pass computes gradients with respect to both the activations and the weights, about twice the forward cost, 4 FLOPs. So training costs about 6 FLOPs per parameter per token, and a run costs C ≈ 6 · N · D, with N parameters and D tokens. The formula leaves out attention's own FLOPs, which stay small next to the weights' at moderate context lengths.
+
+Check it against a real run: Llama 3 405B trained on 15.6 trillion tokens: 6 × 405 × 10⁹ × 15.6 × 10¹² = 3.79 × 10²⁵ FLOPs, and the paper reports 3.8 × 10²⁵.
+
+The figure below turns our budget into wall-clock time, one division per row.
+
+<AnimatedDiagram
+  spec="animated/transformer/compute-estimate"
+  caption="Multiply 6 by parameters and tokens for the FLOPs, divide by what each GPU really sustains and by the number of GPUs: 7B parameters on 2T tokens is about 58,000 GPU-hours, or 2.4 days on 1,000 GPUs."
+/>
+
+**How to read it:** the top row is 6ND. Each row below carries the previous result down in pale blue and divides it by one more number. The side panels explain the 6 and compare tokens per parameter.
+
+**The numbers:** 8.4 × 10²² ÷ 4 × 10¹⁴ FLOP/s = 2.1 × 10⁸ GPU-seconds = 58,333 GPU-hours = 2,431 GPU-days, so 2.43 days on 1,000 GPUs.
+
+The 400 TFLOP/s is the assumption that matters most. An H100's dense bf16 peak is 989 TFLOP/s, so 400 is 40 % model-FLOPs utilization (MFU), the share of peak that goes into the model's own maths. Llama 3 reports 38 to 43 % MFU on H100s, and 400 TFLOP/s per GPU on 16,384 GPUs. At that rate its 3.79 × 10²⁵ FLOPs is 66.9 days of pure compute.
+
+### The Chinchilla arithmetic, step by step
+
+Chinchilla's rule says D ≈ 20 · N for the lowest loss at a given budget. Put that into C = 6 · N · D and you get C = 120 · N², so N = √(C / 120).
+
+1. **Our budget.** C = 8.4 × 10²² FLOPs.
+2. **Optimal size.** N = √(8.4 × 10²² / 120) = √(7 × 10²⁰) = 26.5 billion parameters.
+3. **Optimal data.** D = 20 × 26.5B = 529 billion tokens. Check: 6 × 26.5B × 529B = 8.4 × 10²².
+4. **The over-trained choice.** The same budget on a 7B model buys 2 trillion tokens: 286 tokens per parameter, 14.3 times the ratio.
+
+Chinchilla's own Table 3 shows the same shape: a 10B model should see 205.1 billion tokens for 1.23 × 10²² FLOPs, 20.5 tokens per parameter.
+
+### Kaplan and Chinchilla disagree about growth
+
+Both papers fit the optimal size and data as powers of compute: N_opt ∝ C^a and D_opt ∝ C^b, with a + b = 1. Kaplan's fit gave a = 0.73 and b = 0.27. Chinchilla's gave a = b = 0.5 (0.46 and 0.54 by its third method). Start from our Chinchilla-optimal 26.5B on 529B tokens and give it 10 times the compute, 8.4 × 10²³ FLOPs:
+
+- **Chinchilla:** both grow 10^0.5 = 3.16 times, to 83.7B parameters on 1.67 trillion tokens, still 20 per parameter.
+- **Kaplan:** parameters grow 10^0.73 = 5.37 times and tokens 10^0.27 = 1.86 times, to 142B parameters on 985 billion tokens, 6.9 per parameter.
+
+Both spend the same FLOPs, but Kaplan's rule drifts towards Gopher's 280B on 300B tokens, 1.1 per parameter. Kaplan's runs used one fixed learning-rate schedule for every run length; Chinchilla matched the schedule to the number of tokens, which made long runs on smaller models look as good as they are.
+
+### Over-training is a choice, not a mistake
+
+Chinchilla minimizes training loss for a training budget. It ignores serving. A forward pass costs about 2N FLOPs per generated token, so the 26.5B model costs 3.78 times as much per token as the 7B model, for the same training bill. Over billions of requests, that saving dwarfs the training bill. Llama 3 405B used 38.5 tokens per parameter, and its own scaling law asked for 402B on 16.55 trillion tokens, 41.2 per parameter.
+
+### Where the memory goes
+
+Training with Adam in mixed precision holds 16 bytes per parameter: 2 for bf16 weights, 2 for bf16 gradients and 12 for the fp32 master copy and Adam's two moments. Our 7B model needs 16 × 7 × 10⁹ = 112 GB of model states, more than one 80 GB H100 holds before a single activation. ZeRO shards these states across the data-parallel GPUs. Over 64 GPUs, stage 1 (optimizer states) leaves 29.3 GB per GPU, stage 2 (plus gradients) 15.5 GB, and stage 3 (plus weights) 1.75 GB. PyTorch's FSDP shards the same three states. Activations come on top, which gradient checkpointing trades for recomputation.
 
 ### How a large training job is split across GPUs
 
-```mermaid
-flowchart TB
-    subgraph DP["Data parallel replicas (different batches)"]
-        direction LR
-        subgraph R1["Replica 1"]
-            direction TB
-            P1["Pipeline stage 1<br/>layers 1-20"] --> P2["Stage 2<br/>layers 21-40"]
-            P2 --> P3["Stage 3<br/>layers 41-60"]
-        end
-        subgraph R2["Replica 2"]
-            direction TB
-            Q1["Stage 1"] --> Q2["Stage 2"] --> Q3["Stage 3"]
-        end
-    end
-    TP["Inside each stage: tensor parallel<br/>split matrices across GPUs in a node"]:::accent -.-> P2
-    R1 <-->|"average gradients<br/>(sharded with ZeRO/FSDP)"| R2
-```
+The next figure shows the three ways to split a job, nested inside each other.
 
-Large jobs combine all three: tensor parallelism inside a server, pipeline parallelism across servers, and data parallelism across replicas. This is often called 3D parallelism.
+<AnimatedDiagram
+  spec="animated/transformer/parallelism-3d"
+  caption="Tensor parallelism splits each matrix across the GPUs of one server, pipeline parallelism splits the layers across servers, and data parallelism copies that whole pipeline and averages gradients between the copies."
+/>
 
-### A worked compute estimate
+**How to read it:**
 
-A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2e12 = 8.4e22 floating-point operations. At an effective 400 teraflops per GPU, that is about 58,000 GPU-hours, or roughly 2.5 days on 1,000 GPUs, before accounting for failures, restarts and lower real-world utilization.
+- Each grey replica is one full copy of the model, fed its own batch. The arrows between replicas average gradients; ZeRO or FSDP shards that step.
+- Inside a replica, three pipeline stages each hold 20 of the 60 layers. The violet zoom shows one stage splitting its weight matrix column-wise across 4 GPUs, joined by an all-gather over the server's fast links.
+- The schedule at the bottom is the forward pass: each micro-batch moves one stage per slot, and the empty cells are the bubble.
+
+**The numbers:** with p = 3 stages and m = 4 micro-batches, the bubble adds (p − 1) / m = 2 / 4 = 50 % to the ideal time; with 32 micro-batches it is 2 / 32 = 6.3 %.
+
+Large jobs combine all three: tensor parallelism inside a server, pipeline parallelism across servers, and data parallelism across replicas. This is often called 3D parallelism. Llama 3 405B used tensor parallelism of 8, pipeline parallelism of 16 and data parallelism of 64 to 128.
+
+<Callout tone="red" title="What breaks">
+Pipeline parallelism with too few micro-batches leaves GPUs idle: 4 micro-batches over 3 stages wastes a third of the time. Fix it with more micro-batches per step (m ≫ p) or an interleaved schedule.
+</Callout>
 
 ## Trade-offs
+
+<Compare caption="The main training decisions, and what each option costs.">
 
 | Decision | Option A | Option B | Guidance |
 | --- | --- | --- | --- |
@@ -103,21 +171,44 @@ A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2
 | Data parallel only vs sharded | Simple | Fits much larger models | Use ZeRO or FSDP once the model and optimizer stop fitting on one GPU |
 | Pipeline parallel | Fits very deep models | Pipeline "bubbles" leave GPUs idle | Use with enough micro-batches to keep the bubble small |
 
-## Real-world examples
+</Compare>
+
+In our example, 26.5B on 529B tokens reaches the lowest loss; 7B on 2T tokens reaches a higher loss but serves each token 3.78 times cheaper.
+
+## Production systems
 
 - Kaplan et al. (2020) documented power-law scaling for language models.
 - Chinchilla (2022) showed many earlier large models were undertrained for their size.
 - InstructGPT (2022) showed a 1.3-billion-parameter model tuned with RLHF was preferred by people over the 175-billion-parameter GPT-3 base model.
 - Megatron-LM introduced practical tensor parallelism; ZeRO introduced optimizer-state sharding.
+- Llama 3 (2024) trained 405B parameters on 15.6 trillion tokens on up to 16,384 H100s at 38 to 43 % MFU, then aligned it with rounds of SFT, rejection sampling and DPO.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Treating scaling laws as guarantees of specific abilities. They predict loss, not when a skill appears.
 - Forgetting that optimizer states (Adam keeps two extra values per parameter) often use more memory than the weights.
 - Ignoring data quality; deduplication and filtering often beat raw volume.
 - Confusing fine-tuning compute with pre-training compute; fine-tuning is typically orders of magnitude cheaper.
 
-## How to answer in an interview
+### Real failures and deliberate trade-offs
+
+Three of the things that look like failures are real; one is not.
+
+<Callout tone="red" title="What breaks">
+**Loss spikes.** PaLM 540B's loss spiked about 20 times despite gradient clipping. The fix was to restart from a checkpoint about 100 steps before the spike and skip 200 to 500 batches. Llama 3 saw few spikes, starting with a small batch and doubling it later.
+</Callout>
+
+<Callout tone="red" title="What breaks">
+**Running out of unique data.** Muennighoff et al. (2023) found up to 4 epochs of repeated data cost almost nothing next to unique data; with more repetition the value of extra compute decays to zero. Fix it with more sources or synthetic data, not more epochs.
+</Callout>
+
+<Callout tone="red" title="What breaks">
+**Hardware interruptions.** Llama 3 had 466 job interruptions in 54 days, 419 unexpected, about 78 % from hardware. Frequent checkpoints and automatic restarts kept effective training time above 90 %.
+</Callout>
+
+An over-trained small model is not on that list. A 7B model at 286 tokens per parameter has a higher loss than the 26.5B model the same budget could buy, and the team chose that on purpose to cut serving cost by 3.78 times.
+
+## Interview framework
 
 1. Lay out the pipeline: pre-train, SFT, preference tuning, evaluation.
 2. State the scaling-law idea and the Chinchilla ratio.
@@ -125,38 +216,52 @@ A 7-billion-parameter model trained on 2 trillion tokens needs about 6 x 7e9 x 2
 4. Explain memory: weights, gradients, optimizer states, activations; and mixed precision.
 5. Explain how parallelism splits that memory and compute.
 
+Sizing 8.4 × 10²² FLOPs takes four lines: 26.5B parameters, 529B tokens, 2.43 days on 1,000 GPUs at 40 % MFU, 112 GB of states that need ZeRO. Then name the serving trade-off.
+
 **What interviewers listen for:** a correct pipeline, a quick compute estimate, and a clear picture of where memory goes.
 
 **Red flags:** thinking alignment happens during pre-training, or no idea how a model larger than one GPU is trained.
 
 ## Further reading
 
-- [Scaling Laws for Neural Language Models (Kaplan et al., 2020)](https://arxiv.org/abs/2001.08361)
-- [Training Compute-Optimal LLMs, Chinchilla (Hoffmann et al., 2022)](https://arxiv.org/abs/2203.15556)
-- [Training Language Models to Follow Instructions, InstructGPT (Ouyang et al., 2022)](https://arxiv.org/abs/2203.02155)
-- [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models (Rajbhandari et al., 2019)](https://arxiv.org/abs/1910.02054)
+- [Scaling Laws for Neural Language Models (Kaplan et al., 2020)](https://arxiv.org/abs/2001.08361): §2.1 for 6N per token.
+- [Training Compute-Optimal LLMs, Chinchilla (Hoffmann et al., 2022)](https://arxiv.org/abs/2203.15556): Table 2 for the exponents, Table 3 for optimal sizes.
+- [Training Language Models to Follow Instructions, InstructGPT (Ouyang et al., 2022)](https://arxiv.org/abs/2203.02155): §3.2 datasets, §5.1 compute.
+- [Direct Preference Optimization (Rafailov et al., 2023)](https://arxiv.org/abs/2305.18290)
+- [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models (Rajbhandari et al., 2019)](https://arxiv.org/abs/1910.02054): §3.1 for 16 bytes per parameter.
 - [Megatron-LM (Shoeybi et al., 2019)](https://arxiv.org/abs/1909.08053)
+- [Efficient Large-Scale Language Model Training on GPU Clusters (Narayanan et al., 2021)](https://arxiv.org/abs/2104.04473): §2.2 for the pipeline bubble.
+- [PaLM (Chowdhery et al., 2022)](https://arxiv.org/abs/2204.02311): §5.1 for loss spikes.
+- [Scaling Data-Constrained Language Models (Muennighoff et al., 2023)](https://arxiv.org/abs/2305.16264)
+- [The Llama 3 Herd of Models (Llama Team, 2024)](https://arxiv.org/abs/2407.21783): Table 4 for MFU, §3.3.4 for interruptions.
 
 <InterviewQuestions>
   <InterviewQuestion question="Describe the stages of training a chat LLM." category="Concepts" level="Junior">
-    First, pre-training on a very large text corpus with next-token prediction produces a base model that knows language and facts but does not reliably follow instructions. Then supervised fine-tuning on instruction-response examples teaches format and helpfulness. Finally, preference tuning, using RLHF or DPO on human or AI comparisons, aligns outputs with what people prefer, followed by safety evaluation.
+    - First, pre-training on a very large text corpus with next-token prediction produces a base model that knows language and facts but does not reliably follow instructions.
+    - Then supervised fine-tuning on instruction-response examples teaches format and helpfulness.
+    - Finally, preference tuning, using RLHF or DPO on human or AI comparisons, aligns outputs with what people prefer, followed by safety evaluation.
   </InterviewQuestion>
   <InterviewQuestion question="What did the Chinchilla paper change about how models are sized?" category="Scaling" level="Mid">
-    It showed that for a fixed compute budget, parameters and training tokens should grow roughly in equal proportion, at around 20 tokens per parameter. Earlier large models had too many parameters and too little data for their compute. Chinchilla, at 70 billion parameters on 1.4 trillion tokens, beat the much larger Gopher at the same compute.
+    - It showed that for a fixed compute budget, parameters and training tokens should grow roughly in equal proportion, at around 20 tokens per parameter.
+    - Earlier large models had too many parameters and too little data for their compute.
+    - Chinchilla, at 70 billion parameters on 1.4 trillion tokens, beat the much larger Gopher at the same compute.
   </InterviewQuestion>
   <InterviewQuestion question="Why do companies train models well beyond the Chinchilla-optimal number of tokens?" category="Trade-offs" level="Mid">
-    Chinchilla minimizes training compute for a target loss, but a deployed model's lifetime cost is dominated by inference. Training a smaller model on far more tokens costs more upfront but produces a model that is cheaper and faster to serve for billions of requests, so total cost is lower.
+    - Chinchilla minimizes training compute for a target loss, but a deployed model's lifetime cost is dominated by inference.
+    - Training a smaller model on far more tokens costs more upfront but produces a model that is cheaper and faster to serve for billions of requests, so total cost is lower.
   </InterviewQuestion>
   <InterviewQuestion question="Roughly how much compute does it take to train a 7B model on 2 trillion tokens?" category="Scaling" level="Mid">
-    Using about 6 floating-point operations per parameter per token, it is 6 times 7e9 times 2e12, or about 8.4e22 operations. At an effective 400 teraflops per GPU that is about 58,000 GPU-hours, roughly two and a half days on a thousand GPUs, plus overhead for failures, restarts and lower utilization.
-  </InterviewQuestion>
-  <InterviewQuestion question="Explain data, tensor and pipeline parallelism." category="Architecture" level="Senior">
-    Data parallelism gives each GPU a model copy and different data, then averages gradients; ZeRO or FSDP shard the optimizer states, gradients and weights so copies do not each hold everything. Tensor parallelism splits individual weight matrices across GPUs, which needs fast interconnects so it usually stays inside a server. Pipeline parallelism puts different layers on different GPUs and streams micro-batches through, at the cost of idle bubbles. Large runs combine all three.
+    - Using about 6 floating-point operations per parameter per token, it is 6 times 7e9 times 2e12, or about 8.4e22 operations.
+    - At an effective 400 teraflops per GPU that is about 58,000 GPU-hours, or about 2.4 days on a thousand GPUs, plus overhead for failures and restarts.
   </InterviewQuestion>
   <InterviewQuestion question="Where does GPU memory go when training a model with Adam?" category="Scaling" level="Senior">
-    With mixed precision, weights and gradients take about 2 bytes per parameter each, and Adam keeps fp32 master weights plus two moment estimates at about 12 bytes per parameter, so roughly 16 bytes per parameter before activations. Activations add memory proportional to batch size, sequence length and depth, which gradient checkpointing reduces by recomputing them. Sharding with ZeRO or FSDP spreads the per-parameter states across GPUs.
+    - With mixed precision, weights and gradients take about 2 bytes per parameter each, and Adam keeps fp32 master weights plus two moment estimates at about 12 bytes per parameter, so roughly 16 bytes per parameter before activations.
+    - Activations add memory proportional to batch size, sequence length and depth, which gradient checkpointing reduces by recomputing them.
+    - Sharding with ZeRO or FSDP spreads the per-parameter states across GPUs.
   </InterviewQuestion>
   <InterviewQuestion question="Compare RLHF and DPO." category="Trade-offs" level="Senior">
-    RLHF trains a separate reward model on human comparisons, then optimizes the LLM with reinforcement learning such as PPO while a KL penalty keeps it close to the starting model. It is flexible but complex and can be unstable. DPO derives a loss directly on preference pairs that achieves a similar objective without a reward model or RL loop, so it is simpler and more stable, and it is a common default today.
+    - RLHF trains a separate reward model on human comparisons, then optimizes the LLM with reinforcement learning such as PPO while a KL penalty keeps it close to the starting model.
+    - It is flexible but complex and can be unstable.
+    - DPO derives a loss directly on preference pairs that achieves a similar objective without a reward model or RL loop, so it is simpler and more stable, and it is a common default today.
   </InterviewQuestion>
 </InterviewQuestions>

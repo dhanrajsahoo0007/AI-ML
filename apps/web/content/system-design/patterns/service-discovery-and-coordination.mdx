@@ -1,0 +1,231 @@
+---
+title: "Service Discovery and Coordination Services"
+description: "How a caller finds a healthy instance when instances come and go: registries, leases, health checks, watches and config push."
+icon: compass
+updated: 2026-11-16
+---
+
+Every multi-service diagram has an arrow from one service to another, and behind that arrow is a question: which of the 40 instances, at which address, right now?
+
+- Interviewers ask about service discovery to see whether you know how a caller learns about instances that start and stop every minute, and what happens when the thing that knows is itself down.
+
+## Overview
+
+- **Service discovery** answers "where are the healthy instances of service X right now?" for every caller.
+- A **service registry** holds the answer. Instances **register** themselves and keep the entry alive with a **heartbeat** or **lease**; a silent instance drops out.
+- **Client-side discovery:** callers read the registry and pick an instance. **Server-side discovery:** callers send to a balancer that reads it.
+- **DNS** is the simplest registry, but answers are cached for their TTL, so callers keep using dead addresses for a while.
+- **Coordination services** (etcd, ZooKeeper, Consul) are small, strongly consistent stores built for this: **leases**, **ephemeral keys** and **watches**. The same watches push configuration and feature flags.
+- When the registry is down, callers keep the **last good list**; nothing should depend on reaching it on every request.
+
+## Mental model
+
+- Think of a taxi rank with a dispatcher's board.
+- Each driver who arrives writes their name on the board and taps in every few minutes; a driver who stops tapping in is wiped off.
+- A customer reads the board instead of remembering which taxi was there yesterday.
+- If the dispatcher's office closes for an hour, customers use the last copy of the board they saw. The board is the registry, the tapping in is the lease.
+
+## Core concepts
+
+- The running example is Brightpost's order service calling the product service: **40 product instances**, **2,300 calls/s** at peak, and deploys that replace **10 instances a minute**.
+
+### Why hard-coded addresses fail
+
+- Instances are replaced on every deploy, scale-out and crash, and each new one gets a new address.
+- An address in a config file is wrong after the first deploy. An address cached from DNS is wrong until its TTL runs out.
+
+<AnimatedDiagram spec="animated/patterns/disco-stale-address" stepper caption="For up to one TTL after a deploy, callers keep sending requests to an address that no longer answers." />
+
+<StepCards>
+  <StepCard n={1} title="Resolve once, cache the answer">
+    The order service resolves `product-svc`, gets `10.0.1.7` with a 30 s TTL, and calls it. Every call in the next 30 seconds reuses that answer.
+  </StepCard>
+  <StepCard n={2} title="A deploy replaces the instance">
+    At 12:00:05 a deploy replaces the instance behind `10.0.1.7`. Calls to it are refused, but the cached answer is still valid until 12:00:30.
+  </StepCard>
+  <StepCard n={3} title="The next lookup finds the new one">
+    After the TTL ends, the next lookup returns `10.0.2.9` and calls succeed again. For 25 seconds this caller sent its requests to an address that no longer answered.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 2,300 calls/s over 40 instances is 57.5 calls/s per instance.
+- A replaced instance stays in a caller's cache for half the TTL on average: 15 s × 57.5 = about 860 failed calls per replacement, before retries.
+
+<PremiumBreak />
+
+### The registry, leases and heartbeats
+
+- **Self-registration:** each instance writes its address to the registry when it starts.
+- **A lease** ties the entry to the instance staying alive. The instance renews it every few seconds; if renewals stop, the registry deletes the entry.
+  - In etcd, keys attached to a lease are deleted when no keep-alive arrives within its TTL.
+  - In ZooKeeper, an **ephemeral znode** is deleted when the session that created it ends.
+- **Health checks** add a second opinion: the registry (or an agent next to the instance) calls the instance, and marks it critical when the check fails. Consul supports HTTP, TCP, gRPC, script and TTL checks.
+- **Deregister on shutdown:** a well-behaved instance removes its own entry before it stops, so callers stop sending first and the lease is only a backstop for crashes.
+
+### Watches and config push
+
+- Polling the registry costs load and adds delay. A **watch** pushes each change to the caller as it happens.
+  - etcd streams PUT and DELETE events from a given revision.
+  - ZooKeeper's classic watches fire once and must be set again; persistent watches arrived in 3.6.
+- The same mechanism pushes **configuration and feature flags**: change a key once, every watcher sees it within about a second.
+- Keep values small. A coordination service is a consistent notice board, not a database.
+
+## Architecture
+
+The product service's instances in a registry with leases and watches, one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/disco-registry" stepper caption="Instances prove they are alive by renewing a lease; callers learn about changes from a watch instead of waiting for a TTL." />
+
+<StepCards>
+  <StepCard n={1} title="Callers use addresses from config">
+    The order service calls an address written in its config. This is the system without the pattern: the first deploy makes the address wrong.
+  </StepCard>
+  <StepCard n={2} title="Instances register with a lease">
+    Each product instance writes its address to the registry under a 10 s lease and renews it every few seconds.
+  </StepCard>
+  <StepCard n={3} title="The caller looks up healthy instances">
+    The order service reads the list of live entries and calls one of them, balancing across the list itself.
+  </StepCard>
+  <StepCard n={4} title="A lease expires; the entry is deleted">
+    Instance 3 crashes and stops renewing. Ten seconds later its lease expires and the registry deletes its entry.
+  </StepCard>
+  <StepCard n={5} title="A watch tells the caller">
+    The order service watches the product service's entries, so it hears "instance 3 gone" at once instead of on its next poll.
+  </StepCard>
+  <StepCard n={6} title="Keep the last good list">
+    The caller keeps the list in memory. If the registry is unreachable, it keeps calling the instances it last knew about.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Client-side, server-side or DNS
+
+- Where the list lives decides how fast a dead instance disappears and what callers must run.
+
+<AnimatedDiagram spec="animated/patterns/disco-client-vs-server" caption="The list of instances lives in the caller, in a balancer or in DNS caches, and that decides how fast a dead instance disappears." />
+
+**How to read it:**
+
+- Server-side is ringed as the default for most teams: callers need only one stable address.
+- Client-side removes a hop but needs a library or a sidecar per caller (a service mesh is that sidecar, see [Proxies](/system-design/fundamentals/proxies)).
+- The red cell is DNS's weakness: an answer lives in caches for its TTL, and some caches keep it longer.
+
+### A coordination service as a small consistent core
+
+- etcd, ZooKeeper and Consul's servers replicate their data with a consensus protocol (Raft or ZAB), usually on 3 or 5 nodes.
+- That makes them the right place for the few facts everyone must agree on: who is alive, who is the leader, which config is live.
+- Other uses on the same primitives: [leader election](/system-design/patterns/leader-election) with a lease, locks, and the membership list behind a [consistent-hashing](/system-design/patterns/consistent-hashing) ring.
+- Writes need a quorum, so they are slower than a cache and do not scale with more nodes. Keep high-volume data elsewhere.
+- In Kubernetes, the API server stores Services in etcd, and EndpointSlices list each Service's endpoints with `ready`, `serving` and `terminating` conditions, at most 100 per slice by default.
+
+### When the registry is down
+
+- Calls between services should not need the registry on every request.
+- Each caller caches the last good list and keeps using it; new instances are invisible until the registry is back, but nothing breaks.
+- Health checks done by the caller (or passive ones on errors) still take dead instances out of the cached list.
+- Registration should retry with backoff, so a thousand instances do not stampede the registry when it returns.
+
+### Worked example: a deploy at the peak
+
+Brightpost deploys the product service at 12:00, replacing 10 of 40 instances a minute while the order service calls it 2,300 times a second.
+
+1. **With DNS and a 30 s TTL,** each replaced address stays in the order service's cache for about 15 s on average.
+2. **With a registry and a watch,** each instance deregisters, then drains, then stops. The watch removes it from callers' lists before it stops answering.
+3. **With a crash instead of a deploy,** the lease is the backstop: the entry disappears 10 s after the last heartbeat.
+
+**The numbers:**
+
+- Calls per minute: 2,300 × 60 = 138,000.
+- DNS: 10 replacements × 57.5 calls/s × 15 s ≈ 8,600 failed calls a minute, about 6 % of all calls, before retries.
+- Registry with a watch: about 0 failed calls on a planned deploy.
+- A crash with a 10 s lease: 57.5 × 10 ÷ 2 ≈ 290 failed calls on average, until the lease expires.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Plain DNS | Nothing to run; every language has it | Stale for a TTL; caches ignore TTLs | Slowly changing services, external endpoints |
+| Server-side (balancer reads the registry) | Callers need one address; any language | One more hop; the balancer must be redundant | Most teams; Kubernetes Services |
+| Client-side (caller reads the registry) | No extra hop; caller-side balancing | A library or sidecar per caller | Large meshes, latency-sensitive calls |
+| Lease and heartbeat | Crashes drop out on their own | Heartbeat traffic; a GC pause can expire a live lease | Every registry entry |
+| Watch instead of poll | Changes arrive in about a second | Long-lived connections to the registry | Membership and config that change often |
+
+## Production systems
+
+- **etcd** (as of November 2026): leases with a TTL that clients keep alive; keys attached to a lease are deleted when it expires; watches stream changes from any retained revision.
+- **ZooKeeper**: ephemeral znodes vanish with the session that created them; classic watches are one-time triggers, with persistent recursive watches since 3.6.
+- **Consul**: a service catalogue with HTTP, TCP, gRPC, script and TTL health checks, `deregister_critical_service_after` to remove dead services, and a DNS interface whose answers have a TTL of 0 by default.
+- **Kubernetes**: Services give callers one stable address; EndpointSlices track ready, serving and terminating endpoints for kube-proxy.
+- **Used in our case studies:** [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt)
+
+## Failure modes & pitfalls
+
+- **Long DNS TTLs on internal services.** Callers hit dead addresses for minutes. Use a registry, or short TTLs with retries.
+- **No deregistration on shutdown.** Every deploy relies on lease expiry, and callers get errors for the lease's length. Deregister, drain, then stop.
+- **Callers that need the registry on every request.** A registry outage becomes a full outage. Cache the last good list.
+- **Leases shorter than a GC pause.** A healthy instance drops out and flaps. Set the lease to several heartbeat intervals.
+- **Big or busy data in the coordination service.** Writes need a quorum and slow everything. Keep it for membership, leaders and small config.
+- **A thundering herd on recovery.** Every instance re-registers at once. Add jitter and backoff.
+
+## Interview framework
+
+1. Say why addresses cannot be static: instances change on every deploy and crash.
+2. Add a registry with self-registration under a lease, plus health checks.
+3. Choose client-side or server-side discovery, and say what callers need to run.
+4. Push changes with watches, and use the same mechanism for config.
+5. Cover the registry's own failure: consensus on 3 or 5 nodes, and callers that keep the last good list.
+
+**What interviewers listen for:** leases for liveness, watches instead of polling, and a plan for the registry being down.
+
+**Red flags:** "use DNS" with no word on TTLs, or a design that calls the registry on every request.
+
+## Further reading
+
+- [Leases and watches (etcd API docs)](https://etcd.io/docs/v3.5/learning/api/)
+- [Ephemeral nodes and watches (ZooKeeper programmer's guide)](https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html)
+- [Health checks configuration reference (Consul docs)](https://developer.hashicorp.com/consul/docs/services/configuration/checks-configuration-reference) · [DNS caching (Consul docs)](https://developer.hashicorp.com/consul/docs/discover/dns/scale)
+- [EndpointSlices (Kubernetes docs)](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/)
+- Related pages: [DNS](/system-design/fundamentals/dns) · [Proxies](/system-design/fundamentals/proxies) · [Load Balancing](/system-design/patterns/load-balancing) · [Leader Election and Consensus](/system-design/patterns/leader-election) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What problem does service discovery solve?" category="Concepts" level="Junior">
+    - Instances of a service start and stop all the time, on deploys, scale-outs and crashes, and each new one has a new address.
+    - Callers need the current list of healthy instances, not an address from yesterday.
+    - A registry holds that list; instances add themselves and drop out when they stop renewing a lease.
+  </InterviewQuestion>
+  <InterviewQuestion question="Client-side or server-side discovery?" category="Trade-offs" level="Mid">
+    - Server-side: callers send to one stable address and a balancer reads the registry. Any language works, at the cost of an extra hop and a balancer to keep redundant.
+    - Client-side: each caller reads the registry and picks an instance itself. No extra hop, smarter balancing, but every caller needs a library or a sidecar.
+    - Most teams start server-side; large service meshes move to client-side through sidecars.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is DNS a weak service registry?" category="Failure modes" level="Mid">
+    - Answers are cached by resolvers and clients for their TTL, and some caches keep them longer.
+    - A replaced instance keeps receiving traffic until every cache expires.
+    - DNS has no health checks of its own and only balances by the order of the addresses it returns.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a registry know an instance has died?" category="Architecture" level="Mid">
+    - The instance holds a lease and renews it with heartbeats; when renewals stop for the lease's TTL, the entry is deleted.
+    - Health checks add an outside view: the registry or a local agent calls the instance and marks it critical on failure.
+    - On a planned shutdown the instance deregisters itself first, so the lease is only a backstop for crashes.
+  </InterviewQuestion>
+  <InterviewQuestion question="The registry is down. What still works?" category="Failure modes" level="Senior">
+    - Calls between services keep working if callers cache the last good list and do not need the registry per request.
+    - New instances cannot be found and dead ones are not removed by the registry, so callers must also eject instances that fail their own health checks or return errors.
+    - Config changes and leader elections stall until it is back.
+    - On recovery, registration must back off with jitter so instances do not stampede it.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why build the registry on a consensus-based store like etcd or ZooKeeper?" category="Trade-offs" level="Senior">
+    - Membership, leaders and config are facts every node must agree on; a quorum-replicated store gives one answer even when nodes fail.
+    - Leases, ephemeral keys and watches are exactly the primitives discovery needs.
+    - The cost is that writes go through a quorum and do not scale out, so keep the data small and the write rate low.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many requests fail during a deploy with DNS discovery and a 30 s TTL?" category="Scaling" level="Senior">
+    - Take 2,300 calls a second over 40 instances: 57.5 a second each.
+    - A replaced address stays cached for about half the TTL on average, 15 s, so about 860 calls hit it before retries.
+    - Replacing 10 instances a minute gives about 8,600 failed calls a minute, about 6 % of traffic.
+    - With a registry, deregistration before shutdown and a watch, that falls to about zero.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,16 @@
+title: Key-value store high-level architecture
+alt: >-
+  An architecture diagram in seven steps across six zones: clients, routing, coordinator, replica nodes, background
+  and the storage engine on each node. Step 1: an application sends put and get to one node, which appends to a
+  commit log, applies the write to a memtable and flushes it to sorted files. Step 2: a load balancer sends each
+  request to any node, which looks up the key's owners on a partition map, a hash ring with virtual nodes. Step 3: the
+  coordinator, the green highlighted node, copies the write to replicas A, B and C. Step 4: replica B times out, drawn
+  red; the write goes to node D with a hint for B, and D hands it back when B returns. Step 5: reads return the value
+  with its version. Step 6: gossip tells the coordinator which nodes are up. Step 7: anti-entropy repairs a key range
+  on B by comparing Merkle trees, and snapshots hard-link the sorted files.
+caption: >-
+  A leaderless key-value store: any node coordinates, three replicas per key, quorums of two, hints for a node that is
+  down, and background repair.
+tags: [case-studies, key-value-store, architecture, replication, quorum]
+source: original
+created: 2026-11-17

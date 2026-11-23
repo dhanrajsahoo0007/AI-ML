@@ -1,0 +1,355 @@
+---
+title: "Agent Reliability & Error Recovery"
+description: "Why agents fail on long tasks and how to make them dependable: retries, checkpoints, durable execution, limits and fallbacks."
+icon: refresh-cw
+---
+
+An agent that works in a demo can still fail one customer in three.
+
+- Each step can go wrong, and a long run has many steps.
+- This page covers why errors compound, how to retry a tool call without doing it twice, how to survive a crash, how to stop a loop that is going nowhere, and how to measure whether the agent is dependable.
+- Interviewers ask about it because it separates a prototype from a system that moves money.
+
+## Overview
+
+- If each step succeeds with probability p, a run of n steps succeeds with **pⁿ**. At 95 % per step, 20 steps finish cleanly 0.358 of the time. Shorter runs and better steps both help.
+- A **timeout does not mean failure**. The tool may have acted. Retry only with an **idempotency key**, an id the service uses to spot a repeat, built and saved before the first call.
+- **Checkpoint** after every step, so a crash costs one step, not the run. Durable execution engines do this for you.
+- **Budgets** cap turns, tokens and time. **Breakers** stop a loop that repeats the same call or failure.
+- **Verify** against the world, not the model's own claim. Measure with **pass^k**: the chance that k runs in a row all succeed.
+
+## Mental model
+
+- Think of a relay race with 20 runners who each drop the baton one time in 20.
+- Each runner looks reliable. The team finishes without a drop only about one race in three.
+- An agent run is that relay. Every model call and tool call is a hand-over.
+
+- You make the team dependable in four ways: fewer hand-overs, better runners, a rule for picking up a dropped baton safely, and a referee who stops the race when it goes round in circles.
+
+## Core concepts
+
+- Every example on this page follows the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures).
+- Customer 1847 writes: "My kettle arrived cracked.
+- It's order 4471. Can I get my money back?" The happy path takes five model calls and four tool calls, and the £42 refund waits for a support agent because it is over £30.
+
+### How errors compound over steps
+
+Assume each step succeeds on its own with probability p, and a run succeeds only if every step does.
+
+<AnimatedDiagram
+  spec="animated/agents/compounding-error"
+  stepper
+  minWidth={620}
+  caption="A step that works 95 % of the time sounds reliable, but a 20-step run then finishes cleanly only about one time in three. Moving each step to 99 % lifts the same run to 0.818."
+/>
+
+**How to read it:**
+
+- The horizontal axis counts steps in a row; the vertical axis is the chance that none of them failed.
+- The dashed curve is 95 % per step, the solid one 99 %. Both start at 1.0 and only fall.
+
+**The numbers:**
+
+- 0.95¹⁰ = **0.599**, 0.95²⁰ = **0.358** and 0.99²⁰ = **0.818**.
+- Going from 95 % to 99 % per step cuts the failure rate per step by five, and lifts the 20-step run from 36 % to 82 %.
+- Halving the run from 20 steps to 10 at 95 % lifts it from 36 % to 60 %.
+
+- The model is a simplification. Real steps are not independent: one wrong order number poisons every later step.
+- And some errors are caught and repaired, which is the point of the rest of this page.
+- Anthropic's "Building effective agents" names the same risk: autonomy brings "the potential for compounding errors".
+
+### Tool failures, retries and idempotency
+
+Tool calls fail in three ways, and each needs a different response:
+
+- **Retryable:** a timeout, a 429 rate limit, a 5xx error. Retry with exponential backoff and jitter, a random spread in each wait so clients do not retry in step. Marc Brooker's analysis (AWS, 2015) found backoff without jitter the "clear loser". LangGraph's default retry policy is 3 attempts, starting at 0.5 s and doubling, with jitter on.
+- **Fixable by the model:** a missing argument or an unknown order id. Return the error to the model with `is_error: true` and say what to try next. Anthropic's docs report that Claude retries an invalid call 2 to 3 times with corrections.
+- **Fatal:** a refused permission or a policy limit. Stop, save state and escalate to a person.
+
+The trap is the timeout. It tells you the reply did not arrive, not that nothing happened. Here `create_refund` times out after the payments service has already paid.
+
+<AnimatedDiagram
+  spec="animated/agents/retry-idempotency"
+  stepper
+  minWidth={660}
+  caption="A timeout does not tell you whether the refund happened. Without a key the retry pays £84 for a £42 kettle; with the same key on both attempts, the second call returns the first result and moves no money."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The refund goes out, but the reply is lost">
+    The model asks for `create_refund(4471, 42.00)`. The payments service makes refund R-2291 and pays £42. The reply
+    never reaches the harness, which sees a timeout.
+  </StepCard>
+  <StepCard n={2} title="Without a key, the retry refunds again">
+    The harness retries. The payments service cannot tell a retry from a new request, so it makes R-2292. The customer
+    gets £42 + £42 = £84.
+  </StepCard>
+  <StepCard n={3} title="The same run with a key">
+    Before the call, the harness builds the key `run_8f3a:toolu_03` (run id plus tool-call id) and saves it in
+    checkpoint `cp_3`. The payments service makes R-2291 and stores the key with its reply. The reply is lost again.
+  </StepCard>
+  <StepCard n={4} title="The retry carries the same key">
+    The payments service has seen the key, so it returns the saved reply, R-2291, and pays nothing. The model gets one
+    refund, £42.
+  </StepCard>
+</StepCards>
+
+The call the harness sends on both attempts. The key is the same both times; that is what makes the second safe:
+
+```json
+{
+  "tool": "create_refund",
+  "input": { "order_id": "4471", "amount": 42.0 },
+  "idempotency_key": "run_8f3a:toolu_03"
+}
+```
+
+- Stripe's API is the model to copy. It takes the key in an `Idempotency-Key` header of up to 255 characters, saves the status and body of the first request, returns them to any retry with the same key, and rejects a retry whose parameters differ.
+- Keys can be pruned after 24 hours, so the key only protects retries inside that window.
+
+<Callout tone="red" title="What breaks">
+  A key made at call time, such as a fresh UUID per attempt. Every retry gets a new key, and the payments service sees
+  two different requests. The key must be durable before the side effect runs: build it in an earlier step and save it
+  in the checkpoint, as LangGraph's fault-tolerance guide requires.
+</Callout>
+
+### Checkpoints and durable execution
+
+- Retries cover a failed call. A **checkpoint** covers a failed worker: the run's state, saved after every step, so another worker can pick it up.
+- [State Persistence & Retrieval](/ai-system-design/genai-system-design/state-persistence-retrieval) builds this in full; here is the same refund run with a crash in the worst place.
+
+<AnimatedDiagram
+  spec="animated/agents/checkpoint-timeline"
+  stepper
+  minWidth={660}
+  caption="A crash costs one step, not the run. Worker B starts from cp_4, and the refund it repeats is safe because the key was saved in cp_3, before any money moved."
+/>
+
+**How to read it:**
+
+- Each dot is a checkpoint. Worker A dies after the payments service paid but before `cp_5` was saved.
+- Worker B loads `cp_4` and re-runs only `create_refund`, with the key from `cp_3`, so the payments service answers from its saved reply.
+
+**The numbers (latencies illustrative: 1.5 s per model call, 0.3 s per tool call):**
+
+- Resuming from `cp_4` repeats one tool call: 0.3 s.
+- Restarting from the message repeats three model calls and two tool calls, 3 × 1.5 + 2 × 0.3 = **5.1 s**, asks the support agent to approve again, and refunds £84 without the key.
+
+- **Durable execution** is this pattern packaged as an engine.
+- Temporal records every step in an event history and replays it after a crash; it recommends idempotent activities and suggests the workflow run id plus the activity id as the key.
+- LangGraph saves a checkpoint per step and, on resume, re-runs only the step that did not finish.
+- Neither can close the gap between "the service acted" and "the result was saved". Only the key can.
+
+### Loop, step and budget limits
+
+- A run without limits can loop until it runs out of money.
+- Give every run three budgets, checked before each turn: **turns** (model calls), **tokens** and **wall-clock time**, plus a cost cap where calls are priced.
+- "Building effective agents" recommends stopping conditions "such as a maximum number of iterations".
+- When a budget runs out, the run saves its state and hands over to a person; it does not stop in silence.
+- [Loop Engineering](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops#budgets-steps-tokens-wall-clock-time-and-cost-caps) draws the three meters for the bug-fix agent.
+
+- Set the budget from data: run the evaluation set, take the 95th percentile of turns for successful runs and add headroom.
+- The Brightpost happy path needs 5 model calls, so an illustrative cap of 12 leaves room for one or two repairs without allowing a runaway.
+
+## Architecture
+
+The reliability layer sits in the harness, around the loop, not in the prompt:
+
+| Layer                | What it does                                                 | On the refund run                                    |
+| -------------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
+| Tool wrapper         | Timeout, retry with backoff and jitter, error classification | `create_refund` gets 10 s (illustrative), 3 attempts |
+| Idempotency          | Key built before the call, sent on every attempt             | `run_8f3a:toolu_03` saved in `cp_3`                  |
+| Checkpointer         | State after every step; resume from the latest               | `cp_1` to `cp_7` in Postgres                         |
+| Budgets and breakers | Turn, token and time caps; repeat detection                  | 12 turns (illustrative); trip on 3 identical calls   |
+| Verifier             | Checks the outcome against the system of record              | Reads refund R-2291 back before replying             |
+| Fallback             | Smaller scope, another model, or a person                    | Hand the thread to the support agent                 |
+
+- Each layer handles a failure the one before it cannot.
+- Retries handle a flaky call. The key makes retries safe.
+- Checkpoints handle a dead worker. Breakers handle a model that keeps trying the same thing.
+- The verifier catches a run that finished but is wrong.
+
+## Technical mechanics
+
+### Worked example: the refund run with a timeout and a retry
+
+Follow the [retry figure](#tool-failures-retries-and-idempotency) end to end, with every layer from the table in play.
+
+1. **Calls 1 and 2.** The model calls `get_order(4471)` and `search_help("damaged item refund")`. The harness saves `cp_1` and `cp_2`.
+2. **Call 3.** The model asks for `create_refund(4471, 42.00)`. £42 is over £30, so the harness holds the call, builds the key `run_8f3a:toolu_03` and saves both in `cp_3`. The run waits.
+3. **Approval.** The support agent approves at 10:20; the harness saves `cp_4`.
+4. **The timeout.** The harness sends the refund with the key. The payments service makes R-2291, and the reply is lost. After 10 s (illustrative) the wrapper classifies the timeout as retryable.
+5. **The retry.** After a jittered 0.5 s the wrapper sends the same request with the same key. The payments service returns the saved reply: R-2291. No money moves. The harness saves `cp_5`.
+6. **Verify.** Before the reply, the harness reads the order's refunds back from the payments service: one refund, £42. The check passes.
+7. **Finish.** Call 4 sends the email, call 5 writes the reply. Turns used: 5 of 12.
+
+**The numbers:**
+
+- The retry cost about 10.5 s of waiting and one extra tool call, and £0.
+- Without the key the same run pays £84 and passes every check that looks only at the transcript.
+
+What if every attempt times out? The wrapper must not tell the model "failed". The model would call `create_refund` again, with a new tool-call id and so a new key. Return the honest state instead:
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_03",
+  "content": "Outcome unknown: the payments service did not reply after 3 attempts. Do not call create_refund again. The harness is checking the refund status.",
+  "is_error": true
+}
+```
+
+The harness then queries the payments service for refunds on order 4471, as LangGraph's guide advises: treat a lost reply as unknown, not as proof that nothing happened.
+
+### Detecting stuck and looping agents
+
+- A budget stops a long run; it does not notice a run that is going nowhere.
+- Three signals catch that. The **same tool call** with the same arguments three times in a row: `get_order(4471)` three times means the agent is re-reading, not progressing.
+- The **same failure** three times, by a fingerprint of the normalised error.
+- And **no tool use** for several turns: the agent is talking, not working.
+
+- Repeated steps are common: in the MAST study of multi-agent traces, step repetition was 15.7 % of failures ([Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems#why-multi-agent-systems-fail)).
+- The response to a trip is the same as to a spent budget: save state, stop, and escalate or change strategy.
+- The [breaker figure](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops#circuit-breakers-and-detecting-repeated-failure-loops) shows one tripping on the third repeat.
+
+### Verification steps and self-correction
+
+- A model's claim that it succeeded is not evidence.
+- Anthropic's advice is that agents need "ground truth" from the environment at each step.
+- For Brightpost that means reading the refund back from the payments service, not trusting the transcript.
+- For the coding agent it means running the tests.
+
+- Self-correction works when the check is external.
+- A failed check goes back to the model as an error with a reason, and the model repairs.
+- A model grading its own work without a new signal tends to approve it ([Planner–Generator–Evaluator Loops](/ai-system-design/genai-system-design/planner-generator-evaluator-loops)).
+- Put deterministic checks first, and a model grader only where no deterministic check exists.
+
+### Measuring reliability: pass^k and consistency
+
+A single success rate hides how often the same task fails on a rerun. Measure **pass^k**, the chance that all k runs of a task succeed, defined by tau-bench (Yao et al., 2024).
+
+<AnimatedDiagram
+  spec="animated/agents/pass-k"
+  stepper
+  minWidth={620}
+  caption="Same agent, same 70 % per run. Give it four tries and it almost always passes once (0.992); ask it to pass four times in a row and it manages that only 24 % of the time."
+/>
+
+**How to read it:**
+
+- pass@k, at least one of k runs passing, climbs; pass^k falls.
+- A support agent gets one run per customer, so pass^k is the number that matches what customers see.
+
+**The numbers:**
+
+- At p = 0.7: pass@4 = 1 − 0.3⁴ = **0.992** and pass^4 = 0.7⁴ = **0.240**.
+- [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) explains how to estimate it from n runs.
+- Add fault injection to the evaluation set: force a timeout on `create_refund` in one run in four and check that the refund total is still £42.
+
+## Trade-offs
+
+| Choice                        | Gain                                | Cost                                            |
+| ----------------------------- | ----------------------------------- | ----------------------------------------------- |
+| More retries                  | Fewer failed runs from flaky tools  | Longer waits; unsafe without keys               |
+| Checkpoint every step         | Crash costs one step                | A write per step; schema versions to manage     |
+| Durable execution engine      | Retries, timers and replay built in | New infrastructure; deterministic workflow code |
+| Tight budgets                 | Bounded cost and latency            | Hard tasks stop early and escalate              |
+| Verifier on every side effect | Catches wrong outcomes              | One more read per action                        |
+| Fallback to a person          | Safe end state                      | Staff time; slower answer                       |
+
+## Production systems
+
+- **Stripe** idempotency keys: the reference design for safe retries of payments (as of November 2026).
+- **Temporal** runs long workflows as durable executions with automatic activity retries; its docs recommend the run id plus activity id as the key.
+- **LangGraph** checkpointers and per-node retry policies, with a fault-tolerance guide on keys and lost acknowledgements.
+- **Claude Code** hands control back when its `/goal` loop stops making tool calls, a no-progress breaker ([Loop Engineering](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops)).
+
+## Failure modes & pitfalls
+
+- Treating a timeout as "nothing happened" and retrying a side effect without a key.
+- A new key per attempt, or a key built inside the step that retries.
+- Telling the model a call "failed" when the outcome is unknown; it calls again with a new id.
+- Retrying permanent errors (a refused permission) with backoff.
+- Restarting a crashed run from the first message instead of the last checkpoint.
+- Budgets with no hand-over: the run stops and the customer hears nothing.
+- Trusting the transcript instead of reading the result back from the system of record.
+- Reporting one success rate instead of pass^k on reruns.
+
+## Interview framework
+
+1. Start with the arithmetic: pⁿ, and 0.95²⁰ = 0.358. Reliability is about steps.
+2. Classify failures: retryable, fixable by the model, fatal. Give each its handling.
+3. For every side effect, name the idempotency key, where it is built and when it is saved.
+4. Add checkpoints and say where the run resumes after a crash.
+5. Add budgets, breakers, a verifier and a fallback to a person.
+6. Measure pass^k with fault injection.
+
+**What interviewers listen for:** "a timeout is not a failure", a key saved before the call, and verification against the real system.
+
+**Red flags:** "add more retries", or "the model will notice and fix it".
+
+## Further reading
+
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/engineering/building-effective-agents)
+- [Handle tool calls: errors with is_error (Anthropic docs)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+- [Idempotent requests (Stripe API reference)](https://docs.stripe.com/api/idempotent_requests)
+- [Exponential backoff and jitter (Marc Brooker, AWS Architecture Blog, 2015)](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
+- [LangGraph: Fault tolerance (retries, timeouts, idempotency)](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)
+- [Temporal: Activity Definition, idempotency](https://docs.temporal.io/activity-definition)
+- [tau-bench: a benchmark for tool-agent-user interaction (Yao et al., 2024)](https://arxiv.org/abs/2406.12045)
+- [Why do multi-agent LLM systems fail? (Cemri et al., 2025)](https://arxiv.org/abs/2503.13657)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Each step of your agent succeeds 95 % of the time. How reliable is a 20-step run, and what do you do about it?"
+    category="Concepts"
+    level="Junior"
+  >
+    - If steps fail independently, the run succeeds with 0.95²⁰ = 0.358, about one time in three.
+    - Two levers move it: fewer steps (10 steps gives 0.599) and better steps (99 % per step gives 0.818 over 20).
+    - Then add recovery, so a failed step is retried or repaired instead of ending the run.
+    - Measure the result with pass^k, not one success rate.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A refund tool call times out. Should the agent retry it?"
+    category="Failure modes"
+    level="Mid"
+  >
+    - Only if the call is idempotent. A timeout means the reply was lost, not that the refund did not happen, so a plain retry can refund twice.
+    - Build a key before the call, such as run id plus tool-call id, save it in the checkpoint and send it on every attempt; the payments service returns its saved reply to a repeat.
+    - If all retries time out, tell the model the outcome is unknown and check the status, rather than saying it failed.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you recover when the worker running an agent dies halfway through?"
+    category="Reliability"
+    level="Mid"
+  >
+    - Save a checkpoint after every step, keyed by thread and run, in a durable store.
+    - Another worker takes over when the lease expires, loads the latest checkpoint and continues from there, without asking the model again for decisions already made.
+    - The step that was in flight runs again, so every side effect needs an idempotency key saved before it ran.
+    - A durable execution engine such as Temporal packages this pattern.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you stop an agent that is looping?" category="Reliability" level="Mid">
+    - Set budgets for turns, tokens and time, from the evaluation set's 95th percentile plus headroom.
+    - Add breakers for no progress: the same tool call with the same arguments three times, the same normalised failure three times, or several turns with no tool use.
+    - When either trips, save state and hand over to a person or change strategy, so the user is never left with silence.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent scores 90 % on the evaluation set but customers complain it is unreliable. Why?"
+    category="Evaluation"
+    level="Senior"
+  >
+    - One run per task hides variance. A task that passes 70 % of the time passes four reruns in a row only 0.7⁴ = 24 % of the time, and every customer is a fresh run.
+    - Measure pass^k over several runs per task, and inject faults such as timeouts so recovery paths are tested.
+    - Grade the end state in the real system, not the transcript, because a run can look fine and still refund twice.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Where should reliability logic live: in the prompt or in the harness?"
+    category="Architecture"
+    level="Senior"
+  >
+    - Mostly in the harness. Timeouts, retries, keys, checkpoints, budgets and breakers are deterministic code that must work even when the model is wrong.
+    - The model's part is to read clear errors and repair what it can, such as a missing argument.
+    - Verification also belongs outside the model, against the system of record, because a model grading its own work tends to approve it.
+  </InterviewQuestion>
+</InterviewQuestions>

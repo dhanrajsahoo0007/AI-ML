@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { BookmarkCheck, CreditCard, LifeBuoy, LogIn, LogOut, Mail, Shield, Sparkles, User } from "lucide-react";
+import { clearAllLocalProgress } from "@/features/progress/sync-account-progress.client";
 import { publicNav, SUBSCRIBE_KIND } from "@/features/sections/public";
 
 // Sign-in state is fetched only when the menu is opened (never on page load), so content pages stay static
@@ -39,6 +40,7 @@ export function ProfileMenu() {
       headers: { "content-type": "application/json" },
       body: "{}",
     }).catch(() => {});
+    clearAllLocalProgress();
     window.location.reload();
   };
 
@@ -63,7 +65,7 @@ export function ProfileMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Open profile menu"
-        className="inline-flex size-9 items-center justify-center rounded-full border border-hairline bg-paper-2 text-ink transition-colors hover:border-ink"
+        className="inline-flex size-8 items-center justify-center rounded-full border border-hairline bg-paper-2 text-ink transition-colors hover:border-ink min-[375px]:size-9"
       >
         <User className="size-4" />
       </button>

@@ -1,96 +1,219 @@
 ---
 title: "Load Balancing"
 description: "Spreading traffic across servers: L4 vs L7, algorithms, health checks, sticky sessions and global balancing."
+icon: network
+updated: 2026-11-16
 ---
 
-A load balancer is on almost every architecture diagram. Interviewers want to hear how traffic is spread, how failures are detected, and how the balancer itself avoids being a single point of failure.
+A load balancer is on almost every architecture diagram, and one slow server behind it can still hurt every user.
 
-## TL;DR
+- Interviewers want to hear how traffic is spread, how a failing server is detected and drained, and how the balancer itself avoids being a single point of failure.
 
-- A load balancer distributes requests over healthy servers to raise capacity and availability.
-- **L4** balances on IP and port (fast, simple); **L7** reads HTTP and can route by path, header or cookie.
-- Common algorithms: **round robin**, **least connections**, **weighted**, **consistent hashing**.
-- **Health checks** remove bad servers; **redundant balancers** remove the single point of failure.
+## Overview
+
+- A **load balancer** spreads requests over healthy servers, to raise capacity and availability.
+- **L4** balances TCP or UDP connections on IP and port (fast, simple); **L7** reads HTTP and can route by path, header or cookie.
+- Common algorithms: **round robin**, **least connections**, **two random choices**, **weighted** and **hashing**.
+- **Health checks** take bad servers out; **connection draining** lets a server leave without dropping requests; **redundant balancers** remove the single point of failure.
 - Keep servers **stateless** so any server can handle any request.
+- The basics of what a balancer is live in [Load Balancing Basics](/system-design/fundamentals/load-balancing-basics); this page owns algorithms, health checks and failure.
 
-## The idea in plain English
+## Mental model
 
-A shop with many checkout lanes needs someone directing customers to the shortest open lane and closing broken ones. The load balancer is that person for requests.
+- A shop with many checkout lanes needs someone directing customers to the shortest open lane and closing broken ones.
+- Round robin sends customers to lanes in turn, even to the lane whose till is jammed.
+- Least connections looks at the queues; two random choices glances at two lanes and picks the shorter one.
+- The load balancer is that person for requests.
 
 ## Core concepts
 
-1. **L4 vs L7.** L4 forwards TCP/UDP connections without inspecting content. L7 terminates HTTP, enabling routing rules, TLS termination, caching and auth.
-2. **Algorithms.** Round robin is even for similar requests; least connections adapts to uneven request cost; weighted variants handle different server sizes; hashing keeps a key on the same server.
-3. **Health checks.** Active probes (ping an endpoint) and passive checks (watch error rates) take servers in and out of rotation.
-4. **Sticky sessions.** Pin a client to a server; avoid by storing session state in a shared store.
-5. **Global load balancing.** DNS or anycast sends users to the nearest region and fails over between regions.
-6. **Client-side balancing.** Service meshes and clients pick a server themselves, avoiding an extra hop.
+- The running example is Brightpost's product service: **2,300 reads/s** at peak over **40 app servers**, about 57.5 requests/s each.
+
+### L4 or L7
+
+- **L4** forwards TCP or UDP connections without reading their content. It is fast and works for any protocol, but every request on one connection goes to the same server.
+- **L7** terminates HTTP, so it can route each request separately, by path or header, and handle TLS, caching and authentication. It costs more CPU and a little latency.
+- Large sites stack them: an L4 layer spreads connections over a fleet of L7 proxies, which spread requests over the app servers.
+
+### Algorithms
+
+- **Round robin** sends each request to the next server in turn. Even for similar requests; blind to a slow server.
+- **Least connections** (least outstanding requests) sends each request to the server with the fewest open requests. It adapts to uneven request cost.
+- **Two random choices** picks two servers at random and sends the request to the less busy one. It gets most of the benefit of least connections with a view of only two servers.
+- **Weighted** variants handle servers of different sizes; **hashing** keeps one key on the same server (see [Consistent Hashing](/system-design/patterns/consistent-hashing)).
+
+<AnimatedDiagram spec="animated/patterns/lb-algorithms" caption="Round robin keeps feeding a slow server; least connections starves it; two random choices does almost as well with far less information." />
+
+**How to read it:**
+
+- Each row asks one question of the three algorithms; least connections is ringed as the usual default for uneven requests.
+- The red cells are each one's weak spot: round robin's blindness to load, and least connections' herd when many balancers all pick the same emptiest server.
+
+**The numbers:**
+
+- 2,300 ÷ 40 = 57.5 requests/s per server. One server slows from 10 ms to 100 ms a request (illustrative).
+- Round robin still sends it 57.5/s: 1 in 40, so 2.5 % of all requests are slow.
+- Least connections keeps open requests level, so the slow server's rate falls with its speed: 2,300 × 0.1 ÷ (39 + 0.1) ≈ 5.9/s, 0.26 % of requests.
+
+<PremiumBreak />
+
+Try the algorithms on one stream of requests, some of them slow:
+
+<LoadBalancerSim servers={4} algorithm="round-robin" requests={24} />
+
+### Health checks and connection draining
+
+- **Active checks:** the balancer calls an endpoint such as `GET /healthz` every few seconds and takes a server out after several failures.
+- **Passive checks:** the balancer watches real traffic and takes out a server whose error rate or latency jumps.
+- **Shallow or deep.** A shallow check asks "is the process up?". A deep check also touches the database and the cache.
+  - Shallow misses a server that is up but cannot serve.
+  - Deep can take the whole fleet out at once when a shared dependency blips. Many balancers fail open: AWS ALB sends traffic to every target when none is healthy.
+- **Connection draining.** Before a server leaves (a deploy, a scale-in), the balancer stops sending it new requests and lets in-flight ones finish.
+  - AWS ALB waits 300 s by default (the deregistration delay); Google calls the state "lame duck".
+  - Without draining, every deploy cuts off the requests in flight on each server it replaces.
+
+### Sticky sessions
+
+- Stickiness pins a client to one server, usually with a cookie.
+- It suits servers that keep session state in memory, and it is how a WebSocket stays on one server.
+- It creates uneven load and loses the state when the pinned server dies. Store sessions in a shared store such as Redis instead.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    U["Users"] --> DNS["DNS / GSLB"]
-    DNS --> LB1["Load balancer (active)"]
-    DNS --> LB2["Load balancer (standby)"]
-    LB1 --> S1["Server 1"]
-    LB1 --> S2["Server 2"]
-    LB1 --> S3["Server 3"]
-    LB1 -. "health checks" .-> S1
-```
+Brightpost's read path, one layer of balancing at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/lb-layers" stepper caption="Each layer spreads a different unit: DNS spreads shoppers over regions, L4 spreads connections, L7 spreads requests." />
+
+<StepCards>
+  <StepCard n={1} title="One server takes every request">
+    All 2,300 reads a second reach one app server. When it is busy or down, so is the shop.
+  </StepCard>
+  <StepCard n={2} title="A balancer spreads requests over 40 servers">
+    An L7 balancer sends each request to one of 40 stateless servers. Capacity grows with the fleet, but a dead server still gets its 1 in 40.
+  </StepCard>
+  <StepCard n={3} title="Health checks take a bad server out">
+    A health checker probes every server and tells the balancer which are in rotation. A crashed server stops getting traffic within a few probes. The balancer itself is now the single point of failure.
+  </StepCard>
+  <StepCard n={4} title="An L4 balancer in front of several L7 balancers">
+    An L4 layer spreads TCP connections over a fleet of L7 balancers, so no single proxy is critical and the fleet can grow. One region is still one failure domain.
+  </StepCard>
+  <StepCard n={5} title="Global DNS picks a region and fails over">
+    DNS answers London first and switches to Frankfurt when London's health checks fail. A region outage now costs one DNS TTL, not the whole shop.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
 
 ### Making the balancer itself reliable
 
-Run balancers in pairs (active-passive with a floating IP, or active-active behind anycast or DNS). Managed balancers (ALB, NLB) do this for you.
+- Run balancers in pairs: active-passive with a floating IP, or active-active behind anycast or DNS.
+- Managed balancers (AWS ALB and NLB, Google Cloud Load Balancing) do this for you across zones.
+- **Client-side balancing:** service meshes and smart clients pick a server themselves, avoiding an extra hop and a central balancer (see [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination)).
 
-### Connection draining
+### Global load balancing
 
-Before removing a server for deploys, stop sending new requests and let in-flight ones finish. This avoids dropped requests during rollouts.
+- **DNS** or **anycast** sends each user to the nearest healthy region.
+- DNS failover is only as fast as the record's TTL and the resolvers that respect it.
+- Anycast announces one IP from many sites, so the network itself picks the nearest one.
+- Running two regions active-active is a bigger topic: [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover).
+
+### Worked example: one slow server and a deploy at the peak
+
+At 12:00 Brightpost's 40 app servers take 2,300 reads/s. Server 17 starts a long garbage-collection pause and every request on it takes 100 ms instead of 10 ms.
+
+1. **Round robin** keeps sending server 17 its 57.5 requests a second, so 2.5 % of shoppers wait ten times longer.
+2. **Least connections** sees server 17's open requests climb and sends it new ones only as old ones finish: about 5.9 a second.
+3. **Health checks** still pass, because the process answers `/healthz`; only passive latency checks would take it out.
+4. **A deploy** then replaces 10 servers. Each is drained first: no new requests, in-flight ones finish, then it stops.
+
+**The numbers:**
+
+- Requests in flight on a 10 ms server at 57.5/s: 57.5 × 0.01 = 0.6. On the slow server under round robin: 57.5 × 0.1 = 5.8.
+- Draining 10 servers that each hold under 1 request in flight takes milliseconds of real work; the 300 s default delay is an upper bound, and lowering it makes deploys faster.
+- With the other 30 servers carrying the load during the deploy, each takes 2,300 ÷ 30 ≈ 77 requests/s, a third more than usual.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| L4 | Speed, protocol-agnostic | No content-based routing |
-| L7 | Smart routing, TLS, auth | More CPU, more latency |
-| Sticky sessions | Simple stateful apps | Uneven load, harder failover |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| L4 | Speed; any protocol | No content-based routing; one connection goes to one server | In front of L7 proxies; non-HTTP traffic |
+| L7 | Routing by path or header, TLS, auth | More CPU, more latency | HTTP APIs and web traffic |
+| Round robin | Simple; needs no load data | Blind to slow servers | Similar requests on similar servers |
+| Least connections or two random choices | Adapts to uneven cost and slow servers | Needs open-request counts | Mixed request cost (the usual case) |
+| Sticky sessions | Simple stateful apps; WebSockets | Uneven load, harder failover | Only when state cannot move to a shared store |
 
-## Real-world examples
+## Production systems
 
-- Connection-heavy chat servers rely on balancing plus sticky connections: [WhatsApp](/system-design/case-studies/whatsapp), [Facebook Messenger](/system-design/case-studies/facebook-messenger).
-- Streaming traffic is steered to the nearest edge: [Netflix](/system-design/case-studies/netflix).
-- Model-serving fleets balance by queue depth: [ChatGPT](/system-design/case-studies/chatgpt).
+- **AWS Application Load Balancer** (as of November 2026): round robin by default, with least outstanding requests and weighted random as options; a deregistered target drains for 300 s by default; when no target is healthy it sends traffic to all of them (fail open).
+- **Envoy**: its least-request balancer picks the better of 2 random hosts by default (power of two choices).
+- **Google** (SRE book): simple round robin left up to 2 times CPU spread between tasks, so clients moved to weighted round robin driven by load the backends report; each client talks to a subset of 20 to 100 backends.
+- **Maglev**: Google's software L4 balancer, using consistent hashing so a connection stays on its backend as the balancers change.
+- Connection-heavy chat servers rely on balancing plus sticky connections: [WhatsApp](/system-design-case-studies/case-studies/whatsapp), [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger).
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Instagram](/system-design-case-studies/case-studies/instagram) · [S3](/system-design-case-studies/case-studies/s3)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Balancer as a single point of failure.
-- Health checks that only test "process is up", not "can serve traffic".
-- Round robin with very uneven request cost.
-- Forgetting connection draining on deploys.
+- **The balancer as a single point of failure.** Run it in pairs or use a managed, multi-zone balancer.
+- **Health checks that only test "process is up".** A server that cannot reach its database stays in rotation. Add passive checks on errors and latency.
+- **Deep checks that fail the whole fleet.** A database blip marks every server unhealthy at once. Keep deep checks out of the decision to remove servers, or fail open.
+- **Round robin with very uneven request cost.** Use least connections or two random choices.
+- **Forgetting connection draining on deploys.** Every deploy drops in-flight requests.
+- **Sticky sessions holding state.** A server dies and its users lose their sessions. Move state to a shared store.
 
-## How to answer in an interview
+## Interview framework
 
-Place balancers at each tier boundary, choose L4 or L7 with a reason, name the algorithm, describe health checks, and mention redundancy and multi-region failover.
+1. Place balancers at each tier boundary and say what each one spreads: regions, connections or requests.
+2. Choose L4 or L7 with a reason.
+3. Name the algorithm and why: least connections or two random choices when request cost varies.
+4. Describe health checks (active and passive), draining on deploys and fail-open behaviour.
+5. Make the balancer redundant and add DNS or anycast for regions.
 
-## Related patterns
+**What interviewers listen for:** a reason for the algorithm, draining on deploys, and redundancy at every layer.
 
-[Consistent Hashing](/system-design/patterns/consistent-hashing) · [Circuit Breaker and Retries](/system-design/patterns/circuit-breaker-and-retries) · [Rate Limiting](/system-design/patterns/rate-limiting)
+**Red flags:** one balancer box with no redundancy, or health checks that call every dependency.
 
 ## Further reading
 
 - [Load balancing in the datacenter (Google SRE Book)](https://sre.google/sre-book/load-balancing-datacenter/)
 - [Maglev: A Fast and Reliable Software Network Load Balancer](https://research.google/pubs/maglev-a-fast-and-reliable-software-network-load-balancer/)
+- [Target group attributes: routing algorithm and deregistration delay (AWS docs)](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html)
+- [Supported load balancers (Envoy docs)](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers)
+- Related pages: [Load Balancing Basics](/system-design/fundamentals/load-balancing-basics) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Circuit Breaker and Retries](/system-design/patterns/circuit-breaker-and-retries) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination)
 
 <InterviewQuestions>
   <InterviewQuestion question="L4 vs L7 load balancer?" category="Concepts" level="Junior">
-    L4 routes connections by IP and port and is very fast. L7 understands HTTP, so it can route by URL or header, terminate TLS and apply auth, at higher cost.
+    - L4 routes connections by IP and port and is very fast, for any protocol.
+    - L7 understands HTTP, so it can route each request by URL or header, terminate TLS and apply auth, at higher cost.
+    - Large sites put an L4 layer in front of a fleet of L7 proxies.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you avoid the load balancer being a single point of failure?" category="Reliability" level="Mid">
-    Run at least two balancers in active-passive or active-active mode using a floating IP, anycast or DNS, and use managed balancers that are redundant across zones.
+  <InterviewQuestion question="How do you avoid the load balancer being a single point of failure?" category="Failure modes" level="Mid">
+    - Run at least two balancers in active-passive or active-active mode, using a floating IP, anycast or DNS.
+    - Use managed balancers that are redundant across zones.
+    - Put an L4 layer in front of several L7 proxies, so no single proxy is critical.
   </InterviewQuestion>
   <InterviewQuestion question="Why avoid sticky sessions?" category="Trade-offs" level="Mid">
-    They create uneven load and lose state when the pinned server dies. Keeping sessions in a shared store such as Redis lets any server serve any request.
+    - They create uneven load, because heavy users stay on one server.
+    - They lose state when the pinned server dies.
+    - Keeping sessions in a shared store such as Redis lets any server serve any request.
+  </InterviewQuestion>
+  <InterviewQuestion question="One of 40 servers becomes ten times slower. What happens under round robin and under least connections?" category="Scaling" level="Mid">
+    - Round robin keeps sending it 1 in 40 requests, so 2.5 % of users get the slow path.
+    - Least connections sees its open requests pile up and sends it new ones only as old ones finish; its share falls to about a tenth of a healthy server's.
+    - Two random choices gets close to that while each balancer looks at only two servers, and it avoids every balancer piling onto the same emptiest server.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you deploy 40 servers without dropping requests?" category="Architecture" level="Mid">
+    - Replace them in batches, and drain each one first: the balancer stops sending new requests and waits for in-flight ones to finish.
+    - Bring the new server in only after it passes health checks, ideally with a slow start so a cold cache is not flooded.
+    - Keep enough capacity during the batch: with 10 of 40 out, the other 30 carry a third more traffic each.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should a health check call the database?" category="Failure modes" level="Senior">
+    - A check that only asks "is the process up" keeps a server that cannot reach the database in rotation.
+    - A check that calls the database marks every server unhealthy when the database blips, and the balancer has nowhere to send traffic.
+    - Use a shallow check for rotation, watch real error rates and latency to remove single bad servers, and make sure the balancer fails open when every target looks unhealthy.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do large fleets use two random choices instead of least connections?" category="Trade-offs" level="Senior">
+    - Exact least connections needs a fresh count for every server, which many independent balancers do not share.
+    - Balancers with the same stale view all send to the same emptiest server and overload it.
+    - Picking the better of two random servers needs two counts, spreads the choices and gives most of the benefit; Envoy uses it by default.
   </InterviewQuestion>
 </InterviewQuestions>

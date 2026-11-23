@@ -1,0 +1,14 @@
+title: "One price change: feed, database, change log, index"
+alt: >-
+  A sequence diagram with six lanes: an orange listing feed, teal ingest, violet primary database, blue change log,
+  teal indexer and violet search index. Step 1: the feed sends listing 77 at 550 thousand dollars with version 5;
+  ingest upserts the database only if version 5 is newer, and one row changes; change data capture puts the change on
+  the log, and the indexer writes the document to the search index with version 5. Step 2: the feed sends a late
+  version 4, which the conditional upsert drops with zero rows changed; the log replays version 5 to the indexer, and
+  the index answers with a conflict because it is not newer.
+caption: >-
+  Every change carries the source's version: a late update changes nothing in the database, and a replay changes
+  nothing in the index.
+tags: [case-studies, zillow, ingest, cdc, idempotency]
+source: original
+created: 2026-11-17

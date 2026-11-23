@@ -307,6 +307,8 @@ export async function contentPages(contentDir: string): Promise<Map<string, Page
 /** Assets referenced from code rather than MDX: always considered used. */
 export const CODE_REFS: { test: (a: IndexedAsset) => boolean; ref: string }[] = [
   { test: (a) => a.type === "logo", ref: "code:src/lib/company-logos.ts" },
+  // Named by case-study frontmatter (`logo`, `modelledOn`) and hub cards, which the MDX ref scan does not read.
+  { test: (a) => a.type === "system-logo", ref: "code:src/components/case-studies/system-logo.tsx" },
 ];
 
 /** usedBy for each asset: the pages that reference it (sorted, unique) plus code references. */
@@ -356,7 +358,12 @@ export function checkAssets(index: AssetIndex, refs: AssetRef[]): Problem[] {
         message: `${a.id}: source "${a.source}" is not a key in assets/LICENSES.yaml`,
       });
     }
-    if (a.group === "logos" && a.source === "original") {
+    // Case-study glyph marks for generic systems (plan §6.1) are drawn in-house, so they are the one original logo.
+    if (
+      a.group === "logos" &&
+      a.source === "original" &&
+      !(a.type === "system-logo" && a.tags.includes("glyph-mark"))
+    ) {
       problems.push({
         file: metaFile(a),
         level: "error",
@@ -721,6 +728,8 @@ export function snippetFor(a: Pick<AssetEntry, "id" | "type">): string {
       return `<Diagram id="${rest("diagrams/")}" />`;
     case "tech-icon":
       return `<TechIcon id="${rest("logos/tech/")}" />`;
+    case "system-logo":
+      return `logo: ${rest("logos/")}  (case-study frontmatter; rendered by <SystemLogo>)`;
     case "download":
       return `<Download id="${a.id}" />`;
     case "logo":

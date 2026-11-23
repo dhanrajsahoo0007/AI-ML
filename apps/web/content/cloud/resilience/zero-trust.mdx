@@ -1,11 +1,307 @@
 ---
 title: "Zero Trust, Defence in Depth and Identity-Aware Access"
-description: "Why being inside the network no longer means trusted, and how layered defences and identity-aware proxies check every request."
-status: outline
+description: "Why being inside the network proves nothing, how an identity-aware proxy checks every request, and how layered defences protect the data."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** replacing the idea that inside the network means trusted with every request proving who is calling, from what device and for which resource. It explains defence in depth as independent layers that must each fail, and identity-aware proxies as the way to put an internal tool on the internet safely.
+<KeyIdea>
+  Being inside the network proves nothing: every request must show who is asking, from which device, and why, and then gets only what that one request needs.
+</KeyIdea>
 
-**Related reading on this site:** [Security overview](/system-design/fundamentals/security) · [Authentication and authorization for APIs](/system-design/fundamentals/api-auth) · [Identity & Security on AWS](/cloud/aws/security)
+## The story
+
+Brightpost's staff use an **admin tool**, a small internal web app, to look up orders and give refunds. It has no login of its own. It sits inside the shop's private network, and the only way in is the office VPN, so everyone treats the VPN as the lock. One Wednesday a contractor needs to fix a bug in the tool's export page. At 10:20 he connects from his personal laptop, signing in with his own password and an MFA code. The laptop carries malware he does not know about. By 10:26 the malware has found the admin tool, which asks it nothing, because the request comes from inside. It starts pulling customer records through the export page. At 13:05 an alert fires: the database is serving 40 times its normal reads. Asha cuts the VPN at 13:15. By then 18,000 records are gone, with names, home addresses and order histories. The tool stays offline for 3 days while it is rebuilt, and refunds are done by hand.
+
+The contractor proved who he was, once. Nobody asked about his laptop, and nothing checked a single request after that. Every step below adds one of those checks.
+
+## How it works
+
+Three words first. A <Term id="vpn">VPN</Term>, or virtual private network, is an encrypted tunnel that makes a far-away laptop part of a private network. The **perimeter** is the line between inside and outside that network. <Term id="zero-trust">Zero trust</Term> is the rule that being inside that line earns nothing: each request is checked on its own.
+
+### Step 1: Never trust the network location
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={1} minWidth={620} caption="Brightpost's first setup: the support agent signs in to the VPN once, and the admin tool trusts any VPN address." />
+
+Perimeter thinking is a castle with a moat. Guards check people once, at the gate, and everyone inside trusts everyone else. Brightpost's VPN is that gate. The support agent signs in once in the morning, and from then on the admin tool trusts her address. It never asks who she is.
+
+Zero trust turns this around. Where a request comes from proves nothing. Each request must show three things: **who** is asking, **from which device**, and **in what context**, such as the country, the time and how unusual the request looks. Then it gets only what that one request needs. Think of a building where every door reads your badge, not only the front gate. The wider ideas and the attacks they answer are on [Security overview](/system-design/fundamentals/security).
+
+<PremiumBreak />
+
+### Step 2: One gate, then a flat network
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={2} minWidth={620} caption="The failure: malware rides the contractor's VPN session, opens the admin tool with no login and exports customer records." />
+
+A **flat network** is one where every machine can reach every other machine. The contractor's sign-in was real: right password, right MFA code. But the VPN gave the whole laptop an inside address, and every program on it shared that address, the malware included.
+
+<Callout tone="red" title="What breaks">
+  At 10:20 the laptop joins the VPN. By 10:26 the malware has scanned the network and found the admin tool. The tool asks for no login, because the request comes from an inside address. Its export page has full access to the orders database, so the malware reads 18,000 customer records before the alert at 13:05.
+</Callout>
+
+There were three gaps. The check happened once, at connect time, not on each request. Nobody asked about the device. And one sign-in opened the whole network, not one app. The next steps close each gap.
+
+### Step 3: Verify every request at an identity-aware proxy
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={3} minWidth={620} caption="The VPN is gone. The proxy asks the company directory who this is, then passes a signed identity to the tool." />
+
+A **proxy** is a server that takes requests on behalf of another server. An **identity-aware proxy** is a proxy that sits in front of an app and checks the person on every request. Brightpost puts one in front of the admin tool and switches off the VPN route.
+
+Staff now open the tool by its web address, over HTTPS. Anyone without a valid session signs in at the company directory, with <Term id="mfa">MFA</Term>, a second proof such as a phone code. Signing in happens about once a day. The check happens on every request.
+
+The proxy then passes the request on with a **signed identity**: a short note saying "this is the support agent". The proxy signs it, so the tool can prove where it came from. How single sign-on and MFA work is on [Identity and Access](/cloud/fundamentals/identity-and-access).
+
+### Step 4: Which device, and in what context
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={4} minWidth={620} caption="The proxy asks whether the laptop is managed and patched. The contractor's personal laptop is refused before any page loads." />
+
+Who is asking is half the question. The other half is what they ask from. **Device posture** is the state of a device: managed by the company or not, disk encrypted or not, system up to date or not. A **device check** reads that state from the company's device-management service.
+
+Brightpost now opens the admin tool only on company laptops that pass. The contractor's personal laptop fails, so the proxy refuses it before a single page loads.
+
+**Conditional access** means a rule depends on context as well as on identity. The usual signals are device, location, time and **risk**, a score for a session that looks odd, such as sign-ins from two countries an hour apart. Brightpost's rules: a managed device, always. A sign-in from a new country must pass MFA again. A high-risk session is refused.
+
+### Step 5: Least privilege, per app and per request
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={5} minWidth={620} caption="The access policy names which people, on which devices, may open this one app." />
+
+An **access policy** says which people, on which devices, may open which app. Brightpost writes one rule per app. The support agent and the finance lead may open the admin tool. The contractor may open only the product-page editor he works on. Each person sees the apps their job needs, and no others.
+
+This is <Term id="least-privilege">least privilege</Term>, applied to each request. Because the proxy checks every request, a change takes effect on the next click. If the contractor leaves the editor's group at 17:00, his request at 17:01 is refused, even though his session is still valid.
+
+The tool keeps least privilege inside, too. The support agent may look up an order and refund it. Only the finance lead may export, and an export of more than 100 rows needs a second person to approve it.
+
+### Step 6: Small segments and a narrow identity
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={6} minWidth={620} caption="The tool accepts traffic only from the proxy, and reads the database with its own identity, one order at a time." />
+
+**Segmentation** splits a network into small parts, and each part accepts traffic only from the callers it expects. The admin tool now sits in its own segment, and its only allowed caller is the proxy. A machine in the old office network is refused, as the red line shows. [Firewalls](/cloud/networking/firewalls) explains the rules that do this.
+
+The next hop is checked as well. The tool reaches the database with its own service identity, an identity made for a program, which may read one order per query. Services proving who they are to each other is on [Service-to-Service Calls](/cloud/networking/service-to-service).
+
+### Step 7: Defence in depth: one control per layer
+
+<AnimatedDiagram spec="animated/cloud/defence-layers" stepper minWidth={620} caption="Six rings around the customer records. Step 2 asks, for each ring, what an attacker gets if it fails." />
+
+**Defence in depth** means several layers of protection around the data, each with its own control, so one failure never reaches the records. Brightpost has six, from the edge inwards. The outermost is a <Term id="waf">web application firewall</Term> with flood protection, covered on [CDN, Edge and WAF](/cloud/networking/cdn-edge-and-waf). The innermost adds [encryption](/cloud/resilience/encryption-and-keys) and an alert on bulk reads.
+
+Step 2 of the figure asks of each ring: what if this one fails? The answer must always be "the next ring still holds". In the incident, the VPN was the only ring, so its failure exposed 18,000 records. The layers must also be independent. If two layers trust the same password, they are one layer.
+
+### Step 8: Write every decision down
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" step={7} minWidth={620} caption="Every allow and deny goes to the audit log, with the person, the device and the app." />
+
+The proxy records each request: the person, the device, the app and the decision. The database records each query and the identity that sent it. Both go to the audit account, where the shop team cannot erase them.
+
+In the incident, the VPN log said only that the contractor was connected from 10:20 to 13:15. Now each line says who opened which page, from which laptop, and whether it was allowed. [Threat Detection](/cloud/resilience/threat-detection) turns such lines into alerts.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a front door that checks person and device, one rule per app, and an app that checks again.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Front door:** AWS Verified Access. Each internal app gets its own endpoint, reached over HTTPS with no VPN.
+    - **Who signs in:** a user trust provider: IAM Identity Center, or another identity provider that speaks OpenID Connect.
+    - **Device and context:** a device trust provider, a partner device-management product that reports each device's state.
+    - **Per-app rules:** Verified Access policies, written in the Cedar policy language, on a group of endpoints or on one endpoint. They can test both user and device claims.
+    - **The app checks too:** Verified Access can pass the user's claims to the app in a signed header. The app should verify it.
+
+    **The difference that changes a design.** Device trust comes from a partner product, not from AWS, so you choose a device-management product first. Policies are code, so they can be reviewed and tested like code.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Front door:** Identity-Aware Proxy (IAP), switched on for a backend behind a load balancer, or for Cloud Run or App Engine.
+    - **Who signs in:** Google accounts and groups, managed in Cloud Identity or Google Workspace.
+    - **Device and context:** access levels in Access Context Manager, built from IP ranges, regions and device attributes that Endpoint Verification reports. Chrome Enterprise Premium adds richer signals.
+    - **Per-app rules:** an IAM role on each protected backend, which lets its holders through IAP. An IAM condition can require an access level.
+    - **The app checks too:** IAP adds a signed header to every request. The app verifies the signature and the audience.
+
+    **The difference that changes a design.** Access through IAP is an ordinary IAM grant, so it follows the resource tree: a grant on a folder reaches every app below it. Grant on each app instead. The same access levels can also guard Google Cloud's own APIs.
+  </Tab>
+  <Tab label="Azure">
+    - **Front door:** Microsoft Entra application proxy publishes an internal web app through a connector that connects outward, so no inbound port is open. Entra Private Access covers other protocols, through a client on the device.
+    - **Who signs in:** users and groups in Microsoft Entra ID, with MFA.
+    - **Device and context:** Conditional Access policies read signals such as device compliance from Microsoft Intune, named locations and sign-in risk.
+    - **Per-app rules:** Conditional Access policies that target each app, plus which users and groups are assigned to it.
+    - **The app checks too:** an app that signs users in with Entra ID validates the token it receives.
+
+    **The difference that changes a design.** Conditional Access is checked when Entra ID issues a token, not on every HTTP request. A session lasts until its token or session control expires; some services re-check sooner through continuous access evaluation. One policy set covers every app that signs in with Entra ID.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/zero-trust-request" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/zero-trust-request" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should someone reach this internal tool?"
+  tree={{
+    q: "Is it a web app that people open in a browser?",
+    yes: {
+      q: "Is everyone who uses it always in the office?",
+      yes: "Use an identity-aware proxy anyway. The office network is not a reason to trust a request, and laptops leave the office.",
+      no: "An identity-aware proxy in front of the app: sign-in with MFA, a device check, and one rule per app. No VPN.",
+    },
+    no: {
+      q: "Is it a remote login to a server, such as SSH or remote desktop?",
+      yes: {
+        answer: "Use the cloud's identity-checked remote access. No port open to the internet.",
+        href: "/cloud/networking/firewalls",
+      },
+      no: "A database client or another protocol: a private access agent that checks person and device for that one app. A VPN, if any, reaches that one segment only.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The contractor leaves the editor's group at 17:00. His session is still valid. What happens to his request at 17:01?" hint="When does the proxy read the rules?">
+    It is refused. The proxy checks the rules on every request, so a valid session alone does not decide. The change works on the next click.
+  </QuizItem>
+  <QuizItem question="Malware on a company laptop that passes the device check steals the support agent's session. What can it reach?" hint="Look at the access policy and at the tool's own rules.">
+    Only the admin tool, with her rights: look up and refund orders. It cannot export, because only the finance lead may. Every request is logged with her name, so the odd pattern shows quickly.
+  </QuizItem>
+  <QuizItem question="A test server in the old office network sends a request straight to the admin tool's address. What stops it?">
+    Two layers. The tool's segment accepts traffic only from the proxy. And the request carries no signed identity, so the tool would refuse it anyway.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Office VPN", "Identity-aware proxy", "Private access agent"]}
+  rows={[
+    ["What one sign-in opens", "The whole network", "One app per rule", "One app or port per rule"],
+    ["Device checked", "Rarely", true, true],
+    ["Rules checked on every request", false, true, "On each new connection"],
+    ["Works for SSH and database clients", true, "Mostly web apps", true],
+    ["Needs on the laptop", "A VPN client", "A browser", "An agent"],
+    ["The Wednesday at 10:20", "18,000 records copied", "Refused at the proxy", "Refused at the agent"],
+  ]}
+  caption="Three ways to reach Brightpost's internal tools, scored on the incident."
+/>
+
+The VPN wins only for tools that are not web apps. For Brightpost's web tools, the proxy needs only a browser and checks every request.
+
+## Common pitfalls
+
+- **The app trusts the proxy blindly.** If the tool accepts any request that reaches it, a second route skips every check. Verify the signed identity in the app, and let its segment accept only the proxy.
+- **One rule for "all staff".** Opening every app to everyone rebuilds the flat network with a nicer sign-in page. Write one rule per app, naming the groups that need it.
+- **Device checks in "log only" for ever.** Teams turn on a report-only mode to see who would fail, then never enforce it. Set a date, fix the failing laptops, then refuse.
+- **Keeping the VPN as a spare.** Every route left open is a way around the proxy. Close the VPN when the last app has moved.
+- **Thinking one product is zero trust.** The proxy guards the front door. The tool, the database and the logs still need their own checks.
+
+## How to say it in an interview
+
+"I don't treat the network as proof of anything. Every request has to show who is asking, from which device, and in what context, and it gets only what it needs. For internal web tools I put an identity-aware proxy in front instead of a VPN. It sends people to single sign-on with MFA, checks the device's state, and applies one rule per app on every request. The app still verifies the signed identity the proxy passes, and its segment accepts traffic only from the proxy. Behind it, each service uses its own narrow identity, and the data is encrypted and watched for bulk reads. I ask of each layer: if this one fails, what still holds?"
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does 'never trust the network' mean in practice?" level="Junior" category="Cloud">
+    **Short answer.** An address inside the company network earns no access. Every request is checked for who is asking, from which device and in what context, and gets only what it needs.
+
+    **Why.** Brightpost's admin tool trusted any VPN address. A contractor signed in properly, but malware on his personal laptop shared its inside address. It opened the tool with no login and copied 18,000 customer records in under 3 hours. A per-request check of person and device would have refused the first page.
+
+    <AnimatedDiagram spec="animated/cloud/zero-trust-request" step={2} path="contractor>vpn>admin>db" caption="One sign-in at the VPN, then the network itself was the permission." />
+
+    **Follow-ups the interviewer may ask.**
+    - Does zero trust mean you remove the firewall rules?
+    - What about traffic between two of your own services?
+
+    **Watch out for.** Saying "zero trust means trusting nobody". It means trust is earned per request, from identity and context, never from location.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Identity-aware proxy or VPN for an internal admin tool: which, and why?" level="Mid" category="Cloud">
+    **Short answer.** An identity-aware proxy. It checks the person, the device and a per-app rule on every request, and opens one app, not a network. A VPN checks once at connect time and then trusts everything the laptop sends.
+
+    **Why.** With the VPN, one sign-in gave the contractor's whole laptop the whole network, malware included. With the proxy, his personal laptop fails the device check, and a passing laptop reaches only the apps its rule names. Removing someone takes effect on the next request.
+
+    <AnimatedDiagram spec="animated/cloud/zero-trust-request" step={3} path="staff>proxy>admin" caption="The proxy, not the network, decides who reaches the tool." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you do for a tool that is not a web app?
+    - What does each cloud offer for this?
+
+    **Watch out for.** Keeping both "to be safe". The VPN stays a route around every check the proxy makes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is conditional access, and which signals would you use for an admin tool?" level="Mid" category="Cloud">
+    **Short answer.** A rule that depends on context, not only on identity. For an admin tool I would require a managed, encrypted, patched device always, ask for MFA again from a new country, and refuse a high-risk session.
+
+    **Why.** A stolen password and MFA code still come from the attacker's own device and place. The device check stops Brightpost's case outright, because the personal laptop is not managed. Location and risk catch a session that suddenly appears elsewhere.
+
+    <AnimatedDiagram spec="animated/cloud/zero-trust-request" step={4} highlight={["device", "proxy", "contractor"]} caption="The device check refuses the unmanaged laptop before any page loads." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you roll out a device check without locking out half the staff?
+    - Is a country check enough on its own?
+
+    **Watch out for.** Leaning on location alone. Addresses are easy to borrow, and staff travel. Use location as one signal among several.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why must the app still check identity when a proxy is in front of it?" level="Mid" category="Cloud">
+    **Short answer.** Because the proxy only protects the requests that pass through it. If anything can reach the app by another route, the app must refuse requests that lack a valid signed identity from the proxy.
+
+    **Why.** Brightpost's admin tool verifies the proxy's signature on every request, and its segment accepts traffic only from the proxy. A test server in the old office network is refused twice: by the network rule and by the tool. A mistake in one check does not open the other.
+
+    <AnimatedDiagram spec="animated/cloud/zero-trust-request" step={6} highlight={["vpn", "admin", "proxy"]} caption="Traffic that did not come through the proxy is refused at the tool's segment." />
+
+    **Follow-ups the interviewer may ask.**
+    - What exactly does the app verify in the signed header?
+    - How does the tool's own identity limit what it can do to the database?
+
+    **Watch out for.** Trusting a plain header such as "user: alice" that any caller could set. Only a signature the app verifies proves the proxy sent it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the layers an attacker must beat to read a Brightpost customer record." level="Senior" category="Cloud">
+    **Short answer.** Six independent layers, each with its own control: edge, identity, network, host, app and data. For each one, ask what still holds if it fails.
+
+    **Why.** If the proxy fails, the segment and the tool's role check still stand. If a server is taken over, its identity reads one order per query, so copying 90,000 customers trips the bulk-read alert. The layers must not share a secret, or one leak beats two layers.
+
+    <AnimatedDiagram spec="animated/cloud/defence-layers" step={2} caption="For every ring, the answer to 'what if this fails?' is an inner ring that still holds." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which layer would you build first with a small team, and why?
+    - How would you test that a layer still works?
+
+    **Watch out for.** Listing products instead of controls. "A WAF and a VPN" is two boxes, not a design.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you move 6 staff and their contractors off a VPN without breaking their work?" level="Senior" category="Cloud">
+    **Short answer.** One app at a time. Put each web app behind the proxy with per-app rules, run device checks in report mode for a few weeks, fix the failing laptops, then enforce. Close the VPN route to each app as it moves, and switch the VPN off when the last one has.
+
+    **Why.** A list of apps and their users gives the rules: at Brightpost, the admin tool, the product-page editor and a few reports. Reporting first shows who would be locked out before anyone is. Database clients and other non-web tools go to a private access agent. The VPN's own log shows when it carries no more traffic.
+
+    <AnimatedDiagram spec="animated/cloud/zero-trust-request" step={5} highlight={["policy", "proxy", "admin", "staff"]} caption="Each app gets its own rule, so apps can move one at a time." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is your fallback if the identity provider is down?
+    - How do contractors get managed devices?
+
+    **Watch out for.** A big-bang switch on a Monday morning. One forgotten tool sends everyone back to the VPN, and it never closes.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Firewalls: Security Groups, NACLs, NSGs & Firewall Policies](/cloud/networking/firewalls)
+- [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [Encryption at Rest, in Transit and Key Management](/cloud/resilience/encryption-and-keys)
+- [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security)
+- [Authentication and authorization for APIs](/system-design/fundamentals/api-auth)
+
+## Further reading
+
+- [AWS Verified Access user guide](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html): trust providers, endpoints and policies.
+- [Google Cloud Identity-Aware Proxy overview](https://cloud.google.com/iap/docs/concepts-overview): how IAP checks each request.
+- [Microsoft Entra Conditional Access overview](https://learn.microsoft.com/entra/identity/conditional-access/overview): signals, conditions and controls.
+- [Microsoft Entra application proxy](https://learn.microsoft.com/entra/identity/app-proxy/overview-what-is-app-proxy): publishing internal web apps.

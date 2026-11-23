@@ -62,7 +62,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 625,
       y: 230,
-      w: 170,
+      w: 174,
       h: 64,
     },
     { id: "store", label: "Poster photos", icon: "blob", tone: "violet", variant: "glyph", x: 800, y: 230 },

@@ -1,0 +1,18 @@
+title: Ring attention across four GPUs
+alt: >-
+  A layout figure in two panels about one 128,000-token prompt. The top panel cuts the prompt into four blue blocks of
+  32,000 tokens, one for each of four teal GPUs. Each GPU keeps its own query block, Q0 to Q3. Arrows join the GPUs in
+  a ring, GPU 0 to 1 to 2 to 3 and a dashed arrow back from GPU 3 to GPU 0, and carry key and value blocks. The bottom
+  panel is a grid with one row per GPU and one column per round. In round 1 every GPU computes its query block against
+  its own key and value block, Q0 with KV0, Q1 with KV1, and so on. In round 2 each GPU holds the block of its
+  neighbour, Q0 with KV3, Q1 with KV0. Rounds 3 and 4 continue the shift, so after four rounds every query block has
+  met all four key and value blocks and a green result column shows each GPU's finished output. Under rounds 1 to 3 a
+  note says the next block is in flight while the GPU computes; under round 4 nothing is left to send. A closing note
+  says that each round needs 33.6 TFLOP of attention against 1.05 GB of data sent, that blocks must be at least about
+  1,040 tokens on NVLink or about 24,960 on InfiniBand, and that 32,000 tokens is enough to hide the transfer.
+caption: >-
+  Each GPU keeps its query block and passes key and value blocks round the ring; after four rounds every query block has
+  met every key and value block, and the sends overlap the compute.
+tags: [serving, long-context, ring-attention, context-parallelism, genai]
+source: original
+created: 2026-11-15

@@ -1,0 +1,267 @@
+---
+title: GPU/TPU Resource Management
+description: Scheduling, partitioning, memory, and cost controls for accelerator-heavy ML training and inference at scale.
+updated: 2026-11-15
+---
+
+Accelerators are the scarcest, costliest part of an LLM platform. Sharing them without breaking latency joins four things: splitting one GPU, a KV-aware memory budget, priority rules, and honest utilisation metrics.
+
+## Overview
+
+- **Three ways to share a GPU:** give a pod the **whole card**, **time-slice** it (pods take turns on one memory pool, with no memory or fault isolation), or **partition it in hardware with MIG** (up to **7 instances** with their own memory and cache, in fixed profile sizes).
+- **Place models by memory, and count the KV cache.** A 70 B model at 8 bits has **70 GB** of weights and fits an 80 GB GPU on paper, but leaves **2 GB** for the KV cache: room for **2 requests**, where Brightpost needs **18**.
+- **Interactive work goes first.** Priority scheduling and pre-emption keep a chat request from waiting behind a batch queue; the batch job pays by re-running some work.
+- **GPU capacity is a reservation problem as much as a scheduling one.** Cloud GPU quotas are per region and per GPU model, and quota does not guarantee a machine is free.
+- **`nvidia-smi` "utilisation" is the share of time a kernel was running**, not how much of the chip was busy. Watch SM activity, memory bandwidth, queue depth and **tokens/s**.
+- **TPUs come as slices of a pod**, joined by a fixed chip-to-chip network, so you reserve a shape, not a count.
+
+## Mental model
+
+- **Whole GPU vs. time-slicing:** A GPU is a large kitchen with one oven and a very fast chef; a whole GPU rents the kitchen to one restaurant, while time-slicing lets four restaurants take turns at the stove and share one fridge, where one restaurant's spill reaches everyone's food.
+- **Hardware walls (MIG):** MIG puts up walls and gives each restaurant its own corner and fridge, though the corners only come in fixed sizes.
+- **The fridge limit (KV cache):** Every order in progress keeps ingredients (the KV cache) in the fridge, so a kitchen that fits the recipe book can still fail at the dinner rush.
+- **Priority seating:** When the lunch crowd arrives, the head waiter seats walk-in guests before the staff meal.
+
+## Core concepts
+
+1. **Whole GPU.** A pod asks for `nvidia.com/gpu: 1` and owns the card. Simple and predictable; idle SMs (streaming multiprocessors, the GPU's compute units) are still billed.
+2. **Time-slicing.** The device plugin advertises each GPU as several replicas. Pods on the same GPU take equal turns. There is no memory isolation and no fault isolation, and asking for two replicas does not buy twice the compute (NVIDIA GPU Operator docs).
+3. **MIG (Multi-Instance GPU).** Hardware splits a supported card (A100, A30, H100, H200 and newer) into up to seven instances. Each has its own memory, cache banks and memory bandwidth, and faults stay inside the instance. Profiles have fixed sizes, written compute slices then memory: `1g.10gb`, `3g.40gb`, `7g.80gb`.
+4. **MPS (Multi-Process Service).** A service that lets several CUDA processes share a GPU cooperatively and cuts context switching. NVIDIA's documentation describes memory and SM partitioning; check the version you run for what it isolates.
+5. **KV budget.** What is left of GPU memory after weights and a reserve. It decides how many requests run at once (see [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)).
+6. **Bin-packing.** Placing models on GPUs so that weights, reserve and KV budget all fit, with as few cards as the latency target allows.
+7. **Priority and pre-emption.** Interactive requests run before batch ones; when memory is full, a low-priority request is evicted.
+8. **Device plugin and DRA.** How Kubernetes sees GPUs. A device plugin advertises integer resources; **Dynamic Resource Allocation (DRA)** adds device classes, claims and filters on device attributes.
+9. **Quotas and reservations.** Per-region limits you must raise, and pre-booked capacity you pay for whether or not you use it.
+10. **Utilisation metrics.** Which counters say the GPU is doing useful work (see Technical mechanics).
+
+## Architecture
+
+Brightpost's GPU work arrives as a queue in front of an autoscaling pool, matching the [Batch, HPC and GPUs page](/cloud/compute/batch-hpc-gpus).
+
+<AnimatedDiagram
+  spec="animated/cloud/gpu-fleet"
+  stepper
+  minWidth={620}
+  caption="A GPU is billed while it is on, so a queue in front of it keeps it busy. This page covers what happens inside the box labelled GPU machines."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Holding a GPU idle is the expensive default">
+    A notebook that holds a machine for 168 hours of a week while doing 25 hours of work shows a busy meter of 15 percent. The bill follows hours switched on, not hours of work.
+  </StepCard>
+  <StepCard n={2} title="A queue lets one GPU serve many jobs">
+    Jobs wait in one list and the shared GPU runs them back to back, reaching about 80 percent busy.
+  </StepCard>
+  <StepCard n={3} title="The pool follows the queue">
+    A batch service starts GPUs when jobs wait and stops them at zero. Sharing and placement, below, decide what runs on each GPU while it is on.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Sharing modes: one card, three contracts
+
+<AnimatedDiagram
+  spec="animated/serving/gpu-sharing-modes"
+  stepper
+  caption="The same 80 GB card as a whole GPU, as four time-sliced pods and as four MIG instances. Only the third puts walls between the pods."
+/>
+
+**How to read it:**
+
+- **Panels:** Each panel is one GPU.
+- **Time-slicing (panel 2):** The strip shows pods taking turns on shared memory.
+- **MIG (panel 3):** The strip of seven cells represents the card's compute slices, where four are handed out and three are not.
+
+**The numbers:**
+
+- **H100 80 GB MIG profiles (NVIDIA MIG guide, checked November 2026):** `1g.10gb` (up to 7 instances), `1g.20gb` (4), `2g.20gb` (3), `3g.40gb` (2), `4g.40gb` (1), and `7g.80gb` (1).
+- **Stranded compute:** Four `1g.20gb` instances use 4 × 20 = 80 GB (all the memory), but only 4 of 7 compute slices, stranding three sevenths of the compute.
+- **Profile trade-off:** Choosing a profile means choosing which resource you waste.
+
+<Callout tone="red" title="What breaks">
+  Time-slicing with several LLM servers on one GPU gives no memory walls. Each server sizes its cache as if it owned the card, so together they ask for more than 80 GB and one hits out-of-memory, taking its neighbours' latency with it. Give each server a fixed memory fraction, or use MIG.
+</Callout>
+
+- **GPU Operator setup:** In Kubernetes, MIG and time-slicing are configured through the NVIDIA GPU Operator and its device plugin.
+- **Restart requirement:** A time-sliced GPU is configured with a replica count, and changing it needs a restart of the device plugin (Operator docs, November 2026).
+- **Integer device limits:** Core Kubernetes treats a device-plugin resource as an integer that cannot be shared or overcommitted, which is why sharing lives in the plugin's configuration.
+
+### Placing models by memory
+
+<AnimatedDiagram
+  spec="animated/serving/gpu-bin-packing"
+  stepper
+  caption="Weights, a reserve and the KV budget must all fit. Plan A fits the weights and starves the cache; Plan B splits the big model. The 80 GB card and the 8 GB reserve are illustrative."
+/>
+
+**How to read it:**
+
+- **Memory segments:** Each bar is an 80 GB GPU; green is weights, grey is the reserve for the CUDA context and activations, and violet is what remains for the KV cache.
+- **Cache sizing:** Step 2 works out how much KV Brightpost needs.
+
+**The numbers:**
+
+- **Per-token KV size:** The KV cache holds a key and a value for every layer and every KV head; for a 70 B model with 80 layers, 8 KV heads and a head size of 128 (the Llama 3 shape, 16-bit cache), that is 2 × 80 × 8 × 128 × 2 bytes = 327,680 bytes per token.
+- **Per-request and peak KV:** A request of 2,200 prompt and 250 answer tokens holds 2,450 × 327,680 B = 0.80 GB at full length; at the peak of 12 requests/s and 1.5 s per answer, 12 × 1.5 = 18 requests are in flight, so the cache needs 18 × 0.80 = 14.5 GB.
+- **Plan A vs. Plan B:** Plan A has 80 − 70 − 8 = 2 GB (room for 2 requests); Plan B splits the weights over two GPUs (35 GB each, tensor parallel, which needs a fast link between them), leaving 37 GB each (74 GB together), holding 74 ÷ 0.80 = 92 requests (5.1 times the need).
+- **Shared third GPU:** Two 8 B models share a third GPU (8 GB at FP8 and 16 GB at FP16) with 48 GB of cache; at 0.32 GB per request that is 149 requests.
+- **Block allocation:** Real engines allocate cache in blocks as a request grows, so the worst case above is safe, not exact.
+- **vLLM memory fraction:** vLLM takes a fraction of GPU memory (`gpu_memory_utilization`, default 0.92 in the documentation, November 2026) and gives the engine whatever remains after weights as the cache pool.
+
+### Who goes first: priority and pre-emption
+
+<AnimatedDiagram
+  spec="animated/serving/gpu-priority-queue"
+  stepper
+  caption="Eight batch requests wait for a GPU, then an interactive request arrives. First come, first served makes it wait 800 ms; priority makes it wait for one slot. The 100 ms slot is illustrative."
+/>
+
+**How to read it:**
+
+- **Queue colours:** Blue cells are batch requests (nightly ticket summaries), orange is the interactive request, and teal is the GPU.
+- **Memory contention:** Step 3 shows GPU memory when batch work holds every block.
+
+**The numbers:**
+
+- **Queue wait time:** If the GPU serves one request per 100 ms, a request behind 8 others waits 8 × 100 = 800 ms, twice the 400 ms first-token target; with priority it waits at most one running slot (100 ms).
+- **Pod priority:** Kubernetes applies the same idea to pods via `PriorityClass`, giving pods an integer priority so a pending high-priority pod can evict lower-priority pods from a node to make room (Kubernetes docs, November 2026).
+- **Engine priority and recompute:** Inside an engine, vLLM's `--scheduling-policy priority` handles requests in priority order (lowest value first); pre-empting a request frees its cache, and vLLM's default pre-emption is recompute, so the victim redoes its prefill when it resumes.
+
+### The cloud side: GPU quota and reserved capacity
+
+- **Regional quotas:** Cloud GPU quota is regional; on Google Cloud, GPU quota counts the GPUs in all your VMs in a region, is set per GPU model, and Spot VMs draw on a separate "preemptible" quota once requested (Compute Engine docs, November 2026).
+- **Quota vs. capacity:** Quota does not guarantee that the zone has a free GPU; request quota before launch in every region you may use, plus the all-regions GPU quota.
+- **AWS Capacity Blocks:** AWS sells pre-booked capacity as EC2 Capacity Blocks for ML, reserving up to 64 GPU instances up to eight weeks ahead; you pay for the reserved period and cannot cancel once bought (EC2 docs, November 2026).
+- **Tiered buying strategy:** Use reservations for the steady inference floor and training windows, on-demand for the next layer, and Spot for restartable work.
+
+### TPUs: pods and slices
+
+- **Pods, slices, and topologies:** A **TPU pod** is a group of TPU chips on a dedicated network; a **slice** is a set of chips inside one pod linked by inter-chip interconnect (ICI), and a **topology** such as `2x4` or `4x4x4` names its shape (the product of dimensions is the chip count).
+- **Host VMs and multislice:** A slice may span several host VMs (on the TPU7x generation each host connects to four chips), and **multislice** joins several slices over the data-centre network (Google Cloud TPU docs, November 2026).
+- **Shape compilation:** Unlike GPUs, you request a shape and compile the program for the slice it runs on, so changing the shape means re-sharding and recompiling; the same tension holds between packing for efficiency and leaving headroom for tail latency.
+
+### Kubernetes: device plugins and DRA
+
+- **Device plugins:** A device plugin registers a resource name such as `nvidia.com/gpu` with the kubelet and reports its devices; pods ask for whole integers.
+- **Dynamic Resource Allocation (DRA):** Stable since Kubernetes 1.35 (first added in 1.30, Kubernetes docs, November 2026), DRA lets drivers publish devices (`ResourceSlice`), admins define categories (`DeviceClass`), and workloads request a `ResourceClaim` that filters on device attributes and shares a device between containers.
+- **Pre-emption limitation:** The scheduler does not yet pre-empt for DRA devices, so a high-priority pod that needs one waits until the device is free; for the rest of the container story see [Containerization and Orchestration](/ai-system-design/genai-system-design/containerization-orchestration).
+
+### Metrics that matter, and why nvidia-smi misleads
+
+- **Why `nvidia-smi` misleads:** NVIDIA defines `nvidia-smi` GPU utilisation as the percent of the sample period during which one or more kernels were running, so one small kernel running all the time reads 100 percent while most of the chip sits idle.
+- **DCGM profiling signals:** Use NVIDIA's DCGM profiling fields instead:
+
+| Signal | What it tells you |
+| --- | --- |
+| SM active (`DCGM_FI_PROF_SM_ACTIVE`) | Fraction of time at least one warp was active, averaged over SMs; a warp stalled on memory still counts |
+| SM occupancy (`DCGM_FI_PROF_SM_OCCUPANCY`) | Resident warps against the maximum an SM supports |
+| Tensor pipe active (`DCGM_FI_PROF_PIPE_TENSOR_ACTIVE`) | Fraction of cycles the matrix units worked |
+| DRAM active (`DCGM_FI_PROF_DRAM_ACTIVE`) | Fraction of cycles moving data to or from GPU memory |
+| Tokens/s, queue depth, KV-cache usage | The service-level view: output, waiting, and memory headroom |
+
+- **Memory-bound decode:** Decode is memory-bound (see [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms)), so a healthy decode GPU shows high DRAM activity and low tensor activity—that is not a fault.
+- **Service-level autoscaling:** Judge health by tokens/s per GPU and p95 time to first token, autoscale on queue depth as on [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference), and track power-cap throttling, out-of-memory events, and pre-emption counts next to queue depth.
+
+### Worked example: Brightpost's three GPUs
+
+Brightpost's peak is 12 requests/s, 18 in flight, and 3,000 output tokens/s (12 × 250). It runs a 70 B support model, an 8 B triage model that sorts tickets, and an 8 B summariser for a nightly batch job.
+
+1. **Place.** Plan A (the 70 B model alone on one GPU) leaves 2 GB of cache and 2 requests, so it fails at peak. Plan B splits the 70 B model over GPU 0 and GPU 1 (92 requests of room) and puts both 8 B models on GPU 2 (149 requests).
+2. **Share.** The two 8 B models share GPU 2. Time-slicing would let a runaway summariser starve triage of memory, so Brightpost gives each server a fixed memory fraction, or MIG instances where the profile sizes suit.
+3. **Prioritise.** Chat requests run at high priority and the summariser at low. At the sale peak the engine pre-empts batch work first and the nightly job finishes later; chat stays under its 400 ms first-token target.
+4. **Reserve.** The floor of three GPUs is reserved capacity; the batch pool is Spot or a Capacity Block, sized by [Capacity Planning and Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation).
+5. **Measure.** Alerts fire on queue depth, KV-cache usage and p95 first-token time, not on the `nvidia-smi` percentage.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Whole GPU | Full isolation and speed; simplest | Idle SMs are billed | Large models, training, strict latency |
+| Time-slicing | Many small services per card; any GPU | No memory or fault isolation; uneven latency | Dev, notebooks, light internal services |
+| MIG | Hard isolation; predictable slices | Fixed profile sizes can strand compute; reconfiguration needs care | Multi-tenant serving of small models |
+| Bin-pack tightly | Fewer GPUs, lower bill | No headroom for traffic spikes or cache growth | Steady load with a measured KV budget |
+| Reserved capacity | Capacity assured | Paid when idle | The steady floor of inference |
+| Spot or preemptible | Large discount | Can be reclaimed | Batch and checkpointed training |
+
+## Production systems
+
+- **NVIDIA GPU Operator.** Configures MIG and time-slicing through the device plugin, and documents that time-slicing has no memory or fault isolation (November 2026).
+- **Kubernetes DRA.** Became stable in Kubernetes 1.35 to describe devices with classes and claims instead of integer counts.
+- **vLLM.** Offers a priority scheduling policy and a pre-emption mode, and reports preemption counts as metrics so you can see memory pressure.
+- **AWS EC2 Capacity Blocks for ML.** Reserves GPU instances for a future window, up to 64 instances per block.
+- **Google Cloud TPU slices.** Sold as a topology within a pod, with multislice for jobs larger than one slice.
+
+## Failure modes & pitfalls
+
+- Sizing a model by weights alone and discovering at peak that the KV cache has no room.
+- Time-slicing latency-sensitive services together and expecting isolation.
+- Choosing a MIG profile by memory and ignoring that its compute share may be a fraction of what you need.
+- Alerting on `nvidia-smi` utilisation, which can read 100 percent on a nearly idle chip.
+- Packing to 100 percent memory, so one long prompt triggers out-of-memory or constant pre-emption.
+- Relying on quota as if it were capacity: the zone may still be empty.
+
+## Interview framework
+
+1. Name the sharing modes and what each isolates: whole GPU, time-slicing, MIG, and say MIG has fixed profiles.
+2. Do the memory arithmetic: weights plus reserve plus KV budget, and requests in flight times KV per request.
+3. Say who goes first: priority classes, engine priority, pre-emption and its recompute cost.
+4. Cover supply: quotas, reservations, Spot for restartable work, and TPU slices as shapes.
+5. Close on measurement: tokens/s, queue depth, KV usage and SM activity, with a note on why `nvidia-smi` misleads.
+
+**What interviewers listen for:** KV cache in the fit calculation, honest isolation claims, and metrics tied to latency.
+
+**Red flags:** "MIG and time-slicing are the same", sizing by weights only, or autoscaling on GPU utilisation.
+
+## Further reading
+
+- [NVIDIA Multi-Instance GPU user guide, supported profiles](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/supported-mig-profiles.html)
+- [NVIDIA GPU Operator: GPU sharing with time-slicing](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html)
+- [Kubernetes: Dynamic Resource Allocation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) · [Device plugins](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/) · [Pod priority and preemption](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)
+- [NVIDIA DCGM feature overview (profiling metrics)](https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/feature-overview.html) · [nvidia-smi documentation](https://docs.nvidia.com/deploy/nvidia-smi/index.html)
+- [Cloud TPU system architecture](https://docs.cloud.google.com/tpu/docs/system-architecture-tpu-vm) · [Google Cloud GPU quotas](https://docs.cloud.google.com/compute/resource-usage) · [Amazon EC2 Capacity Blocks for ML](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html)
+- Related pages: [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) · [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [Capacity Planning and Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation) · [Containerization and Orchestration](/ai-system-design/genai-system-design/containerization-orchestration) · [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is high GPU utilisation not always a healthy sign for an inference service?" category="Failure modes" level="Mid">
+    - **Misleading counter:** The `nvidia-smi` figure is the share of time at least one kernel was running, so a single small kernel can read 100 percent while most SMs idle.
+    - **Queue and memory stalls:** A busy GPU can also mean a growing queue that inflates latency, or memory-bound kernels where the compute units wait for data.
+    - **Better metrics:** For latency-sensitive APIs, track SM activity, DRAM activity, queue depth, KV-cache usage, tokens/s, and p95 time to first token, and keep moderate load with explicit concurrency caps.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do spot or preemptible accelerators change how you design distributed training?" category="Trade-offs" level="Mid">
+    - **Design for loss:** Use frequent checkpoints to durable object storage, elastic worker groups that tolerate shrinkage, and a restart path that does not assume a fixed world size.
+    - **Split roles:** Keep a small on-demand coordinator and put workers on Spot.
+    - **True cost:** Price in the lost work between the last checkpoint and the reclaim; the discount is only real if lost partial epochs and engineering effort do not eat it.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose MIG over time-slicing for colocated inference workloads?" category="Architecture" level="Senior">
+    - **Hard isolation with MIG:** MIG gives each tenant its own memory, cache, and bandwidth, and contains faults so one tenant's out-of-memory error or traffic spike cannot reach another's—critical for multi-tenant serving with latency commitments.
+    - **Time-slicing limits:** Time-slicing is more flexible for light, bursty services but has no memory or fault isolation and gives equal turns, not guaranteed shares.
+    - **MIG trade-offs:** MIG's costs are fixed profile sizes that can strand compute (four `1g.20gb` instances use 4 of 7 slices) and the operational work of reconfiguring when models change.
+  </InterviewQuestion>
+  <InterviewQuestion question="A 70 B model at 8 bits fits an 80 GB GPU by weights. Why might it still be a bad placement?" category="Scaling" level="Mid">
+    - **Starved KV cache:** Weights take 70 GB and the runtime needs a reserve, leaving very little memory for the KV cache.
+    - **Per-request arithmetic:** With 2,450-token requests and a 70 B model with 8 KV heads, each request holds about 0.8 GB at full length, so 2 GB serves about 2 requests while 18 in-flight requests need about 14.5 GB.
+    - **Fixes:** Split the weights across two GPUs (leaving roughly 37 GB of cache on each), quantise the cache, or shorten the context.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you keep nightly batch jobs from hurting interactive latency on a shared GPU pool?" category="Architecture" level="Senior">
+    - **Two-level priority:** In Kubernetes, give chat pods a higher `PriorityClass` so they can pre-empt batch pods; in the engine, use a priority scheduling policy so interactive requests go first and batch work pre-empts when the cache is full.
+    - **Pre-emption cost:** The evicted victim re-runs its prefill, so batch jobs must be restartable.
+    - **Pool isolation and alerts:** Cap batch concurrency, run batch work on a separate pool or Spot capacity where possible, and alert on queue wait for the high-priority class.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does Dynamic Resource Allocation add over a device plugin?" category="Concepts" level="Mid">
+    - **Device plugin limits:** A device plugin advertises a resource name with an integer count, and each device goes to one container.
+    - **DRA capabilities:** DRA lets drivers publish devices with attributes, admins define device classes, and workloads request a claim that filters on attributes (such as memory size) and shares devices across containers, making fractional and partitioned devices first-class objects.
+    - **Current status:** As of Kubernetes 1.35 it is stable, but the scheduler does not yet pre-empt for DRA devices.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a TPU slice, and how does reserving TPUs differ from reserving GPUs?" category="Concepts" level="Junior">
+    - **Pods and slices:** A TPU pod is a group of chips on a dedicated network, and a slice is a set of chips inside it connected by fast inter-chip links, described by a topology such as `4x4x4`.
+    - **Shape compilation:** You request a shape rather than a count, and the compiler targets that exact slice, so a new shape means re-sharding and recompiling.
+    - **GPU comparison:** GPUs are usually requested as a number of devices per node, with the network layout set by the instance type.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your launch needs 64 more GPUs next month. How do you secure them?" category="Scaling" level="Senior">
+    - **Quota first:** Request quota per region and per GPU model, plus any global GPU quota, remembering that quota is not guaranteed capacity.
+    - **Tiered reservations:** Reserve capacity (an EC2 Capacity Block or committed reservation) for the steady floor since it is paid even when idle, put restartable batch on Spot with checkpoints, and keep a second region or provider for failover.
+    - **Arithmetic sizing:** Size the GPU count from tokens per second and KV budget rather than guesses, and revisit after load testing.
+  </InterviewQuestion>
+</InterviewQuestions>

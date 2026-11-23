@@ -1,0 +1,15 @@
+title: Placing models on GPUs by memory
+alt: >-
+  Memory bars for 80 GB GPUs, each split into a green weights segment, a grey reserve segment and a violet KV budget
+  segment. Step 1, left: Plan A puts a 70 billion parameter model at 8 bits on one GPU, 70 GB of weights, 8 GB reserve
+  and only 2 GB left for the KV cache. Step 2 adds the working below it: 327,680 bytes of KV per token, 0.80 GB per
+  request of 2,450 tokens, 18 requests in flight at 12 requests per second and 1.5 seconds each, so 14.5 GB needed; a
+  red line says Plan A has room for 2 requests. Step 3, right: Plan B splits the big model over two GPUs with 35 GB of
+  weights, 8 GB reserve and 37 GB of KV each, giving 92 requests, and a third GPU holds two 8 billion parameter models
+  with 48 GB of KV, giving 149 of their requests; a lime line says 92 is at least 18, a 5.1 times headroom.
+caption: >-
+  Fitting by weights alone is not enough. What is left after weights and reserve is the KV budget, and it sets how many
+  requests run at once. Illustrative: an 80 GB GPU and an 8 GB reserve.
+tags: [gpu, kv-cache, capacity, bin-packing, serving, genai]
+source: original
+created: 2026-11-15

@@ -1,0 +1,14 @@
+title: A lost ack, a redelivery and a dead letter
+alt: >-
+  A sequence diagram in two steps with five lanes: a neutral order queue, teal workers A and B, a violet orders
+  database and a green dead-letter queue. Step 1: worker A receives the message for order 4471, reserves stock with
+  message id m1, then crashes before its delete reaches the queue, drawn as a red timeout. After a 30-second
+  visibility timeout, worker B receives the same message, asks the database to reserve stock for m1 again, is told m1
+  is already done, skips it and deletes the message. Step 2: a message that cannot be parsed fails on five receives
+  without being deleted, and the queue moves it to the dead-letter queue.
+caption: >-
+  At-least-once means a crash before the ack delivers the message again: the idempotent check absorbs the repeat, and
+  the dead-letter queue catches what never succeeds.
+tags: [patterns, message-queues, dead-letter-queue, idempotency]
+source: original
+created: 2026-11-16

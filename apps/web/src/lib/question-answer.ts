@@ -68,6 +68,14 @@ function companiesAttr(attrs: string): string[] | undefined {
   return list === undefined ? undefined : [...list.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2]);
 }
 
+/**
+ * Whether an article body holds at least one <InterviewQuestion> block. The tag may be followed by a space or
+ * by a newline (attributes on their own lines); <InterviewQuestions>, the wrapper, does not count.
+ */
+export function hasInterviewQuestions(mdx: string): boolean {
+  return /<InterviewQuestion[\s/>]/.test(mdx);
+}
+
 /** The <InterviewQuestion> blocks of an article body that have a `question` attribute, in order. */
 export function extractInterviewQuestions(mdx: string): ArticleQuestion[] {
   const out: ArticleQuestion[] = [];

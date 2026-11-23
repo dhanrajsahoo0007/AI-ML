@@ -1,0 +1,19 @@
+title: Vending machine fleet high-level architecture
+alt: >-
+  An architecture diagram in seven steps across six zones: machines and people, edge, payments core, application
+  services, async pipeline and storage. Step 1: the payment devices send credit and selections to the machine
+  controller, the solid accent node, which runs the state machine and drives the motors. Step 2: the controller
+  writes every vend and refund to a local log on the machine before it acts. Step 3: the controller authorises a card
+  through the payment API; the payment service holds the money at the card processor, then captures or releases it,
+  and keeps each payment's state in the payments database. Step 4: the local log uploads events with sequence numbers
+  through an MQTT broker into an event log keyed by machine. Step 5: a stream processor applies each sale once and
+  keeps stock per slot in the fleet database; telemetry goes to a time-series database. Step 6: the operator sets
+  prices through the API gateway; the config service records the desired version and sends it down through the
+  broker, so the upload link becomes two-way. Step 7: the restock planner reads stock and alerts and sends pick lists
+  to the driver app, and old sales move to an archive store.
+caption: >-
+  A vending machine fleet: each machine decides on its own and logs first, cards are held and then captured or
+  released, and events flow up through a broker into a log that builds the stock view.
+tags: [case-studies, vending-machine, architecture, iot, offline, payments]
+source: original
+created: 2026-11-17

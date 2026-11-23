@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ANSWER_COMPONENTS, answerComponents, checkAnswerMdx, extractInterviewQuestions } from "./question-answer";
+import {
+  ANSWER_COMPONENTS,
+  answerComponents,
+  checkAnswerMdx,
+  extractInterviewQuestions,
+  hasInterviewQuestions,
+} from "./question-answer";
 
 describe("answerComponents", () => {
   it("lists capitalised JSX tags once each, in order", () => {
@@ -108,5 +114,24 @@ describe("extractInterviewQuestions", () => {
     expect(extractInterviewQuestions(wrap(body))[0].answer).toBe(
       'Text.\n\n<AnimatedDiagram name="messenger/architecture" highlight={["chat"]} />'
     );
+  });
+});
+
+// content-check uses this to find articles that hold questions but are missing from articles.yaml. It used to
+// look for the tag followed by a space, so pages that put each attribute on its own line were never flagged.
+describe("hasInterviewQuestions", () => {
+  it("finds a block whose attributes start on the next line", () => {
+    const src = `<InterviewQuestions>\n  <InterviewQuestion\n    question="Q?"\n    level="Mid"\n  >\n    A.\n  </InterviewQuestion>\n</InterviewQuestions>`;
+    expect(hasInterviewQuestions(src)).toBe(true);
+    expect(extractInterviewQuestions(src)).toHaveLength(1);
+  });
+
+  it("finds a block written on one line", () => {
+    expect(hasInterviewQuestions(`<InterviewQuestion question="Q?">A.</InterviewQuestion>`)).toBe(true);
+  });
+
+  it("does not count the wrapper on its own", () => {
+    expect(hasInterviewQuestions("<InterviewQuestions>\n</InterviewQuestions>")).toBe(false);
+    expect(hasInterviewQuestions("No questions here.")).toBe(false);
   });
 });

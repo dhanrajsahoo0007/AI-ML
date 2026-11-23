@@ -211,6 +211,20 @@ export const docsKind: SectionKind<DocItem> = {
               "warning"
             );
           }
+          if (target && (card.tier ?? "core") !== ((target.data.tier as string | undefined) ?? "core")) {
+            push(
+              indexFile,
+              `card ${card.href} has tier ${card.tier ?? "core"} but the page is ${String(target.data.tier ?? "core")}`,
+              line
+            );
+          }
+          if (target && (card.logo ?? "") !== ((target.data.logo as string | undefined) ?? "")) {
+            push(
+              indexFile,
+              `card ${card.href} has logo ${card.logo ?? "(none)"} but the page has ${String(target.data.logo ?? "(none)")}`,
+              line
+            );
+          }
         }
       }
       const markup = JSON.stringify(parseHubMarkup(fs.readFileSync(hubItem.file, "utf8")));

@@ -1,0 +1,220 @@
+---
+title: "Hot Keys, Skew and Request Coalescing"
+description: "When one key takes most of the traffic: single flight, in-process caches, key salting and sharded counters for skewed reads and writes."
+icon: flame
+updated: 2026-11-16
+tier: advanced
+---
+
+The cache and the shards are in place, then one product goes viral and one node melts while the others idle.
+
+- Interviewers ask about hot keys to see whether you notice that hashing spreads keys, not traffic, and whether you can protect one key without redesigning the system.
+
+## Overview
+
+- A **hot key** is one key that takes a large share of the traffic: a celebrity's profile, a product on sale, a global counter.
+- **Skew** shows up as one shard, one cache node or one database row at its limit while the rest sit idle. **Adding shards does not help**: the key still hashes to one place.
+- Read-hot keys: **request coalescing** (single flight) turns many identical misses into one fetch; an **in-process cache** with a 1 s TTL absorbs the rest; **salted copies** `key#1..N` spread what is left.
+- Write-hot keys: **sharded counters** split one row into N rows; **buffered increments** batch many writes into one per second.
+- **Detect** hot keys before they hurt: count requests per key at the proxy or client, or sample the cache's access frequencies.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Shard the products by id and put Redis in front."
+  - **Why the interviewer pushes back:** "One product takes a third of all reads at noon. Which node serves it, and what happens to that node?"
+  - **The answer that stands out:** coalesce concurrent misses with single flight, cache the hot key in each server's memory for one second, and salt it across several cache nodes if that is not enough. Name the cost: up to one second of staleness and N copies to invalidate.
+</Callout>
+
+## Mental model
+
+- Think of a bakery with four counters where every customer is free to queue at any of them.
+- On a normal day the queues even out. Then one cake goes viral, and only counter 2 sells it.
+- Opening more counters does not help: the cake is still at counter 2.
+- The fixes are to put a tray of that cake at every counter (an in-process cache or salted copies) and to have one baker refill the tray while the queue waits (single flight).
+
+## Core concepts
+
+- The running example is Brightpost's flash sale: at 12:00 the kettle's page takes **30 % of 2,300 reads/s = 690 reads/s**, all on one key, served by **40 app servers**; orders peak at **300/s**, every one of them a kettle.
+
+### How skew shows up
+
+- Hashing gives each shard about the same number of keys. It does nothing about how often each key is read.
+- So one shard (or cache node, or row) runs at its limit while the others have room to spare.
+
+<AnimatedDiagram spec="animated/patterns/hotkey-skew" caption="Hashing spread the keys evenly, but not the traffic: one key puts one shard over its limit while three sit at 40 %." />
+
+**How to read it:**
+
+- Each bar is one shard against an illustrative limit of 1,000 reads/s.
+- Shard 1 holds the kettle: its orange part alone is 690 reads/s, and the red part is what it cannot serve.
+
+**The numbers:**
+
+- Kettle: 0.3 × 2,300 = 690 reads/s. Other keys: 2,300 − 690 = 1,610 reads/s, about 403 per shard.
+- Shard 1: 690 + 403 = 1,093 reads/s against 1,000. Shards 2 to 4: 403 each, 40 % of their limit.
+- Doubling to 8 shards leaves shard 1 at 690 + 201 = 891 reads/s: still hot, because the kettle cannot be split by adding shards.
+
+<PremiumBreak />
+
+### Request coalescing (single flight)
+
+- When a hot key is missing from the cache, every request for it misses at the same moment.
+- **Single flight** makes the first request the leader; the others wait on the leader's call and share its result.
+- It works per process (Go's `singleflight` package) or per key across a fleet when requests for one key are routed to one place (Discord routes by key to its data services, then coalesces).
+
+<AnimatedDiagram spec="animated/patterns/hotkey-coalesce" stepper caption="Single flight turns a burst of identical misses into one query; the waiters share its answer." />
+
+<StepCards>
+  <StepCard n={1} title="Without coalescing: 500 misses, 500 queries">
+    The kettle's entry has just expired. In the 20 ms it takes to rebuild, 500 requests reach one app server, and each one misses and queries the database itself.
+  </StepCard>
+  <StepCard n={2} title="Single flight: one query, 499 waiters">
+    The first request becomes the leader and queries once; the other 499 wait on the same call. When the row returns, all 500 get the same answer and one copy goes back into the cache.
+  </StepCard>
+</StepCards>
+
+### Distributed counters
+
+- A counter on one row (likes, views, stock) is a **write-hot key**: every increment locks the same row.
+- **Sharded counters:** keep N rows for one counter, add to a random one, and read the sum. N rows take N times the writes.
+- **Buffered increments:** each server adds in memory and writes the total once a second. One write replaces hundreds.
+- Both trade exactness for throughput: the sum is a little behind, and a crashed server loses its unflushed buffer.
+- For stock, a buffer must never oversell: reserve stock in blocks per server, or keep the decrement exact and buffer only the display count.
+
+## Architecture
+
+Three defences for the kettle, added one at a time.
+
+<AnimatedDiagram spec="animated/patterns/hotkey-defences" stepper caption="Each defence cuts the load on one place: a local cache cuts reads, salting spreads them, a buffer batches writes." />
+
+<StepCards>
+  <StepCard n={1} title="Every server reads one cache node">
+    All 40 app servers read `product:kettle` from cache node 1: 690 reads a second on one node, and on its one network card. This is the system without the defences.
+  </StepCard>
+  <StepCard n={2} title="An in-process cache with a 1 s TTL">
+    Each server keeps the kettle in its own memory for one second. A server asks the shared cache at most once a second, so at most 40 reads a second leave the fleet. Prices can now be up to one second old.
+  </StepCard>
+  <StepCard n={3} title="Salted copies on four cache nodes">
+    The kettle is written as `kettle#1` to `kettle#4` on four nodes, and each read picks one at random. No node sees more than about 10 reads a second for it. Every update must now write four copies.
+  </StepCard>
+  <StepCard n={4} title="Buffer writes to a hot counter">
+    Every order decrements the kettle's stock. Each server adds its decrements in memory and flushes once a second, so the stock row takes 40 writes a second instead of 300.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Detecting hot keys
+
+- Count requests per key where they pass: in the client library, the proxy or the cache tier. Sample if counting every request costs too much.
+- Keep only the heavy hitters with a top-k sketch (see [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards)).
+- Redis can report a key's access frequency with `OBJECT FREQ` when it runs an LFU eviction policy.
+- Act on known hot keys ahead of time: a planned flash sale is a hot key you can warm and salt before 12:00.
+
+### Choosing a defence
+
+- **Read-hot, tolerates a second of staleness:** in-process cache with a short TTL. Cheapest and most effective.
+- **Read-hot, bursty misses:** single flight, always on; it costs nothing when keys are cold.
+- **Read-hot beyond one node even after that:** salted copies, or read replicas of the cache node.
+- **Write-hot:** sharded counters or buffered increments. Salting does not help writes that must land in one place.
+
+### Worked example: the kettle at 12:00
+
+At 12:00 the flash sale opens. Follow the kettle's reads and writes through the four steps of the Architecture figure.
+
+1. **No defences.** 690 reads/s hit cache node 1, and when its entry expires, a burst of misses reaches the database.
+2. **Single flight plus a 1 s in-process cache.** Each of 40 servers fetches the kettle at most once a second, and concurrent misses inside a server share one fetch.
+3. **Salting into 4 copies.** The 40 fetches a second spread over 4 nodes.
+4. **Buffered stock writes.** 300 decrements a second become one flush per server per second.
+
+**The numbers:**
+
+- Reads leaving the fleet: 40 servers × 1 per second = 40 reads/s, against 690: 17 times fewer.
+- Per cache node after salting: 40 ÷ 4 = 10 reads/s for the kettle.
+- Staleness: a price change reaches every shopper within 1 s (the TTL), plus the time to update 4 copies.
+- Writes to the stock row: 40 flushes a second of about 300 ÷ 40 = 7.5 each, instead of 300 single writes.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Single flight | Free when cold; kills miss bursts | Only coalesces within one process (or one routed node) | Always, in front of any expensive fetch |
+| In-process cache, short TTL | Removes most reads from the network | Up to one TTL of staleness; memory on every server | Read-hot keys that tolerate a second of staleness |
+| Salted copies | Spreads one key over N nodes | N copies to write and invalidate | Keys too hot for one node even after local caching |
+| Sharded counters | N times the write throughput | Reads sum N rows; slightly behind | Likes, views, any high-rate counter |
+| Buffered increments | One write per second per server | Loses a crashed server's buffer; lag | Counters where a few seconds of lag is fine |
+
+## Production systems
+
+- **Go `singleflight`** (as of November 2026): `Group.Do` lets only one call per key run at a time; duplicate callers wait and receive the same result, and `shared` tells them so.
+- **Memcache at Facebook** (NSDI 2013): leases hand out at most one token per key every 10 seconds; on keys prone to thundering herds this cut the peak database query rate from 17K/s to 1.3K/s.
+- **Discord** (2023 blog, "How Discord Stores Trillions of Messages"): data services between the API and ScyllaDB route requests for the same channel to the same instance with consistent hashing, then coalesce them into one database query.
+- **Used in our case studies:** [URL Shortener](/system-design-case-studies/case-studies/url-shortener) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok)
+
+## Failure modes & pitfalls
+
+- **"Add more shards."** The hot key still lands on one shard. Fix the key, not the shard count.
+- **Salting reads but not writes.** Copies drift apart when one update misses a copy. Write all N, or keep a short TTL on each.
+- **In-process caches with no TTL.** Servers serve old prices for minutes. Keep the TTL to about a second for hot keys.
+- **Single flight with no timeout.** A slow leader makes every waiter slow. Give the leader a deadline and let waiters fall back.
+- **Buffered stock counts that oversell.** Reserve stock per server in blocks, and keep the final decrement exact.
+- **Finding hot keys during the incident.** Measure per-key traffic all the time and warm planned hot keys before the event.
+
+## Interview framework
+
+1. Name the skew: one key, one shard, and why more shards do not help.
+2. For reads: single flight, then an in-process cache with a short TTL, then salted copies; give the read rate after each.
+3. For writes: sharded counters or buffered increments, and what they cost in exactness.
+4. Say how you detect hot keys and warm planned ones.
+5. State the staleness bound you accept.
+
+**What interviewers listen for:** the arithmetic from 690 reads/s to 40, and a staleness bound attached to it.
+
+**Red flags:** "more shards", or a counter that takes every like as a write to one row.
+
+## Further reading
+
+- [singleflight (Go package docs)](https://pkg.go.dev/golang.org/x/sync/singleflight)
+- [Scaling Memcache at Facebook (NSDI 2013)](https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala)
+- [How Discord Stores Trillions of Messages (Discord blog, 2023)](https://discord.com/blog/how-discord-stores-trillions-of-messages)
+- [OBJECT FREQ (Redis docs)](https://redis.io/docs/latest/commands/object-freq/)
+- Related pages: [Caching](/system-design/patterns/caching) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a hot key, and why doesn't sharding fix it?" category="Concepts" level="Junior">
+    - A hot key is one key that takes a large share of the traffic, such as a viral product or a celebrity profile.
+    - Sharding hashes each key to one shard, so all the traffic for that key still lands on one machine.
+    - Adding shards spreads the other keys more thinly but leaves the hot key where it was.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is request coalescing?" category="Concepts" level="Mid">
+    - When many requests miss the same key at once, only the first fetches it; the others wait and share its result.
+    - It turns a burst of identical database queries into one, which is what protects the database when a hot entry expires.
+    - It works within a process (Go's singleflight), or across a fleet when requests for one key are routed to one node.
+  </InterviewQuestion>
+  <InterviewQuestion question="One product takes 30 % of 2,300 reads a second. Walk through your defences with numbers." category="Scaling" level="Senior">
+    - That is 690 reads a second on one key, so one cache node and one shard take it all.
+    - An in-process cache with a 1 s TTL on 40 servers lets at most 40 reads a second reach the shared cache.
+    - Single flight inside each server collapses concurrent misses into one fetch.
+    - If 40 a second is still too much for one node, salt the key into 4 copies: about 10 a second each. The cost is up to a second of staleness and 4 copies to update.
+  </InterviewQuestion>
+  <InterviewQuestion question="A like counter gets 50,000 writes a second on one row. Design it." category="Architecture" level="Senior">
+    - One row cannot take that: every increment locks it.
+    - Shard the counter into, say, 100 rows and add to a random one, so each row takes about 500 writes a second; reads sum the rows, cached for a second or two.
+    - Or buffer increments in each server and flush a total every second, so the store takes one write per server per second.
+    - Either way the displayed count lags by a second or so, which is fine for likes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you find hot keys before they cause an outage?" category="Failure modes" level="Mid">
+    - Count requests per key in the client, proxy or cache tier, sampling if needed, and keep the heavy hitters with a top-k sketch.
+    - Alert when one key's share passes a threshold or one node's load diverges from the others.
+    - Warm and salt known hot keys before planned events such as a flash sale.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does salting a key cost?" category="Trade-offs" level="Senior">
+    - Every write must update N copies, or the copies drift and readers see different values.
+    - Invalidation touches N keys, and memory holds N copies.
+    - It helps reads only; a value that must be decremented in one place, like stock, still needs a single writer or a sharded counter.
+  </InterviewQuestion>
+  <InterviewQuestion question="Single flight's leader request is slow. What happens to the waiters?" category="Failure modes" level="Senior">
+    - They all wait as long as the leader, so one slow fetch becomes hundreds of slow requests.
+    - Give the leader a deadline, and let waiters return a stale value or an error when it passes.
+    - Serving the last cached value while one request refreshes in the background avoids the wait entirely for keys that tolerate staleness.
+  </InterviewQuestion>
+</InterviewQuestions>

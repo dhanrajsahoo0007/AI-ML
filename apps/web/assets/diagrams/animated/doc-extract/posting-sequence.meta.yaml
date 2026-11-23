@@ -1,0 +1,20 @@
+title: Ingest once, post once
+alt: >-
+  A sequence diagram with six lanes: Supplier and Review in orange, Intake and Workflow in grey, Poster in teal and
+  the ERP in violet, in four steps. Step 1: the supplier emails INV-20417.pdf; the intake finds its sha256 new and
+  creates document doc_9f2a; the same PDF then arrives through the portal and the intake answers duplicate_of
+  doc_9f2a; a note says a hit on a rejected or held document reopens it and a hit on a posted one returns it. Step 2:
+  the workflow sends a task with flagged fields to review; the clerk approves version 3; the workflow commits the
+  approval and the outbox row in one transaction for the poster; a note says a second approval of version 3 gets a
+  409. Step 3: the poster posts with the key SUP-0193|INV20417|Y2026|invoice; the ERP does not reply in time, shown
+  as a red timeout; a note says there is no resend for 30 minutes and then a status read; later the ERP's
+  acknowledgement arrives with its document number and the poster tells the workflow it is posted. Step 4: the
+  supplier sends a copy printed INV-2O417 with a letter O; its new bytes create doc_a71c, and the workflow holds it as
+  a near-duplicate for review; a note says the copy folds to the same key, which the outbox's unique index blocks, and
+  a note on the ERP lane names its hard duplicate check and the daily reconciliation.
+caption: >-
+  At-least-once delivery, deduplicated three times: a byte hash at the door, a folded business key in the outbox,
+  and the ERP's own duplicate check; a timeout never triggers a resend inside the interface window.
+tags: [genai, case-study, document-processing, idempotency, sequence]
+source: original
+created: 2026-11-17

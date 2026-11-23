@@ -31,7 +31,7 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 800, y: 230, w: 150, h: 150 },
   ],
   nodes: [
-    { id: "client", label: "Chat widgets", sub: "30k open", icon: "browser", x: 100, y: 210, w: 130 },
+    { id: "client", label: "Chat widgets", sub: "30k open", icon: "browser", x: 100, y: 210, w: 144 },
     {
       id: "lb",
       label: "Load balancer",
@@ -40,7 +40,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 285,
       y: 210,
-      w: 136,
+      w: 150,
     },
     {
       id: "poll1",
@@ -92,7 +92,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 690,
       y: 305,
-      w: 136,
+      w: 140,
       step: 2,
     },
     {
@@ -103,7 +103,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 875,
       y: 305,
-      w: 130,
+      w: 154,
       step: 2,
     },
   ],

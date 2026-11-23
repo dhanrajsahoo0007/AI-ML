@@ -1,11 +1,300 @@
 ---
 title: "Where Data Lives on the Cloud"
-description: "A map of the managed places data can live on a cloud, and what durability, availability and consistency mean there."
-status: outline
+description: "A map of every place data can live on a cloud, and the five questions to ask of each one: copies, location, access, backup and cost."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the map of the hub: Brightpost's data (catalog, orders, sessions, product images, click events and reports) placed on the managed storage and database families, plus the three words every later page uses: durability, availability and consistency.
+<KeyIdea>
+  Every kind of data needs a home that matches how it is used and what happens if that home disappears.
+</KeyIdea>
 
-**Related reading on this site:** [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Files, blocks and objects](/system-design/fundamentals/storage-types)
+## The story
+
+In March, Asha adds a "download my data" button to Brightpost's shop. The shop builds a ZIP file with the customer's orders and home address and saves it on the server's own disk. Then it emails a link that works for 7 days. Every test passes, because the test account runs one server. In the first week 120 customers ask for a file. The shop runs 2 servers, and the load balancer sends each click to either one. So 58 first clicks land on the server without the file and show "file not found". On Saturday's sale the fleet grows to 10 servers, and at 11 p.m. the scaling rule removes 8. Their disks are deleted with them, and 38 files nobody had downloaded yet are gone. By Monday the support agent has 74 emails to answer, one file at a time.
+
+The file was fine. It lived in the one place on the cloud that is thrown away on purpose. This page maps where every kind of Brightpost's data lives instead, and why.
+
+## How it works
+
+Four words first. A **store** is any service that keeps data: a disk, a bucket, a database, a cache. **Durability** is the chance that data you saved is still there later; clouds buy it with copies. <Term id="availability">Availability</Term> is whether you can reach the data right now. <Term id="consistency">Consistency</Term> is whether every reader sees the latest write.
+
+The section's growth map shows where the shop stands. The orders database has left the server and has a standby, and the photos sit in a bucket.
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={5} highlight={["db", "standby", "photos"]} minWidth={620} caption="Brightpost so far: a managed database with a standby in a second zone, and a bucket for photos." />
+
+### Step 1: Every kind of data has a home
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={1} minWidth={620} caption="Today: each server has its own disk, orders go to the database, and a nightly export file goes to a bucket." />
+
+Brightpost keeps three kinds of data today. Orders live in the managed database. The nightly export files and the product photos live in buckets. Each server's operating system and code live on that server's disk.
+
+The disk and the buckets are two of the three storage shapes. <Term id="block-storage">Block storage</Term> is a disk attached to one server. <Term id="object-storage">Object storage</Term> keeps whole files, called objects, fetched by name over the network. <Term id="file-storage">File storage</Term> is a shared folder that several servers open at once. [Files, blocks and objects](/system-design/fundamentals/storage-types) teaches how each works. To place data on them, ask what happens to the data if the thing holding it disappears.
+
+<PremiumBreak />
+
+### Step 2: A server's disk is scratch space
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={2} minWidth={620} caption="The failure: export files sit on whichever server built them, and removing a server deletes its disk." />
+
+A server's disk is durable in one narrow sense. The provider keeps copies of every block inside one zone, so a failed drive loses nothing. But the disk belongs to one server. Other servers cannot read it, and Brightpost's disks are set to be deleted with their server, the usual setting for a boot disk.
+
+<Callout tone="red" title="What breaks">
+  Each export file exists on one of 2 servers, so about half the first clicks reach the wrong one: 58 of 120. On Saturday the scaling rule removes 8 of 10 servers at 11 p.m. Their disks go with them, and 38 files are lost. Each file also held a home address, on a disk nobody had listed as a place customer data lives.
+</Callout>
+
+The disk did its job. Shared, long-lived files sat in a store that lives only as long as one server.
+
+### Step 3: Files go to object storage
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={3} minWidth={620} caption="Export files go to their own bucket, which every server can reach; the disk keeps only what a new server rebuilds." />
+
+Export files now go to an exports bucket. Every server writes to the same bucket, so any server can answer any click. The bucket keeps copies across several zones on its usual settings. A <Term id="lifecycle-rule">lifecycle rule</Term> deletes each file 7 days after it is written, so no address outlives the link.
+
+The email link points at the shop, not at the file. After the customer signs in, the shop hands out a link to the file that works for 15 minutes. The server disk keeps only the operating system and code, which every new server gets again. [Object Storage](/cloud/data/object-storage) covers classes, versions and signed links.
+
+### Step 4: Copies for speed: a cache and a search index
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={4} minWidth={620} caption="Baskets move to an in-memory cache, and product changes feed a search index." />
+
+Two stores hold copies shaped for speed, and both can be rebuilt if lost. The <Term id="cache">cache</Term> keeps shoppers' baskets in memory for 7 days, so every page reads one in under a millisecond. The search index holds a word-by-word copy of the 2,000 products, so a search never touches the orders database. [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) tells how Brightpost found out it needed them.
+
+### Step 5: Events, items by key, and folders
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={5} minWidth={620} caption="Click events go to a stream, the printing partner's updates go to a key-value table, and the file share stays empty." />
+
+Three more shapes of data appear as the shop grows.
+
+1. **Click events.** Each page view becomes one event, about 25,000 a day. An **event stream** keeps events in time order for a set time, 7 days at Brightpost. Several readers can each read it at their own pace. [Queues, Topics, Streams and Workflows](/cloud/data/streaming-and-messaging-services) covers the family.
+2. **Delivery status.** The printing partner sends three updates per order: printed, shipped, delivered. That is about 1,200 a day, always read by order id. A key-value table in a [managed NoSQL](/cloud/data/managed-nosql) service fits, because nothing joins them to other data.
+3. **Folders.** Nothing at Brightpost needs a shared folder yet. A file share is for software that can only open files by path. [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) explains when that is.
+
+### Step 6: A warehouse for questions across years
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={6} minWidth={620} caption="The warehouse takes the click events and a nightly copy of the orders, for questions across two years." />
+
+The finance lead asks which posters sell best each December, across two years of orders. That question reads millions of rows but only a few columns. A **data warehouse** is a store built for it. It keeps each column together, so a question reads only the columns it needs.
+
+Every night it takes a copy of the orders and the day's click events. It is never the source of truth: if it is lost, it is loaded again. [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) covers the choices.
+
+### Step 7: Backups live somewhere else
+
+<AnimatedDiagram spec="animated/cloud/data-map" step={7} minWidth={620} caption="The 03:00 backup of the orders database is kept in a vault in the audit account." />
+
+The database's standby protects against a failed zone. It does not protect against a bad delete, because it copies the delete within a second. A backup does.
+
+Brightpost's nightly backup at 03:00 now goes to a **backup vault** in the audit account. A test script once deleted the live database from a shared account, and a backup in that account would have gone too. A vault in another account, with its own delete lock, survives such a mistake. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) covers retention and restore tests.
+
+### Step 8: Five questions for every store
+
+Every store on the map answers the same five questions, and the answers shape its design.
+
+1. **How durable is it?** How many copies exist, and what can each copy survive?
+2. **Where do the copies live?** In one zone, across zones, in another region or in another account?
+3. **Who can read it?** Each store has its own access rules, and a copy does not inherit the original's.
+4. **How is it backed up?** By a backup, by a rebuild from the source, or not at all?
+5. **What does it cost to keep and to move?** Storage bills per gigabyte kept; data leaving the cloud bills per gigabyte sent.
+
+<Compare
+  columns={["Store", "Copies live", "If it is lost", "Backed up by"]}
+  rows={[
+    ["Server disk", "Inside one zone", "A new server rebuilds it", "Nothing needed"],
+    ["Buckets", "Across several zones", "Order files and exports are gone", "Versions or a copy elsewhere"],
+    ["Orders database", "Main copy and a standby, two zones", "Every order is gone", "Nightly backup in the vault"],
+    ["Cache", "Memory, with a copy in a second zone", "Shoppers rebuild baskets", "Nothing needed"],
+    ["Event stream", "Across zones, for 7 days", "Events not yet read are gone", "The warehouse, once loaded"],
+    ["Warehouse", "Managed by the provider", "Reports wait for a reload", "Reload from the database"],
+  ]}
+  caption="Brightpost's stores and the answers that decided their design."
+/>
+
+## On AWS, Google Cloud and Azure
+
+Every store on the map has a managed service on all three clouds. What differs is where each one keeps its copies by default.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Object:** Amazon S3 buckets.
+    - **Block and file:** Amazon EBS volumes for server disks. Amazon EFS for shared folders over NFS, and Amazon FSx for other file systems.
+    - **Databases:** Amazon RDS and Aurora for relational. Amazon DynamoDB for key-value and documents.
+    - **Cache, search and streams:** Amazon ElastiCache, Amazon OpenSearch Service and Amazon Kinesis Data Streams.
+    - **Warehouse and backups:** Amazon Redshift. AWS Backup, with vaults that can live in another account.
+
+    **The difference that changes a design.** An EBS volume lives in one zone and normally attaches to one server there. Most S3 storage classes keep copies across several zones in the region. So a bucket survives a zone outage and a volume does not. To bring a volume back in another zone, restore it from a snapshot, a point-in-time copy kept at region level.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Object:** Cloud Storage buckets.
+    - **Block and file:** Persistent Disk and Hyperdisk for server disks. Filestore for shared folders over NFS.
+    - **Databases:** Cloud SQL and AlloyDB for relational. Firestore for documents, and Bigtable for very large tables.
+    - **Cache, search and streams:** Memorystore, Vertex AI Search and Pub/Sub.
+    - **Warehouse and backups:** BigQuery. The Backup and DR Service, with backup vaults.
+
+    **The difference that changes a design.** Two choices here are about place. A persistent disk can be zonal, or regional with a synchronous copy in a second zone, so a disk can survive a zone outage. A bucket's location is a region, a dual-region or a multi-region. You choose it when you create the bucket and cannot change it later, so moving files means copying them to a new bucket.
+  </Tab>
+  <Tab label="Azure">
+    - **Object:** Azure Blob Storage, inside a storage account.
+    - **Block and file:** Azure Managed Disks for server disks. Azure Files for shared folders over SMB or NFS.
+    - **Databases:** Azure SQL Database and Azure Database for PostgreSQL for relational. Azure Cosmos DB for key-value and documents.
+    - **Cache, search and streams:** Azure Managed Redis, Azure AI Search and Azure Event Hubs.
+    - **Warehouse and backups:** Microsoft Fabric, which includes a warehouse; many existing setups use Azure Synapse Analytics. Azure Backup, with its own vaults.
+
+    **The difference that changes a design.** Redundancy is a setting of the storage account, and every blob and file share in it follows that setting. Locally redundant storage keeps its copies in one datacenter. Zone-redundant storage spreads them across zones, and geo-redundant storage adds copies in a second region. Put files that must survive a zone outage in an account set to zone-redundant or wider.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/data-map" stepper minWidth={620} caption="The whole map in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/data-map" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this data live?"
+  tree={{
+    q: "Is it part of one server: its operating system, its code or temporary work files?",
+    yes: "The server's disk. Keep nothing there that a new server cannot rebuild.",
+    no: {
+      q: "Is it a whole file, written and read in one piece by name?",
+      yes: { answer: "Object storage: a bucket, with a lifecycle rule for when it should go.", href: "/cloud/data/object-storage" },
+      no: {
+        q: "Is it a record of events that several readers process in time order?",
+        yes: { answer: "An event stream, and a warehouse for questions across months.", href: "/cloud/data/streaming-and-messaging-services" },
+        no: {
+          q: "Must related records change together, and do you ask new questions of them?",
+          yes: { answer: "A relational database, the source of truth.", href: "/cloud/data/managed-relational" },
+          no: {
+            q: "Is it read by one key on almost every request, and can it be rebuilt if lost?",
+            yes: { answer: "A cache in front of the real store.", href: "/cloud/data/managed-caches" },
+            no: { answer: "A key-value or document table in a managed NoSQL service.", href: "/cloud/data/managed-nosql" },
+          },
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="An export file sits on one of the shop's 3 servers on a busy day. The load balancer picks a server for each click. What share of first clicks fail?" hint="How many servers hold the file?">
+    About 2 in 3. Only one server of three holds the file. On a 2-server day it is about 1 in 2, which is how 58 of 120 clicks failed.
+  </QuizItem>
+  <QuizItem question="A customer asks Brightpost to delete their data. Name every store on the map that may hold their home address.">
+    The orders database, the nightly export files in the orders bucket, the exports bucket for up to 7 days, the warehouse, and the backups in the vault. The cache and the click events may hold their id too.
+  </QuizItem>
+  <QuizItem question="The warehouse load stops on a Friday night, and nobody notices for 10 days. The stream keeps events for 7. What is lost?" hint="Which store is the source of truth for each kind of data?">
+    The click events from the first 3 days of the gap: the stream deleted them before anyone read them. The orders are safe, because the warehouse can reload them from the database.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Server disk", "Bucket"]}
+  rows={[
+    ["Reachable from", "One server", "Every server, by name"],
+    ["When the server is removed", "Deleted with it", "Unaffected"],
+    ["Copies live", "Inside one zone", "Across several zones"],
+    ["Time to start a read", "About 1 ms", "Tens of ms"],
+    ["Deleting old files", "By hand, on each server", "A lifecycle rule: 7 days"],
+    ["Who can read it", "Anyone who can sign in to that server", "Whoever the bucket's policy names"],
+    ["Use it for", "OS, code, temporary work", "Exports, photos, order files, backups"],
+  ]}
+  caption="Where to keep Brightpost's export files: the first and the second answer."
+/>
+
+The disk wins only on the time to start a read. For a file a customer fetches once, tens of milliseconds cost nothing; losing 38 files cost a week.
+
+## Common pitfalls
+
+- **Files on a server's own disk.** The next scaling event deletes them, and the other servers never see them. Put anything that outlives one request in a bucket or a database.
+- **Copies nobody listed.** Each copy of customer data is one more place to protect and to delete from. Keep a list of every store that holds personal data, and add to it before you add a copy.
+- **Backups in the same account as the data.** One mistake or one stolen login can delete both. Keep a copy in a separate account, with a delete lock.
+- **Treating a copy as the source of truth.** A cache, a search index and a warehouse trail the real data. Write and read anything that matters, such as an order or a price, from the source.
+- **Forgetting the cost of moving data.** Data leaving a cloud is billed per gigabyte. Copying the warehouse to another cloud every night bills every night. Count it before you choose where a store lives.
+
+## How to say it in an interview
+
+"I place each kind of data by how it is used and by what happens if its home disappears. A server's disk is scratch space for the operating system and code, because a scaling rule can delete it at any time. Files go to object storage, which every server can reach and which keeps copies across zones. Records that change together go to a relational database, which stays the source of truth; caches, search indexes and warehouses hold copies for speed or analysis. For every store I ask five questions. How durable is it, and where do its copies live? Who can read it, how is it backed up, and what does it cost to keep and to move?"
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which of Brightpost's data belongs in object storage, and why?" level="Junior" category="Cloud">
+    **Short answer.** Whole files that are written once and read by name: product photos, the nightly order exports, customer export files and backups. Object storage keeps them across several zones, every server can reach them, and a lifecycle rule can delete them on a schedule.
+
+    **Why.** None of these files is edited in place, and none needs a query inside it. A server disk would tie each file to one server, and a database is not built to hold large files. Orders stay in the database, because an order and its lines change together.
+
+    <AnimatedDiagram spec="animated/cloud/data-map" step={3} highlight={["app", "buckets", "exports"]} caption="Order files, photos and exports live in buckets that every server reaches." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you let a customer download a file without making the bucket public?
+    - Which of these files would you move to a cheaper storage class, and when?
+
+    **Watch out for.** Putting the orders themselves in a bucket "because it is cheap". You lose transactions, and every question becomes a read of whole files.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A cloud disk keeps copies of every block. Why did Brightpost still lose 38 export files?" level="Mid" category="Cloud">
+    **Short answer.** Durability says a saved block survives a failed drive. It says nothing about how long the disk itself lives. Brightpost's disks were deleted with their servers, and the scaling rule removed 8 servers at 11 p.m.
+
+    **Why.** Durability protects against hardware failure, not against your own system deleting the disk. A boot disk usually goes with its server, and an autoscaled fleet removes servers on purpose. The disk was also visible to one server only, so 58 of 120 first clicks failed before anything was deleted. The fix is placement: export files go to a bucket every server can reach, with a lifecycle rule of 7 days.
+
+    <AnimatedDiagram spec="animated/cloud/data-map" step={2} caption="Export files on one server's disk: the wrong server answers, then the disk is deleted with its server." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is the difference between durability and availability?
+    - When is a server's own disk the right place for data?
+
+    **Watch out for.** Answering "take snapshots of every disk". Snapshots save the files but not the design: the other servers still cannot read them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you put click events so both the app and the analysts can read them?" level="Mid" category="Cloud">
+    **Short answer.** In an event stream. The app writes each event once, and several readers each read at their own pace. One reader loads the events into a warehouse every night, where analysts ask questions across months.
+
+    **Why.** Brightpost writes about 25,000 events a day. Putting them in the orders database would add load to the store checkout depends on. A stream keeps events in time order for a set time, 7 days here, so a slow or broken reader can catch up. The warehouse keeps them for years, column by column, so a question reads only what it needs. If the warehouse load stops for longer than 7 days, events start to be lost.
+
+    <AnimatedDiagram spec="animated/cloud/data-map" step={6} path="app>stream>warehouse" caption="The app writes events once; the warehouse is one of the stream's readers." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you get the events into the warehouse within minutes instead of overnight?
+    - What do you watch so a stopped reader is noticed within a day?
+
+    **Watch out for.** Using a queue. A queue hands each message to one reader and then deletes it, so the analysts' reader and the app's reader would steal events from each other.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A customer asks Brightpost to delete their data. How do you make sure every copy goes?" level="Senior" category="Cloud">
+    **Short answer.** Start from a list of every store that holds personal data, kept up to date as stores are added. Delete at the source, then in each copy, and let copies that cannot be edited, such as backups, expire on a known schedule.
+
+    **Why.** On Brightpost's map the address lives in five stores: the orders database, the nightly export files, the exports bucket, the warehouse and the backup vault. The database and the warehouse can delete rows. The 730 export files must be rewritten without the customer, or expire under a retention rule. Exports expire after 7 days. Backups are rarely edited, so keep a list of deleted customers and apply it again after any restore.
+
+    <AnimatedDiagram spec="animated/cloud/data-map" step={7} highlight={["db", "buckets", "exports", "warehouse", "vault"]} caption="Five stores on the map hold a customer's address; each needs its own delete." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find copies a team added without telling anyone?
+    - What retention would you set on backups, and who agrees to it?
+
+    **Watch out for.** Deleting the database row and calling it done. Every copy on the map still holds the address.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Object, Block and File: Which One for Which Job](/cloud/data/storage-types)
+- [Object Storage](/cloud/data/object-storage)
+- [Block Storage](/cloud/data/block-storage)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Managed NoSQL](/cloud/data/managed-nosql)
+- [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Storage on AWS](/cloud/aws/storage)
+- [Files, blocks and objects](/system-design/fundamentals/storage-types)
+- [Choosing a Database](/system-design/databases/choosing-a-database)
+- [Polyglot Persistence](/system-design/databases/polyglot-persistence)
+
+## Further reading
+
+- [AWS storage services overview](https://docs.aws.amazon.com/whitepapers/latest/aws-overview/storage-services.html): the storage family on AWS.
+- [Google Cloud storage options](https://cloud.google.com/products/storage): object, block and file storage on Google Cloud.
+- [Azure Storage redundancy](https://learn.microsoft.com/azure/storage/common/storage-redundancy): how a storage account keeps its copies.
+- [Azure data store overview](https://learn.microsoft.com/azure/architecture/guide/technology-choices/data-store-overview): choosing a store on Azure.

@@ -1,0 +1,354 @@
+---
+title: "Planner-Generator-Evaluator Loops"
+description: "Separating planning, execution and skeptical QA into distinct roles to beat self-grading bias in multi-step agent loops."
+icon: workflow
+---
+
+A planner-generator-evaluator loop splits one agent's job into three roles so a model does not grade its own work. Interviewers test where checking belongs, what roles hand each other, and what extra rounds cost.
+
+## Overview
+
+- Models grade their own output too generously. Anthropic found that agents "reliably skew positive when grading their own work". A **separate evaluator** with its own context and its own instructions is easier to make strict.
+- The **planner** writes what to build and why, with acceptance criteria. The **generator** builds. The **evaluator** checks the build against the planner's criteria, never against the generator's own report.
+- Every hand-off is a **written contract**: a spec with criteria, an artefact with a report, a critique. Writing them to files lets each role start with a fresh context.
+- A useful critique names the **failed criterion**, gives **evidence** the generator can reproduce, says **where**, suggests a **fix** and says what to **keep**.
+- Cost grows with **rounds × roles**: one planner run plus a generator run and an evaluator run per round. In one published run the evaluator was 8.3 % of the bill; repeated generator rounds were the rest.
+- Start with one agent and a deterministic check. Split into roles only when the task is beyond what the model does reliably alone, and remove a role when a newer model no longer needs it. Built on [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) and [Loop Engineering & Verification Loops](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops).
+
+## Mental model
+
+- **Editorial separation:** A writer who proofreads their own article reads what they meant to write, not what is on the page; publishers solve this with an editor who writes the brief, a writer, and a copy editor who checks the article against the brief.
+- **Actionable copy notes:** The copy editor's notes are specific ("paragraph 3 says 2024; the source says 2023") so the writer can fix them without starting over.
+- **Model equivalent:** All three roles can use the same model with different instructions; what matters is that the evaluator does not share the generator's context and checks against criteria someone else wrote.
+
+## Core concepts
+
+- Every figure follows the bug-fix agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering) on `brightpost-orders` ("Order import drops the last line of a CSV file" in `src/parser.ts`, 18 tests in `parser.test.ts`):
+
+- **C1:** the test "keeps the last line" passes.
+- **C2:** all 18 tests pass.
+- **C3:** lint and type checks are clean.
+- **C4:** the diff touches only `src/parser.ts`.
+
+### Why models grade their own output too generously
+
+Here is the generator's first diff, graded twice: once by the generator itself, and once by a separate evaluator.
+
+<AnimatedDiagram
+  spec="animated/agents/self-grading-bias"
+  minWidth={620}
+  caption="Same diff, two graders. The author checks the test it was fixing and passes itself; a separate evaluator runs every test and finds the case the author never thought about."
+/>
+
+**How to read it:**
+
+- **Same starting diff:** Both columns start from the same round-1 diff, which changes the loop bound from `< n - 1` to `< n`.
+- **Self-grading pass (left):** The generator runs only the one test it was fixing, sees it pass, and reports 4 of 4 criteria met (red: a bug ships).
+- **Evaluator catch (right):** The evaluator runs all 18 tests itself, sees "parses an empty file" fail, records a ringed verdict of 3 of 4 met, and sends a critique back.
+
+Three things push a model to pass its own work:
+
+- **It checks what it meant to do.** The generator's context holds its plan and its reasoning, so it re-reads its intentions, not the code.
+- **It prefers its own text.** Panickssery et al. (2024) found that models can recognise their own outputs and rate them higher than other text of the same quality, and that the stronger the recognition, the stronger the preference.
+- **It has no new information.** Huang et al. (ICLR 2024) found that models asked to correct their own reasoning, with no outside feedback, rarely fix it and sometimes make it worse.
+- **Why a separate evaluator helps:** A separate model evaluator is still "inclined to be generous towards LLM-generated outputs", as Anthropic's harness post notes, but tuning a sceptical evaluator is "far more tractable" than making a generator critical of its own work.
+
+### The Planner, Generator and Evaluator separation
+
+| Role      | Reads                         | Writes                                 | Told to                                              |
+| --------- | ----------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| Planner   | The request                   | A spec: what, why, acceptance criteria | Be specific about outcomes, not about implementation |
+| Generator | The spec, the latest critique | The artefact and a short report        | Build to the criteria; say what it checked           |
+| Evaluator | The criteria, the artefact    | A verdict per criterion and a critique | Doubt the report; check everything itself            |
+
+- **Planner scope:** Focuses on what to build and why; Anthropic's planner expanded a 1–4 sentence prompt into a full product spec while staying at high-level design so low-level spec mistakes would not cascade.
+- **Generator and Evaluator roles:** The **generator** is a normal agent loop with tools, while the **evaluator** has its own isolated context, tools, and fault-finding instructions.
+- **Pattern fit and contrast:** This is the evaluator-optimizer pattern from Anthropic's "Building effective agents" (used when human feedback improves output and a model can supply that feedback) with a planner in front; it differs from [plan-and-execute](/ai-system-design/genai-system-design/agent-architectures#plan-and-execute-as-a-state-machine) (where planner steps drive execution) and reflection (where one model critiques itself).
+
+### Contract-driven handoffs between stages
+
+- **File-based handoffs:** Roles never pass a conversation; they pass fixed-shape documents (often files) so each role starts with an empty context and the harness can store, diff, and replay every hand-off.
+
+Here is the planner's spec for the bug fix. The format is this page's own; there is no standard schema:
+
+```json
+{
+  "task": "Order import drops the last line of a CSV file",
+  "repo": "brightpost-orders",
+  "criteria": [
+    { "id": "C1", "check": "\"keeps the last line\" passes", "how": "run parser.test.ts" },
+    { "id": "C2", "check": "All 18 tests pass", "how": "run the full suite" },
+    { "id": "C3", "check": "Lint and types clean", "how": "run lint and the type checker" },
+    { "id": "C4", "check": "Diff touches only src/parser.ts", "how": "read the diff" }
+  ],
+  "out_of_scope": ["Other CSV dialects", "Import speed"]
+}
+```
+
+- **Checkable criteria:** Every criterion specifies **how** it will be checked; a criterion without a check ("the code is clean") turns into an argument between two models.
+- **Sprint contracts:** For long builds, Anthropic had the generator propose what it would build and how success would be verified before each sprint, iterating with the evaluator until they agreed on testable checks.
+
+### Adversarial and skeptical QA passes
+
+A sceptical evaluator is built, not prompted into existence with one adjective. Four rules make it work:
+
+1. **Check, do not read.** The evaluator runs the tests, clicks through the app or queries the database itself. Anthropic's evaluator drove the running app through the Playwright MCP server. A report that says "all tests pass" is a claim, not evidence.
+2. **One verdict per criterion, with a hard bar.** In Anthropic's harness each criterion had a threshold, and if any one fell below it the sprint failed. An average lets a strong criterion hide a broken one.
+3. **Assume something is wrong.** Tell the evaluator its job is to find the failure, and give it examples of failures that earlier evaluators missed.
+4. **Calibrate it against people.** Grade a sample of runs by hand and compare. The method is on [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) and [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation).
+
+<Callout tone="red" title="What breaks">
+  An evaluator that finds the problem and then approves the work anyway. Anthropic reports that, out of the box, Claude
+  was a poor QA agent: it found real issues, talked itself into dismissing them and approving the work, and tested
+  superficially. It took several rounds of reading the evaluator's logs and tightening its prompt to fix. Read your
+  evaluator's transcripts before you trust its pass rate.
+</Callout>
+
+## Architecture
+
+Here is the whole loop on the bug fix, with the contract each role hands to the next.
+
+<AnimatedDiagram
+  spec="animated/agents/pge-loop"
+  stepper
+  minWidth={620}
+  caption="Each role hands the next a written contract: the planner a spec with criteria, the generator a diff and a report, the evaluator a critique. The evaluator takes its criteria from the planner, never from the generator."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The planner turns the issue into a spec">
+    The planner reads "Order import drops the last line of a CSV file" and writes the spec above: the task, four
+    criteria and how each is checked. It does not say how to fix the bug. The generator gets the spec.
+  </StepCard>
+  <StepCard n={2} title="The evaluator gets the same criteria">
+    The evaluator's criteria come straight from the planner. If they came from the generator, the generator could soften
+    them, and the evaluator would check the work against the author's own idea of done.
+  </StepCard>
+  <StepCard n={3} title="The generator hands over a diff and a report">
+    The generator changes the loop bound in `src/parser.ts`, runs "keeps the last line", sees it pass, and hands over
+    the diff with a report: "4 of 4 met".
+  </StepCard>
+  <StepCard n={4} title="The evaluator runs the tests itself">
+    The evaluator ignores the claim and runs all 18 tests: 17 pass and "parses an empty file" fails. C1, C3 and C4 pass;
+    C2 fails.
+  </StepCard>
+  <StepCard n={5} title="A critique goes back to the generator">
+    The critique names C2, gives the failing test and its error, points at empty input in `src/parser.ts`, suggests
+    returning an empty list, and says the loop bound fix must stay. The [Deep
+    dive](#passing-structured-critique-back-into-the-generator) shows the message.
+  </StepCard>
+  <StepCard n={6} title="Round 2 passes and the run ends">
+    The generator adds `return []` for empty input. The evaluator runs everything again: 18 passed, lint and types
+    clean, 4 of 4 met. The change goes to a person for review.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Worked example: two rounds on the CSV bug
+
+This follows the [loop figure](#architecture) run by run. Each row is one agent run with a fresh context.
+
+| #   | Role, round  | Reads                    | Does                                      | Hands on                  |
+| --- | ------------ | ------------------------ | ----------------------------------------- | ------------------------- |
+| 1   | Planner      | The issue                | Writes C1 to C4 and how to check each     | Spec                      |
+| 2   | Generator, 1 | Spec                     | Loop bound `< n - 1` → `< n`; runs 1 test | Diff, report "4 of 4 met" |
+| 3   | Evaluator, 1 | Criteria, diff           | Runs 18 tests: 17 pass, 1 fails           | Critique: C2 fails        |
+| 4   | Generator, 2 | Spec, its diff, critique | Adds `return []` for empty input          | Diff, report              |
+| 5   | Evaluator, 2 | Criteria, new diff       | 18 passed, lint and types clean           | Pass: 4 of 4 met          |
+
+**The numbers:**
+
+- **Total runs:** Runs = 1 planner + 2 roles × rounds = 1 + 2 × 2 = **5 agent runs** (versus 1 run of 9 steps for the single-agent fix on Harness Engineering).
+- **Round cap ceiling:** With a cap of 3 rounds, the worst case is 1 + 2 × 3 = 7 runs before the loop stops and escalates to a person.
+
+Three things to take from it:
+
+- **The generator's report was wrong, not dishonest.** It checked the test it was asked about. The evaluator caught the gap because it checked the criterion, not the report.
+- **Round 2 was small** because the critique was specific. The generator changed one line and kept the first fix.
+- **This task barely needed the split.** A single agent that runs the full suite finds the same failure, as the [coding-agent trace](/ai-system-design/genai-system-design/harness-engineering) shows. The split earns its cost when the checks need judgement, as the next section explains.
+
+### Keeping monolithic loops simple until complexity demands splitting
+
+- Start with one agent and the strongest deterministic check you have: tests, a type checker, a schema.
+- A test suite is already an evaluator outside the model, and it never grades generously. Add roles only when one of these holds:
+
+- **Some criteria need judgement.** Design quality, whether a feature is complete, whether a reply follows a policy. No test covers them, and the generator's opinion of its own work is the weakest signal you have.
+- **The task is beyond what the model does reliably alone.** Anthropic's conclusion: the evaluator "is worth the cost when the task sits beyond what the current model does reliably solo".
+- **The run is long.** A spec written once keeps a multi-hour build on course, and each role can start with a clean context. See [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+- **Retiring roles as models improve:** Every role encodes an assumption about what the model cannot do alone; when Anthropic upgraded its model, it dropped sprints, kept the planner, and moved the evaluator to a single end-of-run pass—removing one component at a time and measuring.
+
+### Passing structured critique back into the generator
+
+The critique is the only thing the evaluator sends back, so its shape decides how fast the loop converges.
+
+<AnimatedDiagram
+  spec="animated/agents/critique-payload"
+  minWidth={620}
+  caption="A critique the generator can act on names the criterion, shows evidence it can reproduce, points to the place, suggests a fix and says what must not break."
+/>
+
+**How to read it:**
+
+- **Vague critique (left):** The generator does not know which test failed or why, so it guesses and may rewrite working code.
+- **Structured critique (right):** Expresses the finding as six fields; the ringed `evidence` row makes it reproducible ("parses an empty file"), and the `keep` row stops round 2 from undoing round 1.
+
+Here is the critique message for round 1:
+
+```json
+{
+  "round": 1,
+  "verdict": "fail",
+  "met": ["C1", "C3", "C4"],
+  "failed": [
+    {
+      "criterion": "C2: All 18 tests pass",
+      "evidence": "1 failed: \"parses an empty file\". Error: empty input has no lines",
+      "where": "src/parser.ts, empty input, before the loop",
+      "suggested_fix": "return [] for empty input"
+    }
+  ],
+  "keep": "C1 passes: do not undo the loop bound fix"
+}
+```
+
+- **Prune old critiques:** Give the generator the spec, its current artefact, and the latest critique—not the full history of earlier critiques of code that no longer exists (keep those in files for the harness and debugging).
+
+<Callout tone="red" title="What breaks">
+  A critique with a score and no evidence. "6/10, needs polish" gives the generator nothing to reproduce, so it changes
+  something at random, and the next score moves for no reason. If the evaluator cannot point to evidence, it should not
+  fail the criterion.
+</Callout>
+
+### Controlling latency and token amplification across roles
+
+Every round re-runs the generator and the evaluator, each reading the spec, the artefact and the critique into a fresh context. Here is where the money went in one published run.
+
+<AnimatedDiagram
+  spec="animated/agents/token-amplification"
+  minWidth={620}
+  caption="Every extra round re-runs the generator, and that is where the money goes; the evaluator was 8.3 % of this run. Figures are from one published run, not a benchmark."
+/>
+
+**How to read it:**
+
+- **Grid layout:** Rows are roles and columns are rounds, with darker cells indicating higher cost.
+- **Role breakdown:** The planner runs once; the generator's three rounds cost \$71.08, \$36.89, and \$5.88; and the evaluator's three passes cost \$3.09 to \$4.06 each (ringed total).
+
+**The numbers:**
+
+- **DAW build breakdown:** In Anthropic's simplified harness run building a digital audio workstation app over 3 h 50 min, Planner (\$0.46) + Generator (\$113.85) + Evaluator (\$10.39) = **\$124.70**, making the evaluator 10.39 / 124.70 = **8.3 %** of the bill.
+- **Extra round share:** Rounds 2 and 3 cost \$39.98 + \$9.94 = \$49.92, accounting for 40 % of the run.
+- **Solo vs harness trade-off:** In an earlier harness version, another app cost \$9 in 20 minutes solo (central feature broken) versus \$200 in 6 hours with the full harness (central feature working)—over 20× more cost for a working result.
+
+Ways to control it:
+
+1. **Cap the rounds.** Two or three, then stop and hand the critique to a person. A loop that fails the same criterion twice with the same evidence is not converging.
+2. **Run cheap checks first.** Tests, lint and types take seconds and cost no tokens. Call the model evaluator only on what they cannot check.
+3. **Evaluate at the right grain.** Per sprint catches problems early; once at the end costs less. Anthropic moved to one end-of-run pass once its newer model needed less help.
+4. **Send the latest round only.** The spec, the current artefact and the latest critique, as above.
+
+## Trade-offs
+
+| Decision                         | Option A                              | Option B                                     | Guidance                                                                       |
+| -------------------------------- | ------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| One agent vs three roles         | Fewer runs, less latency              | Stricter checking, a spec to steer long runs | Three roles when criteria need judgement or the task is beyond the model alone |
+| Self-check vs separate evaluator | No extra run                          | Fresh context, easier to tune for strictness | Separate for anything that ships; self-check is a pre-check                    |
+| Deterministic vs model evaluator | Exact, cheap, never generous          | Covers judgement criteria                    | Deterministic first; the model only for what tests cannot see                  |
+| Evaluate per step vs at the end  | Catches drift early                   | Fewer runs                                   | Per step while the model drifts; at the end once it does not                   |
+| Full history vs latest critique  | The generator sees every past mistake | Smaller context                              | Latest critique plus a "keep" list                                             |
+
+## Production systems
+
+- **Anthropic's long-running harness** (24 March 2026): a planner, a generator and an evaluator that tested the running app with Playwright, communicating through files. In the first version, sprint 3 alone had 27 contract criteria.
+- **Frontend design runs** in the same post took 5 to 15 generator-evaluator iterations per design, with the evaluator grading design quality, originality, craft and functionality.
+- **The simplified harness** that followed dropped sprints, kept the planner and moved the evaluator to one pass at the end: three build-and-check rounds for \$124.70.
+- **Evaluator-optimizer** in Anthropic's "Building effective agents" (December 2024) uses literary translation and multi-round search as examples where one call's feedback improves another's output.
+
+## Failure modes & pitfalls
+
+- Letting the generator write or summarise the criteria the evaluator checks.
+- Giving the evaluator the generator's conversation, so it inherits the generator's reasoning and its blind spots.
+- Criteria with no way to check them ("the code is clean").
+- An evaluator that reads reports instead of running things.
+- Critiques with scores but no evidence, or no "keep" list.
+- No round cap, or no stop when the same criterion fails twice.
+- Keeping all three roles after a model upgrade without measuring whether each one still helps.
+
+## Interview framework
+
+1. Start from the problem: models grade their own work too generously, so checking needs a separate context and criteria someone else wrote.
+2. Name the three roles and what each hands on: spec with criteria, artefact with report, critique.
+3. Make the evaluator sceptical in practice: it runs things itself, has a hard bar per criterion and is calibrated against people.
+4. Describe the critique: criterion, evidence, where, fix, keep.
+5. Do the cost arithmetic: 1 + 2 × rounds runs; cap rounds and run deterministic checks first.
+6. Say when not to use it: one agent with good tests is often enough.
+
+**What interviewers listen for:** criteria that flow from the planner to the evaluator, not through the generator; evidence-based critiques; a round cap.
+
+**Red flags:** "the model reviews its own answer before replying" offered as verification, or adding roles without measuring what each one buys.
+
+## Further reading
+
+- [Harness design for long-running application development (Anthropic, 24 Mar 2026)](https://www.anthropic.com/engineering/harness-design-long-running-apps)
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/research/building-effective-agents)
+- [LLM Evaluators Recognize and Favor Their Own Generations (Panickssery, Bowman and Feng, 2024)](https://arxiv.org/abs/2404.13076)
+- [Large Language Models Cannot Self-Correct Reasoning Yet (Huang et al., ICLR 2024)](https://arxiv.org/abs/2310.01798)
+- [Reflexion: Language Agents with Verbal Reinforcement Learning (Shinn et al., 2023)](https://arxiv.org/abs/2303.11366)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Why separate the evaluator from the generator instead of asking the generator to check its own work?"
+    category="Concepts"
+    level="Junior"
+  >
+    - **Self-grading bias:** A model grading its own output skews positive because its context holds its own intentions, it prefers text it wrote, and without external feedback it rarely catches its own reasoning mistakes.
+    - **Isolated context and criteria:** A separate evaluator starts with a fresh context and checks against acceptance criteria written by the planner.
+    - **Tractable strictness:** While still a model, an independent evaluator can be tuned for strictness without making the generator timid.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What does each role hand to the next, and why write the hand-offs down?"
+    category="Architecture"
+    level="Mid"
+  >
+    - **Role artefacts:** The planner hands over a spec with acceptance criteria and verification methods; the generator hands over the built artefact and a short report; the evaluator returns a per-criterion verdict and critique.
+    - **Clean contexts and replayability:** Writing hand-offs to files lets each role start with a fresh context and allows the harness to store, diff, and replay every round.
+    - **Preventing goal drift:** Routing criteria directly from the planner to the evaluator stops the generator from softening what counts as done.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What should an evaluator's critique contain to make the next round succeed?"
+    category="Design"
+    level="Mid"
+  >
+    - **Five required fields:** Name the failed criterion, provide reproducible evidence (a failing test error, screenshot, or line quote), pinpoint the location, suggest a fix, and list what already passes and must be kept.
+    - **Preventing random edits and regressions:** Without reproducible evidence the generator guesses; without the `keep` list it may break passing fixes from earlier rounds.
+    - **Latest critique only:** Pass only the spec, current artefact, and latest critique rather than the entire history of prior rounds.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you not use a planner-generator-evaluator loop?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - **Deterministic checks suffice:** Skip the split when a single agent with a test suite, type checker, or schema validator already catches failures without bias.
+    - **When the split earns its cost:** Use three roles when criteria require judgement, the task exceeds solo model reliability, or a multi-hour run needs a spec to stay on course.
+    - **Re-evaluate after model upgrades:** Because each role compensates for current model limits, remove roles one at a time after upgrading the underlying model to see if they still help.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your three-role loop costs 20 times more than a single agent. How do you control cost and latency?"
+    category="Cost"
+    level="Senior"
+  >
+    - **Identify the main cost driver:** Total runs equal 1 planner + (generator + evaluator) × rounds; in Anthropic's published run, repeated generator rounds were 91 % of the bill and the evaluator was 8.3 %.
+    - **Cap rounds and fail fast:** Cap the loop at 2–3 rounds and halt immediately if the same criterion fails twice with identical evidence.
+    - **Gate with cheap checks:** Run tests, lint, and type checks before invoking the model evaluator, evaluate once at the end if the model rarely drifts mid-run, and pass only the latest critique.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your evaluator passes work that users later reject. What do you do?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - **Audit evaluator transcripts:** Evaluators often spot real bugs and then rationalise approving the work anyway.
+    - **Enforce execution and hard bars:** Require the evaluator to execute tests or drive the UI (e.g., via Playwright) rather than reading reports, enforce a hard pass threshold per criterion instead of an average, and add missed failure examples to its prompt.
+    - **Calibrate and codify:** Calibrate evaluator verdicts against human-graded samples over time, and move any check that can be written in code into a deterministic test.
+  </InterviewQuestion>
+</InterviewQuestions>

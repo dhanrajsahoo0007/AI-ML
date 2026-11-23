@@ -1,11 +1,327 @@
 ---
 title: "Virtual Machines, Instance Families and Images"
-description: "What a virtual machine is made of, how providers name sizes and families, and how an image turns one machine into a fleet."
-status: outline
+description: "What a VM is made of, how families and sizes are named, why a baked image beats a long start-up script, and how one VM becomes a fleet across zones."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** a VM as a slice of a physical host with its own operating system: what the slice is made of, how providers name sizes and families, why an image is the unit of repeatability, and how one VM becomes a fleet across zones. A short part covers desktops as a service.
+<KeyIdea>
+  A virtual machine is a rented slice of a real computer, and an image is a saved disk that lets you stamp out identical slices whenever you need more.
+</KeyIdea>
 
-**Related reading on this site:** [Compute on AWS](/cloud/aws/compute) · [Compute on Google Cloud](/cloud/gcp/compute) · [Compute on Azure](/cloud/azure/compute)
+## The story
+
+Brightpost's shop runs on a group of rented virtual machines, one in each of three zones near London. Each new server started from a plain operating system and ran a start-up script. The script downloaded about 600 MB of packages from a public package mirror, a website that hands out free software. On a normal day a new server was ready in 4 minutes. At 9:00 on the spring sale, shoppers online rose from 40 to about 1,500 in five minutes. Three servers serve about 600, so at 9:02 the group asked for 5 more. That morning the mirror was slow, and each new server took 11 minutes. Until 9:13, about 900 shoppers at a time saw timeouts, and about 150 orders were lost.
+
+The servers were healthy; their recipe ran its slowest part at the worst moment. The steps below open up one VM, then rebuild the fleet so a new server is ready in 3 minutes.
+
+## How it works
+
+Three words first. A **physical host** is a real server in the provider's data centre. A **virtual machine** (VM) is a slice of one host that behaves like a whole computer, with its own operating system (OS). Some clouds call it an instance. An **image** is a saved copy of a disk that a new VM starts from.
+
+### Step 1: A VM is a slice of a host
+
+<AnimatedDiagram spec="animated/cloud/vm-anatomy" step={1} minWidth={620} caption="One host, three tenants. The hypervisor gives each VM its share of the machine and keeps them apart." />
+
+The provider runs a program called a **hypervisor** on every host. It cuts the host's processors, memory, disks and network into slices, one per VM. Each VM boots its own OS and cannot see the others. Brightpost's app server is one slice, with 4 virtual processors and 16 GB of memory. The other slices may belong to other companies, each a <Term id="tenant">tenant</Term>.
+
+Isolation keeps data apart, but the hardware is shared. A **noisy neighbour** is another tenant whose heavy use slows yours down. Providers limit it, and a dedicated host, rented whole, removes it. [The Compute Spectrum](/cloud/compute/compute-spectrum) places VMs among the other ways to run code.
+
+<PremiumBreak />
+
+### Step 2: What one VM is made of
+
+<AnimatedDiagram spec="animated/cloud/vm-anatomy" step={2} minWidth={620} caption="Brightpost's VM opened up: processors, memory, a network card and three kinds of disk." />
+
+A VM has six parts, and they behave differently when it stops.
+
+- **vCPU**, a virtual processor: one thread of a real core. Brightpost's server has 4.
+- **Memory:** 16 GB, lost when the VM stops.
+- **Network card:** a private address in its network, here 10.0.1.12. A public address is optional.
+- **Boot disk:** the OS and the app, 30 GB, copied from an image when the VM is created.
+- **Data disk:** an extra disk on the provider's storage network. It survives a stop and can move to another VM.
+- **Local disk:** on some sizes, a fast disk inside the host. It can be erased when the VM stops or moves.
+
+Boot and data disks are <Term id="block-storage">block storage</Term>, covered in [Block Storage](/cloud/data/block-storage). The rule: anything kept only in memory or on a local disk can vanish with the VM.
+
+### Step 3: Families and sizes
+
+Providers sell VMs in **families**, groups of sizes built for one kind of work. Inside a family, each step up in **size** usually doubles the vCPUs, the memory and the price per hour. Families differ in how much memory comes with each vCPU, and in special hardware.
+
+<Compare
+  columns={["Family", "Memory per vCPU", "Built for"]}
+  rows={[
+    ["General purpose", "About 4 GB", "Web and app servers, such as Brightpost's 4 vCPU, 16 GB shop servers"],
+    ["Compute optimised", "About 2 GB", "Work that keeps processors busy: video encoding, scientific batch jobs"],
+    ["Memory optimised", "About 8 GB or more", "Caches, search indexes held in memory, large databases"],
+    ["Storage optimised", "Varies", "Fast local disks for heavy reads and writes"],
+    ["Accelerated", "Varies", "GPUs and other chips for machine learning and graphics"],
+  ]}
+  caption="Typical shapes. Exact ratios differ by cloud and by hardware generation."
+/>
+
+A sixth kind, **burstable**, gives a small steady share of a processor and lets it run faster for short spells. It suits a mostly idle machine, not steady load.
+
+A size name packs this into a few letters: family, hardware generation, options such as the processor type, and size. Pick by measurement, not by name. If memory is full while processors sit idle, move to a memory family before adding vCPUs. Matching size to measured use is <Term id="rightsizing">rightsizing</Term>.
+
+### Step 4: Processor architecture: x86 or Arm
+
+Two processor designs run almost every cloud VM. **x86** is the design in most laptops and servers, made by Intel and AMD. **Arm** started in phones and now powers server chips, including chips the clouds design themselves.
+
+For many workloads, an Arm VM does the same work for less money per hour. That makes it a cost lever that leaves the design unchanged. The catch is software: every program must be built for Arm, and an x86 image will not boot on an Arm size. An old library or a closed-source agent may not have an Arm build.
+
+So the move is a test. Brightpost would bake one image for Arm, run its sale-day load test, and compare shoppers per server with cost per hour.
+
+### Step 5: Configuring at boot: metadata and start-up scripts
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={1} minWidth={620} caption="Brightpost's first recipe: boot a plain OS, then download the shop's packages from the internet." />
+
+A new VM can learn facts about itself: name, zone, address, tags and any settings you attached. The VM reads them from the **metadata service**, a fixed local address that only that VM can reach. The same address hands out the server's short-lived credentials, as [Identity and Access](/cloud/fundamentals/identity-and-access) shows.
+
+A **start-up script** is one attached setting that the OS runs at first boot; some clouds call it user data. Brightpost's script did everything: install the runtime, download 600 MB of packages, fetch the code and start it. It needs no build step. The price: every new server repeats the whole install when it is needed most, from a website Brightpost does not run.
+
+Never put a password or key in the script. Anyone who can read the VM's settings can read it.
+
+### Step 6: From one VM to a group in three zones
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} minWidth={620} caption="A VM group copies one template into each zone, behind a load balancer that spans all three." />
+
+A fleet needs two objects. A **VM template** records how to build one server: image, size, disks, network and start-up script. A **VM group** keeps a set number of copies running and replaces any that fail a health check. <Term id="autoscaling">Autoscaling</Term> changes that number with load; [Autoscaling](/cloud/compute/autoscaling) covers the loop.
+
+The group also decides placement. Brightpost's group **spreads** copies across three <Term id="availability-zone">availability zones</Term>, so a failed zone takes a third of the fleet, not all of it. The opposite, **packing** VMs onto nearby hardware, cuts delay for jobs whose machines talk constantly. A <Term id="load-balancer">load balancer</Term> sends shoppers only to servers that pass their health check.
+
+This works because baskets live in the shared database, not on a server, so the group can replace any server at any time.
+
+### Step 7: Sale day: 11 minutes to ready
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={3} minWidth={620} caption="The failure: five new servers each wait on a slow mirror, and the load balancer keeps them out for 11 minutes." />
+
+A new server is useful only once the VM has booted, the app has started and the health check passes. **Time to ready** is the sum. With a start-up script, it includes every download.
+
+<Callout tone="red" title="What breaks">
+  At 9:02 the group adds 5 servers, as its rule says. Each boots in under a minute, then asks the public mirror for 600 MB of packages. The mirror is slow that morning, so each server takes 11 minutes. The load balancer rightly keeps them out until their health checks pass. From 9:02 to 9:13, three servers face about 1,500 shoppers, and about 150 orders are lost.
+</Callout>
+
+Autoscaling asked for servers on time. The delay sat inside each VM, in a download from a site outside Brightpost's control. A quiet-afternoon test took 4 minutes and hid the risk.
+
+### Step 8: Bake an image
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={4} minWidth={620} caption="An image build installs the packages once and saves golden image v12. The template now points to it." />
+
+**Baking** means doing the slow work once, ahead of time. An **image build** starts a temporary VM from the plain OS, runs the install steps, tests the result and saves the disk as a new image. The result is a **golden image**, with OS, runtime, packages and app in place. Brightpost bakes one per release and weekly for OS patches: v12, v13 and so on.
+
+The mirror is now used once per build. If it is slow, the build is slow, and no shopper waits. The template points to v12, and the start-up script only reads a few settings from metadata, such as which database to use. Settings stay out of the image, so the same v12 runs in test and in production.
+
+### Step 9: Ready in 3 minutes, and replace instead of repair
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={5} minWidth={620} caption="New servers boot from v12 and pass the health check at 9:05, 3 minutes after the group added them." />
+
+From the baked image, a new server boots, reads its settings, starts the app and passes its health check in about 3 minutes. With v12 on sale day, the 5 extra servers would have served from 9:05, not 9:13. The rest of the gap belongs to autoscaling: how soon it notices load and how much spare it keeps.
+
+The image also changes how fixes happen. Nobody patches a running server. The team changes the build, bake v13, point the template at it, and let the group replace servers one at a time. This is **immutable infrastructure**: servers are replaced, never edited. Rolling back means pointing the template at v12 again. [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management) covers the rollout.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds sell VMs in families, boot them from images and run fleets from a template. They differ in naming, and in where an image or a fleet can live.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Families:** EC2 instance types, named family letter, generation, options, size. M general, C compute, R memory, I storage, P and G accelerated, T burstable.
+    - **Arm option:** AWS Graviton processors, marked by a g among the option letters.
+    - **Images:** Amazon Machine Images (AMIs). EC2 Image Builder bakes and tests them.
+    - **Template and group:** a launch template and an EC2 Auto Scaling group. Placement groups pack or spread instances.
+    - **Start-up settings:** user data, usually run by cloud-init, and the instance metadata service.
+
+    **The difference that changes a design.** A subnet lives in one Availability Zone, so an Auto Scaling group spreads only across the subnets you list. List one subnet per zone, or the fleet sits in fewer zones than you think. AMIs are regional, so a second region needs a copy first.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Families:** Compute Engine machine families: general purpose (such as E2 and N2), compute, memory, storage and accelerator optimised. A machine type names series, shape and vCPU count.
+    - **Arm option:** Arm series, including ones built on Google's own Axion processor.
+    - **Images:** custom images. An image family points to the newest one.
+    - **Template and group:** an instance template and a managed instance group (MIG). A regional MIG spreads VMs across the region's zones.
+    - **Start-up settings:** a `startup-script` metadata key, read from the metadata server.
+
+    **The difference that changes a design.** Custom machine types: on several general-purpose series you choose vCPUs and memory yourself instead of a fixed size. A memory-hungry app gets 4 vCPUs and 32 GB without paying for 8 vCPUs. Custom images are global, so a second region needs no copy.
+  </Tab>
+  <Tab label="Azure">
+    - **Families:** VM series by letter: B burstable, D general, F compute, E and M memory, L storage, N GPUs, H high-performance computing.
+    - **Arm option:** sizes with a p among the feature letters, on Ampere chips or Microsoft's own Cobalt processor.
+    - **Images:** Marketplace images, and your own in Azure Compute Gallery, which copies versions to chosen regions. Azure VM Image Builder bakes them.
+    - **Template and group:** a Virtual Machine Scale Set holds the VM model and its instances across zones. Without zones, an availability set spreads VMs across racks.
+    - **Start-up settings:** custom data run by cloud-init, the Custom Script Extension, and the Instance Metadata Service.
+
+    **The difference that changes a design.** A VM is a bundle of separate resources: the VM, its network interface, its disks and often a public IP. Deleting the VM does not always delete the rest, and a forgotten disk keeps costing money. Scale Sets manage the bundle as one.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/vm-fleet-three-zones" lead="aws" />
+
+### Desktops as a service
+
+A managed virtual desktop is a VM fleet for people. A worker signs in from a laptop or browser and gets a desktop on a cloud VM, handed out by a broker the provider runs. Companies pick it for contractors and call centres: files stay in the cloud, so a lost laptop holds nothing. Azure offers Azure Virtual Desktop and AWS offers Amazon WorkSpaces. On Google Cloud, partner products run on Compute Engine.
+
+## Try it
+
+<DecisionTree
+  title="Which family?"
+  tree={{
+    q: "Does the work need a GPU or another accelerator chip?",
+    yes: {
+      answer: "An accelerated family. Keep it busy with a queue, because it bills every second it is on.",
+      href: "/cloud/compute/batch-hpc-gpus",
+    },
+    no: {
+      q: "Is memory near full while the processors sit below half?",
+      yes: "Memory optimised: about 8 GB or more per vCPU, so you stop paying for idle processors.",
+      no: {
+        q: "Are the processors near full while memory sits below half?",
+        yes: "Compute optimised: about 2 GB per vCPU, more processor for the money.",
+        no: {
+          q: "Is the machine idle most of the day, with short bursts of work?",
+          yes: "Burstable. Check that its base share covers the quiet hours, and move off it if load turns steady.",
+          no: "General purpose. Then try an Arm build of the same image and compare cost per unit of work.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The group adds 5 servers at 9:02. When do they start serving with the old start-up script on sale day, and when with golden image v12?" hint="Add each recipe's time to ready.">
+    9:13 with the script, because each took 11 minutes. 9:05 with v12, because a baked server is ready in about 3 minutes.
+  </QuizItem>
+  <QuizItem question="An engineer logs in to one server and fixes a setting by hand. That night the server fails a health check and the group replaces it. What happens to the fix?" hint="Where does the group get its recipe?">
+    It is gone. The new server comes from the template and image, which never saw the fix. The change belongs in the image build or in the template's settings.
+  </QuizItem>
+  <QuizItem question="A search service needs about 28 GB of memory and 2 vCPUs of processing. Which family gives it that with the fewest idle vCPUs?">
+    Memory optimised: at about 8 GB per vCPU, 4 vCPUs bring 32 GB. General purpose needs 8 vCPUs for that memory, and 6 would sit idle.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Configure at boot", "Everything baked in", "Baked image + settings at boot"]}
+  rows={[
+    ["Time to ready on sale day", "4 min, or 11 min with a slow mirror", "About 3 min", "About 3 min"],
+    ["Needs an outside website at boot", true, false, false],
+    ["One image for test and production", true, false, true],
+    ["To change a setting", "Edit the script; next boot", "Bake a new image", "Change the metadata; next boot"],
+    ["To patch the OS", "Each boot gets the latest, so servers differ", "Bake, then replace servers", "Bake, then replace servers"],
+    ["Setup effort", "Minutes: one script", "An image build", "An image build and a 10-line script"],
+  ]}
+  caption="Brightpost's three options, with the spring sale's numbers."
+/>
+
+Configuring at boot wins only on the first day. Brightpost picked the third column: slow work happens once in the build, and what differs between test and production arrives as settings.
+
+## Common pitfalls
+
+- **Downloading the world at boot.** Every new server repeats the install when load is highest. Bake packages in; let the script read settings.
+- **Fixing a running server by hand.** The next replacement wipes the fix. Change the build or the template, then replace servers.
+- **Choosing a family by name.** A memory-hungry process on a compute-optimised size runs out of memory and swaps, writing memory to a far slower disk. Measure, then pick the family whose ratio matches.
+- **Keeping data on the VM.** Memory and local disks can vanish, and the group replaces servers at will. Keep orders, baskets and uploads in a database or a bucket.
+- **Secrets in the start-up script.** Anyone who can read the VM's settings can read them. Use the VM's attached identity to fetch secrets.
+
+## How to say it in an interview
+
+"A VM is a slice of a physical host, cut by a hypervisor, with its own OS, vCPUs, memory, disks and network card. I choose the family from measurements, matching memory per vCPU to the workload, and I test an Arm build when the software allows. I bake a golden image with everything installed and pass only settings at boot. A new server is then ready in minutes and never waits on an outside site. A template and a VM group spread stateless copies across three zones behind a load balancer. I patch by baking a new image and replacing servers, never by logging in."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between an image and an instance?" level="Junior" category="Cloud">
+    **Short answer.** An image is a saved disk with the OS and software, not running. An instance is a running VM whose boot disk was copied from an image. One image can start any number of instances.
+
+    **Why.** All 5 of Brightpost's sale-day servers start from golden image v12, so they behave alike. What an instance later writes to its own disk never flows back into the image. To change every server, you change the image and replace the instances.
+
+    <AnimatedDiagram spec="animated/cloud/vm-anatomy" step={2} highlight={["image", "boot"]} caption="The image is copied into the boot disk when the VM is created; after that the two are separate." />
+
+    **Follow-ups the interviewer may ask.**
+    - How is an image different from a snapshot of a disk?
+    - Can an image built for x86 start an Arm instance?
+
+    **Watch out for.** Calling an image "a stopped instance". A stopped instance still has its own disks and settings; an image is a template for new disks.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why must a VM be stateless before you can autoscale it?" level="Mid" category="Cloud">
+    **Short answer.** The group adds and removes servers on its own. Data kept on a server, such as baskets or sessions, is lost when it goes, and other servers cannot see it. Stateless servers can be added, removed and replaced at any time.
+
+    **Why.** Brightpost's baskets live in the shared database, so the load balancer can send any shopper to any of 3 to 10 servers. When the group replaces a failed server, no shopper loses anything. With baskets in one server's memory, every scale-in would empty some baskets.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} highlight={["lb", "server-a", "server-b", "server-c", "group"]} caption="Any server can take any shopper, because none of them holds a basket." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you keep user sessions instead?
+    - How do you remove a server that is still answering a long request?
+
+    **Watch out for.** Sticky sessions, which pin each shopper to one server. They hide the problem until that server is removed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You logged in to a server and fixed a config file. The next morning the fix is gone. What happened, and how do you prevent it?" level="Mid" category="Cloud">
+    **Short answer.** The group replaced the server overnight from a template and image that never had the fix. Make every change in the image build or the template's settings, bake a new image, and roll it out by replacement.
+
+    **Why.** A VM group treats servers as copies of one recipe and replaces them after a failed health check, a scale-in or an update. A hand edit lives on one disk and dies with it. Baked into v13, the fix reaches every server, and rolling back means pointing the template at v12.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={4} highlight={["build", "golden", "template", "group"]} caption="Changes go in at the build; the template and the group carry them to every server." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you stop people logging in to servers at all?
+    - Which settings belong in the image, and which arrive at boot?
+
+    **Watch out for.** Turning off replacement. It keeps the fleet healthy; the hand edit is the problem.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A search process on a compute-optimised VM keeps swapping to disk. How do you choose a better size?" level="Mid" category="Cloud">
+    **Short answer.** Measure memory use, processor use and swapping. If memory is full while processors sit idle, move to a memory-optimised family with the same or fewer vCPUs, not a bigger compute size.
+
+    **Why.** Swapping means the OS writes memory out to disk because memory ran out, and disk is far slower. Compute optimised gives about 2 GB per vCPU, so enough memory there means many idle vCPUs. Memory optimised gives about 8 GB or more. For 28 GB, 4 memory-optimised vCPUs bring 32 GB; compute optimised would need about 16.
+
+    <AnimatedDiagram spec="animated/cloud/vm-anatomy" step={2} highlight={["vcpu", "memory"]} caption="The family decides how much memory comes with each vCPU." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you rule out first, such as a memory leak?
+    - How do you change the size of a fleet without downtime?
+
+    **Watch out for.** Adding vCPUs to fix a memory problem. Faster processors still wait on the same slow disk.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="New servers take 11 minutes to be ready, and your sale traffic quadruples in 5 minutes. What do you change?" level="Senior" category="Cloud">
+    **Short answer.** Cut time to ready first: bake a golden image so boot downloads nothing, which took Brightpost from 11 minutes to about 3. Then cover the rest with spare capacity: scale up on a schedule before a known sale.
+
+    **Why.** Time to ready is boot, app start and health check. Brightpost's 11 minutes were mostly a download from a mirror it does not control. Baking moves that work to the image build, where a slow mirror delays nobody. Even 3 minutes is long against a 5-minute surge, so for a planned sale the fleet should reach 8 servers by 8:55.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={3} highlight={["mirror", "new-a", "new-b", "new-c", "lb"]} caption="All of the delay sits between the mirror and the new servers, inside each boot." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you keep the image current without slowing releases?
+    - What do stopped, ready-to-start servers cost and save?
+
+    **Watch out for.** Raising the autoscaling maximum. The group asked on time; more 11-minute servers still arrive at 9:13.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Block Storage: Volume Types, IOPS and Snapshots](/cloud/data/block-storage)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+
+## Further reading
+
+- [What is Amazon EC2?](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html): instances, AMIs and instance types.
+- [Compute Engine machine families](https://cloud.google.com/compute/docs/machine-resource): series, machine types and custom shapes.
+- [Sizes for Azure virtual machines](https://learn.microsoft.com/azure/virtual-machines/sizes/overview): VM series and naming.
+- [Azure Compute Gallery](https://learn.microsoft.com/azure/virtual-machines/azure-compute-gallery): image versions and replication.

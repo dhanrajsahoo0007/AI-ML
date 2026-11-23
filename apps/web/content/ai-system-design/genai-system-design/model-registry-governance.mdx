@@ -1,0 +1,239 @@
+---
+title: Model Registry & Governance
+description: Catalog models with cards and approvals, govern staging-to-production promotion, track lineage, and retire models safely so production ML stays auditable.
+updated: 2026-11-15
+---
+
+A model registry is the catalog between what training produces and what serving runs.
+
+- Interviewers ask about it because the hard part is not storing a file: it is deciding who may move a version to production, on what evidence, and how to undo it.
+- For LLM systems there is an extra twist: often the "model" is a provider's API plus a prompt plus a config, and the registry has to version that.
+- The release path is on [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines) and the undo path on [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment).
+
+## Overview
+
+- **A registry maps a name to versions and a version to its evidence:** the run that made it, its evaluation, its model card and its approvals.
+- **Four lifecycle steps, an approval at each move:** registered, staging, production, archived. Brightpost's offline gate is **170 of 200** on the golden set.
+- **MLflow stages are deprecated** (since MLflow 2.9.0, checked November 2026). The current pattern is **aliases**: a mutable name such as `champion` points at one version; promotion repoints it and rollback points it back.
+- **A model card has nine sections** (Mitchell et al., 2019): details, intended use, factors, metrics, evaluation data, training data, quantitative analyses, ethical considerations, caveats.
+- **For API models the entry is a bundle:** a pinned provider snapshot, a prompt, a config, tool schemas and guardrails. An alias like `latest` can move under you.
+- **Governance scales with risk.** A low-risk prompt tweak needs one reviewer; a model swap needs a canary and a risk sign-off.
+
+## Mental model
+
+- Think of a hospital pharmacy. A new drug arrives on the shelf with a leaflet that says what it is for, who it was tested on and what to watch for (the model card).
+- It sits in a quarantine cupboard until a pharmacist checks the paperwork (registered, then staging).
+- Only then does it go on the dispensing shelf (production), and when a better version arrives the old one goes to the archive, with a record of who approved what and when.
+- The label on the shelf is an alias; moving the label is a deliberate act.
+
+## Core concepts
+
+1. **Registered model and version.** A name (`brightpost-support`) with numbered versions. Each version stores a link to the run that produced it, tags and a description. In MLflow a version number starts at 1 and increments with each registration under that name (checked November 2026).
+2. **Lineage.** The version's link to its run, data and prompt; see [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control).
+3. **Stages.** The classic lifecycle: registered, staging, production, archived. MLflow documents that model stages are deprecated and "will be removed in a future major release", and recommends aliases and tags instead.
+4. **Aliases.** A mutable, named reference to one version. MLflow loads a model by `models:/name@alias`, so serving code never hard-codes a version number.
+5. **Tags.** Key-value labels on versions, such as `validation=passed` or `risk=low`. Governance checks read them.
+6. **Approvals.** A gate at each move: automated (the golden-set floor, a filled model card) or human (an owner and a risk reviewer). The approval is recorded with its evidence.
+7. **Model card.** A short document with the assumptions behind the metrics and the known failure modes; see Technical mechanics.
+8. **The registry for API models.** The entry records a provider snapshot id, prompt, config, tool schemas and guardrails as one version.
+9. **Deprecation and archive.** An end-of-life date, a successor, a fallback, and a retention period so audits can still read the evidence.
+10. **Federation.** One registry per team with shared interfaces, against a single global one: autonomy against a single audit view.
+
+## Architecture
+
+Brightpost's model passes four stops. Each move has a named approval, and in MLflow the "production" stage is an alias that is repointed.
+
+<AnimatedDiagram
+  spec="animated/llmops/registry-stages"
+  stepper
+  caption="A model version moves from registered to archived with an approval at each step; in current MLflow the live version is the one an alias points at."
+/>
+
+**How to read it:**
+
+- Step 1 shows the four stages. Step 2 adds the approvals: an offline gate (170 of 200 on the golden set, and a filled model card), a canary and sign-off by an owner and a risk reviewer, and a retirement check that the successor is live and baked.
+- Step 3 shows how MLflow expresses this today: versions 5, 6 and 7, with `@champion` on version 6 and `@challenger` on version 7.
+- Step 4 promotes by repointing `@champion` to version 7.
+
+1. Training logs a run, and the model is registered as a new version linked to that run.
+2. The offline gate scores the version on the golden set: it needs 170 of 200 (85 %), and the card must be complete.
+3. A canary sends staged traffic to it with quality and latency gates.
+4. An owner and a risk reviewer sign off, and the serving alias moves to the new version.
+5. The old version stays warm for rollback, then is archived with its evidence.
+
+## Technical mechanics
+
+### Stages against aliases
+
+- Stages are a single slot: one version is "Production".
+- That is easy to read and hard to extend, because teams want a challenger in a shadow slot, a regional variant, and several environments.
+- MLflow's documentation states that as of MLflow 2.9.0 model stages are deprecated and will be removed in a future major release, and that tags and aliases replace them (checked November 2026).
+- A stage-style URI such as `models:/name/Production` becomes `models:/name@champion`.
+- The ideas survive: you still need staging checks and a production approval, but they are expressed as tags and as the move of an alias.
+
+- Rollback is the same operation in reverse. Moving `@champion` back from version 7 to version 6 is one metadata change, which matches the one-switch rollback on the [rollback page](/ai-system-design/genai-system-design/rollback-blue-green-deployment).
+
+### The model card
+
+Mitchell et al. proposed model cards in "Model Cards for Model Reporting" (FAT* 2019). The paper lists nine sections, and the figure fills them in for Brightpost's model m7.
+
+<AnimatedDiagram
+  spec="animated/llmops/model-card"
+  stepper
+  caption="The nine model-card sections for Brightpost's model m7. Section names follow the 2019 paper; the entries are illustrative."
+/>
+
+**How to read it:**
+
+- Row 1 says what the model is and what it is for: details, intended use and the factors it was evaluated across.
+- Row 2 says how it was measured: the metrics, the evaluation data (the 200-ticket golden set) and the training data (tickets-v3, 5,000 tickets).
+- Row 3 gives the numbers and the limits: 184 of 200 (92 %) by ticket type, a note that tickets hold personal data, and a caveat that refunds over £30 need approval.
+
+- The point of a card is to write down the conditions under which the metrics are true.
+- A score of 92 % on the golden set says nothing about tickets in a language the set did not cover, and the card is where that gets stated.
+- Treat the card as a required file in the registry entry, with the approval gate checking that it exists and that its numbers match the evaluation record.
+
+### The registry for API models
+
+Brightpost does not host weights for every route. For some the "model" is a provider's API.
+
+<AnimatedDiagram
+  spec="animated/llmops/registry-for-apis"
+  stepper
+  caption="An API-based entry is five parts: a pinned provider snapshot, a prompt, a config, tool schemas and guardrails. Provider ids are invented."
+/>
+
+**How to read it:**
+
+- Step 1 shows registry entry `brightpost-support`, version 42, as five parts.
+- Step 2 contrasts a pinned snapshot (the same weights until you move it) with an alias such as `latest`, which the provider can repoint, so answers change while the entry still says version 42 and nobody approved the new snapshot.
+- Step 3 adds what the registry keeps beside the parts: the evaluation (184 of 200), the approval and a tested fallback snapshot.
+- The [release bundle](/ai-system-design/genai-system-design/cicd-ct-pipelines) is the same set of parts seen from the pipeline.
+
+The entry is a JSON file in git or a row in a registry; its parts are versioned together because they were tested together:
+
+```json
+{
+  "name": "brightpost-support", "version": 42,
+  "provider_model": "provider-model-2026-09-01",
+  "prompt": "p12", "tools": "t8", "guardrails": "g5",
+  "config": {"temperature": 0, "max_tokens": 400},
+  "evaluation": {"golden_pass": 184, "golden_total": 200},
+  "approvals": ["owner", "risk"], "fallback": "provider-model-2026-06-15"
+}
+```
+
+- This follows the `registry-for-apis` figure; the provider ids are invented.
+- A provider alias that silently changes is a risk to check for: [Drift Detection](/ai-system-design/genai-system-design/drift-detection) covers watching for it.
+
+<Callout tone="red" title="What breaks">
+  Pointing a production entry at an alias such as latest. The provider can move it without telling you, quality changes, and the registry still shows an approved version. Pin a dated snapshot, record it in the entry, and let a new snapshot go through the same gate as any other change.
+</Callout>
+
+### Governance
+
+- Governance turns risk appetite into checks. Automated gates are cheap: the golden-set floor, a complete card, a passed privacy scan, no open red-team findings.
+- Human gates cost a person's time, so spend them where risk is: a model swap, a new tool with write access, a change to refund limits.
+- Every approval is stored with its evidence and the approver.
+- This is the trail that [Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging) reads from.
+
+### Worked example: Brightpost promotes model m7
+
+1. **Register.** The run that produced model m7 (the one in the experiment tracker) is registered as version 7 of `brightpost-support`. It is tagged `validation=pending`, and its card lists intended use and caveats.
+2. **Offline gate.** The golden set scores 184 of 200 (92 %), above the 170 needed. The card is complete. The tag changes to `validation=passed` and `@challenger` points at version 7.
+3. **Canary.** The release pipeline sends 1 %, then 10 % and 50 % of traffic; quality and latency gates pass at each; see [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines).
+4. **Sign-off.** The owner and a risk reviewer approve with the evaluation report attached. `@champion` moves from version 6 to version 7.
+5. **Roll back, later.** Two weeks on, the weekly sample falls under the floor. Moving `@champion` back to version 6 takes one change and the pipeline logs it.
+6. **Archive.** After the baking period, version 6 is archived with its card, run link and evaluation, for the audit retention period.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Stages (legacy) | Simple to read | One slot; deprecated in MLflow | Existing setups until migrated |
+| Aliases and tags | Flexible; many environments; one-step rollback | You define the conventions | New registries |
+| Central registry | One audit view; shared policy | Can bottleneck hotfixes | Regulated or high-risk systems |
+| Federated registries | Team autonomy | Policy drift | Large organisations with shared interfaces |
+| Pinned provider snapshot | Reproducible answers | Snapshots retire; you must migrate | Production API routes |
+| Provider alias | Free upgrades | Silent behaviour change | Prototypes only |
+| Human approval on every move | Strongest control | Slow; reviewer fatigue | Model swaps and policy changes |
+
+## Production systems
+
+- **MLflow Model Registry.** Versions, tags, aliases and lineage to the run; stages deprecated since 2.9.0 (documentation checked November 2026).
+- **Weights and Biases Artifacts.** Run inputs and outputs are versioned and addressed by alias, for example `name:latest` (documentation checked November 2026).
+- **Model cards.** Published by many model providers and by Mitchell et al.'s original examples, a smiling-face detector and a toxic-comment classifier.
+- **Brightpost's registry.** `brightpost-support` versions 5 to 7, with `@champion` and `@challenger`.
+
+## Failure modes & pitfalls
+
+- Treating the registry as a file store with no approvals or evidence.
+- Pointing production at a provider alias that can move.
+- Cards written once and never checked against the evaluation record.
+- A rollback target that was archived or deleted before it was needed.
+- Approvals recorded in chat, not in the registry, so an audit cannot find them.
+- Gating every low-risk change on a committee, so teams route around the registry.
+
+## Interview framework
+
+1. Define the registry: names, versions, and for each version the run, the evaluation, the card and the approvals.
+2. Walk through the lifecycle and name the approval at each move.
+3. Mention that MLflow stages are deprecated and aliases replace them, and explain promotion as repointing an alias.
+4. Say what is different for LLMs: the entry is a bundle with a pinned provider snapshot, a prompt and a config.
+5. Close on risk-based governance: automated gates for most, human sign-off where the risk is.
+
+**What interviewers listen for:** evidence stored with each version, one-step rollback, a pinned snapshot, and gates matched to risk.
+
+**Red flags:** "just copy the model to a production folder", a latest alias in production, and approvals nobody can find later.
+
+## Further reading
+
+- [MLflow Model Registry (MLflow documentation)](https://mlflow.org/docs/latest/ml/model-registry/)
+- [MLflow Model Registry workflows: aliases and the stage deprecation (MLflow documentation)](https://mlflow.org/docs/latest/ml/model-registry/workflow/)
+- [Model Cards for Model Reporting (Mitchell et al., arXiv 1810.03993, FAT* 2019)](https://arxiv.org/abs/1810.03993)
+- Related pages: [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) · [CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines) · [Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging) · [Experiment Tracking & Version Control](/ai-system-design/genai-system-design/experiment-tracking-version-control)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What gates would you require before promoting a generative model to production?" category="Trade-offs" level="Senior">
+    - Documented intended use and out-of-scope uses, a score above the golden-set floor, safety and content-policy evaluations including adversarial prompts, and privacy checks for personal data leakage.
+    - Add latency and cost envelopes, a canary with quality and latency gates, and a tested rollback plan.
+    - Automated checks enforce the presence of those artefacts and block promotion if red-team findings are open without a recorded exception, while product and risk owners sign off on the rest.
+    - Match the number of human gates to the risk of the change.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a model registry fit into a microservices architecture?" category="Architecture" level="Mid">
+    - Serving services resolve a model through the registry by name and alias, such as `brightpost-support@champion`, instead of baking a version number or a file path into the container.
+    - Training pipelines register new versions after validation, and deployment controllers pull immutable artefacts using the registry's URIs and checksums.
+    - This lets inference scale independently, supports canary and blue-green releases, and keeps the authority to promote at one boundary.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you operationalize model deprecation?" category="Concepts" level="Mid">
+    - Announce the end-of-life date, mark the version with a tag and a warning in client libraries, and monitor remaining traffic by consumer.
+    - Migrate workloads to the successor, comparing outputs in shadow mode where needed, then enforce the cutoff.
+    - Keep the artefacts, card and evaluation for the audit retention period, and never delete a version that a rollback or a fallback still points to.
+  </InterviewQuestion>
+  <InterviewQuestion question="MLflow deprecated model stages. What replaced them and how do you promote now?" category="Concepts" level="Mid">
+    - Model version tags and aliases replaced stages, as of MLflow 2.9.0.
+    - An alias is a mutable, named pointer to one version, so you promote by setting `champion` to the new version, and consumers load `models:/name@champion`.
+    - Validation state lives in tags, and approvals are recorded with the evidence.
+    - Rollback is the same operation in reverse. The benefit over stages is that you can hold several aliases at once, such as a challenger and a regional champion.
+  </InterviewQuestion>
+  <InterviewQuestion question="What goes in a model card, and why does it belong in the registry?" category="Concepts" level="Junior">
+    - The 2019 model-card paper proposes nine sections: model details, intended use, factors, metrics, evaluation data, training data, quantitative analyses, ethical considerations, and caveats and recommendations.
+    - They record the conditions under which the metrics are true and the known limits.
+    - Keeping the card with the version means a reviewer can check the card against the evaluation record before approving, and an auditor can find it years later.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a registry entry when the model is a provider's API, and what can go wrong?" category="Architecture" level="Senior">
+    - The entry is a bundle: a pinned provider snapshot id, the prompt, the decoding config, the tool schemas and the guardrails, with the evaluation and approvals that cover that exact combination.
+    - What goes wrong is an alias such as latest that the provider repoints, so behaviour changes while the entry still looks approved.
+    - Pin a dated snapshot, record a tested fallback, watch for drift, and send a new snapshot through the same gate. Plan for snapshot retirement dates as well.
+  </InterviewQuestion>
+  <InterviewQuestion question="Central registry or federated registries per team?" category="Trade-offs" level="Senior">
+    - A central registry gives one audit view and one policy, which suits regulated systems, but it can become a bottleneck if every hotfix needs a committee.
+    - Federated registries give teams speed, at the risk of different conventions and missing evidence.
+    - A common design is federated storage with shared interfaces and a mandatory core of fields and gates, so audit can query across teams, and a risk tier decides how much human review a change needs.
+  </InterviewQuestion>
+  <InterviewQuestion question="After a promotion, quality drops and you must roll back. What makes that safe?" category="Failure modes" level="Senior">
+    - The previous version must still exist and still work: its artefacts, its prompt and tool versions, and its provider snapshot.
+    - With aliases, rollback is moving the serving alias back, which is one metadata change that is logged.
+    - Keep the old version warm during the baking period, and make sure the card and evaluation of both versions are in the registry so you can state what changed. Without those, rollback becomes a rebuild.
+  </InterviewQuestion>
+</InterviewQuestions>

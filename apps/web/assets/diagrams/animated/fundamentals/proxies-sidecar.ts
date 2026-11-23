@@ -31,7 +31,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 155,
       y: 220,
-      w: 160,
+      w: 176,
       h: 64,
     },
     {
@@ -53,7 +53,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 705,
       y: 220,
-      w: 160,
+      w: 164,
       h: 64,
     },
     {

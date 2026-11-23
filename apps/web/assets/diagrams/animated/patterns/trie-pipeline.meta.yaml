@@ -1,0 +1,16 @@
+title: Building and serving typeahead suggestions
+alt: >-
+  An architecture diagram built in six steps. Step 1: orange shoppers send each typed prefix, 556 a second on average,
+  to teal suggest servers that hold a trie in memory, and send finished searches to a teal search service, which
+  writes them to a violet search log of 8 million searches a day. Step 2: a teal aggregation job reads the log in a
+  daily batch and keeps 30-day counts per query. Step 3: a green trie builder, drawn as the solid accent, turns 10
+  million queries into a trie with the top 5 stored at every node and writes it as one file to a violet snapshot
+  store. Step 4: the suggest servers load the new snapshot and swap it in. Step 5: a fast path: the log also streams
+  into a green trending counter covering the last 10 minutes, whose short list the servers merge in. Step 6: a grey
+  edge cache now sits between the shoppers and the servers and answers short prefixes; only misses reach a server.
+caption: >-
+  Suggestions are built offline from yesterday’s searches and shipped as a file; only the trending list and the cache
+  misses move in real time.
+tags: [patterns, trie, typeahead, pipeline]
+source: original
+created: 2026-11-16

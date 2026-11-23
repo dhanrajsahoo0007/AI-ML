@@ -34,7 +34,7 @@ const spec: DiagramSpec = {
   ],
   nodes: [
     { id: "phone", label: "Phone app", sub: "riders", icon: "phone", x: 100, y: 110, w: 140 },
-    { id: "web", label: "Web dashboard", sub: "fleet operators", icon: "browser", x: 100, y: 230, w: 140 },
+    { id: "web", label: "Web dashboard", sub: "fleet operators", icon: "browser", x: 100, y: 230, w: 160 },
     { id: "partner", label: "Partner apps", sub: "transit maps", icon: "users", x: 100, y: 350, w: 140 },
     {
       id: "gateway",
@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 300,
       y: 230,
-      w: 150,
+      w: 154,
       h: 64,
     },
     {
@@ -68,7 +68,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 300,
       y: 365,
-      w: 150,
+      w: 166,
     },
     {
       id: "mbff",

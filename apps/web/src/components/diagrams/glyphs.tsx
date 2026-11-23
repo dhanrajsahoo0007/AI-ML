@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Tone } from "./types";
+import type { LayoutTone } from "./types";
 
 // Illustrated icons for diagram nodes, drawn in a 48 x 48 box and coloured by tone: a cylinder for a
 // database, stacked layers for a cache, a segmented tube for a log or queue. Same visual language as
@@ -82,13 +82,24 @@ export type GlyphName =
   | "coin"
   | "model"
   | "policy"
-  | "pipeline";
+  | "pipeline"
+  | "chunk"
+  | "vector"
+  | "embedder"
+  | "vector-index"
+  | "reranker"
+  | "prompt"
+  | "graph"
+  | "tool"
+  | "plan"
+  | "approval"
+  | "sandbox";
 
-const ink = (t: Tone) => `var(--dg-${t})`;
-const soft = (t: Tone) => `var(--dg-${t}-soft)`;
+const ink = (t: LayoutTone) => `var(--dg-${t})`;
+const soft = (t: LayoutTone) => `var(--dg-${t}-soft)`;
 const PAPER = "var(--paper)";
 
-const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
+const GLYPHS: Record<GlyphName, (t: LayoutTone) => ReactNode> = {
   database: (t) => (
     <>
       <path d="M7 11 V37 A17 6 0 0 0 41 37 V11" style={{ fill: ink(t), stroke: ink(t) }} />
@@ -1193,6 +1204,163 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
       />
     </>
   ),
+
+  // RAG batch: chunks, vectors, the embedding model, the vector index, the reranker, the prompt and a knowledge graph.
+  chunk: (t) => (
+    <>
+      <path d="M8 5 H30 L36 11 V16 H8 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <path d="M30 5 V11 H36" fill="none" style={{ stroke: ink(t) }} strokeLinejoin="round" />
+      <rect x={13} y={18.5} width={28} height={11} rx={2} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={8} y={32} width={28} height={11} rx={2} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M12 10.5 H24 M17 24 H34 M12 37.5 H29" style={{ stroke: PAPER }} strokeLinecap="round" />
+      <path d="M12 10.5 H24 M12 37.5 H29" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.6} />
+    </>
+  ),
+  vector: (t) => (
+    <>
+      {[0.95, 0.35, 0.7, 0.2, 0.55, 0.85].map((o, i) => (
+        <rect key={i} x={4 + i * 6.7} y={17} width={6.7} height={14} style={{ fill: ink(t) }} fillOpacity={o} />
+      ))}
+      <rect x={4} y={17} width={40.2} height={14} rx={1.5} fill="none" style={{ stroke: ink(t) }} />
+      <path d="M7 12 H4 V36 H7 M41 12 H44.2 V36 H41" fill="none" style={{ stroke: ink(t) }} strokeLinecap="round" />
+    </>
+  ),
+  embedder: (t) => (
+    <>
+      <rect x={3} y={12} width={13} height={24} rx={2} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path d="M6 18 H13 M6 23 H13 M6 28 H11" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <path d="M19 10 L30 17 V31 L19 38 Z" style={{ fill: ink(t), stroke: ink(t) }} strokeLinejoin="round" />
+      {[0.9, 0.3, 0.65, 0.45].map((o, i) => (
+        <rect key={i} x={34} y={10 + i * 7} width={10} height={7} style={{ fill: ink(t) }} fillOpacity={o} />
+      ))}
+      <rect x={34} y={10} width={10} height={28} rx={1.5} fill="none" style={{ stroke: ink(t) }} />
+    </>
+  ),
+  "vector-index": (t) => (
+    <>
+      <rect x={3} y={3} width={42} height={42} rx={8} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle
+        cx={25}
+        cy={24}
+        r={10.5}
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeDasharray="3 2.5"
+        strokeLinecap="round"
+      />
+      {[
+        [10, 11],
+        [37, 10],
+        [9, 33],
+        [38, 37],
+        [17, 41],
+      ].map(([x, y]) => (
+        <circle key={`${x}-${y}`} cx={x} cy={y} r={2.4} style={{ fill: PAPER, stroke: ink(t) }} />
+      ))}
+      {[
+        [20, 19],
+        [31, 21],
+        [23, 30],
+      ].map(([x, y]) => (
+        <circle key={`${x}-${y}`} cx={x} cy={y} r={2.6} style={{ fill: ink(t) }} />
+      ))}
+      <path d="M25 21.5 V26.5 M22.5 24 H27.5" style={{ stroke: ink(t) }} strokeWidth={1.8} strokeLinecap="round" />
+    </>
+  ),
+  reranker: (t) => (
+    <>
+      <rect x={5} y={7} width={24} height={9} rx={2.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={5} y={19.5} width={24} height={9} rx={2.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={5} y={32} width={24} height={9} rx={2.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path d="M9 11.5 H20 M9 24 H24 M9 36.5 H18" style={{ stroke: PAPER }} strokeLinecap="round" />
+      <path d="M9 24 H24 M9 36.5 H18" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.55} />
+      <path d="M32 36.5 C43 36.5 43 11.5 33 11.5" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} />
+      <path
+        d="M36.5 8 L32 11.5 L36.5 15"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
+  ),
+  prompt: (t) => (
+    <>
+      <rect x={6} y={4} width={36} height={40} rx={4} style={{ fill: PAPER, stroke: ink(t) }} />
+      <rect x={10} y={8} width={28} height={7} rx={1.5} style={{ fill: ink(t) }} fillOpacity={0.45} />
+      <rect x={10} y={18} width={28} height={14} rx={1.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M13 22.5 H35 M13 27.5 H30" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.6} />
+      <rect x={10} y={35} width={21} height={5} rx={2.5} style={{ fill: ink(t) }} />
+    </>
+  ),
+  graph: (t) => (
+    <>
+      <path
+        d="M11 13 L34 9 M11 13 L22 29 M34 9 L22 29 M34 9 L40 26 M22 29 L40 26 M22 29 L12 39 M40 26 L37 41"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeOpacity={0.7}
+      />
+      <circle cx={11} cy={13} r={4.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={34} cy={9} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={40} cy={26} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={12} cy={39} r={3.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <circle cx={37} cy={41} r={3.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <circle cx={22} cy={29} r={5.5} style={{ fill: ink(t), stroke: ink(t) }} />
+    </>
+  ),
+  // Agents batch.
+  tool: (t) => (
+    <>
+      <path d="M11 37 L26.5 21.5" style={{ stroke: ink(t) }} strokeWidth={7} strokeLinecap="round" />
+      <circle cx={31} cy={17} r={10} style={{ fill: ink(t), stroke: ink(t) }} />
+      <path d="M29.6 15.6 L32.4 18.4 L42.3 8.5 L39.5 5.7 Z" style={{ fill: PAPER }} />
+      <circle cx={31} cy={17} r={2.6} style={{ fill: PAPER }} />
+      <circle cx={11} cy={37} r={1.6} style={{ fill: PAPER }} />
+    </>
+  ),
+  plan: (t) => (
+    <>
+      <rect x={8} y={7} width={32} height={37} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={17} y={4} width={14} height={6} rx={2} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={15} width={7} height={7} rx={1.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={25} width={7} height={7} rx={1.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={35} width={7} height={7} rx={1.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path
+        d="M13.6 18.6 L15.2 20.2 L17.6 17 M13.6 28.6 L15.2 30.2 L17.6 27"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M23 18.5 H35 M23 28.5 H35" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <path d="M23 38.5 H31" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.4} />
+    </>
+  ),
+  approval: (t) => (
+    <>
+      <circle cx={19} cy={14} r={7} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M5 41 A14 14 0 0 1 33 41 Z" style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={35} cy={32} r={9} style={{ fill: ink(t), stroke: PAPER }} />
+      <path
+        d="M30.8 32.2 L33.8 35.2 L39.4 29.2"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
+  ),
+  sandbox: (t) => (
+    <>
+      <rect x={4} y={4} width={40} height={40} rx={5} fill="none" style={{ stroke: ink(t) }} strokeDasharray="4 3" />
+      <path d="M14 20 L20 14 H35 L29 20 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <path d="M29 20 L35 14 V29 L29 35 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <rect x={14} y={20} width={15} height={15} style={{ fill: ink(t), stroke: ink(t) }} />
+    </>
+  ),
 };
 
 /** Every glyph name, in declaration order. */
@@ -1211,7 +1379,7 @@ export function Glyph({
   size,
 }: {
   name: GlyphName;
-  tone: Tone;
+  tone: LayoutTone;
   cx: number;
   cy: number;
   size: number;

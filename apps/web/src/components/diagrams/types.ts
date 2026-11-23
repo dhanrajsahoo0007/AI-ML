@@ -27,7 +27,8 @@ export type ZoneKind = "region" | "vpc" | "subnet";
 export interface DiagramZone {
   id: string;
   title: string;
-  tone: Tone;
+  /** A section tone; architecture zones may also use the diagram-only `pink` and `lime` (see LayoutTone). */
+  tone: LayoutTone;
   kind?: ZoneKind;
   x: number;
   y: number;
@@ -42,9 +43,15 @@ export interface DiagramNode {
   sub?: string;
   /** Glyph from ./glyphs, a key from DIAGRAM_ICONS, or any name from src/lib/icons.ts. */
   icon?: string;
-  tone?: Tone;
+  /** Any diagram tone, including the diagram-only `pink` and `lime` (RAG and Transformer legends). */
+  tone?: LayoutTone;
   /** Solid filled node for the component the diagram is about. */
   accent?: boolean;
+  /**
+   * Card background: "paper" (default, an outline card), "soft" the tone's pale tint, or "pastel" a coloured block
+   * with ink text (`--dg-<tone>-fill`). Ignored when `accent` is set; not allowed on glyph nodes.
+   */
+  fill?: ShapeFill;
   /** "card" (default): boxed node with the icon on the left. "glyph": a large drawing with the label below. */
   variant?: "card" | "glyph";
   /** Build step that introduces this node (default 1). */
@@ -62,7 +69,7 @@ export interface DiagramEdge {
   from: string;
   to: string;
   label?: string;
-  tone?: Tone;
+  tone?: LayoutTone;
   /** Dashed line; with `flow` the dashes march from source to target. */
   dashed?: boolean;
   flow?: boolean;
@@ -157,36 +164,77 @@ export interface SequenceSpec {
 
 // ── Layout diagrams ────────────────────────────────────────────────────────────────────────────────────────────
 
-export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow";
+/**
+ * Diagram specs (layout shapes and groups, architecture nodes, zones and edges) may also use two diagram-only tones:
+ * the Transformer and RAG figures' embedding `pink` and the Add & Norm / ranking `lime`. Sequence lanes and section
+ * tints keep `Tone`.
+ */
+export type LayoutTone = Tone | "pink" | "lime";
+
+export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow" | "path";
+
+/**
+ * Fill of a box, cell or circle: "paper" the page background (box default), "soft" the tone's pale tint (cell and
+ * circle default), "pastel" a stronger tint that reads as a coloured block (the paper-figure style).
+ */
+export type ShapeFill = "paper" | "soft" | "pastel";
+
+/** A drawing inside a circle: ⊕ adder, ⊗ multiplier, or one period of a sine wave (positional encoding). */
+export type CircleSymbol = "plus" | "times" | "sine";
 
 export interface LayoutShape {
   id: string;
   type: ShapeType;
   /**
    * box, cell, text: top-left corner (text is centred inside its w × h box). circle: centre, w is the diameter.
-   * arrow without from/to: start point; w and h are the vector to the end point.
+   * arrow without from/to: start point; w and h are the vector to the end point. path: ignored (use `points`).
    */
   x: number;
   y: number;
   w?: number;
   h?: number;
+  /** Up to three lines, separated by "\n" (box, cell, circle, text). */
   label?: string;
   /** Second, smaller line under the label (box and cell). */
   sub?: string;
-  tone?: Tone;
+  tone?: LayoutTone;
+  /** Box, cell, circle: background strength. Defaults: box "paper", cell and circle "soft". */
+  fill?: ShapeFill;
+  /** Circle: a symbol drawn inside it instead of (or as well as) a label. */
+  symbol?: CircleSymbol;
+  /**
+   * 0 to 1. Cell: fill in the tone's stroke colour at this strength over paper (attention weights, heatmaps); the
+   * label stays ink, and the opacity is capped per theme so it stays readable. Path: stroke opacity and width
+   * (attention arcs).
+   */
+  weight?: number;
   /** Build step that introduces this shape (default 1). */
   step?: number;
   /** Pulsing ring in the shape's tone, for the element the paragraph is about. */
   highlight?: boolean;
+  /**
+   * No "NEW" ring and no stepper announcement when the shape appears: for the many cells of a matrix or vector,
+   * where one labelled shape in the same step should carry the ring instead.
+   */
+  quiet?: boolean;
   /** Arrow endpoints by shape id; the line starts and ends at the shapes' borders. */
   from?: string;
   to?: string;
   /** Intermediate points of an arrow, as [x, y] pairs. */
   via?: [number, number][];
-  /** Arrow: dashed line, and a dot travelling along it. */
+  /** Arrow and path: dashed line. Arrow: a dot travelling along it. */
   dashed?: boolean;
   packet?: boolean;
+  /** Arrowhead at the end. Arrows default to true (false draws a plain line); paths default to false. */
+  head?: boolean;
+  /** Path: the points it passes through, in order, as [x, y] pairs (at least two). */
+  points?: [number, number][];
+  /** Path: a smooth curve through the points instead of straight segments. */
+  smooth?: boolean;
 }
+
+/** A dotted group behind layout shapes, drawn like an architecture zone. */
+export type LayoutGroup = DiagramZone;
 
 export interface LayoutSpec {
   kind: "layout";
@@ -195,7 +243,7 @@ export interface LayoutSpec {
   height: number;
   shapes: LayoutShape[];
   /** Dotted groups behind the shapes, drawn like architecture zones. */
-  groups?: DiagramZone[];
+  groups?: LayoutGroup[];
   steps?: DiagramStep[];
 }
 

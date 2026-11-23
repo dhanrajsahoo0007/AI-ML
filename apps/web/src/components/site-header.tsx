@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
-import { ArrowRight, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { isCompleted, useCompletedPages, useProgressStats } from "@/lib/completed.client";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
 import { BrandMark } from "@/components/brand-mark";
@@ -32,21 +33,62 @@ const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items")
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
+// The desktop bar is sized by how many sections it shows, spanning the full monitor width. Up to seven sections
+// (`regular`): the phone menu below 1100px, compact text up to 1280px, icons from 1440px, Subscribe from 1800px,
+// arrows from 1900px. With eight or more sections (`crowded`, eleven in preview/local today, using `shortLabel`s):
+// laptops from 1280px still get the full desktop bar (compact text and gaps), scaling up smoothly at 1440px,
+// 1536px, 1920px (icons), 2040px (Subscribe), and 2200px (arrows) to fill large monitors cleanly.
+// The class names are written out in full so Tailwind can see them.
+const BAR_SIZES = {
+  regular: {
+    show: "min-[1100px]:flex",
+    phone: "min-[1100px]:hidden",
+    item: "xl:text-sm",
+    barGap: "xl:gap-6",
+    linkGap: "xl:gap-4",
+    toolGap: "xl:gap-3",
+    pricing: "xl:px-4 xl:py-2 xl:text-sm",
+    gem: "xl:block",
+    icon: "min-[1440px]:block",
+    subscribe: "min-[1800px]:inline-flex",
+    arrow: "min-[1900px]:block",
+  },
+  crowded: {
+    show: "xl:flex",
+    phone: "xl:hidden",
+    item: "xl:text-[11.5px] min-[1440px]:text-[12.5px] 2xl:text-[13px] min-[1920px]:text-sm",
+    barGap: "xl:gap-3 min-[1440px]:gap-4 2xl:gap-5 min-[1920px]:gap-6",
+    linkGap: "xl:gap-1.5 min-[1440px]:gap-2.5 2xl:gap-3.5 min-[1920px]:gap-4",
+    toolGap: "xl:gap-2 2xl:gap-3",
+    pricing: "min-[1440px]:px-3.5 min-[1440px]:py-1.5 2xl:px-4 2xl:py-2 2xl:text-sm",
+    gem: "2xl:block",
+    icon: "min-[1920px]:block",
+    subscribe: "min-[2040px]:inline-flex",
+    arrow: "min-[2200px]:block",
+  },
+} as const;
+const REGULAR_BAR_MAX = 7;
+
 export function SiteHeader({
   navTree,
   profileMenu,
   profileMenuMobile,
+  defaultOpenKey,
+  initialNavItems,
 }: {
   navTree: HeaderNavSection[];
   profileMenu: ReactNode;
   profileMenuMobile: ReactNode;
+  defaultOpenKey?: string;
+  initialNavItems?: HeaderNavItems;
 }) {
   const pathname = useCanonicalPathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(defaultOpenKey ?? null);
   const headerRef = useRef<HTMLElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const extras = siteConfig.extraNav;
+  const bar = navTree.length > REGULAR_BAR_MAX ? BAR_SIZES.crowded : BAR_SIZES.regular;
   const openSection = navTree.find((s) => s.key === openKey);
   const subscribe = navTree.find((s) => s.kind === SUBSCRIBE_KIND && !s.comingSoon);
 
@@ -80,7 +122,8 @@ export function SiteHeader({
 
   const itemClass = (active: boolean) =>
     cn(
-      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[12.5px] transition-colors xl:text-sm",
+      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[12.5px] transition-colors",
+      bar.item,
       active
         ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
         : "text-muted-foreground hover:text-ink"
@@ -93,32 +136,40 @@ export function SiteHeader({
       onMouseEnter={() => clearTimeout(closeTimer.current)}
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
-      <nav aria-label="Main" className="flex h-16 w-full items-center gap-3 px-4 sm:px-6 xl:gap-6">
-        <Link href="/" className="flex shrink-0 items-center gap-3">
-          <span className="flex items-center gap-2">
-            <BrandMark className="size-7 sm:size-8" />
-            <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
-          </span>
-          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground min-[1800px]:inline">
-            {siteConfig.tagline}
+      <nav
+        aria-label="Main"
+        className={cn(
+          "flex h-16 w-full items-center gap-2 px-3 min-[375px]:gap-3 min-[375px]:px-4 sm:px-6 min-[1920px]:px-8",
+          bar.barGap
+        )}
+      >
+        <Link href="/" className="flex shrink-0 items-center gap-1.5 min-[375px]:gap-2">
+          <BrandMark className="size-6 min-[375px]:size-7 sm:size-8" />
+          <span className="font-display text-[17px] whitespace-nowrap min-[375px]:text-xl sm:text-2xl">
+            {siteConfig.name}
           </span>
         </Link>
 
-        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch min-[1100px]:flex xl:gap-4">
+        <div
+          className={cn(
+            "relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch",
+            bar.show,
+            bar.linkGap
+          )}
+        >
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
             // The underline of the current section takes that section's tint (data-tone on the link).
             const className = cn(itemClass(active), "after:bg-tint", section.comingSoon && "text-muted-foreground/70");
-            // The section's icon, in its tint when the section is current or its menu is open. The bar is sized for
-            // seven sections next to the logo mark and wordmark: the phone menu below 1100px, labels only up to
-            // 1440px, icons from 1440px, the tagline and Subscribe from 1800px, the arrows from 1900px.
+            // The section's icon, in its tint when the section is current or its menu is open (widths: BAR_SIZES).
             const SectionIcon = getIconComponent(section.icon);
             const icon = SectionIcon && (
               <SectionIcon
                 aria-hidden
                 className={cn(
-                  "hidden size-3.5 shrink-0 transition-colors min-[1440px]:block",
+                  "hidden size-3.5 shrink-0 transition-colors",
+                  bar.icon,
                   active ? "text-tint" : "text-muted-foreground/80"
                 )}
               />
@@ -130,7 +181,8 @@ export function SiteHeader({
                 <ChevronDown
                   aria-hidden
                   className={cn(
-                    "hidden size-3 transition-transform duration-200 min-[1900px]:block",
+                    "hidden size-3 transition-transform duration-200",
+                    bar.arrow,
                     openKey === section.key && "rotate-180"
                   )}
                 />
@@ -187,12 +239,13 @@ export function SiteHeader({
           {openSection && (
             <div
               data-tone={openSection.tone}
-              className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]"
+              className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)] min-[1920px]:w-[72rem]"
             >
               <SectionPanel
                 key={openSection.key}
                 section={openSection}
                 pathname={pathname}
+                initialItems={initialNavItems}
                 onNavigate={() => setOpenKey(null)}
               />
             </div>
@@ -200,7 +253,7 @@ export function SiteHeader({
         </div>
 
         <div
-          className="ml-auto hidden shrink-0 items-center gap-2 min-[1100px]:flex xl:gap-3"
+          className={cn("ml-auto hidden shrink-0 items-center gap-2", bar.show, bar.toolGap)}
           onMouseEnter={() => setOpenKey(null)}
         >
           <SearchButton />
@@ -211,16 +264,22 @@ export function SiteHeader({
               key={e.href}
               href={e.href}
               aria-current={isUnder(pathname, e.href) ? "page" : undefined}
-              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-paper transition-colors hover:bg-primary xl:px-4 xl:py-2 xl:text-sm"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-paper transition-colors hover:bg-primary",
+                bar.pricing
+              )}
             >
-              <Gem aria-hidden className="hidden size-3.5 xl:block" />
+              <Gem aria-hidden className={cn("hidden size-3.5", bar.gem)} />
               {e.label}
             </Link>
           ))}
           {subscribe && (
             <Link
               href={subscribe.href}
-              className="hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink min-[1800px]:inline-flex"
+              className={cn(
+                "hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink",
+                bar.subscribe
+              )}
             >
               Subscribe
             </Link>
@@ -228,13 +287,13 @@ export function SiteHeader({
           {profileMenu}
         </div>
 
-        <div className="ml-auto flex items-center gap-1 min-[1100px]:hidden">
+        <div className={cn("ml-auto flex items-center gap-0 min-[375px]:gap-1", bar.phone)}>
           <SearchButton compact />
-          <ThemeToggle />
+          <ThemeToggle className="size-8 min-[375px]:size-10" />
           {profileMenuMobile}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
-              className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
+              className="inline-flex size-8 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2 min-[375px]:size-10"
               aria-label="Open menu"
             >
               <Menu className="size-5" />
@@ -354,15 +413,16 @@ function loadNavItems() {
   return itemsPromise;
 }
 
-function useNavItems() {
-  const [items, setItems] = useState<HeaderNavItems | null | undefined>(loadedItems);
+function useNavItems(initial?: HeaderNavItems) {
+  const [items, setItems] = useState<HeaderNavItems | null | undefined>(initial ?? loadedItems);
   useEffect(() => {
+    if (initial) return;
     let live = true;
     loadNavItems().then((v) => live && setItems(v));
     return () => {
       live = false;
     };
-  }, []);
+  }, [initial]);
   return items;
 }
 
@@ -381,14 +441,16 @@ function runsByHeading<G extends { heading?: string }>(groups: G[]) {
 function SectionPanel({
   section,
   pathname,
+  initialItems,
   onNavigate,
 }: {
   section: HeaderNavSection;
   pathname: string;
+  initialItems?: HeaderNavItems;
   /** Closes the menu: a company link only changes the query string, which the header does not see as navigation. */
   onNavigate: () => void;
 }) {
-  const items = useNavItems();
+  const items = useNavItems(initialItems);
   // Opens on the group that holds the current page (known once the article lists have loaded), else the first one.
   // A group's own href can be a hub page shared with other groups, so the article lists decide.
   const [picked, setPicked] = useState<string | undefined>(undefined);
@@ -404,6 +466,11 @@ function SectionPanel({
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => setActiveSlug(slug), 90);
   };
+  const done = useCompletedPages();
+  const sectionAllHrefs = items
+    ? Object.values(items[section.key] ?? {}).flatMap((bs) => bs.flatMap((b) => b.items.map((i) => i.href)))
+    : [];
+  const sectionStats = useProgressStats(sectionAllHrefs);
 
   if (section.comingSoon) {
     return (
@@ -421,9 +488,19 @@ function SectionPanel({
   const blocks = active && items ? (items[section.key]?.[active.slug] ?? []) : [];
 
   return (
-    <div className="flex max-h-[calc(100vh-6rem)] flex-col">
+    <div className="flex max-h-[calc(100dvh-6rem)] flex-col">
       <div className="flex items-baseline justify-between gap-4 border-b border-hairline px-6 py-4">
-        <p className="font-display text-xl text-ink">{section.label}</p>
+        <div className="flex items-baseline gap-3">
+          <p className="font-display text-xl text-ink">{section.label}</p>
+          {section.kind === "docs" && sectionStats.completed > 0 && (
+            <span
+              className="text-xs font-medium tabular-nums text-muted-foreground"
+              data-testid={`header-panel-progress-${section.key}`}
+            >
+              {sectionStats.percent}% done · {sectionStats.completed}/{sectionStats.total}
+            </span>
+          )}
+        </div>
         <Link href={section.href} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
           View all <ArrowRight aria-hidden className="size-3.5" />
         </Link>
@@ -482,6 +559,10 @@ function SectionPanel({
             {section.groups.map((group) => {
               const Icon = group.icon ? getIconComponent(group.icon) : undefined;
               const isActive = group.slug === activeSlug;
+              const groupItemHrefs = items
+                ? (items[section.key]?.[group.slug] ?? []).flatMap((b) => b.items.map((i) => i.href))
+                : [];
+              const groupRead = groupItemHrefs.filter((h) => isCompleted(done, h)).length;
               return (
                 <li key={group.slug}>
                   <Link
@@ -504,8 +585,9 @@ function SectionPanel({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{group.title}</span>
                       {group.count > 0 && (
-                        <span className="block text-xs text-muted-foreground">
+                        <span className="block text-xs tabular-nums text-muted-foreground">
                           {group.count} {unit}
+                          {groupRead > 0 && ` · ${groupRead} read`}
                         </span>
                       )}
                     </span>
@@ -538,7 +620,7 @@ function SectionPanel({
                   </Link>
                 </div>
                 {items === undefined && active.count > 0 ? (
-                  <ul aria-hidden className="columns-2 gap-8">
+                  <ul aria-hidden className={cn(active.count > 8 && "columns-2 gap-8")}>
                     {Array.from({ length: Math.min(active.count, 10) }, (_, i) => (
                       <li key={i} className="mb-2.5 h-4 w-4/5 animate-pulse rounded bg-paper-2" />
                     ))}
@@ -546,7 +628,7 @@ function SectionPanel({
                 ) : blocks.length > 0 && section.kind === "directory" ? (
                   <CompanyMenuItems items={blocks.flatMap((b) => b.items)} onNavigate={onNavigate} />
                 ) : blocks.length > 0 ? (
-                  <div className="columns-2 gap-8">
+                  <div className={blocks.length > 1 ? "columns-2 gap-8" : "space-y-4"}>
                     {blocks.map((block, i) => {
                       const BlockIcon = block.icon ? getIconComponent(block.icon) : undefined;
                       return (
@@ -558,20 +640,24 @@ function SectionPanel({
                             </p>
                           )}
                           <ul>
-                            {block.items.map((item) => (
-                              <li key={item.href} className="break-inside-avoid">
-                                <Link
-                                  href={item.href}
-                                  aria-current={pathname === item.href ? "page" : undefined}
-                                  className={cn(
-                                    "block py-1 text-sm leading-snug transition-colors hover:text-primary",
-                                    pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
-                                  )}
-                                >
-                                  {item.title}
-                                </Link>
-                              </li>
-                            ))}
+                            {block.items.map((item) => {
+                              const itemDone = isCompleted(done, item.href);
+                              return (
+                                <li key={item.href} className="break-inside-avoid">
+                                  <Link
+                                    href={item.href}
+                                    aria-current={pathname === item.href ? "page" : undefined}
+                                    className={cn(
+                                      "flex items-center justify-between gap-2 py-1 text-sm leading-snug transition-colors hover:text-primary",
+                                      pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
+                                    )}
+                                  >
+                                    <span>{item.title}</span>
+                                    {itemDone && <Check aria-hidden className="size-3.5 shrink-0 text-success" />}
+                                  </Link>
+                                </li>
+                              );
+                            })}
                           </ul>
                         </div>
                       );

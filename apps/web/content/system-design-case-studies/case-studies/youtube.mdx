@@ -1,0 +1,662 @@
+---
+title: "Design YouTube"
+description: "Resumable uploads, transcoding into renditions, adaptive streaming from a CDN, sharded metadata and view counts at scale."
+logo: systems/youtube
+updated: 2026-11-17
+---
+
+Design a video platform: creators upload videos of any length, and viewers anywhere press play and watch without buffering.
+The hard parts are moving petabytes in and terabits per second out, turning every upload into many renditions quickly, and counting views for videos that go from zero to millions in an hour.
+
+- Interviewers use this question to see whether you split the upload path from the playback path, and justify the store, cache, CDN and queue on each with numbers.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design YouTube: creators upload videos of any length, and viewers anywhere watch without buffering."
+  level="Senior"
+  minutes={45}
+  bankId="design-video-streaming"
+  tests={[
+    "Splitting a write path (upload, transcode) from a read path (playback) that is 700 times bigger",
+    "Large-file upload that survives a dropped connection",
+    "Transcoding as many small retryable tasks, and adaptive bitrate on the player",
+    "A CDN, hot keys and counting at scale, with the single points of failure named",
+  ]}
+  clarify={[
+    { q: "How long can a video be?", a: "Up to 12 hours; most are under 20 minutes. An upload can be several gigabytes." },
+    { q: "Which devices play it?", a: "Phones, browsers and TVs, on links from 1 to 50 Mb/s; the player picks the quality." },
+    { q: "Live streaming too?", a: "No: video on demand only. Live is a variant at the end." },
+    { q: "How fast must a new video be watchable?", a: "360p within 5 minutes of the upload finishing; full quality within 30." },
+    { q: "Must view counts be exact and instant?", a: "Within a minute, never double counted; small, bounded loss is acceptable." },
+    { q: "Managed cloud services or our own machines?", a: "Assume our own data centres: name each component by type, then an example product." },
+  ]}
+  outOfScope={["Recommendations", "Search", "Comments", "Live streaming", "Ads and monetisation", "Content ID"]}
+/>
+
+## Overview
+
+- The creator's app sends the **original** straight to a **blob store** in **16 MB chunks** on a **resumable session**; a dropped link resends one chunk, not the file.
+- A **transcode workflow** splits the original at keyframes into **1-minute chunks** and runs **one encode task per chunk per rendition** on a **work queue**; tasks are idempotent and retried.
+- The packager cuts every rendition into **4-second segments** with the same boundaries and writes a **manifest**; the video publishes at **360p first**.
+- Players fetch segments from a **CDN** and switch rendition between segments (**adaptive bitrate**); the origin sees a request only on a miss.
+- Video and channel **metadata** live in a **relational database sharded by channel**, behind a **cache**.
+- **View and like events** go to a **log**; a **stream aggregator** removes duplicates and writes totals every **10 s**, so a viral video is one write per window, not thousands.
+
+<Numbers
+  items={[
+    { value: "700 : 1", label: "hours watched to hours uploaded", hint: "100,000,000 ÷ 144,000 a day" },
+    { value: "10 Tb/s", label: "average egress", hint: "4,170,000 viewers × 2.5 Mb/s" },
+    { value: "1.2 PB", label: "new video stored a day", hint: "originals + 5 renditions" },
+    { value: "30,000", label: "encode cores busy", hint: "6,000 video-minutes × 5 renditions a minute" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Resumable upload", notes: "Videos of any length; a dropped connection resumes where it stopped." },
+    { id: "F2", requirement: "Transcode into renditions", notes: "240p to 1080p; a status the creator can watch." },
+    { id: "F3", requirement: "Watch with adaptive bitrate", notes: "The player picks and changes quality as the network changes." },
+    { id: "F4", requirement: "Metadata and channel pages", notes: "Title, description, status; a channel lists its videos, newest first." },
+    { id: "F5", requirement: "View counts and likes", notes: "One like per viewer; counts visible within a minute." },
+  ]}
+/>
+
+- Out of scope: recommendations (see [TikTok](/system-design-case-studies/case-studies/tiktok)), search, comments, live streaming, ads.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Start-up", target: "First frame p95 under 2 s", why: "Viewers leave a video that does not start." },
+    { id: "N2", property: "Smooth playback", target: "Rebuffering under 0.5% of watch time; 21 Tb/s at peak", why: "A stall mid-video costs more viewers than lower quality." },
+    { id: "N3", property: "Upload resilience", target: "A drop loses at most one 16 MB chunk", why: "Creators upload gigabytes over mobile links." },
+    { id: "N4", property: "Time to watchable", target: "360p within 5 min of upload end (10-minute video); all rungs within 30 min", why: "Creators publish to an audience that is waiting." },
+    { id: "N5", property: "Durability and cost", target: "0 acknowledged originals lost; storage cost per hour falls as a video cools", why: "An original cannot be re-shot; most bytes are rarely watched." },
+    { id: "N6", property: "Availability", target: "99.99% playback; 99.9% upload and counts", why: "Playback is the product; uploads can retry." },
+    { id: "N7", property: "Count accuracy", target: "Views visible within 1 min; a replayed event never counts twice", why: "Creators and advertisers rely on the number." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Upload rate", assumption: "Given: 100 hours of video a minute", result: "6,000 video-minutes a minute; 144,000 hours a day" },
+    { quantity: "Videos a day", assumption: "144,000 h × 60 ÷ 9 minutes average", result: "≈ 1,000,000 videos; ≈ 12 uploads/s" },
+    { quantity: "Originals", assumption: "8 Mb/s = 1 MB/s = 3.6 GB an hour × 144,000 h", result: "≈ 518 TB a day" },
+    { quantity: "Renditions", assumption: "0.4 + 0.8 + 1.3 + 2.5 + 5.0 = 10 Mb/s = 4.5 GB an hour × 144,000 h", result: "≈ 648 TB a day" },
+    { quantity: "New storage", assumption: "518 + 648 TB, before redundancy", result: "≈ 1.2 PB a day; ≈ 425 PB a year" },
+    { quantity: "Encode work", assumption: "6,000 minutes × 5 renditions at about 1 × real time", result: "≈ 30,000 cores busy; 60,000 at 2 × peak" },
+    { quantity: "Views", assumption: "1,000,000,000 a day ÷ 86,400 s", result: "≈ 11,600/s; ≈ 23,000/s at 2 × peak" },
+    { quantity: "Watch time", assumption: "1,000,000,000 views × 6 minutes", result: "100,000,000 hours a day; ÷ 24 = 4,170,000 viewers at once" },
+    { quantity: "Egress", assumption: "4,170,000 × 2.5 Mb/s average delivered", result: "≈ 10.4 Tb/s; ≈ 21 Tb/s at peak" },
+    { quantity: "Segment requests", assumption: "4,170,000 viewers ÷ one 4 s segment each", result: "≈ 1,040,000/s; 2,100,000/s at peak" },
+    { quantity: "Origin load", assumption: "5% of 10.4 Tb/s misses the CDN", result: "≈ 0.5 Tb/s from the blob store" },
+    { quantity: "Metadata", assumption: "1,000,000 videos a day × 2 KB × 10 years", result: "≈ 7.3 TB, plus likes and channels" },
+    { quantity: "One viral video", assumption: "6,000,000 views in its first hour", result: "≈ 1,670 view events/s on one key" },
+  ]}
+  note="The bytes are the problem on the way out; the work is the problem on the way in."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 100,000,000 hours watched against 144,000 uploaded a day: about 700 to 1; 23,000 view events/s against 12 uploads/s | Separate upload and playback paths; video bytes from a CDN; metadata from a cache |
+| D2 | Peak against average | 2 × daily; one video can go from 0 to 1,670 views/s within an hour | CDN pull with pre-warming for rising videos; request coalescing at the origin shield |
+| D3 | Consistency per operation | Upload state and the creator's own video: read-your-writes; metadata to viewers: up to 60 s stale; counts: eventual within 1 min; one like per viewer: exact | Creator reads from the shard primary; viewers from the cache; likes keyed by `(video, user)` |
+| D4 | Latency target | First frame p95 under 2 s (N1); a 4 s segment must arrive in well under 4 s | Start at a low rung; segments at the edge; manifest and metadata in one round trip |
+| D5 | Durability | An acknowledged original is never lost; renditions can be rebuilt from it | Originals with cross-zone redundancy; renditions cheaper, regenerable |
+| D6 | Ordering | Byte offsets within one upload; segment numbers within one rendition; views have no order | Offsets on the upload session; numbered segment URLs; counts are commutative sums |
+| D7 | Duplicates | A resent chunk or a re-run encode task is harmless; a duplicate view inflates counts | Fixed output keys for tasks; event ids and a dedup window for views |
+| D8 | Data size and growth | 1.2 PB a day, 425 PB a year; a small share of videos takes most views | Object storage; a cold tier for videos nobody watches |
+| D9 | Fan-out shape | One video to millions of viewers; one upload to 50 encode tasks | A CDN for the read fan-out; a work queue for the task fan-out |
+| D10 | Contention | A viral video's counter: 1,670 increments/s on one key | Aggregate in a stream, one write per 10 s; never increment a database row per view |
+| D11 | Geography | Viewers everywhere; creators upload from their region; no residency rule for public videos | Edges in every region; uploads to the nearest region; metadata primaries per shard, replicas per region |
+| D12 | Availability and degradation | 99.99% playback; under stress, keep playback | Shed in this order: live count updates, 1080p and higher encodes, new uploads; never published playback |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/uploads` | Creator app | Start: size and title; returns `video_id` and a session URL |
+| `PUT <session URL>` with `Content-Range` | Creator app | Each 16 MB chunk, straight to the blob store |
+| `PUT <session URL>` with `Content-Range: bytes */<size>` | Creator app | After a drop: ask how many bytes arrived |
+| `GET /v1/videos/{id}` | Viewer, creator | Watch page and processing status |
+| `GET /v1/videos/{id}/manifest` | Player | The list of renditions and their segment playlists |
+| `GET <cdn>/v/{id}/{rung}/{n}.m4s` | Player | Every 4 s segment, from the CDN |
+| `GET /v1/channels/{id}/videos?cursor=` | Viewer | Channel page, newest first |
+| `POST /v1/videos/{id}/views` | Player | Once after 30 s of playback, with an `event_id` |
+| `PUT /v1/videos/{id}/like` | Viewer | Like; repeating it changes nothing |
+
+A resumed upload asks the store how much arrived, then sends the rest.
+
+```http
+PUT https://upload.example.com/s/u_7f3a        # session URL from POST /v1/uploads
+Content-Length: 0
+Content-Range: bytes */1200000000
+
+308 Resume Incomplete
+Range: bytes=0-479999999                       # 30 chunks × 16 MB arrived: send from 480000000
+```
+
+- **Idempotency:** a chunk is addressed by its byte offset, so resending it overwrites the same bytes; `PUT …/like` is a set, not a toggle; a view carries an `event_id` the aggregator removes duplicates by.
+- **Errors:** `308` upload incomplete (with `Range`); `404` session expired after 7 days (start again); `409` the video is still processing (manifest not ready); `429` too many uploads from one creator.
+- **Pagination:** channel pages and "my videos" by cursor on `(created_at, video_id)`, never by offset.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Originals, segments, manifests | Object store (blob storage) | Large immutable files, cheap per GB, cross-zone durable (D5, D8) | Object key `v/{video_id}/…` | Strong read-after-write per object | Database BLOBs: 1.2 PB a day in rows; app-server disks: no durability |
+| Rarely watched renditions | Object store, cold storage class | Cheaper per GB, slower first byte (D8, N5) | Same keys | Same | Deleting them: re-encoding on demand costs more than storing for most |
+| Videos, channels, likes | Relational database (<TechIcon id="oss/mysql" /> MySQL), sharded by `channel_id` | Secondary indexes, unique keys, transactions, read-your-writes (D3, F4) | `channel_id`; shard encoded in `video_id` | Strong on the primary; replicas seconds behind | A key-value store: channel listings and one-like-per-user need extra tables kept in step by hand |
+| Transcode tasks | Same relational cluster, one row per task | Status, attempt and lease per task (D7, N4) | `video_id` | Strong | State only in the queue: a lost message is a lost task |
+| Metadata and counts cache | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | 23,000 reads/s at peak, p99 in milliseconds (D1, D4) | `video_id` | Up to 60 s stale; counts 10 s | Read replicas only: 23,000 SQL queries a second |
+| View and like events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka), keyed by `video_id` | Replay, several readers, per-video order for the aggregator (D7, D10) | `video_id` | Ordered per partition | Incrementing a row per view: 1,670 writes/s on one row |
+| Dedup state | Stream processor's keyed state (<TechIcon id="oss/rocksdb" /> RocksDB in <TechIcon id="oss/apache-flink" /> Flink) | `(viewer, video)` seen in the last 24 h (D7, N7) | `video_id` | Checkpointed with the log offsets | A cache set: lost on restart, so a replay double counts |
+
+```sql
+-- Metadata: MySQL, sharded by channel_id; the top 12 bits of video_id name the shard
+CREATE TABLE videos (
+  video_id    BIGINT PRIMARY KEY,          -- shard bits + time + sequence
+  channel_id  BIGINT NOT NULL,             -- shard key: a channel's videos live together
+  title       VARCHAR(200),
+  status      ENUM('uploading','processing','ready','failed'),
+  rungs_ready VARCHAR(64),                 -- '240p,360p' while the rest encode
+  created_at  DATETIME,
+  INDEX (channel_id, created_at, video_id) -- channel page, newest first, by cursor
+);
+CREATE TABLE likes (
+  video_id BIGINT, user_id BIGINT, created_at DATETIME,
+  PRIMARY KEY (video_id, user_id)          -- one like per viewer: a retry inserts nothing
+);
+CREATE TABLE transcode_tasks (
+  video_id BIGINT, rung VARCHAR(8), chunk INT, attempt INT, lease_until DATETIME,
+  status ENUM('queued','running','done','failed'),
+  PRIMARY KEY (video_id, rung, chunk)      -- output key v/{video_id}/{rung}/{chunk}
+);
+```
+
+- **Watch page:** `video_id` → shard from its bits → the cache, then that shard on a miss.
+- **Channel page:** one shard, one index range scan on `(channel_id, created_at)`.
+- **Creator's status:** the shard primary, so a creator sees their own upload at once (read-your-writes).
+- **Blob keys:** `v/{video_id}/orig`, `v/{video_id}/{rung}/{n}.m4s`, `v/{video_id}/master.m3u8`: a re-run task writes the same key.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and F3 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Upload a file, play the file (F1, F3)
+
+The smallest design: the upload service stores whatever arrives, and the player downloads that same file.
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={1} caption="Step 1: the whole file passes through the upload service into the blob store, and the viewer plays that one file back." />
+
+- **Adds:** the API gateway, the upload service, the watch service, the blob store, the metadata database.
+- **Flow:**
+  1. The creator sends the whole file to the upload service, which writes it to the blob store and a row to the metadata database.
+  2. The viewer loads the watch page, gets a URL, and downloads the original file.
+- **Why this and not that:** files in a blob store, not on the upload server's disk, so any server can fail without losing a video (D5).
+- **The gap:** a 1,200 MB upload pins an upload server for 20 minutes and restarts from zero when the link drops.
+
+<PremiumBreak />
+
+### Step 2: Direct, resumable upload (F1, N3)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={2} caption="Step 2: the upload service only opens a session; the creator sends chunks straight to the blob store and resumes from its offset." />
+
+- **Adds:** an upload **session** in the blob store; the bytes leave the upload service's path.
+- **Flow:**
+  1. The app calls `POST /v1/uploads`; the upload service writes the video row as `uploading` and returns a session URL.
+  2. The app sends 16 MB chunks to the session URL; after a drop it asks how many bytes arrived and sends the rest.
+  3. The store tells the upload service when the object is complete.
+- **Why this and not that:** 518 TB a day of originals never touches our servers, and a drop costs one chunk, not the file (D8, N3). Proxying through app servers would need a fleet sized for bytes, not requests.
+- **The gap:** viewers on a 2 Mb/s phone link cannot play an 8 Mb/s original.
+
+<AnimatedDiagram spec="animated/youtube/upload-resume" stepper caption="The creator’s bytes go straight to the blob store; after a drop the app asks how much arrived and sends only the rest." />
+
+<StepCards>
+  <StepCard n={1} title="Send chunks; the link drops">
+    The app starts a 1,200 MB upload and gets a session URL. Chunks 1 to 30 (480 MB) arrive; chunk 31 is lost when the link drops.
+  </StepCard>
+  <StepCard n={2} title="Ask the offset, resume, complete">
+    The app asks how many bytes the store holds, hears 0 to 480 MB, and sends chunks 31 to 75. The store reports the object complete and the upload service starts the transcode workflow.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 1,200 MB ÷ 16 MB = 75 chunks; the resume sends 45 × 16 = 720 MB instead of 1,200 MB.
+
+### Step 3: A transcoding pipeline (F2, N4)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={3} caption="Step 3: the transcode workflow splits each upload into encode tasks on a queue; workers write renditions back to the blob store." />
+
+- **Adds:** the **transcode workflow** (the accent), the **encode queue** and the **encode workers**.
+- **Flow:**
+  1. The upload service starts a workflow for the new video and sets it to `processing`.
+  2. The workflow splits the original into 1-minute chunks and queues one task per chunk per rendition.
+  3. Workers pull tasks, encode, and write each output to a fixed key in the blob store.
+- **Why this and not that:** asynchronous, because encoding a 10-minute video one rendition after another takes 50 minutes and nobody should wait on an HTTP call that long (N4). Small tasks run in parallel and a crash re-runs one task, not the video (Deep dive 1).
+- **The gap:** every viewer still gets one file at one quality; the player cannot change quality when the link slows.
+
+### Step 4: Adaptive streaming: manifest and segments (F3, N1)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={4} caption="Step 4: the player reads a manifest and fetches 4-second segments, choosing the rendition for each one." />
+
+- **Adds:** a packaging task that cuts each rendition into 4 s segments and writes a manifest; the single-file playback goes away.
+- **Flow:**
+  1. The watch service returns the page and the manifest URL.
+  2. The player fetches the first segments at 360p, then picks a rung per segment from its measured throughput and buffer.
+- **Why this and not that:** a 360p first segment is 0.4 MB, so the first frame lands well inside 2 s (N1); switching at segment boundaries keeps a slow link playing at lower quality instead of stalling (N2).
+- **The gap:** 10 Tb/s of segments would all come from one region's blob store.
+
+### Step 5: A CDN in front (F3, N2)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={5} caption="Step 5: a CDN serves segments from the edge and reads the blob store only on a miss." />
+
+- **Adds:** the **CDN** in the edge zone; segment URLs point at it.
+- **Flow:**
+  1. The player requests a segment from the nearest edge.
+  2. On a hit the edge answers; on a miss it fetches from a regional shield cache, and the shield from the blob store.
+- **Why this and not that:** 10.4 Tb/s on average and 21 Tb/s at peak must come from near the viewer (D1, D9, D11). Segments are immutable, so they cache forever and need no invalidation.
+- **The gap:** 23,000 metadata reads/s at peak sit on one relational database.
+
+### Step 6: Metadata at scale (F4)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={6} caption="Step 6: the watch service reads metadata from a cache; a channel service reads the metadata database, sharded by channel." />
+
+- **Adds:** the **cache**, the **channel service**, and shards for the metadata database (the step-1 direct read of the database by the watch service goes away).
+- **Flow:**
+  1. The watch service reads the video from the cache; on a miss it reads the shard named by the `video_id` bits and fills the cache for 60 s.
+  2. The channel service reads one shard: a channel's videos live together.
+- **Why this and not that:** 7.3 TB and growing, plus likes, outgrows one primary's disk and write rate; sharding by channel keeps the channel page on one shard (D8, F4). The creator reads the primary, so their own edits appear at once (D3).
+- **The gap:** counting views with `UPDATE videos SET views = views + 1` puts 1,670 writes/s on one row for a viral video.
+
+### Step 7: View counts and likes (F5, N7)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={7} caption="Step 7: view and like events go to a log; a stream aggregator removes duplicates and writes totals to the cache every 10 seconds." />
+
+- **Adds:** the **engagement service**, the **view-event log** and the **count aggregator**.
+- **Flow:**
+  1. The player sends a view after 30 s of playback, with an `event_id`; the engagement service appends it to the log, keyed by `video_id`.
+  2. The aggregator drops events it has seen, sums per video in 10 s windows, and writes the absolute total to the cache.
+  3. A like inserts `(video_id, user_id)`; the aggregator counts likes the same way.
+- **Why this and not that:** one write per video per 10 s instead of one per view (D10); writing the absolute total makes a retried write harmless, and the log lets us rebuild counts by replay (D7, N7).
+- **The gap:** every rendition of every video sits in the most expensive storage class forever.
+
+### Step 8: Hot at the edge, cold at the origin (N5)
+
+<AnimatedDiagram spec="animated/youtube/architecture" step={8} caption="Step 8: renditions of videos nobody watches move to a cold tier; rising videos are pre-warmed at the edge." />
+
+- **Adds:** the **cold tier**; popularity from the aggregator drives placement.
+- **Flow:**
+  1. A video with no views for 90 days has its renditions moved to the cold storage class; the original stays in the durable hot store.
+  2. A video whose views climb fast is pre-warmed: its first segments at the common rungs are pushed to the edges before most viewers ask.
+- **Why this and not that:** 425 PB a year at one price wastes money on bytes nobody reads (D8, N5). A cold first byte is slower, but a rarely watched video is fetched once per edge and then cached.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/youtube/architecture" stepper caption="A video platform: resumable uploads straight to blob storage, a transcoding workflow of small tasks, segments from a CDN, and view counts from a stream." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Creator app, viewer's player | Upload in chunks; play segments with adaptive bitrate |
+| **Edge** | CDN (edges and a regional shield), API gateway | Serve segments near the viewer; route, authenticate and limit API calls |
+| **Transcoding core** | Transcode workflow | Split, fan out encode tasks, package, publish |
+| **Application services** | Upload, watch, channel and engagement services | Upload sessions and video rows; pages and manifests; views and likes |
+| **Async pipeline** | Encode queue and workers, view-event log, count aggregator | Encode tasks; carry and count engagement events |
+| **Storage** | Blob store, cold tier, cache, metadata database | Bytes hot and cold; metadata and counts; sharded relational truth |
+
+Upload to first view, step by step:
+
+1. The creator calls `POST /v1/uploads` and sends 75 chunks straight to the blob store; one drop costs one chunk.
+2. The store reports the object complete; the upload service sets `processing` and starts the workflow.
+3. The workflow splits 20 minutes into 20 chunks and queues 100 tasks; 360p tasks go first.
+4. About two minutes later 360p is packaged; the video row becomes `ready` with `rungs_ready = '240p,360p'`.
+5. A viewer opens the watch page: metadata from the cache, the manifest from the watch service, segments from the CDN.
+6. After 30 s the player sends a view; within 10 s the aggregator's total reaches the cache.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for control, plain HTTP GET for bytes
+
+- **Choice:** REST over HTTPS for uploads, pages, likes and views; segments and manifests are plain HTTP GETs of static files; uploads use a resumable byte-range protocol.
+- **Why:** segments are immutable files, so a URL per segment caches at every edge and browser (D1, D9); control calls are short requests and responses.
+- **Why not gRPC:** browsers need a proxy for it, and CDNs cache HTTP GETs by URL, not RPC calls.
+- **Why not GraphQL:** the shapes are few and fixed, and POST-body queries do not cache at the edge, where the read load must land.
+- **Why not WebSockets for live counts:** 4,170,000 open sockets to update a number viewers glance at; the watch page reads the count on load, and that is fresh to 10 s.
+
+### Load balancer: layer 7 behind the API gateway
+
+- **Choice:** an HTTP (layer-7) load balancer routing by path (`/uploads` to upload, `/videos` to watch, `/views` to engagement), least outstanding requests, health checks.
+- **Why:** every API call is short HTTP; video bytes never pass through it (uploads go to the blob store, playback to the CDN), so it is sized for requests, not terabits (D1).
+- **Why not layer 4:** it cannot route by path, and nothing here holds a long-lived socket.
+
+### CDN: edges, a regional shield, pull plus pre-warm
+
+- **Choice:** a CDN (a commercial one, several for redundancy, or our own edge caches) with a regional **shield** tier between the edges and the blob store; pull on a miss, pre-warm rising videos.
+- **Why:** 10.4 Tb/s average and 21 Tb/s peak to viewers everywhere (D1, D9, D11); segments are immutable, so they cache with no invalidation. The shield turns a miss at 50 edges into one origin read and coalesces the first-minute rush on a viral video (D2).
+- **Why not serve from the origin:** 0.5 Tb/s is what the origin sees at a 95% hit ratio; without the CDN it would be 20 × that, from one region, with a round trip across the world per segment (N1).
+- **Why not push every video to every edge:** 1.2 PB a day times hundreds of edges, mostly for videos watched a few times.
+- **Why not peer-to-peer delivery:** viewers' upload links and battery are not ours to spend, and many networks block it.
+
+### Blob store: object storage for originals and segments
+
+- **Choice:** an object store (S3-style API; on our own machines, a system such as Ceph) with cross-zone replication or erasure coding for originals.
+- **Why:** files of 0.4 MB to many GB, written once and read many times, 1.2 PB a day, at the lowest cost per GB (D5, D8). Byte-range reads and resumable writes are built in.
+- **Why not a distributed file system (HDFS):** built for big sequential batch reads, with a single metadata service per cluster; small random segment reads and billions of objects strain it.
+- **Why not database BLOBs:** every byte would pass through the database's buffer pool and replication stream.
+- **Redundancy by value:** originals get the strongest protection (D5); renditions can be rebuilt from the original, so they can use cheaper redundancy.
+
+### Upload path: a resumable session straight to the blob store
+
+- **Choice:** the upload service creates a session and a video row; the app sends 16 MB chunks to the store; the store reports completion.
+- **Why:** bytes skip our servers (518 TB a day), and a drop costs one chunk (D8, N3).
+- **Why not through the upload service:** each 1,200 MB upload would hold a connection for 20 minutes; the fleet would be sized for bandwidth.
+- **Why not presigned multipart URLs:** they work equally well; the offset-query session is simpler for a phone app because it keeps one URL and asks one question after a drop.
+
+### Transcode workflow: a durable workflow of small tasks
+
+- **Choice:** a workflow engine (Temporal-style, or our own scheduler over the `transcode_tasks` table) that splits, fans out tasks, waits for each rung, packages and publishes.
+- **Why:** 50 independent tasks per 10-minute video need per-task state, leases, retries and a fan-in before packaging (D7, D9, N4).
+- **Why not one job per video on one machine:** 50 minutes per 10-minute video, and a crash at minute 49 starts again from zero.
+- **Why not a cron job scanning for new uploads:** no per-task retry or lease, and a slow scan delays every video.
+
+### Encode queue and workers: a work queue, not a log
+
+- **Choice:** a work queue (<TechIcon id="oss/rabbitmq" /> RabbitMQ, or a cloud queue) with per-message acknowledgement, a visibility timeout of a few minutes and two priorities (360p first).
+- **Why:** each task goes to one worker, takes about 60 s, and must come back if the worker dies (D7); priorities make the video watchable early (N4).
+- **Why not Kafka:** a partition is read in order by one consumer, so one slow 4K task blocks the tasks behind it, and per-message redelivery is awkward.
+- **Why not the database as the queue:** workable at 12 uploads/s, but 500 tasks/s of polling and lease updates would load the metadata shards.
+- **Workers:** a stateless CPU fleet, 30,000 cores busy on average; preemptible capacity is fine because a lost task costs at most a minute.
+- **Why not GPUs or hardware encoders everywhere:** they win at very large volume but cost more to buy and change; move the busiest codecs once volume pays for it.
+
+### Metadata database: relational, sharded by channel
+
+- **Choice:** <TechIcon id="oss/mysql" /> MySQL (or <TechIcon id="oss/postgresql" /> PostgreSQL), sharded by `channel_id` behind a routing proxy (Vitess-style), with the shard encoded in `video_id`.
+- **Why:** status changes, unique likes and channel listings need transactions, unique keys and secondary indexes (D3, F4, F5); 7.3 TB and growing needs shards (D8). Read-your-writes for the creator comes from the shard primary.
+- **Why not one large primary:** size, write rate and blast radius all grow without limit.
+- **Why not a wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra):** it handles the size, but a channel listing, a video by id and one like per user become three tables kept in step by the application, with no transaction between them.
+- **Why not shard by `video_id`:** a channel page would scatter to every shard.
+
+### Cache: in-memory key-value store
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, cache-aside for video metadata with a 60 s TTL; counts written by the aggregator.
+- **Why:** 23,000 watch-page reads/s at peak in a few milliseconds, and metadata may be 60 s stale for viewers (D1, D3, D4).
+- **Why not read replicas alone:** still 23,000 SQL queries a second, with lag we do not control.
+- **Why not Memcached:** fine for metadata; Redis also holds counters and hashes, so one cache serves both.
+
+### View-event log: a durable, partitioned log
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, keyed by `video_id`, kept 7 days.
+- **Why:** every view and like is read by several consumers (counts, analytics, recommendations), and counts can be rebuilt by replay (D7, N7). 23,000 events/s is modest for a log.
+- **Why not a work queue:** each message goes to one consumer and is deleted; there is no replay.
+- **Why not writing counters directly:** one row or key per viral video takes 1,670 writes/s, and a retry double counts (D10).
+
+### Count aggregator: a stream processor with keyed state
+
+- **Choice:** <TechIcon id="oss/apache-flink" /> Flink (or Kafka Streams) with <TechIcon id="oss/rocksdb" /> RocksDB keyed state: remove duplicates, sum in 10 s windows, write absolute totals.
+- **Why:** dedup state and offsets are checkpointed together, so a restart neither loses nor repeats a window (D7, N7); one write per video per window (D10).
+- **Why not Redis `INCR` from the engagement service:** no dedup, a hot key, and a retried increment counts twice.
+- **Why not an hourly batch job:** counts would be an hour old against N7's one minute; batch stays for nightly corrections such as removing invalid views.
+
+### Cold tier and video ids
+
+- **Choice:** a cold storage class for renditions of videos unwatched for 90 days; 64-bit `video_id`s carrying the shard number, a time component and a sequence.
+- **Why:** most stored bytes are rarely read, so a cheaper class with a slower first byte cuts cost (D8, N5); an id that names its shard needs no lookup table on the hot path (D4).
+- **Why not deleting renditions:** re-encoding on demand costs compute and delays the first viewer by minutes.
+- **Why not random UUIDs:** they cannot name a shard and do not sort by time for the channel page.
+
+## Deep dives
+
+### Transcoding as a graph of idempotent, retryable tasks
+
+- **Probe first:** read the container and codec; a corrupt or unsupported file fails in seconds, before 50 tasks are queued.
+- **Split at keyframes:** a chunk boundary must be a keyframe so each chunk decodes on its own; 1-minute chunks are long enough to compress well and short enough to retry cheaply.
+- **One task per chunk per rung:** the key `(video_id, rung, chunk)` names the task and its output object, so a second run overwrites the same bytes (idempotent).
+- **Lease and retry:** a worker holds a lease of a few minutes and renews it; when a worker dies the lease runs out and the task returns to the queue, with backoff and at most 3 attempts before the video is marked `failed`.
+- **Fan-in:** when every chunk of a rung is `done`, a package task cuts it into 4 s segments and writes its playlist; the master manifest lists only finished rungs.
+- **Priority:** 360p tasks first, so the video publishes in about two minutes (N4); higher rungs join the manifest as they finish.
+
+<AnimatedDiagram spec="animated/youtube/transcode-dag" stepper caption="Fifty small tasks instead of one long job: each chunk and rendition encodes on its own, a lost task runs again into the same key, and the video publishes at 360p first." />
+
+<StepCards>
+  <StepCard n={1} title="Split at keyframes">
+    The 10-minute, 600 MB original is cut at keyframes into ten 1-minute chunks, each of which decodes on its own.
+  </StepCard>
+  <StepCard n={2} title="50 encode tasks in parallel">
+    One task per chunk for each of five rungs: 50 tasks of about 60 s. One after another they take 50 minutes; on 50 workers, about one.
+  </StepCard>
+  <StepCard n={3} title="A task fails and runs again">
+    The worker on 720p chunk 6 dies. Its lease runs out, the task goes back on the queue, and the retry writes the same key.
+  </StepCard>
+  <StepCard n={4} title="Package and publish">
+    With every chunk of a rung done, the packager writes 4 s segments and the manifest. 360p publishes first; the other rungs follow.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 10 chunks × 5 rungs = 50 tasks × 60 s = 50 minutes of work; in parallel about 60 s plus split and package, inside N4's 5 minutes.
+
+<Callout tone="red" title="What breaks">
+  A task that appends to a shared output file instead of writing its own key is not idempotent: a retry duplicates frames. Name every output by its task key and only the packager reads them together.
+</Callout>
+
+### Adaptive bitrate: segments, the manifest, how the player switches
+
+- **The ladder:** five renditions from 240p at 0.4 Mb/s to 1080p at 5.0 Mb/s, every one cut at the same 4 s boundaries, so any segment can follow any other.
+- **The manifest:** a master playlist lists each rendition with its bandwidth and resolution; each rendition's playlist lists its segment URLs in order (HLS or MPEG-DASH both work this way).
+- **The player's rule:** measure throughput from recent segment downloads, keep a buffer of 20 to 30 s, and pick the highest rung under 0.8 × throughput; drop a rung early when the buffer falls.
+- **Start low:** the first segment at 360p is 0.4 MB, so it arrives in under a second on most links (N1).
+- **Segment length:** 2 s segments switch faster but double the requests and compress worse; 10 s segments compress well but start slowly and switch late. 4 s sits between.
+
+<AnimatedDiagram spec="animated/youtube/abr-ladder" stepper caption="Every rung is cut at the same 4 s boundaries, so the player can change rung between any two segments: start low, climb, and step down before the buffer runs dry." />
+
+<StepCards>
+  <StepCard n={1} title="The ladder">
+    Five rungs, twelve 4-second segments each, all with the same boundaries.
+  </StepCard>
+  <StepCard n={2} title="Start low, then climb">
+    The first two segments come at 360p: 3.2 Mb on a 4 Mb/s link is 0.8 s to the first frame. Then 720p, the top rung under 0.8 × 4 Mb/s.
+  </StepCard>
+  <StepCard n={3} title="The link drops: switch down">
+    At 32 s the link falls to 1.2 Mb/s. The next 720p segment would take 8.3 s to fetch 4 s of video, so the player takes 360p, which takes 2.7 s.
+  </StepCard>
+</StepCards>
+
+**The numbers:** at 1.2 Mb/s a 720p segment (10 Mb) drains the buffer by 8.3 − 4 = 4.3 s; a 360p segment (3.2 Mb) adds 4 − 2.7 = 1.3 s.
+
+The master manifest the watch service returns:
+
+```text
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=426x240
+240p/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+360p/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720
+720p/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
+1080p/index.m3u8
+```
+
+### Counting views: hot keys, approximate counts, dedup
+
+- **What counts:** a view is sent once after 30 s of playback, with an `event_id` the player creates (this page's rule).
+- **Dedup:** the aggregator drops an `event_id` it has seen, and counts one view per `(viewer, video)` per 24 h; that state is keyed by `video_id` and checkpointed with the log offsets.
+- **Hot key:** a viral video's events all land on one log partition: 1,670/s is small for a log, and the aggregator turns it into one write per 10 s.
+- **Approximate where it is enough:** unique viewers per video in a HyperLogLog of 16,384 registers (12 KB), standard error 1.04 ÷ √16,384 ≈ 0.8%; trending lists from a count-min sketch.
+- **Exact where it matters:** the public count is the deduplicated sum; a nightly batch job removes views judged invalid, so the number can go down slightly.
+
+The hot-key pattern page shows the same defences on a shop's best-selling product: read its kettle as the viral video.
+
+<AnimatedDiagram spec="animated/patterns/hotkey-defences" stepper caption="Each defence cuts the load on one place: a local cache cuts reads, salting spreads them, a buffer batches writes." />
+
+**How to read it:**
+
+- Steps 1 to 3 are reads of one hot key: an in-process cache on each watch server and salted copies spread the count's readers.
+- Step 4 is our write side: buffering increments and flushing once per interval is what the aggregator's 10 s window does.
+
+**The numbers:** 1,670 views/s × 10 s = 16,700 events become 1 write per window; across all videos, 23,000 events/s become at most one write per active video per 10 s.
+
+<Callout tone="red" title="What breaks">
+  Incrementing a counter on each event and retrying on timeout counts some views twice, and a replay after a crash counts a whole window again. Write absolute totals from checkpointed state.
+</Callout>
+
+### Worked example: a 20-minute upload that goes viral
+
+1. The creator uploads 1,200 MB in 75 chunks of 16 MB; the link drops at chunk 31, and the resume sends 720 MB.
+2. The workflow cuts 20 one-minute chunks × 5 rungs = 100 tasks; on 100 workers they finish in about 60 s, 360p first.
+3. About two minutes after the upload ends, 360p is packaged into 300 segments of 4 s; the video is `ready`.
+4. It goes viral: 6,000,000 views in the first hour is 1,670 new viewers a second; at 6 minutes each, 1,670 × 360 s ≈ 600,000 watch at once.
+5. Those viewers fetch 600,000 ÷ 4 = 150,000 segments/s; 600,000 × 2.5 Mb/s ≈ 1.5 Tb/s, all from the CDN.
+6. The origin sees at most one read per segment per shield: 300 segments × 5 rungs = 1,500 objects per region, plus refills.
+7. Counts: 1,670 events/s on one partition become 6 writes a minute to the cache.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Upload path | Through app servers, direct to the blob store | Direct, resumable session | D8, N3, F1 | Bytes we cannot inspect until upload ends | Uploads need inline scanning before storage |
+| Transcode timing | Synchronous on upload, asynchronous workflow | Asynchronous workflow | N4, D9 | A `processing` state the creator waits through | Never at this size |
+| Encode unit | Whole video, chunk × rung tasks | 1-minute chunk × rung | N4, D7 | Keyframe alignment and a fan-in step | Videos are all under a minute (short video) |
+| Delivery format | One progressive file, segments + manifest | 4 s segments, adaptive bitrate | N1, N2, D4 | More objects and requests; packaging work | A single fixed-quality audience (podcast audio) |
+| Delivery | Origin, CDN pull, push everything | CDN pull + shield + pre-warm rising videos | D1, D2, D9, D11 | A cold first view is slower | A small catalogue that fits on every edge |
+| Metadata store | Key-value store, sharded relational | Relational, sharded by channel | D3, D8, F4 | Resharding work as channels grow | Access is only by id, with no listings or unique rules |
+| Shard key | `video_id`, `channel_id` | `channel_id`, shard bits in `video_id` | F4, D4 | A huge channel's shard runs hotter | One channel outgrows a shard |
+| View counts | Increment per view, batch hourly, stream with windows | Stream, dedup, 10 s windows | D7, D10, N7 | Counts lag up to a minute | Exact real-time counts are a product need |
+| Storage class | Everything hot, tier by popularity | Tier renditions after 90 days unwatched | D8, N5 | Slower first byte for old videos | Storage becomes cheap relative to retrieval |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Resumable upload; segments in the blob store | Gigabyte files over flaky links; 1.2 PB a day |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | The transcode workflow | 50 tasks per video with leases, retries and a fan-in |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | Encode queue; view-event log | One worker per task; many readers per event |
+| [Caching](/system-design/patterns/caching) | CDN for segments; Redis for metadata | 700 reads for every write |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Metadata by channel; log by video | 7.3 TB and growing; per-video order |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Viral videos at the shield and in the counter | 1,670 events/s on one key |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | The count aggregator | Dedup and sums in 10 s windows |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Parallel encode tasks, batched count writes | 50 minutes of work done in about one |
+| [Idempotency](/system-design/patterns/idempotency) | Chunk offsets, task output keys, view `event_id`s | Every retry must be harmless |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| [Netflix](/system-design-case-studies/case-studies/netflix) | Transcoding ladder, segments, CDN, adaptive bitrate | A small catalogue placed on edges ahead of demand; DRM; per-title encoding |
+| [TikTok](/system-design-case-studies/case-studies/tiktok) | Upload, transcode, CDN, counts | Videos under a minute: no chunking; the feed and recommendations are the hard part |
+| An online course platform | The whole upload and playback path | Signed, expiring segment URLs; progress per learner instead of public counts |
+| Podcast hosting | Blob store, CDN, counts | Audio only: one or two bitrates, progressive download is fine; RSS feeds |
+| Live streaming | Segments, manifest, CDN, adaptive bitrate | Encoding in real time from a live ingest; 2 s segments; the manifest grows as you watch |
+
+## How real systems do it
+
+- **2010:** Vitess was created at YouTube to solve its MySQL scaling: first replicas for reads, then sharding when writes outgrew one primary, with a proxy routing queries so application code no longer picks the shard. It graduated from the CNCF in 2019.
+- **2021:** YouTube reported that more than 500 hours of video are uploaded every minute on average, and that it built a custom transcoding chip, the Video (trans)Coding Unit, because VP9 takes 5 × the compute of H.264 to encode.
+- **2021 (ASPLOS):** Google's paper on warehouse-scale video acceleration reports 20 to 33 × better efficiency than its prior well-tuned software baseline.
+- **YouTube Data API documentation (read 2026):** a resumable upload starts with a POST that returns a session URI in `Location`; after an interruption the client sends `Content-Range: bytes */<size>` and gets `308` with a `Range` header; chunks must be multiples of 256 KB.
+- **2016 (RecSys):** YouTube's recommender is two stages, candidate generation then ranking; it is out of scope here and covered by the TikTok page.
+- **Where this design differs:** YouTube does not publish how its storage, CDN or streaming protocol work, so those parts here are a generic design; the metadata sharding follows Vitess's documented history and the upload follows the documented API.
+
+## Failure modes & pitfalls
+
+- **Uploads through app servers:** the upload fleet saturates on bandwidth and every drop restarts the file; watch upload restarts per GB; send bytes straight to the blob store on a resumable session.
+- **One encode job per video:** a crash near the end repeats all of it and long videos miss N4; watch time-to-360p p95; split into chunk × rung tasks with leases.
+- **Non-idempotent task outputs:** retries duplicate frames or corrupt a rendition; compare segment counts with duration; one fixed key per task output.
+- **Single points of failure:** one workflow scheduler, one metadata primary per shard, one origin region; run the scheduler as a replicated service with leader election, fail over shard primaries, replicate originals across regions.
+- **Thundering herd on a viral video:** every edge misses at once and the origin melts; watch origin requests per object; a shield tier with request coalescing, and pre-warming.
+- **Counting by increment:** a hot row and double counts on retry; watch write latency on the counts path; stream aggregation with absolute totals.
+- **Mismatched segment boundaries:** switching rungs makes the picture jump or stall; check keyframe alignment in the packager; force a keyframe every 4 s in every rung.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify length, devices, live or not, time to watchable, count accuracy, managed or own hardware; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 700 to 1, 10 Tb/s out, 1.2 PB a day in, 30,000 encode cores, 23,000 view events/s.
+3. **Minutes 10 to 15:** API and the data model; name the blob store, the sharded relational store and the cache.
+4. **Minutes 15 to 25:** Steps 1 to 5: direct resumable upload, the transcode workflow, segments, the CDN.
+5. **Minutes 25 to 35:** Steps 6 to 8: sharded metadata and cache, view counts from a stream, hot and cold.
+6. **Minutes 35 to 45:** one deep dive (transcoding, adaptive bitrate or counting); name the single points of failure and what degrades first.
+
+**What interviewers listen for:**
+
+- **Mid:** separate upload and playback; blob storage plus CDN; renditions; asynchronous transcoding.
+- **Senior:** resumable uploads, chunked idempotent encode tasks, segments and a manifest, sharding by channel, counts through a stream with dedup.
+- **Staff:** cost per stored and served hour, tiering, hot-video coalescing, shedding order under stress, what to build on bare machines and what to buy.
+
+**Red flags:** uploading through app servers; serving video from the origin; "store the video in the database"; incrementing a database row per view; transcoding inside the upload request.
+
+## Further reading
+
+- [History of Vitess](https://vitess.io/docs/overview/history/) (Vitess documentation)
+- [Reimagining video infrastructure to empower YouTube](https://blog.youtube/inside-youtube/new-era-video-infrastructure/) (YouTube, 2021)
+- [Warehouse-scale video acceleration: co-design and deployment in the wild](https://research.google/pubs/warehouse-scale-video-acceleration-co-design-and-deployment-in-the-wild/) (Google, ASPLOS 2021)
+- [Resumable uploads](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol) (YouTube Data API documentation)
+- [Deep Neural Networks for YouTube Recommendations](https://research.google/pubs/pub45530) (Google, RecSys 2016)
+- Related pages: [Netflix](/system-design-case-studies/case-studies/netflix) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [Dropbox](/system-design-case-studies/case-studies/dropbox) · [CDNs and edge](/system-design/fundamentals/cdn) · [Object / Blob Storage](/system-design/databases/object-storage) · [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you let a creator upload a 2 GB video over a flaky mobile connection?" category="Architecture" level="Mid">
+  - Send the bytes straight to the blob store on a resumable session; the upload service only creates the session and the video row.
+  - Upload in fixed chunks, such as 16 MB; after a drop, ask the store how many bytes arrived and send the rest.
+  - A drop then costs one chunk, not the file, and no app server holds a connection for 20 minutes.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why transcode into several renditions, and why split the video into chunks first?" category="Concepts" level="Mid">
+  - Viewers range from 1 Mb/s phones to 50 Mb/s TVs: an 8 Mb/s file stalls the phone, and a 1 Mb/s file looks poor on the TV.
+  - Encoding one 10-minute video into 5 rungs one after another takes about 50 minutes.
+  - Split at keyframes into 1-minute chunks and run 50 tasks in parallel: about a minute, and a crash re-runs one task.
+  </InterviewQuestion>
+  <InterviewQuestion question="An encode worker dies halfway through a task. What happens?" category="Failure modes" level="Senior">
+  - The worker held a lease on the task; it stops renewing it, the lease runs out, and the task returns to the queue.
+  - Another worker runs it and writes the same output key, so the half-written output is replaced, not duplicated.
+  - After 3 attempts the video is marked `failed` and an alert fires; a corrupt input is caught earlier by the probe step.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the player decide which quality to fetch, and when to change it?" category="Concepts" level="Mid">
+  - The manifest lists every rendition and its bitrate; all are cut at the same 4 s boundaries.
+  - The player measures throughput from recent segments and keeps a 20 to 30 s buffer, picking the highest rung under about 0.8 × throughput.
+  - It starts low for a fast first frame, climbs as the buffer grows, and drops a rung at the next boundary when throughput falls.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why serve segments rather than one progressive MP4 file?" category="Trade-offs" level="Mid">
+  - With segments the player can change quality every 4 s, so a slower link drops quality instead of stalling.
+  - The first segment at a low rung is small, so playback starts in under 2 s.
+  - Segments are small immutable objects that cache well at the edge; the cost is more objects and more requests.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where are the single points of failure in this design, and how do you remove them?" category="Failure modes" level="Senior">
+  - The workflow scheduler: run several replicas with leader election; task state lives in the database, so a new leader resumes.
+  - Each metadata shard's primary: replicas with automatic failover; viewers read the cache, so playback continues during a failover.
+  - The origin region: replicate originals to a second region; the CDN keeps serving cached segments while the origin recovers.
+  - Uploads and counts may pause under failure; published playback must not.
+  </InterviewQuestion>
+  <InterviewQuestion question="A video goes viral: 6 million views in an hour. What breaks first?" category="Scaling" level="Senior">
+  - Segment misses: every edge asks for the same new segments at once; a regional shield coalesces them into one origin read per segment.
+  - The counter: 1,670 increments a second on one key; a stream aggregator writes one total per 10 s instead.
+  - The metadata read: one hot key in the cache; an in-process cache on each watch server for a second absorbs it.
+  - Pre-warm the first segments at the common rungs to the edges when views start climbing.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you count views accurately at 23,000 events a second?" category="Scaling" level="Senior">
+  - The player sends one view after 30 s with an `event_id`; the engagement service appends it to a log keyed by video.
+  - A stream processor drops seen `event_id`s, counts one view per viewer per video per day, and sums in 10 s windows.
+  - It writes absolute totals, so a retried write is harmless, and checkpoints state with log offsets, so a restart does not double count.
+  - A nightly batch removes invalid views; the public number may drop slightly.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why a sharded relational database for metadata rather than a key-value store?" category="Trade-offs" level="Senior">
+  - The data needs a channel listing by date, one like per user and status changes with a transaction: indexes, unique keys and transactions.
+  - A key-value store handles the size but turns those into extra tables kept in step by application code.
+  - Shard by `channel_id` so a channel page is one shard, and put the shard number in `video_id` so a lookup by id needs no directory.
+  </InterviewQuestion>
+  <InterviewQuestion question="You must build this on your own machines, not managed cloud services. What do you run yourself?" category="Architecture" level="Senior">
+  - An object store with erasure coding (a Ceph-style system) for originals and segments, and edge cache servers in many locations, or a bought CDN.
+  - MySQL behind a sharding proxy for metadata, Redis for the cache, Kafka for events, Flink for counts, RabbitMQ for encode tasks.
+  - A workflow scheduler over a task table, and a stateless encoder fleet that can grow onto spare capacity.
+  - Name what you would still buy: CDN capacity in regions where you have no edge.
+  </InterviewQuestion>
+</InterviewQuestions>

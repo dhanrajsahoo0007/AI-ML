@@ -7,7 +7,7 @@ description: Use when changing a section's release state (off, hidden, on) in an
 
 Background: release states in `apps/web/content/sections.yaml` (`on` built and listed; `hidden` built, unlisted,
 admins only, `noindex`; `off` not built). States are resolved at build, so a change needs a deploy.
-A docs hub parked inside a live section (`hubRelease`, e.g. `ml-system-design` in `ai-system-design`) has only
+A docs hub parked inside a live section (`hubRelease`; no section uses it at the moment) has only
 `on`/`off`; releasing it follows the same one-field, one-PR rule.
 
 1. **One section, one field, one PR.** Change only `release.production` (or the one environment you mean) for that

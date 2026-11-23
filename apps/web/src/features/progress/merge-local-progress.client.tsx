@@ -3,10 +3,29 @@
 import { useEffect, useState } from "react";
 import { safeNextPath } from "@/features/auth/public";
 import { refreshEntitlement } from "@/features/entitlements/islands.client";
-import { clearLocalProgress, readLocalProgress } from "./local";
+import { clearLocalProgress, hydrateLocalProgress, readLocalProgress } from "./local";
 
-// Tiny island on /sign-in/complete: merges signed-out progress into the new session, refreshes the entitlement
-// cookie, then continues to `next` (a same-origin path only: safeNextPath, shared with the sign-in page).
+// Tiny island on /sign-in/complete: merges signed-out progress into the new session, hydrates this browser's
+// synced progress cache from the account, refreshes the entitlement cookie, then continues to `next` (a
+// same-origin path only: safeNextPath, shared with the sign-in page).
+
+async function pullAccountProgress(): Promise<void> {
+  try {
+    const res = await fetch("/api/progress", { credentials: "same-origin", cache: "no-store" });
+    if (!res.ok) return;
+    const body = (await res.json()) as {
+      progress?: { contentKey: string; completedAt: string | null }[];
+      bookmarks?: { contentKey: string }[];
+    } | null;
+    if (!body) return;
+    hydrateLocalProgress(
+      (body.progress ?? []).filter((p) => p.completedAt).map((p) => p.contentKey),
+      (body.bookmarks ?? []).map((b) => b.contentKey)
+    );
+  } catch {
+    // Offline or blocked: the account page or next sign-in will hydrate.
+  }
+}
 
 export function MergeLocalProgress() {
   const [status, setStatus] = useState("Finishing sign-in…");
@@ -16,8 +35,13 @@ export function MergeLocalProgress() {
     const items = readLocalProgress();
     // Issue the entitlement cookie (plan §9.2) before continuing, so a Pro reader lands on full articles.
     // `next` is a same-origin path from safeNextPath above (security review M1), never raw input.
-    // nosemgrep: javascript.browser.security.open-redirect.js-open-redirect
-    const done = () => void refreshEntitlement().finally(() => window.location.replace(next));
+    const done = () =>
+      void refreshEntitlement()
+        .then((tier) => (tier ? pullAccountProgress() : undefined))
+        .finally(() => {
+          // nosemgrep: javascript.browser.security.open-redirect.js-open-redirect
+          window.location.replace(next);
+        });
     if (!items.length) return done();
     setStatus("Saving the progress from this browser to your account…");
     const send = (list: typeof items) =>

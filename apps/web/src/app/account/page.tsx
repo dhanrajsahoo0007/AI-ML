@@ -5,6 +5,7 @@ import { Container, Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { MAX_SESSIONS_PER_USER, withPageSession } from "@/features/auth";
 import { accountOverview, describeDevice } from "@/features/account";
 import { SignOutEverywhereButton } from "@/features/account/account-actions.client";
+import { SyncAccountProgress } from "@/features/progress/sync-account-progress.client";
 import { pageInfo } from "@/features/search";
 
 export const metadata: Metadata = { title: "Your account" };
@@ -32,6 +33,7 @@ export default async function AccountPage() {
 
   return (
     <Container className="max-w-3xl space-y-8 py-14 sm:py-20">
+      <SyncAccountProgress completed={overview.completed} bookmarks={overview.bookmarks} />
       <PageHeader eyebrow="Account" title="Your account" />
 
       <Panel title="Profile">

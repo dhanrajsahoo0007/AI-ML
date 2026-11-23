@@ -1,0 +1,203 @@
+---
+title: "Double-Entry Ledgers and Reconciliation"
+description: "Recording money so you can prove nothing was lost: double-entry pairs that sum to zero, immutable entries, derived balances and daily reconciliation."
+icon: book-open
+updated: 2026-11-16
+tier: advanced
+---
+
+A retry double-charged a customer last Tuesday. With a balance column that was overwritten a thousand times since, nobody can say when, how, or for how much.
+
+- Interviewers ask about ledgers to see whether you record money as a history you can prove, not a number you overwrite, and whether you check it against the outside world.
+
+## Overview
+
+- A **balance column** stores one number and loses the history of how it got there.
+- A **ledger** stores every movement as **immutable entries**; balances are **derived** from them.
+- **Double entry:** every movement is a **debit** on one account and an equal **credit** on another, so all entries always **sum to zero**.
+- Mistakes are corrected by **new entries** (a reversal), never by editing old ones.
+- Movements can be **pending** before they **settle**; the ledger records both states.
+- **Reconciliation** matches the ledger, every day, against outside records (the card provider's settlement file, the bank statement), and sends mismatches to a person.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Each account has a balance column, and payments update it."
+  - **Why the interviewer pushes back:** "A retry double-charged someone last week. How do you find it, and how do you fix the number?"
+  - **The answer that stands out:** record money as immutable double-entry pairs written in the same transaction as the idempotency key, derive balances from them, and reconcile daily against the provider's file. The double charge shows up as an extra pair and an unmatched line; the fix is a reversing pair. Name the cost: more rows, and balances that are computed or cached.
+</Callout>
+
+## Mental model
+
+- A cash book in a shop: every sale is written on a new line, with what came in and what went out.
+- You never rub a line out. If one was wrong, you write a correcting line underneath.
+- At closing time you count the till and compare it with the book. That comparison is reconciliation.
+
+## Core concepts
+
+- The running example is **order 4471, a £42 kettle**, paid and then refunded, in a shop taking **200,000 payments a day**.
+
+### A balance column against a ledger
+
+- A balance column answers "how much now?" and nothing else. Every update overwrites the evidence.
+- A ledger answers "how much now?" and "why?": the balance is the sum of the account's entries, and every entry carries its cause (an order, a refund, a fee).
+
+### Double entry
+
+- Money never appears or disappears: it moves from one account to another.
+- So each movement is two entries of equal size, a debit and a credit. Across the whole ledger, debits equal credits.
+- If they ever differ, something is wrong, and you know at once.
+
+<AnimatedDiagram spec="animated/patterns/ledger-double-entry" stepper caption="The balance says where things stand; the entries say why, and they must always balance." />
+
+<StepCards>
+  <StepCard n={1} title="A balance column: one number, no history">
+    After the payment and the refund, a balance column for order 4471 reads £0. It cannot say that £42 came in and went out again, or when.
+  </StepCard>
+  <StepCard n={2} title="The payment: a debit and a credit">
+    The payment is two entries: the card provider now owes Brightpost £42 (debit the receivable), and order 4471 earned £42 (credit revenue).
+  </StepCard>
+  <StepCard n={3} title="The refund: two new entries, nothing edited">
+    The refund reverses the payment with two more entries. Entries 1 and 2 stay exactly as they were.
+  </StepCard>
+  <StepCard n={4} title="Debits equal credits; every account nets to zero">
+    The totals are £84 of debits and £84 of credits, and both accounts net to £0. The history explains the £0 that the balance column only states.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Debits: £42 + £42 = £84. Credits: £42 + £42 = £84. Difference: £0.
+- Receivable: +42 − 42 = 0. Revenue: −42 + 42 = 0.
+
+<PremiumBreak />
+
+## Architecture
+
+The daily check that the ledger agrees with the outside world.
+
+<AnimatedDiagram spec="animated/patterns/ledger-recon" stepper caption="Every payment must appear on both sides; the few that do not become a short, daily list for a person to check." />
+
+<StepCards>
+  <StepCard n={1} title="Two records of the same day">
+    Brightpost's ledger has 200,000 payments for the day; the card provider sends a settlement file of what it actually moved. Without a check, a difference stays hidden until a customer or an auditor finds it.
+  </StepCard>
+  <StepCard n={2} title="Match by payment id and amount">
+    A matcher joins the two by payment id and compares the amounts.
+  </StepCard>
+  <StepCard n={3} title="Close the matched pairs">
+    Almost everything matches and is closed: 199,900 payments.
+  </StepCard>
+  <StepCard n={4} title="Send both kinds of mismatch for review">
+    Sixty payments are in the provider's file but not in the ledger (a lost event, or a charge we never recorded); forty are in the ledger but not the file (often settling a day late). One hundred items a day go to a person.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Writing entries safely
+
+- Write both entries of a movement in **one database transaction**, so a crash cannot leave half a pair.
+- Write the **idempotency key** in the same transaction (see [Idempotency](/system-design/patterns/idempotency)): a retried payment finds the key and writes no second pair.
+- Entries are **append-only**. Give the table no `UPDATE` or `DELETE` path in the application.
+
+### Balances: derived, then cached
+
+- The true balance is the sum of the account's entries.
+- Summing millions of entries on every read is slow, so keep a **cached balance** per account, updated in the same transaction as each new pair, or a **snapshot** per day plus the entries since.
+- The cached balance can always be checked against, and rebuilt from, the entries (see [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing)).
+- Updates to one account's cached balance are a hot spot: serialise them per account (see [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking)).
+
+### Pending and settled
+
+- A card payment is **authorised** first and **settled** days later. Record both as entries, often in separate pending and settled accounts.
+- A movement that never settles shows up as a pending balance that does not clear.
+- Stripe's Ledger uses the same idea: money passes through **clearing accounts** that should return to zero, so a stuck payment is a clearing account with a non-zero balance.
+
+### Worked example: a refund and a penny
+
+Order 4471 is paid and refunded, then the provider's file disagrees by a penny.
+
+1. **Payment:** entries 1 and 2, written with idempotency key `k-4471` in one transaction.
+2. **Retry:** the app retries the payment; the key exists, so no new entries are written.
+3. **Refund:** entries 3 and 4 reverse the payment.
+4. **Reconciliation:** the provider's file says it settled £41.99 for the payment, not £42.
+5. **Investigation:** the difference is a 1p fee the provider deducted. The fix is two new entries, debit "provider fees" 1p and credit the receivable 1p, so the receivable clears.
+
+**The numbers:**
+
+- 200,000 payments a day × 0.05 % unmatched = 100 items for a person each day.
+- Entries a day: about 2 per payment, so 400,000, plus 2 per refund or fee.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Balance column only | One row per account; fast reads | No history; errors undetectable | Never for money |
+| Double-entry ledger | History; every error shows as an imbalance | More rows; balances must be derived or cached | Payments, wallets, credits |
+| Cached balance in the same transaction | Fast reads, exact | A hot row per account | Accounts read on every payment |
+| Daily snapshot + entries since | Bounded work per read | Slightly more complex reads | Accounts with many entries |
+| Daily reconciliation | Finds what the system cannot see itself | A queue for people; a day's delay | Anything that touches an outside party |
+
+## Production systems
+
+- **Stripe's Ledger** (stripe.dev, as of November 2026): an immutable log of money-movement events built on double-entry bookkeeping, about five billion events a day; clearing accounts that should net to zero expose missing, late or incorrect transactions with a simple query; together with Stripe's data-quality checks it explains over 99.9999 % of money movement, and 99.99 % of dollar volume is verified within four days.
+- **Used in our case studies:** [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments)
+
+## Failure modes & pitfalls
+
+- **Updating or deleting entries.** The history no longer explains the balance. Append reversing entries instead.
+- **Writing half a pair.** A crash between the debit and the credit unbalances the ledger. Write both in one transaction.
+- **Idempotency key outside the transaction.** A retry writes a second pair. Store the key with the entries.
+- **Trusting the cached balance blindly.** A bug drifts it from the entries. Recompute and compare regularly.
+- **No reconciliation.** Lost events and provider fees go unnoticed for months. Match against the provider's file every day.
+- **Floats for money.** £0.1 + £0.2 is not £0.3 in binary floating point. Store integer minor units (pence).
+
+## Interview framework
+
+1. Refuse the bare balance column: money needs a history you can prove.
+2. Model each movement as a debit and a credit that sum to zero, written in one transaction with the idempotency key.
+3. Derive balances, and cache them per account in the same transaction.
+4. Correct with reversing entries, never edits; track pending and settled.
+5. Reconcile daily against the outside party, and size the human review queue.
+
+**What interviewers listen for:** double entry, immutability, idempotency in the same transaction, and reconciliation with numbers.
+
+**Red flags:** `UPDATE balance = balance - 42`, or "we will fix it in the database".
+
+## Further reading
+
+- [Ledger: Stripe's system for tracking and validating money movement (stripe.dev)](https://stripe.dev/blog/ledger-stripe-system-for-tracking-and-validating-money-movement)
+- Related pages: [Idempotency](/system-design/patterns/idempotency) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why never update a ledger row?" category="Concepts" level="Junior">
+    - The ledger is the history that explains every balance; editing a row destroys that evidence.
+    - A mistake is corrected with new, reversing entries, so both the error and the fix stay visible.
+    - Auditors, support and reconciliation all depend on the history being complete.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is double-entry bookkeeping, in system terms?" category="Concepts" level="Mid">
+    - Every movement of money is two entries of equal size: a debit on one account and a credit on another.
+    - Across the ledger, debits always equal credits, so any imbalance is a bug you can detect.
+    - Both entries are written in one transaction, so a crash cannot leave half a movement.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you compute a balance fast?" category="Scaling" level="Mid">
+    - Summing all entries is exact but slow for busy accounts.
+    - Keep a cached balance per account, updated in the same transaction as each new pair, or a daily snapshot plus the entries since.
+    - Recompute from the entries regularly and alert if the cache has drifted.
+  </InterviewQuestion>
+  <InterviewQuestion question="The bank says £41.99 and we say £42. Walk through it." category="Failure modes" level="Senior">
+    - Reconciliation flags the payment as matched by id but not by amount, and it goes to the review queue.
+    - Look at the provider's record: often a fee or currency rounding deducted before settlement.
+    - Record the difference as new entries, for example debit provider fees 1p and credit the receivable 1p, so the receivable clears.
+    - If it is a pattern, encode the fee in the ledger at payment time so tomorrow's file matches.
+  </InterviewQuestion>
+  <InterviewQuestion question="A retry double-charged a customer. How do you find it and fix it?" category="Failure modes" level="Senior">
+    - With the idempotency key in the same transaction as the entries, the retry writes nothing; if the key was missing, the ledger shows two payment pairs for one order.
+    - Reconciliation shows two charges in the provider's file against one order.
+    - Fix it with a refund through the provider and reversing entries in the ledger, then close the gap that let the retry through.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why reconcile against the provider's file if your ledger always balances?" category="Trade-offs" level="Mid">
+    - A balanced ledger proves internal consistency, not that it matches what actually happened outside.
+    - Lost events, provider fees, chargebacks and late settlements only show up when you compare with the outside record.
+    - A daily match turns them into a short list for a person, instead of a surprise at the month end.
+  </InterviewQuestion>
+</InterviewQuestions>

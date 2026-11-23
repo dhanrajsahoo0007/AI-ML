@@ -1,11 +1,321 @@
 ---
 title: "Quotas, Throttling, Retries and Backoff on the Cloud"
-description: "The three ways a cloud says no, why instant retries turn a hiccup into an outage, and how backoff and jitter make retries safe."
-status: outline
+description: "The three ways a cloud says no, how to raise a limit before a sale, and how backoff, jitter and order keys keep retries from making things worse."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the three ways a cloud says no: account quotas (how many of a thing), API rate limits (how fast you may ask) and per-resource throughput (how much a table or disk can serve). It explains why a retry storm turns a hiccup into an outage and how backoff, jitter and idempotency make retries safe.
+<KeyIdea>
+  A cloud limits how much you may run, how fast you may ask and how much one thing can serve, so plan for each limit and retry politely.
+</KeyIdea>
 
-**Related reading on this site:** [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Idempotency](/system-design/patterns/idempotency)
+## The story
+
+Brightpost's spring sale opens at 9:00 on a Saturday. The plan is ready: at 8:30 a schedule tells the autoscaler to start 10 app servers, enough for 2,000 shoppers. At 8:31 servers 9 and 10 are refused. Two years ago, when the shop ran on 2 servers, the region's limit was set at 32 processor cores. Each server has 4, so the limit allows 8. Nobody looks at the scaling log. At 9:00, 1,900 shoppers arrive for 1,600 places. Pages slow down, and the checkout page retries Pay 3 times without waiting. By 9:50, when a raised limit comes through, about 260 orders are lost and 38 shoppers have been charged twice.
+
+Each step below fixes one part of that morning.
+
+## How it works
+
+Four words first. A **limit** is a cap the provider puts on what you may do. A <Term id="quota">quota</Term> is a limit on how many of a thing an account may have. **Throttling** is the cloud refusing a request because you asked too fast; it tells you to slow down and try again. A **retry** is sending the same request again after it failed.
+
+### Step 1: Three ways a cloud says no
+
+<AnimatedDiagram spec="animated/cloud/limit-layers" stepper step={3} minWidth={620} caption="Three kinds of limit: how many you may run, how fast you may ask, and how much one thing can serve." />
+
+Every cloud has three kinds of limit, and each one fails differently.
+
+1. **Account quotas** cap how many of a thing an account may run, usually per region: processor cores, servers, addresses, databases. Brightpost's shop account was allowed 32 cores in its region.
+2. **API rate limits** cap how fast you may ask the cloud to do things, such as start a server or list your servers. The part of the cloud that takes those requests is the **control plane**.
+3. **Resource throughput** caps how much one thing can serve: one database's connections, one table's reads a second, one queue's messages.
+
+A quota stops you growing. A rate limit slows your tools. A throughput limit slows your users. How a limiter counts requests is on [Rate Limiting](/system-design/patterns/rate-limiting).
+
+<PremiumBreak />
+
+### Step 2: Quotas count what you run
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={1} minWidth={620} caption="The sale plan: shoppers reach the app servers through the load balancer, and the autoscaler is told to start 10 servers at 8:30." />
+
+A quota counts per account, and usually per region. Many count processor cores rather than servers, so a bigger server uses more of the quota. Brightpost's 32 cores are 8 servers of 4 cores, or 4 servers of 8.
+
+A **soft quota** is a default you can ask the provider to raise. A **hard limit** is fixed by how the service is built. New accounts start low, which also protects you: a looping script cannot start 500 servers. The test account's 4-server quota on [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance) is the same idea.
+
+The autoscaler's maximum and the quota are separate numbers. Brightpost raised the maximum to 10. Nobody raised the quota.
+
+### Step 3: The ceiling nobody checked
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={2} minWidth={620} caption="The failure: the quota refuses servers 9 and 10, and the checkout page sends each slow Pay up to 4 times with no wait." />
+
+The refusal paged nobody. The autoscaler logged an error and kept trying. A quota error does not pass with time, so those tries could never succeed.
+
+<Callout tone="red" title="What breaks">
+  Eight servers serve about 1,600 shoppers, and 1,900 arrive at 9:00. Pages that took under 1 second now take 4. The checkout page gives up on Pay after 3 seconds and sends it again at once, up to 3 more times. Each slow Pay becomes up to 4 requests on servers that are already full. Within 10 minutes the servers carry about three times the checkout load, and most Pay requests fail.
+</Callout>
+
+That is a **retry storm**: retries add load to a system that is failing because it has too much load. The quota caused the first slowdown. The retries turned it into an outage.
+
+### Step 4: See your quotas, and raise them before you need them
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={3} minWidth={620} caption="The quota is raised to 64 cores before the next sale, and an alert warns when usage passes 80%." />
+
+Every cloud lists your quotas with current usage, and most usage numbers can feed an alert. Brightpost now does three things.
+
+1. **A list.** Before each sale, Asha lists the quotas it depends on, per region: cores, addresses, function copies.
+2. **Headroom.** The core quota is now 64, room for 16 servers.
+3. **An alert at 80%.** Usage of 52 cores sends a message, long before a refusal.
+
+Ask early. Some increases are approved in minutes; others take days. A second region kept for disaster recovery has its own quotas, at the defaults. A standby that cannot start servers is not a standby. [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies) covers the rest of that plan.
+
+### Step 5: Throttling, and what it looks like
+
+At 9:10 Asha starts a script that asks the cloud "are my servers running?" 20 times a second. Within a minute every answer is an error that means "slow down". The script hit an API rate limit.
+
+A throttled request does not fail for good. The cloud is saying "not now". Over web APIs this is usually HTTP status 429, "too many requests", sometimes with a wait in seconds. Some services use their own error names. Treat them all the same: wait, then try again.
+
+On some clouds that budget is shared by every caller in the account and region. Then one script's loop slows every other tool that talks to the control plane. Poll slowly, and use events where the cloud offers them.
+
+### Step 6: Back off, and add jitter
+
+<AnimatedDiagram spec="animated/cloud/retry-backoff-jitter" stepper caption="One copy backs off 1 s, 2 s, 4 s and gets through. Three copies with the same fixed wait collide; random waits spread them apart." />
+
+**Exponential backoff** means each retry waits twice as long as the last: 1 second, then 2, then 4. A hiccup clears on the first retry; a longer problem gets more room.
+
+Backoff alone has a flaw. Clients that failed together also wait the same time, so they come back together. **Jitter** is a random part added to each wait, often a random wait between zero and the limit. Three copies that failed together then retry at 0.3, 0.7 and 1.6 seconds, and all three get through.
+
+Cap both the number of tries and the total time. The cloud's client libraries back off with jitter by default; check their settings before writing your own loop. Theory: [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries).
+
+### Step 7: Retry at one layer, and only for errors that can pass
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={4} minWidth={620} caption="The checkout page retries Pay once, after a wait of 1 to 2 seconds with a random part." />
+
+Retries multiply across layers: a page and a server that each try 4 times turn one click into 16 calls. Brightpost retries only in the checkout page: once, after 1 to 2 seconds, with jitter. [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service) shows deadlines and retry budgets for longer chains.
+
+Retry only errors that may pass by themselves:
+
+- **Retry:** throttling, a timeout, "service unavailable", a dropped connection.
+- **Do not retry:** "not allowed", "bad request", "not found". They fail the same way every time.
+- **Do not retry in a loop:** a quota error. Raise the quota, or pick another server size or region.
+
+### Step 8: Make a repeat harmless
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={5} minWidth={620} caption="Every try of one Pay carries the same order key. The servers check the key table, and a repeat returns the first order." />
+
+A timeout does not say whether the work happened. On the sale morning, 38 first tries of Pay had saved the order, and a retry saved it again.
+
+The fix is an **idempotency key**: a unique id the page creates once per order and sends with every try. The server stores each key with its order. A key it has seen returns the first order and makes nothing new. The call is now <Term id="idempotent">idempotent</Term>: two tries have the same effect as one.
+
+Make a call safe to repeat before you retry it. Reads are already safe. Writes need a key. [Idempotency](/system-design/patterns/idempotency) covers where keys live and how long to keep them.
+
+### Step 9: Work that can wait goes through a queue
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" step={6} minWidth={620} caption="Confirmation emails go to a queue. The worker backs off when the email service slows it, and a message that fails 5 times moves to the dead-letter queue." />
+
+A confirmation email can arrive a minute after "thank you". So the server puts one message per order on a **queue** and answers at once.
+
+A worker takes 10 messages at a time and sends them through a rented email service that accepts only so many sends a second. When it says "slow down", the worker backs off and messages wait in the queue. This is <Term id="back-pressure">back pressure</Term>: work drains at the speed of the slowest part.
+
+A message that fails 5 times moves to a **dead-letter queue**, a side queue that a person checks later, so it no longer blocks the rest.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: quotas per region, rate limits on the control plane, limits on each resource, and libraries that back off.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Where you see quotas:** Service Quotas lists the quotas for each account and region, with usage for many of them. CloudWatch can alarm on that usage.
+    - **Raising one:** an increase request in Service Quotas. Adjustable quotas can be raised; others are fixed. Quota request templates in AWS Organizations ask for higher values in every new account.
+    - **API throttling:** most APIs throttle per account and region. A throttled call fails with an error such as `RequestLimitExceeded` on EC2 or `ThrottlingException` on many other services.
+    - **Resource throughput:** set per service, such as DynamoDB table capacity, Lambda concurrency per region, and IOPS on an EBS volume.
+    - **Retries in the SDK:** the AWS SDKs retry throttling and short-lived errors with exponential backoff and jitter. The adaptive retry mode also slows the client down when it sees throttling.
+
+    **The difference that changes a design.** On-Demand EC2 quotas count vCPUs per family of instance types, not servers. A switch to a larger type therefore uses quota faster. Each account and each region starts with its own defaults, so a new account for a team or a standby region needs its own increases.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Where you see quotas:** the Quotas page and the Cloud Quotas API list each quota per project, with usage. Cloud Monitoring holds quota usage as metrics you can alert on.
+    - **Raising one:** a quota increase request from the Quotas page. Some are granted at once; others are reviewed and can take longer.
+    - **API throttling:** rate quotas cap requests per minute to each API, per project and sometimes per user. A call over one fails with a quota error, often HTTP 429 with the status `RESOURCE_EXHAUSTED`.
+    - **Resource throughput:** limits on each resource, such as a Cloud SQL instance's connections, sit apart from the project's quotas.
+    - **Retries in the SDK:** the Cloud Client Libraries retry some errors with exponential backoff, with settings per method.
+
+    **The difference that changes a design.** Google Cloud names two kinds of quota. Allocation quotas cap how much you hold, such as CPUs in a region. Rate quotas cap how fast you call. You may also lower a quota yourself, so a test project can be capped below the default to stop a runaway script.
+  </Tab>
+  <Tab label="Azure">
+    - **Where you see quotas:** the Quotas page and each subscription's usage and quotas view, per region.
+    - **Raising one:** a quota increase request. Many vCPU increases are handled automatically; others become a support request.
+    - **API throttling:** Azure Resource Manager throttles requests per subscription and caller. Over the limit it returns HTTP 429 with a `Retry-After` header. Response headers show how many requests remain.
+    - **Resource throughput:** set per resource provider, such as request units on Cosmos DB, transactions on a key vault, and disk IOPS.
+    - **Retries in the SDK:** the Azure SDKs retry with exponential backoff and honour `Retry-After`.
+
+    **The difference that changes a design.** vCPU quotas have two levels: a total for the region and one for each VM family. A new server needs room in both. Raising only the family quota still fails when the regional total is full, which is a common surprise on a sale morning.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/retry-storm" stepper minWidth={620} caption="The whole sale morning in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/retry-storm" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Should this call retry?"
+  tree={{
+    q: "Did it fail with throttling, a timeout or 'service unavailable'?",
+    yes: {
+      q: "Is it safe to repeat: a read, or a write that carries an idempotency key?",
+      yes: {
+        q: "Does a layer above or below already retry the same call?",
+        yes: "Do not retry here. Let one layer retry, so the tries do not multiply.",
+        no: {
+          answer: "Retry with exponential backoff and jitter. Cap the tries and stop when the caller's time is up.",
+          href: "/system-design/patterns/circuit-breaker-and-retries",
+        },
+      },
+      no: {
+        answer: "Add an idempotency key first. Until then a retry can make a second order.",
+        href: "/system-design/patterns/idempotency",
+      },
+    },
+    no: {
+      q: "Is it a quota error: you already run as many as you may?",
+      yes: "Do not retry in a loop. Raise the quota, free some capacity, or try another size or region.",
+      no: "An error such as 'not allowed' or 'bad request' fails the same way every time. Fix the request instead.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's servers have 4 cores, and the region allowed 32. The schedule asked for 10 servers. How many started, and what quota would 10 need?" hint="Divide, then multiply.">
+    8 started, because 32 ÷ 4 = 8. Ten servers need 40 cores. Brightpost set 64, room for 16, so an alert at 80% (52 cores) fires long before a refusal.
+  </QuizItem>
+  <QuizItem question="Three worker copies are refused at the same moment, and each waits exactly 2 seconds. What happens next, and what fixes it?" hint="What is the same about all three?">
+    All three come back at the same instant and are refused again. Jitter fixes it: each copy picks a random wait up to the limit, so the tries arrive apart.
+  </QuizItem>
+  <QuizItem question="A Pay request times out and the page retries with the same order key. The first try had already saved order 5101. What does the server do?">
+    It finds the key, returns order 5101 and makes nothing new. The shopper is charged once.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "No retry", "Instant retries", "Backoff + jitter, one layer", "Queue + dead-letter"]}
+  rows={[
+    ["Requests per slow Pay", "1", "Up to 4, at once", "Up to 2, about 1–2 s apart", "1, then the queue retries"],
+    ["Survives a 1-second hiccup", false, true, true, true],
+    ["Adds load when the system is full", false, true, "A little", false],
+    ["Shopper waits for it", "No", "Yes, while it fails", "Up to about 2 s more", "No"],
+    ["Needs an idempotency key", false, true, true, true],
+    ["Use it for", "Errors that fail every time", "Nothing", "Calls a person is waiting on", "Work that can wait, like email"],
+  ]}
+  caption="Brightpost's numbers for one Pay or one confirmation email."
+/>
+
+Instant retries never win. Backoff with jitter suits a person who waits; a queue suits work that can finish later.
+
+## Common pitfalls
+
+- **Raising the autoscaler's maximum but not the quota.** The maximum says 10 and the quota allows 8, and only the log knows. Check the quota every time you raise a maximum.
+- **Asking for an increase on the day.** Some requests take days. List the quotas a sale or a standby region needs and raise them a week ahead.
+- **Retrying a quota error in a loop.** Waiting does not free a quota. Raise it, or try another server size or region.
+- **Fixed waits and retries at every layer.** Clients that wait the same time collide again, and layers that each retry multiply the load. Retry at one layer, with backoff and jitter.
+- **Retrying writes without a key.** A timed-out write may have worked. Send an idempotency key with every try.
+
+## How to say it in an interview
+
+"A cloud says no in three ways: quotas on how much I may run, rate limits on how fast I call its APIs, and limits on each resource. I list the quotas a launch depends on per region, raise them ahead with headroom, and alert at about 80%. That includes a disaster-recovery region, whose quotas start at the defaults. When I am throttled, I retry with exponential backoff and jitter, at one layer, with a cap on tries and time. I retry only errors that can pass, and never a quota error in a loop. Writes carry an idempotency key, and work that can wait goes through a queue with a dead-letter queue."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a quota and a throttle?" level="Junior" category="Cloud">
+    **Short answer.** A quota caps how many of a thing you may have, such as processor cores in a region. A throttle caps how fast you may ask, such as calls a second to an API. You raise a quota by asking the provider; you live with a throttle by slowing down and retrying.
+
+    **Why.** They fail in different ways. Brightpost's quota of 32 cores refused servers 9 and 10, and waiting would never have helped. Asha's script that polled 20 times a second was throttled, and it would have worked again after a pause. So a quota error needs a person or a plan, while a throttle needs backoff in the code.
+
+    <AnimatedDiagram spec="animated/cloud/limit-layers" step={2} caption="The outer ring counts what you hold; the middle ring counts how fast you ask." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is the third kind of limit, and who hits it?
+    - Why does a provider set low quotas on a new account?
+
+    **Watch out for.** Treating the two as one and retrying a quota error. The retries can never succeed and only fill the logs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why add jitter to exponential backoff?" level="Mid" category="Cloud">
+    **Short answer.** Backoff spreads one client's tries over time, but clients that failed together still wait the same time and return together. Jitter adds a random part to each wait, so their tries arrive apart and the service can serve them.
+
+    **Why.** Brightpost's email worker runs several copies. Three refused in the same instant that each wait exactly 1 second come back together and are refused again. With a random wait up to the limit, they retry at 0.3, 0.7 and 1.6 seconds, and all get through.
+
+    <AnimatedDiagram spec="animated/cloud/retry-backoff-jitter" step={3} caption="Three copies with the same fixed wait collide again at the same instant." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why cap the wait, and the total time?
+    - When would you honour a wait the server sends instead?
+
+    **Watch out for.** Saying jitter makes each retry faster. It makes the group of retries smoother; a single client may wait a bit longer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your autoscaler cannot launch servers during a traffic spike. What quota planning was missed?" level="Mid" category="Cloud">
+    **Short answer.** Nobody checked that the region's quota covered the autoscaler's maximum. The maximum and the quota are separate numbers. The plan should list each quota a peak needs, raise it ahead with headroom, and alert at about 80% of it.
+
+    **Why.** Brightpost raised its maximum to 10 servers but its quota still allowed 32 cores, 8 servers of 4 cores. The refusals went only to a log. Now the quota is 64 cores and an alert fires at 52. A list of sale-day quotas is checked a week ahead, since some increases take days.
+
+    <AnimatedDiagram spec="animated/cloud/retry-storm" step={2} highlight={["autoscaler", "quota", "servers"]} caption="The autoscaler asks for servers 9 and 10, and the regional quota refuses them." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which quotas besides cores could stop the same scale-out?
+    - How would you alert on the refusal itself?
+
+    **Watch out for.** Asking for an increase during the incident and calling it a plan. It may take days, and the sale is over in hours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you make a retried 'create order' call safe?" level="Mid" category="Cloud">
+    **Short answer.** Give each order an idempotency key that the client creates once and sends with every try. The server stores the key with the order. A repeat key returns the first order instead of making a second.
+
+    **Why.** A timeout does not say whether the work happened. On Brightpost's sale morning, 38 first tries of Pay had saved the order before the retry saved it again. With a key, the second try finds the first order. Reads need no key, because reading twice changes nothing.
+
+    <AnimatedDiagram spec="animated/cloud/retry-storm" step={5} path="shoppers>lb>servers>keys" caption="The order key travels with every try, and the servers check it before they write." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long do you keep the keys?
+    - What if two tries with one key arrive at the same moment?
+
+    **Watch out for.** Using a timestamp or the cart's contents as the key. Two real orders can share both.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You fail over to a second region during an outage. What limits will you hit, and how do you prepare?" level="Senior" category="Cloud">
+    **Short answer.** The second region has its own quotas, starting at the defaults, so it may not start the servers you need. The failover itself also makes many control-plane calls at once, which can be throttled. Raise the standby region's quotas ahead, test a full start there, and make the failover scripts back off.
+
+    **Why.** Brightpost runs 10 servers on a sale day, so a standby region needs 40 cores plus headroom. Other customers may fail over to the same region in the same hour. A script that creates servers in a tight loop meets the rate limit and slows every other control-plane call. A test each quarter finds both problems first.
+
+    <AnimatedDiagram spec="animated/cloud/retry-storm" step={3} highlight={["quota", "alert", "autoscaler"]} caption="The same plan applies to every region: a quota with headroom and an alert before the limit." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would you keep a few servers running in the standby region? What does that cost and buy?
+    - Which data limits, such as database connections, also change in the new region?
+
+    **Watch out for.** Assuming a quota raised in one region applies to all. Quotas are counted per region, and a standby that cannot start servers is not a standby.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Managed NoSQL: Partition Keys, Capacity Units and Global Tables](/cloud/data/managed-nosql)
+- [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service)
+- [Serverless Functions: Triggers, Cold Starts and Concurrency](/cloud/compute/serverless-functions)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Rate Limiting](/system-design/patterns/rate-limiting)
+- [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+## Further reading
+
+- [AWS Service Quotas User Guide](https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html): viewing and raising quotas.
+- [Google Cloud quotas overview](https://cloud.google.com/docs/quotas/overview): allocation and rate quotas.
+- [Azure quotas overview](https://learn.microsoft.com/azure/quotas/quotas-overview): subscription and vCPU quotas.
+- [Azure Resource Manager throttling](https://learn.microsoft.com/azure/azure-resource-manager/management/request-limits-and-throttling): request limits and headers.

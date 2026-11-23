@@ -1,0 +1,290 @@
+---
+title: "Vision-Language Models"
+description: "How models read images: vision encoders, projection into the language model, image tokens, resolution and grounding."
+icon: eye
+updated: 2026-11-15
+---
+
+A support assistant that cannot see a photo of a cracked kettle makes the customer describe it in words.
+
+- Interviewers ask about vision-language models (VLMs) because the answer joins three things: how a picture becomes tokens, how those tokens reach the language model, and what the tokens cost.
+
+## Overview
+
+- A VLM cuts the image into **square patches**, turns each patch into a vector with a **vision encoder**, and passes the vectors through a **projector** so the language model can read them like word embeddings.
+- The **patch count is arithmetic**. LLaVA-1.5 uses CLIP ViT-L/14 at 336 px: 336 ÷ 14 = 24 patches a side, **24 × 24 = 576 visual tokens**.
+- There are two ways to connect vision to the language model: **put image tokens in the sequence** (LLaVA) or **add cross-attention layers** that read a fixed set of visual tokens (Flamingo, 64 tokens).
+- **Resolution is cost.** On one provider's tile rule (checked 15 November 2026), a 4032 × 3024 phone photo becomes **765 input tokens**, about a third of Brightpost's 2,200-token text prompt.
+- **CLIP** learns a shared image-text space from **400 million pairs** with a contrastive loss; it retrieves and classifies, but it does not write answers.
+- VLMs fail in predictable places: **counting, spatial relations and small text**. Test those before you ship.
+
+## Mental model
+
+- Imagine describing a photo to a friend over the phone, but you are only allowed to read out a fixed number of tiny tiles, each as a short code.
+- A vision encoder is the person who turns each tile into its code.
+- The projector is the translator who rewrites those codes in the friend's own vocabulary.
+- The friend, the language model, then reads the codes in order, followed by your question.
+- If you cut the photo into more tiles, the friend sees finer detail, but the call takes longer and costs more.
+
+## Core concepts
+
+### Vision encoders and patch tokens
+
+- A **vision encoder** is usually a Vision Transformer (ViT).
+- It splits the image into fixed-size square **patches**, flattens each into a vector, adds position information, and runs self-attention over all patches (see [Self-Attention Explained](/ai-system-design/genai-system-design/self-attention-explained)).
+- The output is one vector per patch. "ViT-L/14" means the large model with 14 × 14 px patches.
+- A 336 × 336 image gives 24 × 24 = 576 patches, so 576 vectors.
+- The encoder is normally **pre-trained** (often with CLIP's recipe) and kept frozen or lightly tuned.
+
+### Connecting vision to the language model
+
+- Two designs dominate. **A projector** maps each vision vector to the language model's embedding width (a linear layer, or the two-layer MLP in LLaVA-1.5).
+- The projected vectors become **visual tokens** that sit in the sequence next to the text tokens, so ordinary self-attention reads both.
+- **Cross-attention** keeps image tokens out of the sequence.
+- New layers between the frozen language-model layers take queries from the text and keys and values from the image tokens.
+- Flamingo compresses image features to a fixed 64 visual tokens with a **Perceiver Resampler** first.
+- The first design is simpler; the second keeps the text sequence short.
+
+### Resolution, tiling and token cost
+
+- More pixels mean more patches, and more patches mean more tokens, more memory for the [KV cache](/ai-system-design/genai-system-design/long-context-ring-attention-and-kv-quantization) and a longer time to the first token.
+- Models handle this in three ways: resize everything to one input size (LLaVA-1.5: 336 px, always 576 tokens); cut a large image into **tiles** and encode each (the provider rule in the worked example below); or encode at the image's own size up to a patch budget.
+- A **detail setting** lets the caller trade cost for fidelity.
+
+### Contrastive models such as CLIP versus generative VLMs
+
+- **CLIP** has two encoders, one for images and one for text, trained so that a photo and its caption land close together in one vector space.
+- It scores image-text similarity; it cannot answer a question.
+- A **generative VLM** (LLaVA, Flamingo and the multimodal chat models) puts a vision encoder in front of a language model and writes text.
+- Many generative VLMs use a CLIP image encoder as their eyes, so the two families are linked: CLIP gives the vectors, the LLM gives the sentence.
+
+## Architecture
+
+How does a photo reach the language model?
+
+<AnimatedDiagram
+  spec="animated/multimodal/vlm-patches-to-tokens"
+  stepper
+  caption="The LLaVA-1.5 path: photo, patches, vision encoder, projector, visual tokens, then the sequence. The count is 336 ÷ 14 = 24 a side, 24 × 24 = 576."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Resize the photo to the encoder's input">
+    LLaVA-1.5 uses CLIP-ViT-L at 336 px. Whatever the photo's shape, it becomes a 336 × 336 input.
+  </StepCard>
+  <StepCard n={2} title="Cut it into 14 px patches">
+    336 ÷ 14 = 24 patches across and 24 down: 576 patches, one per cell in the figure.
+  </StepCard>
+  <StepCard n={3} title="Encode each patch">
+    The ViT returns one vector per patch, after attention has mixed information between patches.
+  </StepCard>
+  <StepCard n={4} title="Project to the LLM's width">
+    A two-layer MLP maps each vector into the language model's embedding space. The paper does not print "576"; it follows from the patch size.
+  </StepCard>
+  <StepCard n={5} title="Place the visual tokens in the sequence">
+    The 576 tokens come before the question's text tokens. The LLM reads them with the same attention it uses for words.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The 576 positions are spent before the first word of the question.
+- Every layer of the language model attends over them, and their keys and values stay in the KV cache for the whole answer.
+
+## Technical mechanics
+
+### Projector or cross-attention
+
+<AnimatedDiagram
+  spec="animated/multimodal/vlm-fusion"
+  stepper
+  caption="Left: image tokens join the sequence, so the LLM's own self-attention reads them. Right: new gated cross-attention layers read a fixed 64 visual tokens; the text sequence stays short."
+/>
+
+**How to read it:**
+
+- Orange blocks are attention, using the colours of the Transformer pages; grey blocks are the frozen language-model layers.
+- In the projector design (left) nothing new is added to the LLM, but the sequence grows by 576.
+- In the cross-attention design (right) the LLM is frozen and new layers are trained.
+- Flamingo adds a gated block every fourth layer in its 9 B model and every seventh in its 80 B model, and each gate starts at zero so the frozen model's behaviour is unchanged on day one.
+
+**Which wins today:**
+
+- Many open VLMs follow the projector design because it is simple to train and to serve: image tokens look like text tokens to the engine.
+- Cross-attention is attractive when many images or video frames would blow up the sequence.
+- The [Multimodal & Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai) page puts this choice next to audio.
+
+### Contrastive pre-training, computed
+
+<AnimatedDiagram
+  spec="animated/multimodal/vlm-contrastive-pretrain"
+  stepper
+  caption="A batch of four photo-caption pairs. The true pairs sit on the diagonal of the similarity grid; training raises them and lowers the rest. The vectors are illustrative."
+/>
+
+**How to read it:**
+
+- Each row is a photo, each column a caption. Cells show cosine similarity.
+- A softmax over row 1 at temperature 0.07 gives the right caption a probability of 0.87, so the loss is −ln 0.87 = 0.14.
+- The columns give the same loss in the other direction, which is why CLIP's loss is called symmetric.
+- CLIP's batch held 32,768 pairs, so each photo had 32,767 wrong captions to push away.
+- The space that results can match a text question to a screenshot:
+
+<AnimatedDiagram
+  spec="animated/rag/shared-embedding-space"
+  stepper
+  caption="The same idea in use: a text question and a screenshot of the sign-in screen land close together, so a question retrieves a picture. Positions are a sketch."
+/>
+
+**How to read it:**
+
+- Step 1 is training: in the three-by-three grid each picture (a row) is pulled towards its own caption on the diagonal and pushed away from the other two.
+- Steps 2 and 3 place Brightpost's help centre in the space that results: text chunks (circles) cluster by topic, and each picture (a square) lands in the cluster about the same thing.
+- In step 4 the question lands in the sign-in cluster, and its ring holds both the sign-in screenshot and the chunk "Lost phone: use a backup code".
+
+- For retrieval over pictures, see [Multimodal RAG](/ai-system-design/genai-system-design/multimodal-rag) and [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space).
+
+### Document, chart and screen understanding
+
+- Pictures of text, tables and charts are VLM territory, and they are the hardest case for a fixed small input.
+- A scanned invoice at 336 px turns its small print into a few blurry patches.
+- Models that tile the page, or take many more patches for a document, do better because each character gets enough pixels.
+- Two practical rules: send the page at the resolution the model's guide recommends, and for pure text extraction compare against an OCR step, which is cheaper and gives exact characters.
+- Charts need a check that the model read the axis and the units, not only the shape.
+
+### Grounding and pointing
+
+- **Grounding** means tying words to places in the image: the model returns a box, a point or a mask for "the crack on the lid".
+- Some VLMs are trained to write coordinates as text tokens, so a box is four numbers in the answer.
+- This makes answers checkable: draw the box and look.
+- For Brightpost, a grounded answer ("the crack runs along the lid, here") is easier for an agent to audit than "the lid looks damaged".
+- Grounding quality varies by model, so measure it on your own images.
+
+### Failure modes: counting, spatial reasoning and small text
+
+- **Counting.** "How many cracks?" is hard because the answer needs a count over patches, not a global impression. Expect errors beyond a handful of objects.
+- **Spatial reasoning.** "Is the handle left of the spout?" depends on the order of patches, which the projector and attention only partly keep. Left and right are common slips.
+- **Small text.** A serial number on a kettle base spans a few pixels. Downscaling destroys it. Crop and resend the region at a higher detail.
+- **Hallucination.** The model describes plausible detail that is not in the photo. Ask it to quote or point to the evidence, and check with a second pass.
+
+### Worked example: the cracked kettle
+
+- A Brightpost customer sends a phone photo of order 4471, a cracked kettle, with the message "it arrived like this".
+- The photo is 4032 × 3024 pixels (assumed size).
+- The provider's tile rule, from OpenAI's image guide for its gpt-4o and gpt-4.1 models (read 15 November 2026), turns it into tokens.
+
+<AnimatedDiagram
+  spec="animated/multimodal/vlm-resolution-cost"
+  stepper
+  caption="Resize, count 512 px tiles, multiply. The kettle photo costs 765 tokens at high detail and 85 at low detail. Rule dated 15 November 2026; the price is illustrative."
+/>
+
+**How to read it:**
+
+- The photo is scaled to fit 2048 × 2048 (2048 × 1536), then its shortest side is scaled down to 768 (1024 × 768).
+- That makes ceil(1024 ÷ 512) × ceil(768 ÷ 512) = 2 × 2 = 4 tiles.
+
+**The numbers:**
+
+- Tokens = 85 + 4 × 170 = 765. At low detail the cost is 85 tokens, but a cracked lid is a small feature, so Brightpost uses high detail.
+- The photo adds 765 ÷ 2,200 = 35 % to a normal prompt.
+- If 5 % of the 200,000 daily requests carry a photo (illustrative share), that is 10,000 × 765 = 7.65 M tokens a day, 1.7 % of the 440 M text input tokens.
+- The same guide now lists newer models that count 32 px patches and apply a multiplier (1.2 for several current models), so the formula is model-specific; read the guide for the model you use.
+
+**What the model does with it:**
+
+- The VLM answers "yes, there is a crack across the lid, running to the handle" and points to it.
+- It does not decide the refund. The price is £42 and refunds over £30 need approval, so the agent routes the case to a person with the photo and the grounded description attached.
+- Brightpost also checks the serial number: a first pass at low detail cannot read it, so the agent crops the base and resends that region at high detail.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Projector (tokens in the sequence) | Simple; works with any LLM engine | Sequence grows by hundreds of tokens per image | General chat with a few images |
+| Cross-attention layers | Short text sequence; fixed image cost | New layers to train; trickier to serve | Many images or video frames |
+| Fixed small input (one resize) | Predictable cost and latency | Loses small text and fine detail | Photos where the object is large |
+| Tiling or high detail | Reads documents and fine print | More tokens and slower first token | Documents, screenshots, serial numbers |
+| CLIP-style encoder only | Cheap similarity search | No generation, no reasoning | Retrieval and classification |
+
+## Production systems
+
+- **LLaVA-1.5 (2023).** CLIP-ViT-L at 336 px with a two-layer MLP connector on a Vicuna model. The paper reports training on about 1.2 M public examples in about one day on a single 8-A100 node.
+- **CLIP (2021).** 400 M image-text pairs; the best model matches the original ResNet-50's ImageNet accuracy zero-shot (76.2 % top-1).
+- **Flamingo (2022).** Frozen language model plus gated cross-attention and a Perceiver Resampler of 64 tokens, trained on interleaved web text and images for few-shot prompting.
+- **Provider tile rules (November 2026).** One major API charges 85 + 170 per 512 px tile for its tile-based models and counts 32 px patches for newer ones, so image cost is a documented formula you can estimate before you send.
+
+## Failure modes & pitfalls
+
+- Treating an image as one token. A photo is hundreds of tokens, and they count against the context window and the bill.
+- Sending a huge photo and trusting the default. The provider may downscale it and lose the small text you needed.
+- Using low detail to save money, then asking about fine print.
+- Trusting counts and left-right answers without a test set of your own images.
+- Letting the VLM decide a policy outcome. It describes; the rules and the people decide (a £42 refund needs approval).
+- Quoting a token formula from memory. Rules change by model; date the number.
+
+## Interview framework
+
+1. Draw the path: image, patches, vision encoder, projector, visual tokens, language model.
+2. Give the arithmetic: image size ÷ patch size, squared, is the token count (336 ÷ 14 = 24, so 576).
+3. Name the two connection designs and one cost of each: sequence length against extra layers.
+4. Explain contrastive training in one line: matching pairs on the diagonal, every other cell pushed down.
+5. Close with failure modes and how you would test them: counting, spatial relations, small text, hallucinated detail.
+
+**What interviewers listen for:** the patch arithmetic, the token cost of resolution, the two fusion designs, and a plan to evaluate on your own images.
+
+**Red flags:** "the model just sees the image", no mention of tokens or cost, and trusting a VLM's answer on fine print.
+
+## Further reading
+
+- [Learning Transferable Visual Models From Natural Language Supervision (CLIP; Radford et al., 2021)](https://arxiv.org/abs/2103.00020)
+- [Visual Instruction Tuning (LLaVA; Liu et al., 2023)](https://arxiv.org/abs/2304.08485)
+- [Improved Baselines with Visual Instruction Tuning (LLaVA-1.5; Liu et al., 2023)](https://arxiv.org/abs/2310.03744)
+- [Flamingo: a Visual Language Model for Few-Shot Learning (Alayrac et al., 2022)](https://arxiv.org/abs/2204.14198)
+- [Images and vision (OpenAI API guide; image token rules read 15 November 2026)](https://developers.openai.com/api/docs/guides/images-vision)
+- Related pages: [Multimodal & Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai) · [Multimodal RAG](/ai-system-design/genai-system-design/multimodal-rag) · [Self-Attention Explained](/ai-system-design/genai-system-design/self-attention-explained)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does a vision-language model turn an image into something an LLM can read?" category="Concepts" level="Junior">
+    - A vision encoder, usually a Vision Transformer, cuts the image into square patches and returns one vector per patch.
+    - A small projector, a linear layer or a two-layer MLP, maps each vector to the language model's embedding width.
+    - Those projected vectors act as visual tokens and sit in the input sequence with the text tokens.
+    - The language model then reads them with the same attention it uses for words and writes the answer as text.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many visual tokens does LLaVA-1.5 produce for one image, and why?" category="Concepts" level="Junior">
+    - It uses CLIP ViT-L/14 at 336 px. The patch size is 14, so 336 ÷ 14 = 24 patches per side and 24 × 24 = 576 patches.
+    - Each patch becomes one visual token after the projector, so every image costs 576 tokens whatever it shows.
+    - The paper does not print the number, but it follows directly from the input size and the patch size.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare a projector with cross-attention for connecting vision to a language model." category="Architecture" level="Mid">
+    - A projector puts the image tokens in the sequence, so the LLM's own self-attention reads them.
+    - It needs no new layers, and any engine can serve it, but the sequence grows by hundreds of tokens per image.
+    - Cross-attention, as in Flamingo, keeps image tokens out of the sequence and adds gated layers that take keys and values from a fixed number of visual tokens, 64 after the Perceiver Resampler.
+    - The text stays short, but there are new layers to train and serve.
+    - Projectors dominate open models; cross-attention helps when there are many images or frames.
+  </InterviewQuestion>
+  <InterviewQuestion question="A 4032 × 3024 photo arrives. How would you estimate its token cost?" category="Scaling" level="Mid">
+    - Use the provider's published rule for the model and date the result.
+    - On the tile rule for gpt-4o and gpt-4.1 at high detail, scale the photo to fit 2048 × 2048, scale the shortest side to 768 (1024 × 768), count 512 px tiles (2 × 2 = 4) and compute 85 + 4 × 170 = 765 tokens.
+    - Newer models in the same guide count 32 px patches with a multiplier, so the formula differs by model.
+    - Then compare with your text prompt: 765 tokens is about 35 % of a 2,200-token prompt, and multiply by the share of requests that carry a photo.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does CLIP learn, and what is it good for?" category="Concepts" level="Mid">
+    - CLIP trains an image encoder and a text encoder on 400 M image-caption pairs.
+    - For a batch of N pairs it computes the N × N grid of similarities and uses a symmetric cross-entropy loss that raises the N true pairs on the diagonal and lowers the other N² − N cells, with a learned temperature.
+    - The result is a shared space where a photo and its description are near each other.
+    - That gives zero-shot classification, image-text retrieval and a strong image encoder for other models. It cannot generate text by itself.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does a VLM struggle to read a serial number on a product photo, and what do you do about it?" category="Failure modes" level="Senior">
+    - Resizing to the model's input, or a low-detail setting, leaves a serial number only a few pixels tall, so its patches carry no readable shape.
+    - The model may then guess digits that look plausible.
+    - Crop the region, resend it at high detail so each character gets enough pixels, and ask for the text with a check such as a format pattern.
+    - For pure text, compare with an OCR step, and send low-confidence reads to a person.
+  </InterviewQuestion>
+  <InterviewQuestion question="You add photo support to a support bot with 200,000 requests a day. What do you measure and decide before launch?" category="Trade-offs" level="Senior">
+    - First the cost: tokens per photo from the provider rule, times the share of requests with photos, against the text volume; and the latency, since more input tokens lengthen the time to first token.
+    - Second quality on your own images: a labelled set that includes counting, left-right questions, small text and grounding, scored by people or a checked judge.
+    - Third, policy: the VLM describes damage but does not decide refunds, so a £42 case still goes to approval with the photo attached.
+    - Also log image sizes and detail settings so a cost jump is traceable.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,99 +1,244 @@
 ---
 title: "Leader Election and Consensus"
 description: "Choosing a single coordinator safely: Raft and Paxos, leases, heartbeats, split brain and fencing tokens."
+icon: users
+updated: 2026-11-16
 ---
 
-Many designs need exactly one node in charge: the primary of a database, the owner of a partition, the scheduler. Doing this safely is a consensus problem.
+Many designs need exactly one node in charge: a database primary, a partition owner, the scheduler. Doing this safely is a consensus problem; get it wrong and two leaders sell the last kettle twice.
 
-## TL;DR
+- Interviewers ask about leader election to see whether you can keep one writer through crashes and network cuts, and say in numbers how long writes stop while a new leader takes over.
+
+## Overview
 
 - A **leader** serialises decisions; **followers** replicate and take over on failure.
 - **Consensus** (Raft, Paxos, ZAB) lets nodes agree on a value or leader despite failures, using a **majority quorum**.
-- Detect failure with **heartbeats** and **timeouts**; elect a new leader with a higher **term/epoch**.
+- Detect failure with **heartbeats** and **timeouts**; elect a new leader with a higher **term** (also called an epoch).
 - **Split brain** (two leaders) is prevented by quorums and **fencing tokens**.
-- Usually you use a coordination service (etcd, ZooKeeper) instead of writing consensus yourself.
+- Usually you use a coordination service (etcd, ZooKeeper) or a Kubernetes Lease instead of writing consensus yourself.
+- Writes stop for roughly the election timeout: a few hundred milliseconds with Raft's suggested timeouts, about 15 s with Kubernetes' default lease.
 
-## The idea in plain English
+## Mental model
 
-A meeting needs one chair. If the chair leaves, the group votes on a new one, and a chair is only valid if a majority backs them. Someone who slept through the vote and still thinks they are chair must be ignored.
+- A meeting needs one chair. If the chair leaves, the group votes on a new one, and a chair is only valid if a majority backs them.
+- Every vote opens a new numbered session, and minutes from an older session are void.
+- Someone who slept through the vote and still thinks they are chair must be ignored: the secretary refuses any note stamped with an old session number.
+- Mapped back: the chair is the leader, the vote is the election, the session number is the term, and the secretary is the storage that checks a fencing token.
 
 ## Core concepts
 
-1. **Quorum.** A majority (`N/2 + 1`) must agree; any two majorities overlap, so two leaders cannot both be committed.
-2. **Terms / epochs.** Monotonic numbers; the higher term wins.
-3. **Heartbeats and timeouts.** Followers start an election if the leader goes silent (randomised timeouts avoid ties).
-4. **Log replication.** The leader appends entries and commits once a majority stores them.
-5. **Leases.** A leader holds authority for a time window and must renew; relies on bounded clock drift.
-6. **Fencing tokens.** Each leadership gets an increasing token; storage rejects writes with an older token, stopping a paused ex-leader.
+- The running example is Brightpost's stock service in London on sale day: 10,000 kettles, up to **300 orders/s** at 12:00, one leader that decrements stock, and three nodes, one per availability zone (illustrative).
 
-## Architecture
+### One writer, and how split brain breaks it
 
-```mermaid
-sequenceDiagram
-    participant F1 as Follower A
-    participant F2 as Follower B
-    participant L as Leader (term 4)
-    L->>F1: heartbeat
-    L->>F2: heartbeat
-    Note over L: leader crashes
-    F1->>F1: timeout, term 5
-    F1->>F2: request vote (term 5)
-    F2-->>F1: vote granted
-    F1->>F2: heartbeat (new leader)
-```
+- One leader gives every change a single order, so two shoppers cannot both take the last kettle.
+- **Split brain:** a network cut makes a standby believe the leader is dead. It promotes itself, while the old leader never learns it lost and keeps writing.
+- A heartbeat alone cannot tell "the leader crashed" from "the link to the leader is cut".
+- The fix: a node may act as leader only while a **majority** of the voters stand behind it.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/le-split-brain" stepper caption="Failover on a missed heartbeat alone can leave two leaders; requiring a majority of three means the cut-off node cannot act and the last kettle sells once." />
 
-### Split brain and fencing
+**How to read it:**
 
-A leader that pauses (GC, network) may wake up believing it is still leader. A lease alone is not enough; the resource it writes to must check the fencing token and refuse stale ones.
+- Step 1 is two nodes with heartbeat failover: after 3 s of silence B promotes itself, and both A and B sell the last kettle.
+- Step 2 adds a third voter, C. A is cut off, cannot store the sale on a second node and refuses it; B wins C's vote and sells the kettle once.
+
+**The numbers:**
+
+- Two nodes: each side of the cut holds 1 of 2 votes, so no rule based on votes can pick a side, and a heartbeat rule picks both.
+- Three nodes: a majority is 2. The cut-off node has 1 of 3 and stops; the other side has 2 of 3 and carries on.
+- Five nodes: a majority is 3, so the group survives 2 failures.
+
+<PremiumBreak />
+
+### Quorums, terms and log replication
+
+- **Quorum.** A majority (`N/2 + 1`, rounded down) must agree; any two majorities overlap, so two leaders cannot both be committed in the same term.
+- **Terms.** Monotonic numbers; the higher term wins. A leader or candidate that sees a higher term steps down to follower at once.
+- **Heartbeats and timeouts.** Followers start an election if the leader goes silent; randomised timeouts avoid ties.
+- **Log replication.** The leader appends entries and commits once a majority stores them.
 
 ### Why odd cluster sizes
 
-3 nodes tolerate 1 failure, 5 tolerate 2. Even sizes add cost without extra tolerance.
+- 3 nodes tolerate 1 failure, 5 tolerate 2. Even sizes add cost without extra tolerance: 4 nodes need 3 votes and still tolerate only 1 failure.
+- Spread the voters so that losing one zone leaves a majority: 3 nodes in 3 zones, never 2 in one zone and 1 in another.
+
+## Architecture
+
+A Raft election in Brightpost's three-node stock group, from the leader's crash to the old leader stepping down.
+
+<AnimatedDiagram spec="animated/patterns/le-raft-election" stepper caption="The first node to hear nothing for its random timeout starts a new term and asks for votes; a majority makes it leader, and the higher term silences the old one." />
+
+<StepCards>
+  <StepCard n={1} title="Leader A replicates, then crashes">
+    Leader A, in term 4, appends a kettle reservation as entry 812 on B and C and confirms it once 2 of 3 nodes store it. Then A crashes, and its next heartbeat never arrives.
+  </StepCard>
+  <StepCard n={2} title="B times out first: term 5">
+    Each follower waits a random election timeout from 150 to 300 ms. B's 210 ms runs out first, so B moves to term 5, becomes a candidate and votes for itself.
+  </StepCard>
+  <StepCard n={3} title="C checks B's log and votes yes">
+    B asks C for its vote in term 5 and sends its last entry, term 4 index 812. C's own log is not newer, so C votes yes, and 2 of 3 is a majority.
+  </StepCard>
+  <StepCard n={4} title="B leads term 5; A steps down">
+    B commits a no-op entry in term 5 and takes the order service's retried reservation. When A restarts and sends a term 4 message, B rejects it, and A becomes a follower.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Raft elections in detail
+
+- A candidate wins with votes from a majority for the same term. Each server votes for at most one candidate per term, first come first served.
+- An election ends three ways: the candidate wins, another node proves it leads with a term at least as high, or the votes split and a new term starts after another random timeout.
+- **The log check:** a voter refuses a candidate whose log is less up to date than its own. Compare the last entries' terms; if equal, the longer log wins. So a new leader holds every committed entry.
+- **Timing rule:** broadcast time ≪ election timeout ≪ time between failures. With a broadcast time of 0.5 to 20 ms, the paper puts the election timeout between 10 and 500 ms.
+- The Raft paper measured elections taking over 10 s with no randomness (split votes), 35 ms on average with 12 to 24 ms timeouts, and recommends 150 to 300 ms.
+- **Reads:** a new leader commits a no-op entry first, then confirms it still leads by exchanging heartbeats with a majority before answering a read. A lease avoids that round trip but relies on bounded clock skew.
+
+### Leases and clock drift
+
+- A **lease** gives a leader authority for a time window, and it must renew before the window ends. It needs no vote per decision, so reads can be served on the leader.
+- A lease relies on clocks running at about the same **rate**, not on synchronised clocks. Each node times the lease on its own local timer.
+
+The same lease seen by a leader and two candidates, with the Kubernetes client-go core defaults.
+
+<AnimatedDiagram spec="animated/patterns/le-lease" stepper caption="A lease is safe only while the gap between “the leader gives up” and “the others take over” is wider than the clocks can drift apart." />
+
+**How to read it:**
+
+- The green bar is the leader acting; the lime bars are candidates waiting out the lease; red is the time with two leaders.
+- Step 2 gives one candidate a clock running twice as fast, an extreme rate chosen to make the point.
+
+**The numbers:**
+
+- The leader's next renewal comes 2 s after the last one; if it keeps failing, the leader gives up after its 10 s renew deadline: 2 + 10 = 12 s.
+- A candidate takes over only after 15 s with no change seen, trying every 2 s, so at 15 to 17 s. The gap of 15 − 12 = 3 s is the safety margin.
+- A clock twice as fast counts 15 s in 15 ÷ 2 = 7.5 s, so two leaders act for 12 − 7.5 = 4.5 s.
+- The client-go docs say the ratio of lease duration to renew deadline sets the tolerance: 60 s against 30 s tolerates a clock about twice as fast.
+
+<Callout tone="red" title="What breaks">
+  A pause longer than the margin (a 30 s garbage-collection pause, a frozen VM) breaks any lease, whatever the clocks do. The client-go docs say plainly that the library does not guarantee only one leader. Whatever the leader writes to must also check a fencing token.
+</Callout>
+
+### Fencing tokens
+
+- A leader that pauses (GC, network) may wake up believing it is still leader. A lease alone is not enough; the resource it writes to must check the token and refuse stale ones.
+- A **fencing token** is a number that grows with every leadership or lock grant: the Raft term, or ZooKeeper's `zxid` or znode version.
+- The full mechanics and the token 33 against 34 figure live in [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking).
+
+### Recipes on a coordination service
+
+- **ZooKeeper:** each candidate creates an `EPHEMERAL|SEQUENTIAL` znode; the smallest sequence number leads, and each candidate watches only the next lower znode, which avoids a herd of wake-ups.
+- **Kubernetes:** a `Lease` object in the `coordination.k8s.io` group names the holder, and the holder renews it.
+- Who is alive and who is in the cluster is a separate question; see [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection).
+
+### Worked example: the stock leader fails at 12:00:30
+
+Follow the four steps of the Architecture figure during the flash sale.
+
+1. At 12:00:30 leader A, in term 4, has stored entry 812 on B and C and confirmed the reservation. It sends heartbeats every 50 ms (illustrative), then crashes.
+2. B's timer, drawn at 210 ms from 150 to 300 ms, fires first; C's 280 ms has not. B moves to term 5 and votes for itself.
+3. B asks C for its vote; C's last entry is 4/812, the same as B's, so C votes yes: 2 of 3.
+4. B commits a no-op in term 5 and takes the order service's retries. A restarts with term 4, is rejected, and follows B.
+
+**The numbers:**
+
+- Writes stop for B's timeout plus a vote and a commit round trip inside London: 210 + 2 × 1 ms (illustrative) ≈ 0.21 s, at worst about 0.3 s.
+- At 300 orders/s: 0.3 × 300 = 90 reservations wait. With a 1 s client timeout and an idempotency key on the retry, none fail and none are taken twice.
+- With etcd's defaults (100 ms heartbeat, 1,000 ms election timeout): writes stop for at least 1 s, so 300 or more reservations wait.
+- With Kubernetes' default lease: 15 to 17 s, so up to 300 × 17 = 5,100 reservations stall. Fine for the hold-expiry scheduler: a 10-minute hold ends at most 17 s late (under 3 %).
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Consensus | Safety under failures | Latency of quorum round trips, availability needs a majority |
-| Single leader | Simple ordering | Write bottleneck, failover pause |
-| Leases | Cheap reads on leader | Depends on clocks |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Consensus (Raft, Paxos) | Safety under failures; failover in under a second | Latency of a quorum round trip per write; needs a majority up | The stock leader, metadata, configuration |
+| Single leader | Simple ordering | Write bottleneck, failover pause | Most stateful services |
+| Lease on a store | Cheap reads on the leader | Depends on clocks; no fencing by itself | Schedulers and one-owner background jobs |
+| Lease plus fencing token | A stale leader's writes are refused | The resource must check every token | A leader that writes to an outside store |
+| No leader (quorum reads and writes) | No failover pause | Conflicting writes to resolve | Always-writable key-value stores |
 
-## Real-world examples
+## Production systems
 
-- Partition leaders and controller election: [Distributed Message Queue](/system-design/case-studies/distributed-message-queue).
-- Metadata and replica coordination: [Key Value Store](/system-design/case-studies/key-value-store), [S3](/system-design/case-studies/s3).
-- Single-leader replication: [Single Leader Replication](/system-design/databases/single-leader-replication).
+- **etcd** (as of November 2026): Raft inside; defaults of 100 ms heartbeat and 1,000 ms election timeout; the docs say the election timeout must be at least 10 times the round-trip time, with an upper limit of 50 s.
+- **ZooKeeper**: the leader election recipe uses sequential ephemeral znodes; the smallest sequence number leads, and watching the next lower znode avoids the herd effect.
+- **Kubernetes**: Leases elect one active `kube-controller-manager` and `kube-scheduler` in HA set-ups; client-go's core clients default to a 15 s lease, a 10 s renew deadline and a 2 s retry period.
+- **Amazon**: the Builders' Library calls leases the most widely used leader election mechanism at Amazon, and recommends checking the remaining lease time before any side effect.
+- **Message queues and databases**: partition leaders and controller election in a [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue); [Single-Leader Replication](/system-design/databases/single-leader-replication) for a database primary.
+- **Used in our case studies:** [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [S3](/system-design-case-studies/case-studies/s3) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Using a database row or Redis key as a lock without fencing.
-- Assuming clocks are synchronised.
-- Even-sized clusters or clusters spread so a zone loss loses the majority.
-- Writing your own consensus.
+- **A lock without fencing.** A database row or Redis key used as a lock lets a paused holder write after expiry. Fix: a fencing token the resource checks.
+- **Assuming clocks are synchronised.** A lease is only as safe as the margin between give-up and take-over. Fix: time leases on local monotonic timers, keep the margin, and fence.
+- **Even-sized clusters, or a zone loss that loses the majority.** Fix: 3 or 5 voters, one per zone.
+- **Writing your own consensus.** Fix: etcd, ZooKeeper or a Kubernetes Lease, with a well-tested client.
+- **Election timeouts too tight.** Leaders cannot heartbeat in time and leadership flaps. Fix: keep broadcast time ≪ election timeout.
+- **A lease renewed by a background thread.** The lease stays alive while the worker is stuck. Fix: check the remaining lease time before every side effect.
 
-## How to answer in an interview
+## Interview framework
 
-Say why you need a single writer, use an existing coordination service, explain quorums, terms and failover time, and mention fencing for external resources.
+1. Say why you need a single writer (the stock count, the scheduler) and what two leaders would break.
+2. Use an existing coordination service: etcd, ZooKeeper or a Kubernetes Lease.
+3. Explain quorums and terms: 3 or 5 voters, a majority to lead, the higher term wins.
+4. Give the failover time from the timeouts, and say what writes do meanwhile (retry with an idempotency key).
+5. Mention fencing for external resources.
 
-## Related patterns
+**What interviewers listen for:** a majority, a term, and a failover time in numbers.
 
-[Consistency Models](/system-design/patterns/consistency-models) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Sharding](/system-design/patterns/sharding)
+**Red flags:** "the standby takes over when the heartbeat stops", or a Redis lock guarding stock with no fencing token.
 
 ## Further reading
 
 - [In Search of an Understandable Consensus Algorithm (Raft)](https://raft.github.io/raft.pdf)
 - [How to do distributed locking (Kleppmann)](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html)
+- [ZooKeeper recipes: leader election](https://zookeeper.apache.org/doc/current/recipes.html)
+- [etcd tuning: heartbeat interval and election timeout](https://etcd.io/docs/v3.5/tuning/)
+- [client-go leaderelection package](https://pkg.go.dev/k8s.io/client-go/tools/leaderelection)
+- [Leader election in distributed systems (Amazon Builders' Library)](https://aws.amazon.com/builders-library/leader-election-in-distributed-systems/)
+- Related pages: [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Sharding and Partitioning](/system-design/patterns/sharding)
 
 <InterviewQuestions>
   <InterviewQuestion question="How does Raft elect a leader?" category="Concepts" level="Mid">
-    A follower whose election timeout fires becomes a candidate, increments the term and requests votes; a node grants one vote per term, and a candidate with a majority becomes leader and sends heartbeats. Randomised timeouts make split votes rare.
+    - A follower whose election timeout fires becomes a candidate, increments the term and requests votes.
+    - A node grants one vote per term, and only to a candidate whose log is at least as up to date as its own.
+    - A candidate with a majority becomes leader and sends heartbeats.
+    - Randomised timeouts make split votes rare.
   </InterviewQuestion>
-  <InterviewQuestion question="What is a fencing token?" category="Reliability" level="Senior">
-    A number that increases with each leadership or lock grant. The protected resource rejects any request carrying a lower token, so a paused former leader cannot corrupt data.
+  <InterviewQuestion question="What is a fencing token?" category="Failure modes" level="Senior">
+    - A number that increases with each leadership or lock grant.
+    - The protected resource rejects any request carrying a lower token, so a paused former leader cannot corrupt data.
+    - Raft's term, or ZooKeeper's `zxid` or znode version, can serve as the token.
   </InterviewQuestion>
   <InterviewQuestion question="Why does consensus need a majority?" category="Concepts" level="Mid">
-    Any two majorities share at least one node, so a decision committed by one majority is seen by any later majority, preventing two conflicting leaders or values.
+    - Any two majorities share at least one node.
+    - So a decision committed by one majority is seen by any later majority.
+    - That prevents two conflicting leaders or values in the same term.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is leader election, and why would a system need a leader?" category="Concepts" level="Junior">
+    - It is how a group of nodes agrees which one of them is in charge, and picks a new one when it fails.
+    - One leader gives every change a single order: one node decrements the kettle stock, so the last kettle sells once.
+    - Examples: a database primary, a partition owner, a scheduler that must run each job once.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why run three or five voters and not four?" category="Scaling" level="Junior">
+    - A majority of 3 is 2, so 3 nodes survive 1 failure; a majority of 5 is 3, so 5 survive 2.
+    - 4 nodes need 3 votes and still survive only 1 failure, at the cost of a fourth node.
+    - Place one voter per zone so losing a zone leaves a majority.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens to a five-node Raft cluster when a network cut splits it into two and three nodes?" category="Failure modes" level="Mid">
+    - The side with three nodes holds a majority: it elects a leader in a new term and keeps committing writes.
+    - The side with two cannot commit anything; an old leader stranded there cannot reach a majority, so its writes never commit.
+    - When the cut heals, the stranded nodes see the higher term, step down and take the majority's log.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost's stock leader in London crashes at 12:00:30 during the flash sale. How long do reservations stop, and what decides it?" category="Scaling" level="Senior">
+    - The election timeout decides it: with 150 to 300 ms, a follower notices within 0.3 s and wins a vote in a millisecond or two inside one region.
+    - At 300 orders/s that is about 90 reservations waiting; clients retry with an idempotency key, so none fail or double up.
+    - With etcd's defaults (1,000 ms election timeout) the pause is at least 1 s; with Kubernetes' default 15 s lease it is 15 to 17 s, about 5,100 stalled reservations.
+    - Shorter timeouts cut the pause but must stay well above the broadcast time, or leadership flaps.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is a lease enough, and when do you need consensus plus fencing?" category="Trade-offs" level="Senior">
+    - A lease is enough when a second leader for a few seconds costs little: a scheduler whose jobs are idempotent, a cache warmer.
+    - A lease relies on clocks running at the same rate and no long pauses; a GC pause longer than the margin gives two leaders.
+    - Where two leaders would corrupt data (stock, money), take leadership from a consensus store and pass its term or revision as a fencing token that the storage checks.
   </InterviewQuestion>
 </InterviewQuestions>

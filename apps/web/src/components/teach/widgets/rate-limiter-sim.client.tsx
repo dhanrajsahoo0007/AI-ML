@@ -92,7 +92,7 @@ export function RateLimiterSim({
       <ScrollX label="Request timeline">
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className="w-full min-w-[640px] sm:min-w-0"
+          className="w-full min-w-[640px] max-w-[920px] sm:min-w-0"
           role="img"
           aria-label={`Timeline of ${decisions.length} requests over 4 seconds: ${t.accepted} accepted, ${t.rejected} rejected.`}
         >

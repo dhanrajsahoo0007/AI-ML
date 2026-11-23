@@ -1,0 +1,216 @@
+---
+title: "Prompt vs RAG vs Fine-Tuning"
+description: "How to choose between better prompts, retrieval and fine-tuning for a problem, and when to combine them."
+icon: git-fork
+---
+
+A model that gives the wrong answer can be fixed in three places: the words you send it, the evidence you hand it, or the model itself.
+
+- Each fix costs a different amount, changes at a different speed and fixes a different kind of mistake.
+- Picking the wrong one is the most expensive mistake in an LLM project, because it is usually discovered months later.
+
+## Overview
+
+- **Prompting** changes the instructions and examples. It is free to try, takes effect at once, and should always come first.
+- **RAG** (retrieval-augmented generation) hands the model passages fetched from your own documents at request time. It fixes **knowledge**: facts the model never saw or that change.
+- **Fine-tuning** trains the model on examples. It fixes **behaviour and format**: a house style, a strict output schema, a narrow skill. It is a poor way to teach new facts.
+- Ask "what is still wrong after the best prompt?" Missing facts → RAG. Wrong format or behaviour → fine-tune. Both → combine them.
+- Long context (pasting everything) is a fourth option for small, stable corpora. Brightpost's help centre is **1.32 million tokens**, more than a 1M-token window.
+
+## Mental model
+
+- Think of a new support agent on their first day.
+- You can hand them a better checklist (a prompt).
+- You can give them the help-centre binder to look things up in while they talk to a customer (RAG).
+- Or you can send them on a two-week training course (fine-tuning).
+- The checklist fixes sloppy answers today. The binder fixes "I don't know our refund policy".
+- The course fixes "I can't write a ticket summary the way we want it", but it is a bad way to memorise a policy that changes next week.
+
+## Core concepts
+
+- The running example is Brightpost's support assistant, answering from a help centre of **1,200 articles** (**3,600 chunks** of 400 tokens).
+- The main question is "How do I reset my password if I lost my phone?", whose answer needs two Brightpost articles.
+
+### What each approach changes
+
+Every request to a model has the same parts: instructions, optional evidence, the question, and the weights that read them. Each approach edits a different part.
+
+<AnimatedDiagram
+  spec="animated/rag/three-levers"
+  stepper
+  caption="Prompting changes the words, RAG changes the evidence, fine-tuning changes the model; each changes at a different speed."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Prompt engineering edits the words you send">
+    You rewrite the instructions and add examples, about 200 tokens here. A change ships in minutes and is tested against the eval set the same day. The model still knows only what it learned in training, so it cannot know Brightpost's own reset steps.
+  </StepCard>
+  <StepCard n={2} title="RAG adds evidence to every request">
+    A vector index of the 3,600 help-centre chunks supplies the five most relevant ones, 2,000 tokens, on every request. Editing an article changes the next answer. The model's tone and output format are still whatever its training gave it.
+  </StepCard>
+  <StepCard n={3} title="Fine-tuning changes the model itself">
+    Training on examples changes the weights, once per training run. The model now writes in the house style or a fixed schema without being told at length. Anything it learned this way is frozen until the next run.
+  </StepCard>
+</StepCards>
+
+### A decision framework: knowledge, behaviour and format
+
+- The question to ask is not "which is best?" but "what is still wrong after the best prompt I can write?".
+- That needs an evaluation set first: a few hundred real questions with known good answers (see [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals)).
+
+<AnimatedDiagram
+  spec="animated/rag/choose-approach"
+  caption="The lever follows the gap, and you only know the gap after you have measured the best prompt."
+/>
+
+**How to read it:**
+
+- Start at the top: write the best prompt and measure it.
+- Then sort the failures. If nothing is left, ship the prompt.
+- If the model lacks facts (Brightpost's reset steps, today's prices), add RAG.
+- If it knows enough but answers in the wrong shape (tagging every ticket with one of 40 types in strict JSON), fine-tune.
+- If both kinds of failure remain, combine them, as the Architecture section shows.
+
+### Cost, latency and maintenance compared
+
+The three levers differ most in what one request costs and in what happens when a fact changes.
+
+<AnimatedDiagram
+  spec="animated/rag/context-cost"
+  caption="RAG pays a few thousand tokens and tens of milliseconds to keep facts editable; pasting everything does not even fit."
+/>
+
+**How to read it:**
+
+- The bars use a log scale, so each tick is 100 times the one before.
+- A fine-tuned model reads the fewest tokens because the instructions it no longer needs live in its weights.
+- RAG reads ten times more than the plain prompt, adds an embedding call and a search, and in return an edited article changes the next answer.
+- Pasting the whole help centre needs no index at all, but it does not fit.
+
+**The numbers:**
+
+- Prompt only: 200 + 15 = 215 tokens. Fine-tuned: about 50 + 15 = 65 tokens (illustrative).
+- RAG: 200 + 5 × 400 + 15 = 2,215 tokens, plus 20 ms to embed the question and 15 ms to search (illustrative).
+- Whole help centre: 1,200 × 1,100 = 1,320,000 tokens + 215 ≈ 1.32 million.
+- At an illustrative 3 US dollars per million input tokens, RAG costs about 0.0066 dollars per question and the whole help centre about 3.96 dollars, roughly 600 times more.
+
+## Architecture
+
+In a real product the levers stack. Brightpost's assistant gains them one at a time, each only when the eval set shows the gap it closes.
+
+<AnimatedDiagram
+  spec="animated/rag/combined-stack"
+  stepper
+  caption="Each lever is added only when the eval set shows the gap it closes, and each plugs into a different place."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Start with a prompt, a base model and an eval set">
+    The question goes into a versioned prompt and a hosted base model answers. An eval set of 200 questions (illustrative) gates every prompt change, so a fix for one question cannot quietly break ten others. The eval shows the model invents reset steps, because it has never seen Brightpost's help centre.
+  </StepCard>
+  <StepCard n={2} title="Add retrieval for the facts">
+    - The 1,200 articles are chunked and indexed offline; each question now pulls the top 5 chunks into the prompt.
+    - Answers cite real articles, and an edited article is live after its 3 chunks are re-embedded.
+    - The eval now shows correct facts in an inconsistent tone, and the ticket tags break the JSON schema 1 time in 20 (illustrative).
+  </StepCard>
+  <StepCard n={3} title="Fine-tune for format and style">
+    3,000 graded replies (illustrative) train a LoRA adapter (Hu et al., 2021) in a few hours. The tuned weights replace the base model behind the same prompt and the same retrieval. Facts still come from the index, so the training set never has to be rebuilt when an article changes.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Fine-tuning on the help-centre articles themselves, instead of retrieving them, bakes in a snapshot. When the reset process changes, the model keeps describing the old one with full confidence, and the only fix is another training run. Keep facts in the index; train only on behaviour.
+</Callout>
+
+## Technical mechanics
+
+### Combining RAG and fine-tuning
+
+- The strongest systems use both: retrieval supplies the facts and a fine-tuned model uses them well.
+- RAFT (Zhang et al., 2024) fine-tunes a model on questions paired with retrieved documents, some of them distractors, and trains it to ignore the documents that do not help and to quote the passage that does.
+- That is the right division of labour: the training data teaches *how to read evidence*, not the evidence itself.
+- Fine-tuning the embedding model or adding a reranker is a third combination, covered in [Fine-Tuning Embeddings & Rerankers](/ai-system-design/genai-system-design/fine-tuning-embeddings-and-rerankers).
+
+### Long context as a fourth option
+
+- Context windows of hundreds of thousands of tokens make "paste everything" tempting.
+- Li et al. (2024) found that, given enough resources, long-context models beat RAG on average across their benchmarks, while RAG cost far less; their Self-Route method lets the model decide per question whether retrieved chunks are enough.
+- Long context fits a single contract, a codebase you are working in, or a corpus under about a hundred thousand tokens that rarely changes.
+- It fails Brightpost on three counts: 1.32 million tokens do not fit, every question would pay for the whole corpus, and models use the middle of a long prompt less well than its ends (Liu et al., 2023).
+- [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) cuts the cost of a repeated prefix but not the window limit.
+
+### Common wrong choices
+
+- **Fine-tuning to add knowledge.** Ovadia et al. (2023) found that RAG consistently beat unsupervised fine-tuning for injecting knowledge, both for facts the model had seen and for new ones. Gekhman et al. (2024) found that models learn new facts slowly through fine-tuning and that, once learned, those examples increase the tendency to hallucinate.
+- **RAG for a style problem.** Retrieving five examples of the house tone on every request costs 2,000 tokens forever; a fine-tune or a few in-prompt examples costs far less.
+- **Skipping the prompt.** Teams fine-tune before trying few-shot examples or structured output. A schema problem is often solved by [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation) without training anything.
+- **Choosing without an eval set.** Without measured failures, the choice is a guess, and so is whether it worked.
+
+## Trade-offs
+
+| Decision | Prompting | RAG | Fine-tuning |
+| --- | --- | --- | --- |
+| Fixes | Instructions, examples, format hints | Missing or changing facts | Format, style, narrow skills |
+| Time to change | Minutes | Minutes (re-embed a document) | Hours to days (a training run) |
+| Per-request cost | Lowest | Plus about 2,000 tokens and a search | Lowest, often on a smaller model |
+| Up-front cost | None | An ingestion pipeline and an index | Labelled examples and training compute |
+| Citations | No | Yes, to retrieved chunks | No |
+| Main risk | Prompt grows without limit | Bad retrieval leads to bad answers | Frozen facts, lost general skills |
+
+## Production systems
+
+- **Help-centre and policy assistants** are the textbook RAG case: the articles change weekly and every answer should link to its source.
+- **Coding assistants** read the files of the repository you have open at request time instead of being trained on every customer's code.
+- **High-volume classification** (ticket routing, content tagging) is a common fine-tuning case: a large model with a long prompt proves the task, then a small tuned or distilled model takes over the volume (see [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models)).
+
+## Failure modes & pitfalls
+
+- Fine-tuning on documents to teach facts that will change.
+- Reaching for fine-tuning before writing a good prompt and an eval set.
+- Treating "RAG vs fine-tuning" as either-or when the failures show both gaps.
+- Stuffing more and more context into the prompt instead of retrieving the few chunks that matter.
+- Forgetting that a fine-tuned model must be retrained, re-evaluated and re-deployed whenever its base model is upgraded.
+
+## Interview framework
+
+1. Name the three levers and what each changes: the words, the evidence, the weights.
+2. Say you start with the best prompt and an eval set, then sort the failures.
+3. Map failures to levers: knowledge → RAG, behaviour and format → fine-tuning, both → combine.
+4. Give numbers: tokens per request, time to update a fact, training cost.
+5. Mention long context and when it wins, and RAFT-style training as the combination.
+
+**What interviewers listen for:** a decision driven by measured failures, and the knowledge-versus-behaviour split.
+
+**Red flags:** "fine-tune it on our docs" as the first answer, or no mention of evaluation.
+
+## Further reading
+
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401)
+- [LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)](https://arxiv.org/abs/2106.09685)
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
+- [Fine-Tuning or Retrieval? Comparing Knowledge Injection in LLMs (Ovadia et al., 2023)](https://arxiv.org/abs/2312.05934)
+- [RAFT: Adapting Language Model to Domain Specific RAG (Zhang et al., 2024)](https://arxiv.org/abs/2403.10131)
+- [Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations? (Gekhman et al., 2024)](https://arxiv.org/abs/2405.05904)
+- [Retrieval Augmented Generation or Long-Context LLMs? (Li et al., 2024)](https://arxiv.org/abs/2407.16833)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you choose RAG over fine-tuning?" category="Trade-offs" level="Junior">
+    - When the model is missing knowledge: facts it never saw in training, or facts that change.
+    - RAG fetches the relevant passages at request time, so an edited document changes the next answer and every answer can cite its source.
+    - Fine-tuning bakes facts into weights, needs a training run for every change, and research shows models learn new facts slowly that way.
+  </InterviewQuestion>
+  <InterviewQuestion question="What problems is fine-tuning actually good at?" category="Concepts" level="Mid">
+    - Behaviour and format: a consistent house style, a strict output schema, a narrow skill such as classifying tickets into a fixed set of labels, or making a small model do what a large one did with a long prompt.
+    - It also shortens prompts, because instructions move into the weights. It is a poor way to add facts that change.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your support bot gives correct facts but breaks the JSON schema one time in twenty. What do you do?" category="Architecture" level="Mid">
+    - First tighten the prompt and use the provider's structured-output or JSON-schema mode, which often removes schema errors without training.
+    - If errors remain, collect the failing cases, build a few thousand correct examples and fine-tune, keeping retrieval for the facts.
+    - Measure the schema error rate and answer quality on the eval set before and after.
+  </InterviewQuestion>
+  <InterviewQuestion question="Context windows now hold a million tokens. Is RAG still needed?" category="Trade-offs" level="Senior">
+    - For small, stable corpora, long context can match or beat RAG and is simpler.
+    - For large or changing corpora RAG still wins on cost and latency: every question pays for every token in the window, a 1,200-article help centre is over a million tokens, and models use the middle of long prompts less well.
+    - Prompt caching reduces the cost of a fixed prefix, and routing (try RAG, fall back to long context when the chunks are not enough) gets most of both.
+  </InterviewQuestion>
+</InterviewQuestions>

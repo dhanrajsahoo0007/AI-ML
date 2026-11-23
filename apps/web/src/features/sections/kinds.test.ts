@@ -29,28 +29,36 @@ describe("docs kind", () => {
 });
 
 describe("docs kind: hubs that are off (hubRelease)", () => {
-  const entries = parseRegistry(fs.readFileSync(REGISTRY_FILE, "utf8"));
-  const inEnv = (env: "local" | "production") =>
-    resolveSections(entries, env).find((s) => s.key === "ai-system-design")!;
+  // No section parks a hub today, so one hub of a real multi-hub section is parked here, outside local.
+  const PARKED = { section: "system-design", hub: "patterns" };
+  const entries = parseRegistry(fs.readFileSync(REGISTRY_FILE, "utf8")).map((s) =>
+    s.key === PARKED.section
+      ? {
+          ...s,
+          hubRelease: { [PARKED.hub]: { local: "on", preview: "off", staging: "off", production: "off" } as const },
+        }
+      : s
+  );
+  const inEnv = (env: "local" | "production") => resolveSections(entries, env).find((s) => s.key === PARKED.section)!;
+  const offHref = `/${PARKED.section}/${PARKED.hub}`;
   it("leaves an off hub out of pages, routes, nav, sitemap and search", async () => {
     const section = inEnv("production");
     const kind = kindOf(section);
     const items = await kind.load(section);
-    const offHref = "/ai-system-design/ml-system-design";
     const inOff = (href: string) => href === offHref || href.startsWith(`${offHref}/`);
     assert.ok(items.length > 0);
     assert.equal(items.filter((i) => inOff((i as { href: string }).href)).length, 0);
     assert.ok(!kind.sitemap(section, items).some((e) => inOff(e.url)));
     assert.ok(!kind.search(section, items).some((e) => inOff(e.href)));
     assert.ok(!kind.nav(section, items).groups.some((g) => inOff(g.href)));
-    assert.ok(!loadNavIndex(section).hubs.some((h) => h.slug === "ml-system-design"));
+    assert.ok(!loadNavIndex(section).hubs.some((h) => h.slug === PARKED.hub));
     // The files are still there for the checks that need them.
     assert.ok(loadDocItems(section, { includeOffHubs: true }).some((i) => inOff(i.href)));
   });
   it("includes the hub where it is on", async () => {
     const section = inEnv("local");
     const items = await kindOf(section).load(section);
-    assert.ok(items.some((i) => (i as { href: string }).href === "/ai-system-design/ml-system-design/drift-detection"));
+    assert.ok(items.some((i) => (i as { href: string }).href.startsWith(`${offHref}/`)));
   });
 });
 

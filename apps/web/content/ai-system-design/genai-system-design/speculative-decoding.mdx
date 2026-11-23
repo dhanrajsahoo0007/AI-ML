@@ -1,0 +1,300 @@
+---
+title: "Speculative Decoding"
+description: "Cutting autoregressive decode latency with draft-and-verify decoding, Medusa and EAGLE heads, tree verification and acceptance-rate trade-offs."
+icon: zap
+updated: 2026-11-15
+---
+
+Speculative decoding is the one serving trick that makes a large model answer faster without changing a single output probability.
+
+- Interviewers ask about it because a good answer needs three ideas at once: why decode is limited by memory rather than arithmetic, why the acceptance rule keeps the output exact, and when the speed-up disappears.
+
+## Overview
+
+- A **small draft model** guesses the next **k tokens**; the **large target model checks all of them in one forward pass**, keeps the matching prefix and replaces the first wrong guess with its own token.
+- The acceptance rule (keep a draft with probability **min(1, p/q)**, resample a rejection from **p − q**) makes the output follow **exactly the target model's distribution**, for greedy and sampled decoding alike (Leviathan et al., 2023; Chen et al., 2023).
+- It works because **decode is memory-bandwidth bound**: reading the weights once for 5 positions costs about the same as reading them for 1.
+- With acceptance rate **α** and draft length **k**, one target pass yields **(1 − α^(k+1)) / (1 − α)** tokens on average: **3.36** at α = 0.8 and k = 4. Measured wall-clock gains in the two papers are **1.9–3.4×** at batch size 1.
+- Drafts can come from a **separate small model**, **extra heads** on the target (Medusa, EAGLE, MTP), or **no model at all** (prompt lookup, lookahead decoding). **Trees** of drafts raise acceptance.
+- Gains **shrink at large batch sizes**, where the GPU is already busy; production engines pick k per load or switch speculation off.
+
+## Mental model
+
+- A senior editor checks a junior writer's drafts.
+- Writing one sentence takes the editor a minute, but reading four sentences the junior has already written also takes about a minute, because most of the time goes on picking up the manuscript, not on reading.
+- So the junior writes ahead, the editor reads the batch, signs off every sentence up to the first one they would have written differently, and rewrites that one in their own words.
+- The text is always the editor's text. The junior only decides how much of it arrives per minute.
+
+## Core concepts
+
+### Why decode is memory-bandwidth bound
+
+- Generating one token means running the whole model once.
+- For each token the GPU must read every weight from its high-bandwidth memory (HBM) into the compute units, and it does only about two floating-point operations per weight per token.
+- A 70-billion-parameter model in 16-bit numbers is 70 × 2 = 140 GB of weights; at an illustrative 3 TB/s of memory bandwidth, that read alone takes about 47 ms, whatever the arithmetic units could do in that time.
+- Chen et al. (2023) state it plainly: transformer sampling is typically memory bandwidth bound.
+
+- The consequence is the whole trick. Scoring 5 positions in one pass reads the same 140 GB once and does 5 times the arithmetic, which the idle compute units absorb.
+- Chen et al. note that the linear layers, the KV-cache reads (the stored keys and values of earlier tokens) and the cross-GPU all-reduces all stay about the same cost for a short continuation.
+- See [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) for the roofline view, and [LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference) for prefill against decode.
+
+### Draft-and-verify with exact output distribution preservation
+
+Name the target model's probability for a token p and the draft model's q. One round has four moves:
+
+1. **Draft.** The draft model runs k times, one cheap pass per token, and records q for each guess.
+2. **Verify.** The target runs once over the prompt plus all k drafts and returns p at k + 1 positions: one per draft, and one after the last draft.
+3. **Accept, left to right.** If p ≥ q for a draft, keep it. Otherwise keep it with probability p/q (draw a uniform number r; keep if r is at most p/q). Stop at the first rejection.
+4. **Correct.** At the rejected position, sample a fresh token from the leftover distribution, the positive part of p − q renormalised to sum to 1. If every draft passed, sample a bonus token from the extra p, for k + 1 tokens.
+
+- Leviathan et al. prove that a token produced this way is distributed exactly as p, for any draft model; Chen et al. prove the same for their identical scheme (they swap the letters p and q).
+- Sampling settings such as temperature, top-k and top-p are applied to both distributions first, so they are covered too.
+- Under greedy decoding the rule reduces to "keep the draft if it is the target's top token".
+- Each round produces at least one token, so the target never runs more passes than plain decoding would.
+- The guarantee is exact in maths; vLLM's documentation notes that floating-point and batching effects can still make outputs differ slightly in practice.
+- [Decoding & Sampling](/ai-system-design/genai-system-design/decoding-and-sampling) covers the sampling methods themselves.
+
+### Model-free and single-model drafting (Medusa, EAGLE, MTP)
+
+A separate draft model has to share the tokenizer, be trained, fit in GPU memory and be scheduled next to the target. Three families avoid some of that.
+
+- **Extra heads on the target.** Medusa (Cai et al., 2024) adds decoding heads to the target's last hidden state and verifies their candidates together with tree attention: over 2.2× faster with a frozen backbone (Medusa-1) and 2.3–3.6× when heads and backbone are fine-tuned together (Medusa-2). EAGLE (Li et al., 2024) runs a small autoregressive layer on the target's second-to-top-layer features, plus the token one step ahead, and reports 2.7–3.5× lower latency on LLaMA2-Chat 70B with the output distribution preserved.
+- **Heads trained in from the start.** [Multi-Token Prediction](/ai-system-design/genai-system-design/multi-token-prediction) models such as DeepSeek-V3 carry extra prediction modules from pre-training, which double as a built-in drafter.
+- **No model at all.** Prompt lookup decoding (Saxena, 2023) proposes the tokens that followed the last few generated tokens wherever they appear in the prompt; it reports about 2.4× on summarisation and document question answering with greedy decoding. Lookahead decoding (Fu et al., 2024) generates and verifies n-gram candidates inside the target itself, exactly, with up to 1.8× on MT-Bench.
+
+Here is one round of self-speculation with MTP heads, where one network both drafts and verifies.
+
+<AnimatedDiagram
+  spec="animated/llm/mtp-self-spec"
+  stepper
+  caption="The extra heads draft three tokens in the same pass that gives the real next token; the next pass verifies them, so no second model is loaded or scheduled."
+/>
+
+**How to read it:**
+
+- Pass 1 gives the real next token from head 1 and three drafts from heads 2–4.
+- Pass 2 runs the model over all four tokens; its next-token head at each position is the greedy choice.
+- Two drafts match, the third does not, and the model's own token replaces it: four tokens from two passes.
+- Compare it with the separate draft model in the Architecture figure: same verify step, different drafter.
+
+### Tree-based verification and dynamic speculation length
+
+- A single chain of drafts dies at the first miss.
+- A **token tree** keeps several candidates at each position (say the top 2 for token 1, and the top 2 after each of those), and the target scores every branch in one pass, using an attention mask that lets each node see only its own ancestors.
+- The longest accepted branch wins. SpecInfer (Miao et al., 2023) introduced tree verification and reports 1.5–2.8× for distributed serving; Medusa and EAGLE both verify trees.
+- EAGLE-2 (Li et al., 2024) shapes the tree per context from the draft's own confidence and reports 3.05–4.26×, 20–40 % faster than EAGLE.
+
+- The best draft length also moves. Easy stretches (a copied order number, a closing formula) accept long runs; content that needs knowledge the drafter lacks rejects early.
+- Leviathan et al. estimate that an oracle that knew the right k for each round would be up to about 60 % faster than a fixed k.
+- Serving systems approximate it from live acceptance rates and load (see Technical mechanics).
+
+## Architecture
+
+Inside the inference engine, one round of speculation replaces one ordinary decode step. Follow it on a Brightpost answer.
+
+<AnimatedDiagram
+  spec="animated/serving/specdec-draft-verify"
+  stepper
+  caption="Two drafts pass, “is” fails, and the large model’s own token “needs” replaces it: three tokens from one large-model pass, with the large model’s output distribution unchanged."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Draft: the small model guesses 4 tokens, one quick pass each">
+    The draft model writes "Your refund is on", one token per pass, and keeps its probability q for each. These passes are cheap but sequential, so their cost grows with k.
+  </StepCard>
+  <StepCard n={2} title="Verify: the large model scores all 4 drafts in one pass">
+    The target reads the prompt plus the four drafts in a single forward pass, like a short prefill, and returns its own probability p at five positions. The weights are read once for all five.
+  </StepCard>
+  <StepCard n={3} title="Accept: keep drafts left to right until one fails the test">
+    "Your" has p 0.70 above q 0.60, so it stays. "refund" has p/q = 0.90 and the draw 0.31 is below it, so it stays. "is" has p/q = 0.125 and the draw 0.62 is above it, so it is rejected. "on" is never tested, because it was written after a wrong token.
+  </StepCard>
+  <StepCard n={4} title="Correct: replace the first rejected draft with the target's token">
+    The target samples from the leftover distribution p − q and gets "needs": the £42 refund is over the £30 limit, which the large model knows and the draft model does not. The engine also drops the KV-cache entries it wrote for "is" and "on".
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Two drafts kept plus one corrected token is 3 tokens from one target pass, against 1 for plain decoding.
+- Had all four passed, the fifth distribution would have added a bonus token: 5.
+- All probabilities and draws are illustrative.
+
+<Callout tone="red" title="What breaks">
+  The draft and target must share a tokenizer and the same sampling settings, or p and q describe different things and the guarantee is void. Forgetting to roll back the KV cache for rejected tokens corrupts every later token.
+</Callout>
+
+## Technical mechanics
+
+### Acceptance rate math and effective speedup
+
+- Leviathan et al. define the acceptance rate α as the average chance that a draft is kept, and show it equals the overlap of the two distributions, the sum over tokens of min(p, q).
+- If each draft is kept independently with probability α, the tokens per target pass follow a capped geometric count:
+
+$$
+E[\text{tokens per pass}] = \frac{1 - \alpha^{k+1}}{1 - \alpha}
+$$
+
+Drafting is not free. With c the time of one draft pass divided by one target pass, a round costs k·c + 1 target passes, and the expected wall-clock speed-up is that count divided by k·c + 1 (their Theorem 3.8).
+
+<AnimatedDiagram
+  spec="animated/serving/specdec-speedup"
+  stepper
+  caption="Computed from Leviathan et al. (2023): longer drafts only pay when most drafts are accepted, and once each draft pass costs something, the best draft length depends on α."
+/>
+
+**How to read it:**
+
+- The green curve is k = 4; the marked point is the setting used on this page.
+- Step 2 adds k = 2 and k = 8: at α 0.6 the long draft buys 0.5 tokens over the short one, at α 0.9 it buys 3.4.
+- Step 3 divides by the drafting cost: at α 0.6, k = 8 is slower than k = 4, and at α 0.8 they tie.
+
+**The numbers:**
+
+- α = 0.8, k = 4: (1 − 0.8⁵) / 0.2 = (1 − 0.328) / 0.2 = 3.36 tokens per pass.
+- With c = 0.1 a round costs 4 × 0.1 + 1 = 1.4 passes, so the speed-up is 3.36 / 1.4 = 2.40×.
+- The independence assumption is optimistic: acceptance usually falls for drafts further ahead, so measured gains sit below the curve.
+- For scale, Leviathan et al. measured α of 0.53–0.82 for T5 drafts of an 11B T5-XXL target, and c below 0.05.
+
+### Why speculative decoding stalls under high batch sizes
+
+- Speculation spends spare arithmetic to save memory reads.
+- At batch size 1 there is plenty of spare arithmetic.
+- A serving engine with continuous batching (see [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)) packs dozens of requests into every step to use that same spare capacity, so each extra verified position competes with another user's token.
+- Rejected drafts become pure waste: Leviathan et al. show total arithmetic grows by 1.1–1.6× in their worked examples.
+- Liu et al. (2024) found that in a continuous-batching server, speculation can raise latency under heavy load or low acceptance, and that no single k suits all loads; their SmartSpec picks k per step, down to zero, from a goodput estimate and cuts average latency by up to 3.2×.
+
+- The picture is not fixed. With long contexts the KV-cache reads grow with batch size and sequence length and the step becomes memory-bound again; MagicDec (2024) reports up to 2.51× for Llama-3.1-8B at batch sizes 32–256 using a draft with a sparse KV cache.
+- As of November 2026, vLLM's documentation describes speculation as a tool for inter-token latency at medium-to-low queries per second.
+
+### Choosing a draft model or drafting head
+
+- The trade is α against c. Leviathan et al. found drafts about two orders of magnitude smaller than the target worked best in their tests, and that even a bigram table gave α ≈ 0.2 and 1.25× on translation.
+- Chen et al. trained a 4B draft with only 8 layers for Chinchilla 70B, because a shallow, wide model runs fast on the same chips: 1.8 ms per token against 14.1 ms. Rules of thumb:
+
+- **Same family, same tokenizer** as the target; fine-tune the draft on your own traffic, since α is a property of the task.
+- **Heads (EAGLE, Medusa, MTP)** when you cannot fit or schedule a second model.
+- **Prompt lookup** when answers copy the input: retrieval-grounded answers, summaries, code edits.
+
+In vLLM the choice is one configuration object (the keys follow its speculative decoding docs, November 2026; the model names are Brightpost's own, illustrative):
+
+```bash
+vllm serve brightpost/support-70b \
+  --speculative-config '{"method": "draft_model",
+    "model": "brightpost/support-1b",
+    "num_speculative_tokens": 4}'
+```
+
+The same object takes `"method": "ngram"`, `"eagle3"` or `"mtp"` for the other drafters.
+
+### Worked example: Brightpost's refund answer, 1.5 s to 0.86 s
+
+- Brightpost self-hosts its support model. An answer is 250 output tokens; the first token arrives at 400 ms and the rest decode at 4.4 ms each, so the full answer takes 400 + 250 × 4.4 = 1,500 ms. The Architecture figure showed one round: the drafter wrote "Your refund is on", and the target kept two tokens and corrected the third to "needs".
+- Words that need Brightpost's policy are where drafts fail; filler and copied facts ("order 4471", "the kettle") pass.
+
+Assume the illustrative setting from the speed-up figure: α = 0.8, k = 4, c = 0.1.
+
+1. Tokens per target pass: 3.36, so 250 tokens need about 250 / 3.36 ≈ 75 target passes instead of 250.
+2. Each round costs 1.4 × 4.4 = 6.16 ms, so one token costs 6.16 / 3.36 = 1.83 ms.
+3. Decode time: 250 × 1.83 = 458 ms instead of 1,100 ms, a 2.4× speed-up.
+4. Full answer: 400 + 458 = 858 ms instead of 1,500 ms. Time to first token is unchanged, because speculation only touches decode.
+
+- At Brightpost's peak of 12 requests a second, with about 1.1 s of decoding each, roughly 12 × 1.1 ≈ 13 answers decode at once (Little's law).
+- That is still a small batch, so the gain should mostly hold; re-measure α on real tickets before trusting 2.4×.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Separate draft model | No change to the target; draft tuned on your traffic | Second model in memory; tokenizer must match; c grows with draft size | A small sibling model exists |
+| Draft heads (Medusa, EAGLE) | No second model; high α; tree drafts | Heads trained per target; engine support needed | One large model you serve a lot |
+| MTP heads | Drafter comes from pre-training | Only for models trained with MTP | DeepSeek-V3-style models |
+| Prompt lookup (n-gram) | No training, near-zero c | Helps only when output copies the input | RAG answers, summaries, code edits |
+| Lookahead decoding | No drafter, exact | Smaller gains on chat; extra compute per step | No draft model available |
+| No speculation | Simplest; best throughput at large batches | Highest per-token latency at low load | Batch jobs, saturated GPUs |
+
+## Production systems
+
+- **Google, T5-XXL (Leviathan et al., 2023).** An 11B target with a 77M T5-small draft: 3.4× on translation at temperature 0 and 2.6× at temperature 1, on one TPU v4 at batch size 1, with identical outputs.
+- **DeepMind, Chinchilla 70B (Chen et al., 2023).** A 4B, 8-layer draft and K = 4 at batch size 1: 1.92× on XSum with nucleus sampling, 2.01× greedy, and 2.46× on HumanEval, with benchmark scores matching plain sampling.
+- **EAGLE family.** 2.7–3.5× on LLaMA2-Chat 70B (EAGLE); 3.05–4.26× across three model series with dynamic trees (EAGLE-2), both lossless.
+- **vLLM (as of November 2026).** Ships draft-model, n-gram, suffix, EAGLE-3 and MTP drafters behind one `speculative-config` option; Hugging Face Transformers exposes prompt lookup as `prompt_lookup_num_tokens`.
+- **DeepSeek-V3.** Its MTP module drafts the second token with 85–90 % acceptance, for 1.8× tokens per second (see [Multi-Token Prediction](/ai-system-design/genai-system-design/multi-token-prediction)).
+
+## Failure modes & pitfalls
+
+- Claiming speculation changes quality. Done with the exact rule, it does not; Medusa-2's joint fine-tuning or a relaxed "typical" acceptance rule do trade exactness for speed, so say which one you use.
+- Quoting tokens per pass as the speed-up. Divide by the round cost k·c + 1, and expect less again because acceptance falls along a draft.
+- Turning it on for a saturated cluster. At large batches it can raise latency and cut throughput; measure under real load.
+- A draft with a different tokenizer or chat template. Acceptance collapses, or the engine refuses to run.
+- One fixed k for all traffic. Code and copied text take long drafts; open-ended or high-temperature replies want short ones.
+- Benchmarking at temperature 0 and serving at temperature 1. Every pairing in Leviathan et al.'s Table 2 had a lower α at temperature 1 than at 0.
+
+## Interview framework
+
+1. Start with the bottleneck: decode reads all weights per token, so it is memory-bound and the compute units sit idle.
+2. Describe one round: draft k tokens cheaply, verify them in one target pass, keep the prefix, correct the first miss, bonus token if all pass.
+3. Prove exactness: keep with probability min(1, p/q), resample from p − q; the output is the target's distribution, at any temperature.
+4. Give the maths: (1 − α^(k+1)) / (1 − α) tokens per pass, divided by k·c + 1 for wall-clock time; work one example.
+5. Close with the system view: drafter choice (model, heads, n-gram), trees, k chosen per load, and switching off at high batch sizes.
+
+**What interviewers listen for:** memory-bound decode as the reason, the exact acceptance rule, the speed-up formula with a worked number, and the batch-size caveat.
+
+**Red flags:** "the small model writes the answer and the big one approves it" (so quality drops), no mention of rejection sampling, or claiming the speed-up holds at any load.
+
+## Further reading
+
+- [Fast Inference from Transformers via Speculative Decoding (Leviathan, Kalman & Matias, ICML 2023)](https://arxiv.org/abs/2211.17192)
+- [Accelerating Large Language Model Decoding with Speculative Sampling (Chen et al., DeepMind, 2023)](https://arxiv.org/abs/2302.01318)
+- [Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads (Cai et al., 2024)](https://arxiv.org/abs/2401.10774)
+- [EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty (Li et al., 2024)](https://arxiv.org/abs/2401.15077) and [EAGLE-2 (Li et al., 2024)](https://arxiv.org/abs/2406.16858)
+- [Optimizing Speculative Decoding for Serving Large Language Models Using Goodput (Liu et al., 2024)](https://arxiv.org/abs/2406.14066)
+- [Speculative decoding (vLLM documentation)](https://docs.vllm.ai/en/latest/features/speculative_decoding/)
+- Also cited: [SpecInfer (Miao et al.)](https://arxiv.org/abs/2305.09781) · [Lookahead decoding (Fu et al., 2024)](https://arxiv.org/abs/2402.02057) · [Prompt lookup decoding (Saxena, 2023)](https://github.com/apoorvumang/prompt-lookup-decoding) · [MagicDec (2024)](https://arxiv.org/abs/2408.11049)
+- Related pages: [LLM Serving & Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [Multi-Token Prediction](/ai-system-design/genai-system-design/multi-token-prediction) · [Decoding & Sampling](/ai-system-design/genai-system-design/decoding-and-sampling) · [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is speculative decoding, and why does it not change the model's output?" category="Concepts" level="Junior">
+    - A small draft model guesses the next few tokens, and the large target model checks all of them in one forward pass.
+    - Drafts are kept from left to right until one fails the acceptance test, and the target supplies its own token at that position.
+    - The test keeps a draft with probability min(1, p/q), where p is the target's probability and q the draft's, and a rejected position is resampled from the leftover distribution p minus q.
+    - Leviathan et al. and Chen et al. prove that this makes every token follow the target's distribution exactly, so only the speed changes.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is checking five tokens about as fast as generating one?" category="Concepts" level="Mid">
+    - Decoding one token reads every weight of the model from GPU memory and does only about two operations per weight, so the step is limited by memory bandwidth and the arithmetic units are mostly idle.
+    - Scoring five positions in one pass reads the same weights once and uses some of that idle arithmetic.
+    - The KV-cache reads and the communication between GPUs also barely change for a short continuation.
+    - That is why verification is close to free, and also why the trick weakens once large batches have already used up the spare arithmetic.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through the acceptance rule when sampling at temperature 1, including what happens when every draft is accepted." category="Architecture" level="Mid">
+    - Apply temperature and any top-k or top-p filtering to both models' distributions first.
+    - For each draft from left to right, keep it if the target's probability p is at least the draft's q; otherwise keep it with probability p/q using a uniform random draw.
+    - At the first rejection, sample a replacement from max(0, p minus q) renormalised, and discard the drafts after it along with their KV-cache entries.
+    - If all k drafts pass, the target's distribution after the last draft gives a bonus token, so one round yields between 1 and k plus 1 tokens.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your acceptance rate is 0.8, you draft 4 tokens, and a draft pass costs a tenth of a target pass. What speed-up do you expect?" category="Scaling" level="Mid">
+    - Tokens per target pass are (1 minus 0.8 to the 5th) divided by 0.2, which is (1 minus 0.328) divided by 0.2, or 3.36.
+    - A round costs four draft passes plus one target pass, 4 times 0.1 plus 1, which is 1.4 target passes.
+    - So the expected speed-up is 3.36 divided by 1.4, about 2.4 times.
+    - In practice expect less, because the formula assumes every draft is accepted independently, while acceptance usually falls for drafts further ahead.
+  </InterviewQuestion>
+  <InterviewQuestion question="Speculative decoding sped up your single-user benchmark, but p99 latency got worse in production. Why, and what would you change?" category="Failure modes" level="Senior">
+    - The benchmark ran at batch size 1, where the GPU has spare arithmetic.
+    - Production uses continuous batching, so every extra verified position competes with other users' tokens, and every rejected draft is wasted work on a busy GPU.
+    - Live traffic may also accept less than the benchmark did, for example at a higher temperature or on topics the draft model was not tuned for.
+    - I would measure acceptance and step time per load level, choose k per step from load and recent acceptance (as SmartSpec does), and switch speculation off above a batch-size threshold.
+    - Retuning the draft on recent production prompts raises acceptance too.
+  </InterviewQuestion>
+  <InterviewQuestion question="For a retrieval-grounded support assistant, would you use a separate draft model, EAGLE-style heads or prompt lookup?" category="Trade-offs" level="Senior">
+    - Prompt lookup is the cheapest first step, because grounded answers copy order numbers, product names and policy wording from the retrieved passages, and an n-gram match costs almost nothing.
+    - It does little for the connecting sentences, so for broader gains I would add a learned drafter.
+    - EAGLE-style heads avoid loading and scheduling a second model and reach high acceptance, but need training per target model and engine support.
+    - A separate small model from the same family is simplest if one exists, and can be fine-tuned on our own tickets.
+    - I would benchmark acceptance and p50 and p99 latency for each on real traffic before choosing.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do tree-based drafts improve on a single chain, and what do they cost?" category="Architecture" level="Senior">
+    - A chain is lost at its first wrong token, so one early miss wastes the rest of the draft.
+    - A tree keeps several candidates per position, and the target scores every branch in one pass with an attention mask that lets each node see only its ancestors; the longest accepted branch is kept.
+    - This raises the expected tokens per pass, which is why SpecInfer, Medusa and EAGLE use trees, and EAGLE-2 shapes the tree per context from the draft's confidence.
+    - The cost is more positions per verification pass, which eats into the spare compute that makes speculation cheap, so tree size has to shrink as batch size grows.
+  </InterviewQuestion>
+</InterviewQuestions>

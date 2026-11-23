@@ -1,0 +1,15 @@
+title: Due-time buckets, scanners and leased workers
+alt: >-
+  An architecture diagram built in five steps. Step 1: teal checkout writes 8,333 hold-expiry jobs a second into a
+  violet job store of 16 sorted sets, each scored by due time. Step 2: green scanners, the solid accent, one per
+  partition, take at most 521 due jobs per poll and put them on a grey ready queue. Step 3: teal expiry workers, 9
+  machines of 20 threads, lease each job for 30 seconds and expire the hold in the violet holds database only if it is
+  still held. Step 4: a red crashed worker never deletes its job, so a dashed red arrow shows the job becoming visible
+  on the queue again. Step 5: a failing job goes back to the job store with backoff of 1, 2 and 4 seconds, and after
+  the fifth failure it moves to green dead letters.
+caption: >-
+  Jobs wait in due-time buckets, a scanner per partition moves due ones to a queue, and a lease that runs out hands a
+  dead worker’s job to another.
+tags: [patterns, workflows, scheduling, delay-queue, leases]
+source: original
+created: 2026-11-16

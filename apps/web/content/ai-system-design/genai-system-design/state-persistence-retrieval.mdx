@@ -1,0 +1,364 @@
+---
+title: State Persistence & Retrieval
+description: Checkpoint orchestration and agent state with durable storage, serialization discipline, and recovery patterns so long workflows survive failures and scale.
+---
+
+An agent run can take minutes of model calls and hours of waiting for a person.
+
+- If its state lives only in a worker's memory, one deploy or one crash throws all of it away, or worse, repeats a payment.
+- This page is about **durable run state**: the records a harness saves as it goes (threads, runs, checkpoints), how a crashed run resumes from its last checkpoint, how to replay an old one, and how to keep side effects from happening twice on resume.
+- What the model remembers across conversations is on [Agent Memory](/ai-system-design/genai-system-design/agent-memory); what fits in the context window is on [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+
+## Overview
+
+- Persistence stores transcripts, partial plans, tool outputs awaiting approval and cursor positions, outside the process that runs the agent.
+- A **checkpoint** is a serializable snapshot of a run's state, saved at a stable boundary: after each tool call, after a human decision, or on a timer.
+- Records nest: a **thread** (one conversation) holds **runs** (one pass of the loop each), and each run holds a chain of checkpoints that point to their parents.
+- After a crash, a new worker loads the **latest checkpoint** and continues. Nothing before it runs again.
+- The step that crashed **does** run again. Any side effect in it needs an **idempotency key** that was saved before the call.
+- **Replay** (time travel) loads an old checkpoint to debug or fork a run; every step after it re-executes, side effects included.
+- Durable execution engines such as Temporal record an event history and replay the code against it, so finished work is not redone.
+
+## Mental model
+
+- A checkpoint is a save point in a video game.
+- Lose a life and you restart at the last save point, not at level 1.
+- The catch: anything you did between the save point and the crash, you do again.
+- If that was "pay the shopkeeper", you pay twice, unless the shopkeeper remembers your receipt number.
+
+- In numbers, for the refund on this page: restarting from the start repeats three model calls and two tool calls (an illustrative 5.1 s), asks the support agent to approve again, and refunds £42 a second time.
+- Resuming from the last checkpoint repeats one tool call (0.3 s), and the payments service recognises it.
+
+## Core concepts
+
+- The figures follow the Brightpost refund from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures#architecture): customer 1847 asks for their money back for order 4471, a £42 kettle.
+- At step 5 of that loop the refund is over £30, so the harness saves the run and asks the support agent, who approves at 10:20. This page asks what "saves the run" means.
+
+### Threads, runs and checkpoints
+
+Three records, nested, are enough for most agents.
+
+<AnimatedDiagram
+  spec="animated/agents/state-records"
+  stepper
+  minWidth={660}
+  caption="The checkpointer stores runs inside one thread; memory and the side effects' records live outside it. The key travels with the call, so the payments service can recognise a repeat."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A run and its checkpoints">
+    A **run** is one pass of the agent loop for one message: here `run_8f3a`, the refund. The harness saves a checkpoint
+    after every step, `cp_1` to `cp_7`. Each one points to its **parent**, so the chain is the run's history.
+  </StepCard>
+  <StepCard n={2} title="A thread holds many runs">
+    A **thread** is the conversation, `th_5e08`. The customer's follow-up, "When will it arrive?", starts a second run
+    on the same thread, and its checkpoints continue the thread's history. Load the thread and you get the whole chat
+    back.
+  </StepCard>
+  <StepCard n={3} title="One checkpoint record">
+    `cp_4` holds the thread id, its parent, the messages so far, the next step (`create_refund`), the pending tool call
+    and its idempotency key. That is everything a new worker needs to continue.
+  </StepCard>
+  <StepCard n={4} title="What lives outside the thread">
+    The memory store is read across threads ("prefers email"; see [Agent
+    Memory](/ai-system-design/genai-system-design/agent-memory)). The payments service keeps its own record of the key.
+    Neither is part of the checkpoint.
+  </StepCard>
+</StepCards>
+
+Here is `cp_4`, shaped like LangGraph's state snapshot (`config`, `parent_config`, `next`, `values`, `metadata`) and trimmed:
+
+```json
+{
+  "config": { "configurable": { "thread_id": "th_5e08", "checkpoint_id": "cp_4" } },
+  "parent_config": { "configurable": { "thread_id": "th_5e08", "checkpoint_id": "cp_3" } },
+  "next": ["create_refund"],
+  "values": {
+    "run_id": "run_8f3a",
+    "messages": ["… 6 messages; the last is tool_use toolu_03, create_refund(4471, 42.00)"],
+    "approval": { "by": "Support agent", "at": "10:20", "approved": true },
+    "refund_key": "run_8f3a:toolu_03"
+  },
+  "metadata": { "step": 4 }
+}
+```
+
+- LangGraph uses the same split (as of November 2026): a **checkpointer** saves a thread's graph state at every super-step and serves conversation continuity, human-in-the-loop, time travel and fault tolerance.
+- A **store** holds application data across threads, which is long-term memory.
+
+### Checkpoint boundaries
+
+- Save at **stable boundaries**: after each tool call returns, after a human confirms, or on a timer for long streaming tasks.
+- Between two boundaries the state is half-made (a model reply with no tool result yet) and resuming from it is guesswork.
+
+- Without clear boundaries you either over-persist noisy intermediate states or under-persist and lose hours of work on a crash.
+- LangGraph lets you choose how strict to be with a durability mode: `"sync"` saves before the next step starts, `"async"` saves while it runs and may lose a checkpoint in a crash, and `"exit"` saves only when the run ends, so a crash mid-run leaves nothing to recover. For a run that moves money, use `"sync"`.
+
+### Serialization and schema versions
+
+A checkpoint is read back by a newer version of your code, maybe weeks later, so the format is a contract:
+
+- **Typed records, not pickles.** Prefer JSON with typed records, or protobuf, over pickled Python objects. LangGraph's default serializer is JSON plus msgpack; it can fall back to pickle for unsupported types, which ties the checkpoint to your class definitions.
+- **A schema version in every record**, and a migration shim for each change. Renaming a field without one breaks every paused run.
+- **No live handles.** Do not embed sockets, file handles or closures unless you also persist what they reference.
+- **References for large data.** Large binary artefacts belong in object storage, with only their keys in the state.
+- **Encryption for sensitive fields** at rest, with keys per tenant where compliance requires it. LangGraph ships an `EncryptedSerializer` (AES, key from `LANGGRAPH_AES_KEY`).
+
+### Where state lives: Redis or a SQL database
+
+- Session management ties user identity, device and workflow id to a state record.
+- **Redis** suits low-latency, short-lived coordination: locks, rate limits, fast resume.
+- **Postgres** suits authoritative records: transactions, auditing, complex queries and compliance trails.
+- Hybrid designs use Redis as a hot cache with write-through to durable storage.
+
+- The difference is durability. Redis with its default append-only setting (fsync every second) can lose one second of writes in a crash; with snapshots alone, the last few minutes.
+- A checkpoint that vanishes after the refund went out is exactly the gap this page is about, so the checkpoint itself belongs in the database.
+
+### Coordination: leases and versions
+
+When several workers can pick up one session, two rules keep them from colliding:
+
+- **A lease with a time limit.** A worker owns a run only while its lease is fresh, and renews it as it works. If the worker dies, the lease expires and another worker takes over. Without the time limit, a dead worker's lock is stuck forever.
+- **Optimistic concurrency.** Each write names the version it expects: "save `cp_5` with parent `cp_4`". If a slow worker that lost its lease comes back and tries the same write, the version no longer matches and the write fails.
+
+## Architecture
+
+Here is the refund run with a crash in the worst place: after the refund was made, before the checkpoint was saved.
+
+<AnimatedDiagram
+  spec="animated/agents/checkpoint-timeline"
+  stepper
+  minWidth={660}
+  caption="A crash costs one step, not the run. Worker B starts from cp_4, and the refund it repeats is safe because the key was saved in cp_3, before any money moved."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A checkpoint after every step">
+    Worker A runs call 1 (`get_order`) and call 2 (`search_help`). After each tool result the harness saves a
+    checkpoint: `cp_1` holds the order, `cp_2` the refund rule.
+  </StepCard>
+  <StepCard n={2} title="Save, then pause">
+    Call 3 asks for `create_refund(4471, 42.00)`. £42 is over £30, so the harness holds the call. It builds the
+    idempotency key `run_8f3a:toolu_03` and saves it with the pending call in `cp_3`. The worker is released; the run is
+    now a database row.
+  </StepCard>
+  <StepCard n={3} title="Approved at 10:20">
+    The support agent approves. Worker A picks up the thread, records the approval and saves `cp_4`.
+  </StepCard>
+  <StepCard n={4} title="The refund goes out, then the crash">
+    Worker A runs `create_refund`. The payments service makes refund R-2291 and stores the key. Then worker A dies,
+    before it saves `cp_5`. The checkpointer still says the refund is next.
+  </StepCard>
+  <StepCard n={5} title="Resume from the last checkpoint">
+    Worker A's lease expires and worker B takes the run. It loads the latest checkpoint for the thread, `cp_4`, not the
+    start. Calls 1 to 3 and the approval do not run again.
+  </StepCard>
+  <StepCard n={6} title="The same call, the same key">
+    Worker B runs `create_refund` again with the key from the checkpoint. The payments service has seen the key, so it
+    returns R-2291 instead of refunding again. Worker B saves `cp_5`.
+  </StepCard>
+  <StepCard n={7} title="The rest of the run">
+    Call 4 sends the confirmation email (`cp_6`) and call 5 writes the reply (`cp_7`). The run ends with £42 refunded,
+    once.
+  </StepCard>
+</StepCards>
+
+**The numbers (latencies illustrative: 1.5 s per model call, 0.3 s per tool call):**
+
+- Resuming from `cp_4` repeats one tool call: **0.3 s**.
+- Restarting from the message repeats calls 1 to 3 and two tool calls, 3 × 1.5 + 2 × 0.3 = **5.1 s**, sends the support agent a second approval request, and refunds again with a fresh key: £42 + £42 = **£84** out for a £42 kettle.
+- Add the lease timeout (an illustrative 30 s) to either.
+
+<Callout tone="red" title="What breaks">
+  The gap between the side effect and the save. No checkpoint can close it: worker A can always die after the payments
+  service acted and before `cp_5` is written. What makes it safe is a key built and saved **before** the call (in
+  `cp_3`), so the repeat is recognisable. A key made inside the step, such as a fresh UUID per attempt, is new on every
+  retry and protects nothing.
+</Callout>
+
+## Technical mechanics
+
+### Worked example: the refund crashes after approval
+
+This follows the [timeline](#architecture) row by row. Times other than 10:20 are illustrative.
+
+| #   | Worker | Step                                                    | Checkpoint saved                           |
+| --- | ------ | ------------------------------------------------------- | ------------------------------------------ |
+| 1   | A      | Call 1, `get_order(4471)`: kettle, £42                  | `cp_1`                                     |
+| 2   | A      | Call 2, `search_help`: "Damaged on arrival"             | `cp_2`                                     |
+| 3   | A      | Call 3 asks for `create_refund`; over £30, held; paused | `cp_3`: pending call, key                  |
+| 4   | A      | 10:20, approved; run resumed                            | `cp_4`: approval                           |
+| 5   | A      | `create_refund` runs; payments makes R-2291; crash      | none                                       |
+| 6   | B      | 10:20:35, lease expired; loads latest checkpoint        | none (reads `cp_4`; `next: create_refund`) |
+| 7   | B      | `create_refund`, same key; payments returns R-2291      | `cp_5`                                     |
+| 8   | B      | Call 4, `send_email`                                    | `cp_6`                                     |
+| 9   | B      | Call 5, the reply                                       | `cp_7`, run done                           |
+
+Row 7 is the call worker B sends. It is byte for byte the call worker A sent in row 5, because both were built from `cp_3`:
+
+```json
+{
+  "tool": "create_refund",
+  "input": { "order_id": "4471", "amount": 42.0 },
+  "idempotency_key": "run_8f3a:toolu_03"
+}
+```
+
+Three things to take from it:
+
+- **The key is the run id plus the tool-call id.** It is the same on every retry of this call and different in every other run. Temporal recommends the same recipe for activities: the workflow run id combined with the activity id.
+- **The key lives in two places.** Brightpost keeps it in the checkpoint; the payments service keeps it with the refund. Stripe's API works this way: it saves the first response for a key and returns it to any retry with the same parameters.
+- **Worker B never asked the model.** The checkpoint already held the model's decision, so resume is deterministic. Restarting from the message would ask the model again, and it might decide differently.
+
+- The same refund as a fixed graph, with a timeout retry inside one live worker instead of a crash, is on [Chain / Flow Orchestration](/ai-system-design/genai-system-design/chain-flow-orchestration#technical-mechanics).
+
+### Replay and time travel
+
+The checkpoint chain is also a debugger. In LangGraph (as of November 2026) `get_state_history` lists a thread's checkpoints, newest first. Two things you can do with one:
+
+- **Replay.** Invoke the graph with an old checkpoint's id. Nodes before it are skipped; nodes after it run again. The docs are blunt: "Replay re-executes nodes—it doesn't just read from cache." Model calls, API requests and interrupts all happen again.
+- **Fork.** Call `update_state` on an old checkpoint with changed values, then continue. This adds a new branch; it never rolls the thread back, so the original history stays for the audit.
+
+For the refund: fork from `cp_2` with the rule changed to "partial refund" to see what the agent would have done. Run it against a test payments service.
+
+<Callout tone="red" title="What breaks">
+  Replaying against production tools. Replay from `cp_3` and the approval request goes out again, then `create_refund`
+  runs again. Point replays at sandboxed tools, or make every side-effecting tool refuse calls that carry a replay flag.
+</Callout>
+
+### Durable execution engines
+
+- Temporal takes another route. Workflow code does not save snapshots; every command it issues (start an activity, set a timer) is recorded as an event in the workflow's **event history**.
+- After a crash, a new worker re-runs the workflow code from the top and matches each command against the history.
+- Activities that already completed are not run again; their recorded results are returned. Past the crash point, commands run for real.
+
+Two rules follow (Temporal docs, checked November 2026):
+
+- **Workflow code must be deterministic.** The same input must produce the same commands in the same order. Model calls, API calls and the clock belong in activities. A change that breaks this raises a non-determinism error on replay.
+- **Activities run at least once.** If a worker finishes an activity and dies before reporting it, the activity runs again. Temporal tells you to make activities idempotent, for exactly the duplicate-charge case above.
+
+- A workflow's history is capped: Temporal warns after 10,240 events and terminates a workflow past 51,200 events or 50 MB.
+- A long-lived agent calls **Continue-As-New**, which starts a fresh run with the same workflow id, a new run id and an empty history, carrying over only the state it passes in.
+
+### Recovery patterns
+
+- **Resume from the last checkpoint** for transient failures: a crash, a deploy, a lost lease.
+- **Compensating transactions** for irreversible steps that must be undone: a refund reversed by a charge, an email followed by a correction.
+- **Dead-letter queues** for sessions that cannot proceed: a schema migration failed, or a referenced file is gone. Park the run with its last checkpoint and alert a person; do not retry it forever.
+
+- Retry policies, budgets and stuck-loop detection are on [Agent Reliability & Error Recovery](/ai-system-design/genai-system-design/agent-reliability-and-error-recovery).
+- Pausing for approval is on [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals).
+
+## Trade-offs
+
+| Decision                              | Option A                          | Option B                                     | Guidance                                                         |
+| ------------------------------------- | --------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| Checkpoint every step vs sparse       | Lose at most one step             | Fewer writes, smaller history                | Every step for runs with side effects or people in them          |
+| Redis vs Postgres for checkpoints     | Sub-millisecond, fine for locks   | Transactions, audit, durable by default      | Postgres for checkpoints; Redis for leases, locks and hot caches |
+| Snapshot checkpoints vs event history | Simple, inspectable, any language | Finished work never redone; determinism rule | Graph checkpointer for agent loops; Temporal for long workflows  |
+| Sync vs async saves                   | Nothing lost on a crash           | Lower latency per step                       | Sync whenever the next step has a side effect                    |
+| Keep all checkpoints vs prune         | Full replay and audit             | Bounded storage                              | Keep per your audit window, then prune by age                    |
+
+## Production systems
+
+- LangGraph saves a checkpoint per super-step under a `thread_id`. It ships an in-memory saver for tests and SQLite, Postgres, MongoDB and Azure Cosmos DB savers; its docs recommend Postgres for production and note that in-memory checkpoints are lost on restart (as of November 2026).
+- Temporal records every workflow's event history and replays it after a worker crash. It caps a history at 51,200 events or 50 MB and recommends Continue-As-New for long-lived workflows.
+- Stripe's idempotency keys (API v1) save the status and body of the first request and return them to retries, including 500 errors. Keys are up to 255 characters and may be pruned after 24 hours.
+- Redis's default append-only fsync policy, every second, can lose one second of writes in a crash.
+
+## Failure modes & pitfalls
+
+- An in-memory checkpointer in production: every paused run is lost on deploy.
+- Generating the idempotency key inside the step that retries.
+- Resuming days later against a service that pruned its keys (Stripe: after at least 24 hours), so the old key no longer protects you.
+- Pickled checkpoints that break when a class is renamed.
+- Secrets in plaintext snapshots.
+- Locks without a time limit, held forever by a dead worker.
+- Replaying old checkpoints against production tools.
+- Unbounded checkpoint history with no retention policy.
+
+## Interview framework
+
+1. Name the records: thread, run, checkpoint, and where each is stored.
+2. Say where the boundaries are: after each tool call, after each human decision.
+3. Walk through a crash: lease expires, a new worker loads the latest checkpoint, the step in flight runs again.
+4. Make that repeat safe: an idempotency key built and saved before the call, checked by the receiving service.
+5. Mention replay for debugging and its side-effect risk, and versioned schemas for long pauses.
+
+**What interviewers listen for:** the crash window between a side effect and its checkpoint, and a concrete key recipe.
+
+**Red flags:** "we retry from the beginning", "exactly once" with no idempotency, or run state that lives only in a worker's memory.
+
+## Further reading
+
+- [LangGraph: Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [LangGraph: Checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers)
+- [LangGraph: Time travel](https://docs.langchain.com/oss/python/langgraph/use-time-travel)
+- [Temporal: Workflow Execution](https://docs.temporal.io/workflow-execution)
+- [Temporal: Workflow Definition, deterministic constraints](https://docs.temporal.io/workflow-definition)
+- [Temporal: Activity Definition, idempotency](https://docs.temporal.io/activity-definition)
+- [Temporal: Events and Event History](https://docs.temporal.io/workflow-execution/event)
+- [Temporal: Event History walkthrough (Go SDK)](https://docs.temporal.io/encyclopedia/event-history/event-history-go)
+- [Temporal: Workflow Execution limits](https://docs.temporal.io/workflow-execution/limits)
+- [Stripe: Idempotent requests](https://docs.stripe.com/api/idempotent_requests)
+- [Redis persistence](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How do you recover a long agent run after a worker crash?"
+    category="Reliability"
+    level="Mid"
+  >
+    - Reload the last successful checkpoint from durable storage, validate schema version and referenced artifacts still exist, and resume from the next node in the graph.
+    - Re-execute idempotent steps freely; gate irreversible external calls behind idempotency keys and compare stored intent hashes before retrying.
+    - Surface partial results to the user with a clear resumed status and audit log of the failure window.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you choose Redis versus a SQL database for workflow state?"
+    category="Architecture"
+    level="Mid"
+  >
+    - Use Redis when you need sub-millisecond reads, ephemeral coordination, and can tolerate optional durability trade-offs unless you enable persistence features carefully.
+    - Use SQL when you need strong durability guarantees, complex querying, relational integrity across tables, and straightforward backup and compliance reporting.
+    - Many systems use Redis for fast locks plus async persistence to SQL for source of truth.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What serialization pitfalls break agent checkpointing in production?"
+    category="Implementation"
+    level="Senior"
+  >
+    - Non-serializable objects such as open sockets or closures, unbounded growth of debug fields, implicit timezone-naive timestamps, and breaking changes to field names without migrations.
+    - Also watch for secrets ending up in plaintext snapshots.
+    - Mitigate with explicit DTOs, size limits, migration shims, and field-level encryption for credentials or tokens referenced by state.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What is the difference between a thread, a run and a checkpoint, and where does long-term memory fit?"
+    category="Concepts"
+    level="Junior"
+  >
+    - A thread is one conversation; it holds many runs.
+    - A run is one pass of the agent loop for one message, and it saves a chain of checkpoints, each a snapshot of state that points to its parent.
+    - Loading a thread's latest checkpoint restores the conversation and any paused run.
+    - Long-term memory, such as a customer's preferences, is not in the checkpoint: it lives in a separate store that every thread can read.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent refunded a customer twice after a crash. Walk through why, and fix it."
+    category="Failure modes"
+    level="Senior"
+  >
+    - The worker sent the refund, the payments service made it, and the worker died before saving the next checkpoint.
+    - The new worker resumed from the last checkpoint, where the refund was still next, and sent it again.
+    - Checkpoints cannot close that window, so make the repeat harmless: build an idempotency key from the run id and the tool-call id, save it in the checkpoint before the call, and send it with every attempt.
+    - The payments service returns the first result for a key it has seen.
+    - Then add an evaluation that crashes runs at that point on purpose.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do graph checkpoints differ from Temporal-style durable execution, and how do you debug with either?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - A graph checkpointer saves a snapshot of state after each step; resume loads the latest snapshot and runs the next step.
+    - Temporal records every command as an event and, after a crash, replays the workflow code against that history, returning recorded activity results instead of running them again; the price is deterministic workflow code and a history size limit.
+    - Both let you debug from history: LangGraph can replay or fork from any checkpoint, but every step after it re-executes, so point replays at sandboxed tools.
+  </InterviewQuestion>
+</InterviewQuestions>

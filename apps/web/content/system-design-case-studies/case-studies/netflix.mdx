@@ -1,0 +1,889 @@
+---
+title: "Design Netflix"
+description: "Per-title encoding ladders, an own CDN filled off-peak inside ISPs, steering, a cloud control plane and cached personalised rows."
+logo: systems/netflix
+updated: 2026-11-17
+---
+
+Design a subscription video service: a member presses play and a film starts within two seconds, at the evening peak, anywhere in the world.
+The catalogue is small and the audience predictable, so the hard parts are placing every file next to viewers before they ask,
+steering each device to a copy that works, and keeping playback alive when the cloud behind it fails.
+
+- Interviewers use this question to see whether you notice what a fixed catalogue changes (push instead of pull, encode once at high cost) and whether you separate the control plane from the data plane.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design Netflix: a subscriber presses play and a film starts within two seconds, at the evening peak, anywhere in the world."
+  level="Senior"
+  minutes={45}
+  bankId="design-video-streaming"
+  tests={[
+    "Seeing that a fixed catalogue and a predictable audience allow content to be placed before anyone asks",
+    "A CDN design: own appliances against a bought CDN, push against pull, and steering",
+    "A control plane that can fail while playback carries on",
+    "Naming the single points of failure and what degrades first at the peak",
+  ]}
+  clarify={[
+    {
+      q: "Who supplies the video: members or studios?",
+      a: "Studios and our own productions: about 100 new content-hours a day into a fixed catalogue. Member uploads are YouTube's problem.",
+    },
+    {
+      q: "How many members, and what is the peak?",
+      a: "200,000,000 accounts; 20,000,000 streams at once in the busiest evening hour.",
+    },
+    { q: "Which devices?", a: "TVs, phones and browsers on links from 1 to 100 Mb/s; the player picks the rung." },
+    {
+      q: "Is the catalogue the same everywhere?",
+      a: "No: licences differ per country, so a title may be playable in one country and not the next.",
+    },
+    {
+      q: "Do we own the network?",
+      a: "We may build our own CDN; the control plane runs in a public cloud in several regions.",
+    },
+    {
+      q: "Is personalisation in scope?",
+      a: "Serving the personalised rows is; the recommendation model that ranks them is not.",
+    },
+  ]}
+  outOfScope={["Recommendation model", "Downloads for offline viewing", "Live events", "Billing", "Member uploads"]}
+/>
+
+## Overview
+
+- Studio **masters** go through an **encode pipeline** that builds a **ladder per title** (each rung sized for that title's picture), cut into **4 s segments**, and stores every file once in an **origin store**.
+- Video bytes come from **our own appliances** (cache servers) placed **inside ISPs** and at **exchange points**; each one holds most of the catalogue.
+- A **popularity forecast** decides each night which files go where; appliances copy them in a **02:00 to 06:00 fill window**, the origin feeding **50 hubs** and the hubs feeding **1,000 ISP sites**.
+- Pressing play calls the **playback service** in the cloud: it checks the plan and the **country licence**, and a **steering service** returns a manifest with **three ranked appliance URLs**.
+- The **control plane** runs **active-active in three cloud regions**; a started stream needs only the appliance, so it survives a region failure.
+- Home rows and title data come from a **cache with a full copy in every zone**; positions go to a **wide-column store** every 60 s, so another device resumes where you stopped.
+
+<Numbers
+  items={[
+    { value: "100 Tb/s", label: "out at the evening peak", hint: "20,000,000 streams × 5 Mb/s" },
+    { value: "12,000 : 1", label: "bytes served to bytes ingested", hint: "540 PB out against 45 TB in a day" },
+    { value: "1 PB", label: "the whole encoded catalogue", hint: "50,000 content-hours × 20 GB" },
+    { value: "250 TB", label: "sent by the origin a night", hint: "5 TB to each of 50 hubs" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    {
+      id: "F1",
+      requirement: "Browse a personalised catalogue",
+      notes: "Rows per profile, only titles licensed in the member's country.",
+    },
+    {
+      id: "F2",
+      requirement: "Play: authorise, get a manifest, stream",
+      notes: "Check the plan and licence, return the ladder and appliance URLs, adaptive bitrate on the device.",
+    },
+    {
+      id: "F3",
+      requirement: "Resume on another device",
+      notes: "Stop on the TV, continue on the phone from the same second.",
+    },
+    {
+      id: "F4",
+      requirement: "Ingest and encode studio masters",
+      notes: "Each title encoded into its own ladder and placed on appliances before its release time.",
+    },
+  ]}
+/>
+
+- Out of scope: the recommendation model (see [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems)), downloads, live events, billing, member uploads (see [YouTube](/system-design-case-studies/case-studies/youtube)).
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    {
+      id: "N1",
+      property: "Start-up",
+      target: "Play to first frame p95 under 2 s",
+      why: "Members leave a title that does not start.",
+    },
+    {
+      id: "N2",
+      property: "Smooth playback",
+      target: "Rebuffering under 0.2% of watch time at 100 Tb/s peak",
+      why: "A stall mid-film costs more than a lower rung.",
+    },
+    {
+      id: "N3",
+      property: "Availability",
+      target: "99.99% for started streams; a cloud region evacuated in under 10 minutes",
+      why: "A started film must not stop because the cloud did.",
+    },
+    {
+      id: "N4",
+      property: "Release readiness",
+      target: "Every rung on its appliances 24 h before release",
+      why: "Release night is the peak for that title.",
+    },
+    {
+      id: "N5",
+      property: "Resume accuracy",
+      target: "Lose at most 60 s of position; another device sees it within 5 s",
+      why: "Members switch devices mid-episode.",
+    },
+    {
+      id: "N6",
+      property: "Browse latency",
+      target: "Home page p99 under 500 ms; unpersonalised rows rather than an error",
+      why: "Browsing is the first thing a member sees.",
+    },
+    {
+      id: "N7",
+      property: "Delivery cost",
+      target: "At least 95% of peak bytes from appliances inside or next to the member's ISP",
+      why: "Transit at 100 Tb/s would cost more than the appliances.",
+    },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Peak egress", assumption: "20,000,000 streams × 5 Mb/s average delivered", result: "100 Tb/s" },
+    {
+      quantity: "A day's bytes",
+      assumption: "Average half the peak: 50 Tb/s × 86,400 s",
+      result: "4,320,000 Tb ≈ 540 PB a day; 240,000,000 hours watched",
+    },
+    {
+      quantity: "Ingest",
+      assumption: "100 new content-hours a day × 450 GB a master hour (1 Gb/s)",
+      result: "45 TB a day: bytes out ÷ bytes in ≈ 12,000",
+    },
+    {
+      quantity: "Catalogue",
+      assumption: "50,000 content-hours × 20 GB (8 rungs × 2 codecs, audio, subtitles)",
+      result: "1 PB encoded",
+    },
+    {
+      quantity: "Popular slice",
+      assumption: "10% of titles take 80% of hours (assumed)",
+      result: "100 TB serves 80% of the bytes",
+    },
+    {
+      quantity: "Appliances",
+      assumption: "100 TB and 50 Gb/s each; 100 Tb/s ÷ 50 Gb/s",
+      result: "2,000 at the peak; 3,000 with 1.5 × headroom",
+    },
+    {
+      quantity: "One ISP site",
+      assumption: "400,000 peak streams × 5 Mb/s = 2 Tb/s ÷ 50 Gb/s",
+      result: "40 appliances; 4 PB of disk holds the full catalogue several times",
+    },
+    {
+      quantity: "Nightly fill",
+      assumption: "5 TB a site (2 TB new, 3 TB re-placed) in 4 h",
+      result: "2.8 Gb/s a site; origin 50 hubs × 5 TB = 250 TB",
+    },
+    {
+      quantity: "Encode work",
+      assumption: "100 h × 16 encodes × 3 for trial encodes × 10 CPU-hours",
+      result: "48,000 CPU-hours a day ≈ 2,000 cores",
+    },
+    {
+      quantity: "Play starts",
+      assumption: "20,000,000 streams ÷ 2,400 s average session",
+      result: "≈ 8,300/s at the peak",
+    },
+    {
+      quantity: "Home pages",
+      assumption: "3 a play start × 400 title and row objects each",
+      result: "25,000 pages/s = 10,000,000 cache reads/s",
+    },
+    { quantity: "Heartbeats", assumption: "20,000,000 streams ÷ one every 60 s", result: "≈ 333,000 writes/s" },
+    {
+      quantity: "Viewing data",
+      assumption: "600,000,000 profiles × 200 titles × 100 bytes",
+      result: "12 TB; rows 600,000,000 × 4 KB = 2.4 TB",
+    },
+  ]}
+  note="The bytes leave at 100 Tb/s; the catalogue they come from is only 1 PB, and that is the whole design."
+/>
+
+| #   | Driver                       | For this system                                                                                                                                                | What it forces                                                                                             |
+| --- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| D1  | Read to write ratio          | 540 PB served against 45 TB ingested a day: 12,000 to 1; 10,000,000 cache reads/s against a few thousand catalogue writes a day                                | Spend CPU on each encode once; serve bytes from appliances and metadata from caches                        |
+| D2  | Peak against average         | Predictable: the evening peak is 5 × the 04:00 trough, every day, per time zone; release nights add a known spike                                              | Fill in the trough; size appliances for the peak; shed rungs before streams                                |
+| D3  | Consistency per operation    | Plan and licence: read-your-writes after a change; rows and title data: minutes stale; positions: newest wins within 5 s; appliance file lists: a minute stale | One relational primary for accounts; caches and replicas everywhere else                                   |
+| D4  | Latency target               | First frame p95 under 2 s (N1); playback API p99 300 ms; first segment from an appliance about 10 ms away                                                      | Appliances inside the ISP; one call returns manifest, licence and URLs                                     |
+| D5  | Durability                   | Masters and the origin copy are never lost; appliances hold copies; a position may lose 60 s                                                                   | Cross-region replicated origin; appliances rebuilt by fill; positions written every 60 s                   |
+| D6  | Ordering                     | Only per (profile, title): the newest position wins                                                                                                            | A timestamp on each heartbeat; last write wins in the viewing store                                        |
+| D7  | Duplicates                   | Harmless everywhere: a heartbeat sets an absolute position; a fill copy is keyed by file id and checksum                                                       | Idempotent writes; no dedup machinery                                                                      |
+| D8  | Data size and growth         | 1 PB catalogue growing 2 TB a day; 12 TB of viewing data; the popular 100 TB serves 80%                                                                        | The whole catalogue fits at big sites; small sites keep the popular slice                                  |
+| D9  | Fan-out shape                | One title to millions: 5,000,000 streams of one new season on release night                                                                                    | Many copies of hot files per site, placed before release                                                   |
+| D10 | Contention                   | Not a driver here: every write is per profile; a hot title is a read problem (D9)                                                                              | Nothing: no locks, no counters on shared rows                                                              |
+| D11 | Geography                    | Members on every continent; licences differ per country; appliances in every large market                                                                      | Data plane in ISPs; control plane in 3 regions; licence checks per country                                 |
+| D12 | Availability and degradation | 99.99% for started streams; under stress keep streams going                                                                                                    | Shed in this order: top rungs, personalised rows (fall back to popular rows), fill; never a started stream |
+
+## API design
+
+| Call                                               | Who calls it | When                                                                           |
+| -------------------------------------------------- | ------------ | ------------------------------------------------------------------------------ |
+| `GET /v1/home?profile=`                            | Device       | Opening the app; rows by cursor as the member scrolls                          |
+| `GET /v1/titles/{id}`                              | Device       | Title page: synopsis, episodes, whether it is licensed here                    |
+| `POST /v1/playback/start`                          | Device       | Press play: returns manifest, licence URL, ranked appliance URLs, `session_id` |
+| `POST /v1/licence`                                 | Device       | The decryption key for this session                                            |
+| `GET https://<appliance>/f/{file_id}` with `Range` | Device       | Every 4 s segment, by byte range, from the first URL that answers              |
+| `PUT /v1/positions/{profile}/{title}`              | Device       | Every 60 s and on pause or stop                                                |
+| `GET /v1/positions/{profile}?cursor=`              | Device       | "Continue watching" row                                                        |
+| `POST /v1/ingest/titles/{id}/masters`              | Studio       | A master delivery, resumable by part                                           |
+
+The play call returns everything the device needs in one round trip.
+
+```http
+POST /v1/playback/start
+Authorization: Bearer <member token>
+{ "profile_id": 2, "title_id": 81, "device": { "codecs": ["av1", "h264"], "max_height": 2160 } }
+
+200 OK
+{ "session_id": "s_6f2c",
+  "manifest": { "rungs": [{ "height": 1080, "kbps": 2000, "file_id": "f_81_1080_av1" }, "…"] },
+  "urls": ["https://isp-7.example.net", "https://isp-3.example.net", "https://ix-2.example.net"],
+  "licence_url": "https://api.example.com/v1/licence" }
+```
+
+- **Idempotency:** a position `PUT` sets an absolute value, so a retry changes nothing; `start` with the same `session_id` returns the same answer.
+- **Errors:** `403` the title is not licensed in the member's country; `402` the plan has lapsed; `429` too many streams on the plan; an appliance that does not answer in 2 s is skipped by the device, not retried.
+- **Pagination:** home rows and "continue watching" by cursor, never by offset.
+
+## Data model
+
+| Data                              | Store type                                                                                               | Why this store (driver ids)                                             | Partition key                               | Consistency                                    | Rejected alternative and its cost                                       |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
+| Masters and encoded files         | Object store (S3-style)                                                                                  | 1 PB of immutable files, never lost, cheap per GB (D5, D8)              | Object key `t/{title_id}/{file_id}`         | Strong read-after-write per object             | A file system on appliances only: no durable copy to refill from        |
+| Copies at the edge                | Appliance disks and flash, files by `file_id`                                                            | Bytes 10 ms from the member (D4, D9)                                    | `file_id` hashed across a site's appliances | Immutable files: nothing to keep in step       | Pull caching: misses at the peak, on full links                         |
+| Accounts, plans, titles, licences | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL), one primary, replicas in every region | Plan changes need read-your-writes; licences need joins by country (D3) | `account_id`                                | Strong on the primary; replicas seconds behind | A wide-column store: a plan change could be read stale on the next play |
+| Home rows and title data, served  | In-memory cache (memcached), a full copy per zone                                                        | 10,000,000 reads/s, p99 in a millisecond or two (D1, D4)                | `profile_id`, `title_id`                    | Minutes stale is fine                          | Read replicas: 10,000,000 SQL reads a second                            |
+| Positions, history, rows source   | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra), replicated to every region         | 333,000 writes/s, any region writes, newest wins (D6, D11)              | `profile_id`                                | Last write wins by heartbeat time              | A relational primary: one region takes every write across the world     |
+| Appliance health and file lists   | Steering service memory, rebuilt from reports                                                            | Reported every minute; lost state rebuilds in a minute (D3)             | Site                                        | A minute stale                                 | A database: nothing here needs to survive a restart                     |
+
+```sql
+-- Relational: accounts and licences (primary in one region, replicas in all three)
+CREATE TABLE accounts (
+  account_id BIGINT PRIMARY KEY,   -- partition key if this ever shards
+  plan       TEXT,                 -- 'basic' | 'standard' | 'premium': max streams, max height
+  country    CHAR(2),              -- decides which titles are playable
+  status     TEXT                  -- 'active' | 'lapsed'
+);
+CREATE TABLE licences (
+  title_id BIGINT, country CHAR(2),
+  starts_at TIMESTAMPTZ, ends_at TIMESTAMPTZ,
+  PRIMARY KEY (title_id, country)  -- one lookup per play start
+);
+```
+
+```sql
+-- Wide-column (CQL): positions, newest wins
+CREATE TABLE positions (
+  profile_id bigint,               -- partition key: one profile's titles together
+  title_id   bigint,               -- clustering key
+  seconds    int,                  -- absolute position: a retry is harmless
+  updated_at timestamp,            -- last write wins on this time
+  device     text,
+  PRIMARY KEY (profile_id, title_id)
+);
+```
+
+- **Play start:** account by `account_id` (cache, then a replica), licence by `(title_id, country)`; both read-your-writes after a change through the primary.
+- **Continue watching:** one partition read of `positions` for the profile, newest first.
+- **Home page:** rows for the profile and title data from the cache; on a miss, the rows table in the wide-column store.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Stream from one origin (F2)
+
+The smallest design: the playback service checks the member and hands back one file on the origin store.
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={1}
+  caption="Step 1: the playback service checks the account and licence, and the device streams one file from the origin store."
+/>
+
+- **Adds:** the API gateway, the playback service, the metadata database, the origin store.
+- **Flow:**
+  1. The device calls `POST /v1/playback/start`; the service checks the plan and the title's licence for the member's country.
+  2. It returns the URL of one file; the device downloads it from the origin store.
+- **Why this and not that:** files in an object store, not on app servers, so a server can die without losing a title (D5).
+- **The gap:** one file at one bitrate stalls a 2 Mb/s phone and looks poor on a 4K TV.
+
+<PremiumBreak />
+
+### Step 2: An encoding ladder per title (F4, N1)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={2}
+  caption="Step 2: a studio master goes through the ingest service to the encode pipeline, which writes the title's own ladder to the origin store."
+/>
+
+- **Adds:** the **ingest service** and the **encode pipeline**; the studio delivers masters.
+- **Flow:**
+  1. The studio uploads a master in parts; the ingest service checks it and starts an encode job.
+  2. The pipeline runs trial encodes to pick the bitrate of each rung for this title, then encodes 8 rungs × 2 codecs in parallel chunks.
+  3. It cuts every rung into 4 s segments at the same boundaries and writes them to the origin store.
+- **Why this and not that:** the device needs rungs to switch between (N1, N2), and with 12,000 bytes served per byte ingested, extra CPU per encode pays back on every view (D1). The [YouTube](/system-design-case-studies/case-studies/youtube) page covers chunked, retryable encode tasks and the player's switching rule; this page covers why the ladder differs per title.
+- **The gap:** 100 Tb/s cannot leave one origin.
+
+The ladder per title is the change a fixed catalogue allows.
+
+<AnimatedDiagram
+  spec="animated/netflix/bitrate-ladder"
+  stepper
+  caption="One ladder for every title wastes bits on simple films and starves complex ones; a ladder per title spends bits where the picture needs them."
+/>
+
+<StepCards>
+  <StepCard n={1} title="One ladder for every title">
+    A fixed ladder gives every film 5.0 Mb/s at 1080p. The animated film scores 97, more than anyone can see; the action
+    film scores 86 and looks blocky.
+  </StepCard>
+  <StepCard n={2} title="A ladder per title">
+    Trial encodes find where each rung reaches the target score of 93: 2.0 Mb/s at 1080p for the animated film, 7.0 Mb/s
+    for the action film.
+  </StepCard>
+  <StepCard n={3} title="What it saves">
+    A two-hour view at 1080p falls from 4.5 GB to 1.8 GB for the animated film, and a 3 Mb/s link now gets 1080p instead
+    of 480p.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 5.0 Mb/s × 7,200 s ÷ 8 = 4.5 GB; 2.0 Mb/s × 7,200 s ÷ 8 = 1.8 GB, 60% less. The quality scores are this page's illustration of a perceptual metric, not measurements.
+
+### Step 3: Own appliances inside ISPs, and a steering service (F2, N2, N7)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={3}
+  caption="Step 3: appliances inside ISPs and at exchange points serve segments; the steering service ranks them from what each one reports."
+/>
+
+- **Adds:** **ISP appliances** (inside the member's ISP), **IX appliances** (at internet exchange points) and the **steering service** (the accent); the direct origin download goes away.
+- **Flow:**
+  1. Every appliance reports its health, the routes it learned from the ISP and the files it holds, once a minute.
+  2. On play, the playback service asks steering for appliances that hold the title's files, are healthy and are close to the member's IP.
+  3. The device gets three ranked URLs and fetches segments from the first.
+- **Why this and not that:** 100 Tb/s must come from within the member's network (D9, D11, N7). 2,000 appliances at 50 Gb/s each serve it; a bought CDN would bill every one of those bytes (Component choices).
+- **The gap:** appliances that fill on demand miss on every new release, at the peak.
+
+### Step 4: Fill the appliances off-peak from predicted popularity (N4, N7)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={4}
+  caption="Step 4: a popularity forecast hands steering a fill plan; exchange appliances copy new files from the origin at night and ISP appliances copy from them."
+/>
+
+- **Adds:** the **popularity forecast**; the nightly fill from the origin to IX appliances and from IX appliances to ISP appliances.
+- **Flow:**
+  1. Each night the forecast predicts per region which files will be watched tomorrow, including releases scheduled for the next days.
+  2. Steering turns that into a fill plan per appliance: which files to add, which to drop.
+  3. Between 02:00 and 06:00 local time the 50 hub appliances copy new files from the origin; ISP appliances copy from their hub.
+- **Why this and not that:** the catalogue is fixed and the audience predictable (D2, D8), so the night can move 5 TB a site at 2.8 Gb/s while links are emptiest. Pull filling would fetch the same bytes at 21:00, on full links, with a slow first segment (N1).
+- **The gap:** the control plane runs in one cloud region; if it fails, nobody can press play.
+
+### Step 5: The control plane in three cloud regions (N3)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={5}
+  caption="Step 5: a region DNS sends each device to a healthy one of three active regions."
+/>
+
+- **Adds:** **region DNS**; every control-plane service and store runs in three regions, all serving traffic.
+- **Flow:**
+  1. The device resolves the API name; region DNS answers with the nearest healthy region.
+  2. Each region serves any member: accounts from a local replica, positions from the local wide-column replica.
+- **Why this and not that:** active-active means a region failure moves traffic to two warm regions instead of starting a cold one (N3, D12). Each region is sized for 1.5 × its share, so two carry the load of three.
+- **The gap:** 10,000,000 home-page reads a second still land on databases.
+
+### Step 6: A cache tier for catalogue data (F1, N6)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={6}
+  caption="Step 6: the browse service reads personalised rows and title data from a cache with a full copy in every zone."
+/>
+
+- **Adds:** the **browse service** and the **catalogue cache**.
+- **Flow:**
+  1. The device asks for the home page; the browse service reads the profile's rows, then the title data for each row, from the cache in its own zone.
+  2. It drops titles not licensed in the member's country and returns the first rows; the rest come by cursor.
+- **Why this and not that:** 10,000,000 reads/s, and rows a few minutes stale are fine (D1, D3, D4). A full copy per zone keeps reads local and survives a zone loss (Deep dive 3).
+- **The gap:** a failed dependency, appliance or region is handled only if someone tested it.
+
+### Step 7: Fallbacks, failure injection, region evacuation (N3, N6)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={7}
+  caption="Step 7: the device falls back to an exchange-point appliance, and a failure-injection tool kills instances in production."
+/>
+
+- **Adds:** the device's **fallback** to lower-ranked URLs, **failure injection**, and region evacuation through region DNS.
+- **Flow:**
+  1. An appliance that does not answer in 2 s is skipped; the device takes the next URL while its 30 s buffer plays.
+  2. Every service has a fallback for each dependency: rows fall back to popular rows for the country; the bitrate falls before a stream stops.
+  3. The failure-injection tool kills random instances during working hours; drills evacuate a whole region by changing DNS.
+- **Why this and not that:** fallbacks that are never exercised fail when needed; killing instances on purpose proves them while engineers are watching (D12, N3).
+- **The gap:** a member who stops on the TV starts from zero on the phone.
+
+### Step 8: The resume position (F3, N5)
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  step={8}
+  caption="Step 8: heartbeats go through the resume service to the wide-column viewing store, which also feeds the popularity forecast."
+/>
+
+- **Adds:** the **resume service** and the **viewing store**.
+- **Flow:**
+  1. The device sends its position every 60 s and on pause or stop.
+  2. The resume service writes `(profile, title, seconds, updated_at)` to the local region; it replicates to the other two.
+  3. Another device reads "continue watching" for the profile; the forecast reads the history each night.
+- **Why this and not that:** 333,000 writes/s from every region, where the newest write wins, fits a wide-column store with multi-region replication (D6, D11). A heartbeat every 60 s bounds the loss to 60 s (N5).
+
+## Final architecture
+
+<AnimatedDiagram
+  spec="animated/netflix/architecture"
+  stepper
+  caption="A subscription video service: a cloud control plane authorises and steers, appliances inside ISPs hold the catalogue before anyone asks, and caches keep browsing cheap."
+/>
+
+| Group                      | Components                                                | Responsibility                                                        |
+| -------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Clients**                | Member device, studio                                     | Browse, play with adaptive bitrate, report position; deliver masters  |
+| **Edge and own CDN**       | ISP appliances, IX appliances, API gateway, region DNS    | Serve every video byte; route API calls to a healthy region           |
+| **Playback control plane** | Playback service, steering and fill                       | Authorise, return manifest and ranked URLs; plan each night's fill    |
+| **Application services**   | Ingest, browse and resume services                        | Take masters; serve personalised rows; record positions               |
+| **Async pipeline**         | Encode pipeline, popularity forecast, failure injection   | Build each title's ladder; predict demand; prove the fallbacks        |
+| **Storage**                | Metadata DB, origin store, catalogue cache, viewing store | Accounts and licences; every encoded file; rows and titles; positions |
+
+Pressing play at 21:00, step by step:
+
+1. Region DNS sends the device to the nearest healthy region; the browse service returns rows from the zone's cache copy.
+2. `POST /v1/playback/start`: the playback service reads the plan and the licence for the country, and asks steering for appliances.
+3. Steering returns three URLs: two appliances inside the member's ISP that hold the files, then an exchange-point one.
+4. The device fetches the first segment at a low rung from the first URL in about 40 ms, then climbs the title's ladder.
+5. Every 60 s the device sends its position; the resume service writes it to the viewing store.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for control, plain HTTP range requests for bytes
+
+- **Choice:** REST over HTTPS with JSON for browse, play and positions; video as plain HTTP GETs with byte ranges on immutable files.
+- **Why:** one play call returns manifest, licence URL and appliance URLs in one round trip (D4, N1); byte ranges let an appliance serve segments out of one file per rung without a server process per stream.
+- **Why not gRPC:** many TVs and browsers cannot call it without a proxy, and appliances serve files, not procedure calls.
+- **Why not GraphQL for the home page:** it fits a screen of many shapes, and a backend-for-frontend per device type gives the same one-call page with responses we can cache.
+- **Why not WebSockets:** nothing is pushed to the device; positions go up every 60 s, which a `PUT` does without an open socket for each of 20,000,000 streams.
+
+### Region DNS and the load balancer
+
+- **Choice:** DNS that answers with the nearest healthy region, a short TTL of 60 s, then a layer-7 load balancer in each region in front of the gateway.
+- **Why:** three active regions (N3, D11) need a way to move members between them; DNS reaches every device without a client change, and evacuation means changing one answer.
+- **Why not anycast for the API:** it reaches a nearby region too, but a route change can move a member between regions mid-session, and evacuating a region means withdrawing routes instead of changing one answer.
+- **Why not one global load balancer:** it becomes the single point of failure that three regions were meant to remove.
+- **Why layer 7 inside the region:** routing by path (`/playback`, `/home`, `/positions`) keeps the play path separate from browsing (D12); video bytes never pass through it.
+
+### API gateway: authentication, routing, limits
+
+- **Choice:** a gateway that checks the member token, routes by path to the right service and enforces the plan's stream limit with a `429`.
+- **Why:** every call needs the same checks, and a failed check costs no work behind it (D12).
+- **Why not checks inside each service:** a dozen services would each re-implement token checks and limits, and drift.
+
+### CDN: our own appliances inside ISPs and at exchange points
+
+- **Choice:** our own cache appliances (100 TB, 50 Gb/s in this design) placed free inside large ISPs and at exchange points, filled by push.
+- **Why:** 100 Tb/s at the peak, one title to millions, a catalogue that fits on a site's disks (D1, D8, D9, N7). Inside the ISP the first segment is about 10 ms away (N1), and the ISP's upstream links carry none of it.
+- **Why not a commercial CDN:** it bills per byte; at 540 PB a day the bill dwarfs 3,000 appliances, and its caches are shared with other customers, so our files get evicted.
+- **Why not serve from cloud regions:** 100 Tb/s out of three regions would cross the internet backbone at transit prices, far from members.
+- **Why not pull on demand:** see "Fill" below; misses would arrive at the peak, on full links.
+- **Why not peer-to-peer between members:** members' upload links and batteries are not ours to spend, and a TV behind a home router can rarely accept connections.
+
+### Fill: push from a forecast, tiered through hubs
+
+- **Choice:** a nightly fill plan per appliance from the popularity forecast; the origin fills 50 hub appliances, hubs fill ISP sites, within a 02:00 to 06:00 window.
+- **Why:** the catalogue is fixed and tomorrow's demand is predictable (D2, D8); the trough has room for 2.8 Gb/s a site, and tiering cuts the origin's work from 5 PB to 250 TB a night (Deep dive 1).
+- **Why not pull, as YouTube-style CDNs do:** with millions of uploads a day nobody can predict, pull is right there; here every miss is a predictable miss we chose not to prevent.
+- **Why not fill every site from the origin:** 1,000 sites × 5 TB = 5 PB a night out of one origin.
+
+### Steering service: ranked URLs from appliance reports
+
+- **Choice:** a stateless service in each region that holds, in memory, every appliance's health, routes and file list, and ranks three URLs per play.
+- **Why:** only a central view knows which appliance near this IP holds this file and is healthy (D9, N2); returning three URLs lets the device fail over without asking again.
+- **Why not DNS-based steering:** a DNS answer cannot say which appliance holds this title's files, and resolvers cache it for minutes.
+- **Why not a database for appliance state:** reports arrive every minute; after a restart the state rebuilds within one minute, so durability buys nothing.
+
+### Origin store: object storage
+
+- **Choice:** an object store (S3-style) holding masters and every encoded file, replicated to a second region.
+- **Why:** 1 PB of immutable files, written once and read mostly by the nightly fill, at the lowest cost per GB (D5, D8).
+- **Why not database BLOBs:** every byte would pass through the database's buffer pool and replication stream.
+- **Why not appliances as the only copy:** an appliance is a cache; a lost one must be refilled from somewhere durable.
+
+### Metadata database: relational, one primary, replicas in every region
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL (or <TechIcon id="oss/mysql" /> MySQL) for accounts, plans, titles and licences; one primary, read replicas in all three regions, behind the cache.
+- **Why:** a plan change or a lapsed account must be seen on the next play (read-your-writes, D3); licences join titles to countries. Writes are rare, so one primary holds them; 8,300 play starts/s read from replicas and the cache.
+- **Why not a wide-column store:** it scales writes we do not have, and a plan change could be read stale from another replica.
+- **Why not a distributed SQL database across regions:** it removes the single primary, at the cost of cross-region consensus on every write; worth it only when account writes grow far beyond today's.
+
+### Catalogue cache: memcached-style, a full copy per zone
+
+- **Choice:** an in-memory key-value cache with memcached semantics; every zone holds a full copy (2.5 TB), writes go to every copy, reads go to the local one.
+- **Why:** 10,000,000 reads/s in a millisecond or two, and stale rows for a few minutes are fine (D1, D3, D4). A full copy per zone means a zone failure moves reads, not misses (Deep dive 3).
+- **Why not <TechIcon id="oss/redis" /> Redis Cluster:** it shards one copy with replicas; it would work, but values here are opaque blobs, and the mirror-per-zone layout is what we need from it, not data structures.
+- **Why not an in-process cache in each browse server:** 2.5 TB does not fit in a server's memory; a small in-process cache for the hottest titles sits in front of it.
+- **Why not read replicas of the databases:** 10,000,000 queries a second.
+
+### Viewing store: wide-column, multi-region
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra with `profile_id` as the partition key, replicated 3 times in each of 3 regions, writes at local quorum.
+- **Why:** 333,000 writes/s from every region, where the newest write wins and nothing needs a transaction (D6, D7, D11). One partition read serves "continue watching".
+- **Why not the relational primary:** every heartbeat in the world would cross to one region, and 333,000 writes/s outgrows one primary.
+- **Why not a log in front, such as <TechIcon id="oss/apache-kafka" /> Kafka:** another device must read the position within 5 s (N5); a log adds a hop and lag for no gain. Viewing events for analytics can go to a log separately.
+- **Why not the cache:** positions must survive a cache restart (D5).
+
+### Encode pipeline: a workflow of chunked tasks on a work queue
+
+- **Choice:** a durable workflow per title: inspect, trial encodes, then 8 rungs × 2 codecs as chunked tasks on a work queue (<TechIcon id="oss/rabbitmq" /> RabbitMQ or a cloud queue), package, publish.
+- **Why:** 2,000 cores busy is modest, but a title must be ready 24 h before release (N4), so tasks retry on their own and the workflow tracks every rung (D7).
+- **Why not encode on demand at play time:** the first viewer would wait minutes, and the same work would repeat per region.
+- **Why not one fixed ladder:** it saves the trial encodes and costs bits on every one of millions of views (Step 2, D1).
+
+### Popularity forecast and failure injection
+
+- **Choice:** a nightly batch job over viewing history and the release calendar; a failure-injection tool that kills random instances in production during working hours.
+- **Why the forecast:** the fill plan needs tomorrow's demand per region (D2, N4); a batch job once a night matches the fill window.
+- **Why not a real-time forecast:** fill happens once a night; a fresher forecast changes nothing until then.
+- **Why failure injection:** every fallback in Step 7 is code that runs only during a failure; killing instances on purpose keeps those paths working (D12, N3).
+- **Why not test fallbacks only in staging:** staging has neither the traffic nor the failures of production.
+
+## Deep dives
+
+### Push-fill and steering, with fallback from an ISP appliance to an exchange-point one
+
+- **Placement:** each site's appliances split the files by hashing `file_id`; a popular file gets copies on several appliances so 5,000,000 streams of one release spread across them (D9).
+- **Ranking:** steering filters appliances that hold the file and are healthy, ranks by network distance from the member's IP (routes the appliances learned from the ISP), and returns three URLs: two in the ISP, one at an exchange point.
+- **Fallback:** the device skips a URL that does not answer in 2 s; its 30 s buffer keeps playing while it moves on. The control plane is not on this path.
+- **Rebalancing:** the next minute's reports drop the dead appliance from the rankings; its files are already on other appliances or the hub.
+
+<AnimatedDiagram
+  spec="animated/netflix/steering"
+  stepper
+  caption="The cloud picks the appliances once; when one dies mid-stream the device moves to the next URL from its own buffer, without asking the cloud."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Play: authorise, rank, stream">
+    The playback API checks the plan and the licence, steering ranks isp-7, isp-3 and ix-2, and the device fetches
+    segment 1 at a low rung from isp-7 in 40 ms.
+  </StepCard>
+  <StepCard n={2} title="The appliance fails: next URL">
+    At segment 212 isp-7 and then isp-3 stop answering. The buffer keeps the picture moving while the device fetches
+    segment 212 from ix-2, then reports the failures.
+  </StepCard>
+</StepCards>
+
+**The numbers:** two 2 s timeouts against a 30 s buffer leave 26 s of picture to spare; segment 212 × 4 s is minute 14 of the film.
+
+The fill uses the night's empty links, and tiering keeps the origin small.
+
+<AnimatedDiagram
+  spec="animated/netflix/fill-window"
+  stepper
+  caption="A fixed catalogue and a predictable audience let the night do the work: new files reach every appliance before the evening peak, and the origin sends one copy per hub."
+/>
+
+**How to read it:**
+
+- Step 1 is one site's day: the shape, not a measurement, peaking at 2 Tb/s at 21:00 and falling to 400 Gb/s near 04:00.
+- Step 2 is the fill window; step 3 is the hub tier between the origin and the sites.
+
+**The numbers:** 5 TB = 40,000 Gb; ÷ 14,400 s ≈ 2.8 Gb/s, 0.7% of the trough. Origin: 50 × 5 TB = 250 TB = 2,000,000 Gb ÷ 14,400 s ≈ 139 Gb/s.
+
+<Callout tone="red" title="What breaks">
+  A file the forecast missed is not on the appliance when members ask. The device's next URL is the exchange appliance,
+  which holds more of the catalogue, and the miss is logged so tomorrow's plan adds the file.
+</Callout>
+
+### Control plane against data plane: playback carries on while the cloud is degraded
+
+- **The split:** the control plane (playback, steering, browse, positions) decides; the data plane (appliances) moves bytes. A started stream talks only to appliances.
+- **What a control-plane outage stops:** new plays, browsing and position saves in the affected region; region DNS moves those members to the other two within the 60 s TTL.
+- **What it does not stop:** 20,000,000 started streams; each device holds its manifest and three URLs, and appliances serve files without asking anyone.
+- **Fill:** a failed control plane misses one night's fill plan; appliances keep yesterday's files, so only new releases suffer.
+- **Licences:** a licence covers the session, so a member watching a film is not cut off when the licence service is down.
+
+The pattern page shows the same split on a shop's cells: read its router as the device holding its URLs, and its cells as appliances.
+
+<AnimatedDiagram
+  spec="animated/patterns/cell-planes"
+  stepper
+  caption="When the control plane fails, nothing changes, but nothing stops: the router serves from its last copy of the map."
+/>
+
+**How to read it:**
+
+- Step 1: the control plane writes the map; the data plane serves from its own copy of it.
+- Step 2: the control plane is down and the data plane carries on: here, appliances keep serving and devices keep their URLs.
+
+**The numbers:**
+
+- At the peak a region's share is 20,000,000 ÷ 3 ≈ 6,700,000 streams; none of them stops when its region does.
+- The other two regions take its 8,300 ÷ 3 ≈ 2,800 play starts/s, within their 1.5 × sizing.
+
+### The catalogue cache: mirrored per zone, best effort across regions
+
+- **Mirror per zone:** every write sets the key in all three zones' copies; each browse server reads its own zone's copy, about a millisecond away.
+- **Zone loss:** a server whose zone copy is gone reads another zone's copy; the hit rate stays the same, only latency rises a little.
+- **Across regions:** changes reach the other regions asynchronously, with no guarantee; a missed update is fixed by the TTL (a few minutes) or the next write.
+- **Why best effort is enough:** rows and title data may be minutes stale (D3); the facts that must be exact, plan and licence, come from the relational store.
+- **Cold start:** a new zone copy is warmed by copying from a healthy zone before it takes reads, so the stores behind never see a miss storm.
+
+<AnimatedDiagram
+  spec="animated/netflix/cache-zones"
+  stepper
+  caption="Three full copies cost three times the memory, and buy local reads and no miss storm when a zone fails; other regions converge on a best-effort basis."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A copy in every zone">
+    The row writer sets every key in all three copies. Each zone's browse servers read 3.3 million objects a second from
+    their own copy.
+  </StepCard>
+  <StepCard n={2} title="A zone's copy is lost">
+    Zone b's servers read zone a's copy instead. Zones a and c each take 1.65 million more reads a second, within their
+    5 million sizing.
+  </StepCard>
+  <StepCard n={3} title="Other regions, best effort">
+    Changes reach region B asynchronously. A lost update shows stale rows until the TTL ends or the next write lands.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 10,000,000 reads/s ÷ 3 ≈ 3,300,000 per zone; one sharded copy would turn a zone loss into 3,300,000 misses/s on the wide-column and relational stores.
+
+<Callout tone="red" title="What breaks">
+  A cache that shards one copy across zones looks cheaper until a zone fails: a third of the keys miss at once and the
+  stores behind it fall over. Mirror the data per zone, or size the stores for the miss storm.
+</Callout>
+
+### Worked example: release night for a new season
+
+1. The season is encoded a week early: 10 episodes × 1 h × 20 GB = 200 GB of files, its ladder chosen per episode.
+2. Three nights before release, the forecast puts it on every site; each site copies 200 GB inside its 5 TB fill.
+3. At a site expecting 25% of its 400,000 peak streams on the new season, 100,000 streams × 5 Mb/s = 500 Gb/s need 10 appliances' worth of throughput, so each episode's files sit on at least 10 of the site's 40 appliances.
+4. At 21:00 release, 5,000,000 members press play worldwide in the first hour: 5,000,000 ÷ 3,600 s ≈ 1,400 extra play starts/s, well within 8,300/s.
+5. Every segment comes from an appliance inside the ISP; the origin sends nothing that night beyond the usual 250 TB fill.
+
+**The numbers:** with pull filling instead, each of 1,000 sites would fetch the first episode's 20 GB at 21:00: 20 TB across the backbone in the peak minute, while members wait on misses.
+
+## Design decisions and why
+
+| Decision        | Options considered                                   | Choice                                            | Decided by      | What we give up                                                     | Revisit when                                           |
+| --------------- | ---------------------------------------------------- | ------------------------------------------------- | --------------- | ------------------------------------------------------------------- | ------------------------------------------------------ |
+| Video delivery  | Cloud origin, commercial CDN, own appliances in ISPs | Own appliances inside ISPs and at exchanges       | D1, D9, D11, N7 | Hardware, logistics and an ISP partnership programme                | Traffic is too small to pay for appliances             |
+| Fill            | Pull on miss, push from a forecast                   | Push, nightly, tiered through hubs                | D2, D8, N4      | A missed forecast is a miss until the next night                    | The catalogue is user-uploaded and unpredictable       |
+| Ladder          | Fixed ladder, a ladder per title                     | Per title, from trial encodes                     | D1, N2          | 3 × the encode CPU per title                                        | Encoding becomes the bigger cost (short-lived content) |
+| Steering        | DNS to a site, service returning URLs                | Service returns 3 ranked URLs per play            | D9, N2, N3      | A control-plane call on every play start                            | Never at this scale                                    |
+| Control plane   | One region with failover, active-active in 3         | Active-active in 3 regions                        | D11, D12, N3    | 1.5 × capacity per region; replicated stores                        | A single market in one country                         |
+| Catalogue cache | Sharded single copy, full copy per zone              | Full copy per zone, best effort across regions    | D1, D3, D12     | 3 × the cache memory                                                | The working set outgrows memory economically           |
+| Positions       | Relational, wide-column, log then store              | Wide-column, multi-region, newest wins            | D6, D11, N5     | No transactions; a racing write from two devices is decided by time | Positions need exact ordering across devices           |
+| Accounts        | Wide-column, one relational primary, distributed SQL | One relational primary, replicas per region       | D3, F2          | Plan changes depend on one region                                   | Account writes outgrow one primary                     |
+| Degradation     | Fail requests, lower rungs and simpler rows          | Shed top rungs, then personalised rows, then fill | D12, N2, N6     | Quality and relevance under stress                                  | Never: a started stream is the product                 |
+
+## Patterns used
+
+| Pattern                                                                                                                 | Where in this design                                           | Why it is needed here                                  |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
+| [Caching](/system-design/patterns/caching)                                                                              | Appliances for bytes; the catalogue cache for rows             | 12,000 bytes out for every byte in; 10,000,000 reads/s |
+| [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) (advanced)                | Three active control-plane regions, region DNS                 | A region failure must not stop new plays for long      |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) (advanced) | Control plane against data plane; per-zone cache copies        | Playback survives the cloud failing                    |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced)      | 2 s appliance timeout, popular rows as fallback, rung shedding | Stress lowers quality, never stops a stream            |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)                            | Device moves to the next URL; service fallbacks                | A dead dependency must fail fast                       |
+| [Load Balancing](/system-design/patterns/load-balancing)                                                                | Region DNS, layer-7 balancer, steering across appliances       | Spread members across regions and appliances           |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)                                   | Origin store, segment files, resumable master delivery         | 1 PB of immutable files, never lost                    |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced)     | Encode pipeline, nightly fill plan                             | A title ready 24 h before release, retried on its own  |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced)                     | Several copies of a release per site                           | 5,000,000 streams of one title                         |
+| [Sharding and Partitioning](/system-design/patterns/sharding)                                                           | Viewing positions by `profile_id`, replicated in 3 regions     | 333,000 writes/s from every region                     |
+| [Consistency Models and CAP](/system-design/patterns/consistency-models)                                                | Read-your-writes for plans; stale rows; newest position wins   | Each read pays only for the strength it needs          |
+| [Idempotency](/system-design/patterns/idempotency)                                                                      | Absolute position `PUT`s; `start` by `session_id`              | A retried heartbeat or start changes nothing           |
+
+## Same design, other systems
+
+| If the interviewer asks for…                                | What stays the same                                              | What changes                                                                                                |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [YouTube](/system-design-case-studies/case-studies/youtube) | Ladders, segments, adaptive bitrate, a CDN                       | Millions of uploads nobody can predict: resumable uploads, pull caching, view counts                        |
+| Another subscription video service                          | The whole design                                                 | Fewer members may justify a bought CDN with pre-warming instead of own appliances                           |
+| Game patches                                                | Push to edges before release, steering, tiered fill              | One huge file for millions at a set hour; no adaptive bitrate                                               |
+| Operating-system updates                                    | Staged push, edge copies, a control plane deciding who gets what | Rollout in waves to limit a bad update; peer-to-peer inside a home network is acceptable                    |
+| Music streaming                                             | Control plane, caches, resume, steering                          | Files of 5 to 10 MB; a full catalogue of 100 million tracks does not fit an appliance, so pull caching wins |
+
+## How real systems do it
+
+- **2016:** Netflix wrote that its Open Connect Appliances were in close to 1,000 separate locations, that per-server throughput rose from 8 Gbps in 2012 to over 90 Gbps in 2016, that files are copied across continents during off-peak hours, and that close to 90% of its traffic went over direct connections with ISPs.
+- **Open Connect Overview (read 2026):** appliances store only encoded video and image files and report health, learned BGP routes and stored files to control-plane services in AWS; a steering service picks appliances and generates their URLs after playback services check authorisation and licensing; content is filled during configurable off-peak windows because Netflix can predict what members will watch and when, and appliances can fill from each other.
+- **Open Connect site (read 2026):** embedded appliances are provided to qualifying ISPs at no charge, pre-filled before shipping, and Netflix partners with over a thousand ISPs.
+- **EVCache documentation (read 2026):** a cache with memcached semantics whose data is always mirrored between zones and replicated across regions; reads prefer the local zone and pick another zone at random when none is available; the service makes no consistency guarantees and is purely best effort.
+- **Chaos Monkey (read 2026):** Netflix's open-source tool randomly terminates virtual machine instances and containers in production, integrated with Spinnaker, so that engineers build services that tolerate instance failures.
+- **2025:** Netflix's letter to shareholders for the fourth quarter of 2024 reported 302 million paid memberships at the end of 2024.
+- **Where this design differs:** the encode pipeline, the per-title ladder, the stores, the three regions and every number here are this page's design and round estimates, not Netflix's published architecture; the delivery split (appliances, steering, off-peak fill, control plane in a cloud) follows the sources above.
+
+## Failure modes & pitfalls
+
+- **Pulling at the peak:** new releases miss on every appliance at 21:00; watch the miss ratio on release nights; push from a forecast in the night's fill window.
+- **The control plane on the playback path:** a cloud outage stops films already playing; check whether a started stream calls anything but appliances; hand the device its manifest and URLs up front.
+- **One URL per play:** a dead appliance means a stalled stream and a new play call; watch play restarts per appliance failure; return three ranked URLs and fail over on the device.
+- **A sharded cache across zones:** a zone loss becomes a miss storm on the stores; watch miss rate during zone drills; a full copy per zone, warmed before it serves.
+- **Untested fallbacks:** the popular-rows fallback has a bug that shows only during an outage; count fallback executions per week; inject failures in production during working hours.
+- **Single points of failure:** one origin region, one accounts primary, one steering instance; replicate the origin to a second region, fail over the primary, run steering in every region with state rebuilt from reports.
+- **Filling over the peak:** a late fill plan spills into the evening and competes with members; alert on fill traffic after 06:00; cut the plan rather than extend the window.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify studio content against uploads, scale at the peak, countries and licences, own network or not, personalisation scope; write F1 to F4 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 100 Tb/s out, 12,000 to 1, a 1 PB catalogue, 2,000 appliances, 333,000 heartbeats/s, 10,000,000 cache reads/s.
+3. **Minutes 10 to 15:** API (one play call returning URLs) and the stores: object store, relational, wide-column, cache.
+4. **Minutes 15 to 25:** Steps 1 to 4: one origin, a ladder per title, own appliances and steering, nightly fill.
+5. **Minutes 25 to 35:** Steps 5 to 8: three regions, the catalogue cache, fallbacks and failure injection, resume.
+6. **Minutes 35 to 45:** one deep dive (steering and fill, control against data plane, or the zone-mirrored cache); name the single points of failure and the degradation order.
+
+**What interviewers listen for:**
+
+- **Mid:** encoding into a ladder, segments and adaptive bitrate, a CDN, a cache for metadata, a store for positions.
+- **Senior:** push against pull and why a fixed catalogue allows push, steering with ranked URLs and device fallback, active-active regions, why each store fits its writes.
+- **Staff:** the economics of own appliances against a bought CDN, control plane against data plane, per-zone mirroring against a miss storm, what degrades first and how it is tested in production.
+
+**Red flags:** video from the cloud region; "put a CDN in front" with no fill or steering plan; the control plane on every segment;
+one store for positions and accounts; no answer for an appliance dying mid-stream.
+
+## Further reading
+
+- [How Netflix works with ISPs around the globe to deliver a great viewing experience](https://about.netflix.com/en/news/how-netflix-works-with-isps-around-the-globe-to-deliver-a-great-viewing-experience) (Netflix, 2016)
+- [Open Connect Overview](https://openconnect.netflix.com/Open-Connect-Overview.pdf) (Netflix Open Connect)
+- [Netflix Open Connect](https://openconnect.netflix.com/en/) (Netflix Open Connect)
+- [EVCache features](https://netflix.github.io/EVCache/features) (Netflix open source)
+- [Chaos Monkey](https://github.com/Netflix/chaosmonkey) (Netflix open source)
+- [Fourth quarter 2024 letter to shareholders](https://www.sec.gov/Archives/edgar/data/1065280/000106528025000033/ex991_q424.htm) (Netflix, 2025)
+- Related pages: [YouTube](/system-design-case-studies/case-studies/youtube) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [CDNs and edge](/system-design/fundamentals/cdn) · [Object / Blob Storage](/system-design/databases/object-storage) · [Wide-Column Stores](/system-design/databases/wide-column-stores) · [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Why would a streaming service build its own CDN instead of buying one?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - At 100 Tb/s and 540 PB a day, per-byte CDN pricing costs more than 3,000 appliances placed free inside ISPs. - A
+    small, fixed catalogue fits on a site's disks, so own appliances can hold almost everything; a shared CDN evicts our
+    files for other customers'. - Inside the ISP the first segment is about 10 ms away, and the ISP's upstream links
+    carry none of the video, which is why ISPs host the appliances. - The cost is hardware, logistics and partnerships;
+    a smaller service buys a CDN and pre-warms it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a new episode get to the edge before anyone presses play?"
+    category="Architecture"
+    level="Mid"
+  >
+    - It is encoded days before release and stored once in the origin store. - Each night a forecast predicts per region
+    what will be watched, including scheduled releases, and steering turns that into a fill plan per appliance. -
+    Between 02:00 and 06:00 the origin fills 50 hubs and each ISP site fills from its hub: 250 TB from the origin
+    instead of 5 PB.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="An appliance dies while a member is watching. What happens?"
+    category="Failure modes"
+    level="Mid"
+  >
+    - The play call returned three ranked URLs; the device skips one that does not answer in 2 s. - Its 30 s buffer
+    keeps the picture moving while it fetches the same segment from the next URL. - Steering drops the appliance from
+    rankings at the next minute's reports; the control plane was not needed for the switch.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Where are the single points of failure in this design, and how do you remove them?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - One cloud region for the control plane: run three active regions behind region DNS, each sized for 1.5 × its
+    share. - The accounts primary: replicas in every region with failover; plays read replicas and the cache, so only
+    plan changes wait. - One origin region: replicate the origin to a second region; appliances serve for days from what
+    they hold. - One URL per play: return three, so one appliance or one site can fail without a stall.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="The control plane in one region goes down at 21:00. Do members stop watching?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Started streams carry on: the device holds its manifest, licence and URLs, and appliances serve files without
+    asking anyone. - New plays and browsing in that region fail until region DNS moves members to the other two, within
+    the 60 s TTL. - The two remaining regions take its 2,800 play starts/s; under stress browse falls back to popular
+    rows instead of failing.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why encode a separate bitrate ladder for each title?" category="Concepts" level="Mid">
+    - Simple pictures, such as animation, reach the target quality at a much lower bitrate than grainy, fast action. - A
+    fixed ladder wastes bits on the first and starves the second; a ladder per title spends bits where the picture needs
+    them. - Trial encodes triple the encode CPU, but each title is encoded once and watched millions of times, so the
+    saved bytes win.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a member stop on the TV and resume on the phone at the same second?"
+    category="Architecture"
+    level="Mid"
+  >
+    - The device sends an absolute position every 60 s and on pause or stop; a retry is harmless. - The resume service
+    writes it to a wide-column store keyed by profile, in the local region, replicated to the others. - The phone reads
+    "continue watching" for the profile; the newest write wins by its time, and at most 60 s is lost.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Home pages need 10 million cache reads a second. How do you build that cache, and what happens when a zone fails?"
+    category="Scaling"
+    level="Senior"
+  >
+    - Keep a full copy of rows and title data in every zone, about 2.5 TB each; write to all copies, read the local one.
+    - When a zone's copy is lost its servers read another zone's copy, so reads move but nothing misses. - One sharded
+    copy would lose a third of its keys with a zone: 3.3 million misses a second on the stores behind. - Across regions
+    replicate on a best-effort basis; minutes of staleness are fine for rows, and plan and licence come from the
+    database.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does this design change for user uploads like YouTube?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - Demand is no longer predictable: millions of new videos a day, most watched a few times, so push filling gives way
+    to pull caching with a shield tier. - Encoding moves to the critical path: a creator waits for 360p within minutes,
+    so the ladder is fixed and encode tasks are prioritised. - New problems appear: resumable uploads from phones and
+    counting views on hot videos.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you know your fallbacks work before a real outage?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Kill random instances in production during working hours, so every service's fallback runs while engineers are
+    watching. - Run region evacuation drills by changing region DNS and measure how long the other regions take the
+    load. - Count fallback executions and alert when one has not run for weeks: code that never runs is code that is
+    broken.
+  </InterviewQuestion>
+</InterviewQuestions>

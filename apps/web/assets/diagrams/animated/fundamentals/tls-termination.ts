@@ -23,7 +23,7 @@ const spec: DiagramSpec = {
   ],
   nodes: [
     { id: "browser", label: "Browser", sub: "Lisbon", icon: "browser", tone: "neutral", x: 95, y: 200 },
-    { id: "edge", label: "CDN edge", sub: "Lisbon, 5 ms", icon: "cdn", tone: "blue", x: 290, y: 200, step: 2 },
+    { id: "edge", label: "CDN edge", sub: "Lisbon, 5 ms", icon: "cdn", tone: "blue", x: 290, y: 200, w: 126, step: 2 },
     {
       id: "lb",
       label: "Load balancer",
@@ -33,10 +33,10 @@ const spec: DiagramSpec = {
       accent: true,
       x: 460,
       y: 200,
-      w: 140,
+      w: 150,
     },
-    { id: "app", label: "Checkout", sub: "app server", icon: "server", tone: "teal", x: 660, y: 130 },
-    { id: "payments", label: "Payments", sub: "service", icon: "card", tone: "teal", x: 805, y: 130, step: 3 },
+    { id: "app", label: "Checkout", sub: "app server", icon: "server", tone: "teal", x: 660, y: 130, w: 120 },
+    { id: "payments", label: "Payments", sub: "service", icon: "card", tone: "teal", x: 805, y: 130, w: 122, step: 3 },
     {
       id: "ca",
       label: "Internal CA",

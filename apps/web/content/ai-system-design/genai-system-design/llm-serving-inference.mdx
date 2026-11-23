@@ -1,156 +1,300 @@
 ---
 title: LLM Serving and Inference
 description: How to serve LLMs at scale, covering prefill and decode, continuous batching, KV cache, quantization, speculative decoding, parallelism and autoscaling.
+updated: 2026-11-15
 ---
 
-"Design the serving system for an LLM" is a standard senior question. Interviewers want the latency and throughput model (prefill vs decode), the optimizations that matter (batching, KV cache, quantization, speculative decoding), and an operational plan with the right metrics.
+"Design the serving system for an LLM" is a standard senior question covering the prefill-against-decode latency model, key GPU optimisations, and token-based capacity scaling.
 
-## TL;DR
+- **What interviewers want:** The latency and throughput model (prefill against decode), the optimisations that matter (batching, KV cache, quantisation, speculative decoding), and a platform plan that sizes GPUs from tokens and scales on the right signal.
+- **How this page fits in:** This page follows one request through the whole system; [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) opens up the engine and [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) the layer in front of it.
 
-- Serving cost and latency are shaped by two phases: **prefill** (compute-bound, sets time to first token) and **decode** (memory-bandwidth-bound, sets tokens per second).
-- **Continuous batching** and a **paged KV cache** are the biggest throughput wins.
-- **Quantization** (8-bit, 4-bit) shrinks memory and raises speed with small quality loss.
-- **Speculative decoding** cuts latency by having a small model draft tokens for the big model to verify.
-- Large models are split with **tensor and pipeline parallelism**; replicas scale with traffic.
-- Track **TTFT, inter-token latency, throughput, GPU utilization, queue time and cost per million tokens**.
+## Overview
 
-## The idea in plain English
+- Every answer has two phases: **prefill** reads the whole prompt in one pass (compute-bound, sets **time to first token**) and **decode** adds one token per step (memory-bandwidth-bound, sets the **pace after it**).
+- The request path is **gateway → router → a replica's queue → engine on a GPU → tokens streamed back**. Everything but the engine exists to keep that GPU full without letting the queue grow.
+- **Continuous batching** (Orca: **36.9×** the throughput of FasterTransformer on GPT-3 175B) and a **paged KV cache** (vLLM: **2–4×** over FasterTransformer and Orca) are the biggest throughput wins.
+- **Size from tokens, not requests.** Brightpost's peak of 12 requests/s is **26,400 prompt tokens/s** against 3,000 output tokens/s, so prefill sets the replica count.
+- **Autoscale on queue depth**, never on CPU or GPU utilisation; a new replica must load gigabytes of weights before it serves.
+- Watch **time to first token, time per output token, queue wait, KV-cache usage and cost per million tokens**, at p50, p95 and p99.
 
-An LLM server is a busy kitchen. Prefill is reading the whole order before cooking; decode is plating one item at a time. Continuous batching means the chef starts new orders as soon as any station frees up, instead of waiting for a whole table to finish. The KV cache is the prep each order leaves on the counter; paging stops the counter filling with half-used space. A junior chef pre-plating likely items (speculative decoding) speeds things up when the senior chef usually agrees.
+## Mental model
+
+- An LLM server is a busy kitchen:
+
+- **Prefill vs. decode:** Prefill is reading the whole order before cooking; decode is plating one item at a time.
+- **Continuous batching:** The chef starts a new order the moment any station frees up, instead of waiting for a whole table to finish.
+- **Paged KV cache:** The KV cache is the prep each order leaves on the counter; paging stops the counter filling with half-used space.
+- **Routing and autoscaling:** The front-of-house (gateway and router) seats each party at the kitchen with the shortest queue, and the manager opens another kitchen when the queue at the door grows, not when the cooks look busy, because busy cooks are the point.
 
 ## Core concepts
 
-1. **Prefill vs decode.** Prefill processes the prompt in parallel; decode produces one token per step and re-reads weights and cache each time.
+1. **Prefill against decode.** Prefill processes every prompt token in parallel in large matrix multiplications, so it is limited by arithmetic. Decode makes one token per sequence per step and re-reads all the weights and the whole KV cache each time, so it is limited by memory bandwidth.
 
-2. **Static vs continuous batching.** Static batching waits for every sequence in a batch to finish. Continuous (in-flight) batching adds and removes sequences at each step, keeping the GPU busy.
+2. **Static against continuous batching.** A static batch waits for its longest sequence before any slot is reused. Continuous (iteration-level) batching re-forms the batch at every step: finished requests leave at once and waiting ones join.
 
-3. **KV cache management.** The cache grows with context and concurrent requests. Paged allocation (PagedAttention) avoids fragmentation and lets requests share common prefixes.
+3. **KV cache management.** The keys and values of every earlier token are kept so decode does not recompute them. The cache grows with context length and with the number of requests in flight. PagedAttention stores it in fixed-size blocks (16 tokens by default in vLLM) handed out on demand.
 
-4. **Prefix caching.** Reuse the cached keys and values for shared prompt prefixes such as system prompts.
+4. **Prefix caching.** Requests that share a prompt prefix, such as the same system instructions, reuse its cached blocks instead of running prefill on it again.
 
-5. **Quantization.** Weight-only quantization (GPTQ, AWQ) to 4 or 8 bits, or weights and activations in 8-bit or FP8. Saves memory and bandwidth; must be evaluated per task.
+5. **Quantisation.** Weight-only quantisation (GPTQ, AWQ) to 4 or 8 bits, or weights and activations in 8-bit or FP8. It saves memory and bandwidth, and must be evaluated per task. See [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization).
 
-6. **Speculative decoding.** A draft model proposes several tokens; the target model verifies them in one pass; accepted tokens are kept. Output distribution is preserved with the standard acceptance rule.
+6. **Speculative decoding.** A cheap drafter proposes several tokens and the large model verifies them in one pass, cutting time per token without changing the output distribution (see Technical mechanics).
 
-7. **Parallelism.** Tensor parallelism splits each layer across GPUs in a node; pipeline parallelism splits layers across nodes; expert parallelism spreads MoE experts.
+7. **Parallelism.** Tensor parallelism splits each layer across GPUs in a node; pipeline parallelism splits layers across nodes; expert parallelism spreads the experts of a mixture-of-experts model.
 
-8. **Disaggregated serving.** Running prefill and decode on separate GPU pools so each is tuned for its bottleneck.
+8. **Disaggregated serving.** Prefill and decode run on separate GPU pools, each with its own parallelism, so a long prefill never stalls other users' decode steps. The KV cache moves from the prefill pool to the decode pool.
 
-9. **Autoscaling and routing.** Scale replicas on queue depth and latency, route by model and adapter, and use cache-aware routing to hit existing prefix caches.
+9. **Routing and autoscaling.** The router picks the model, adapter and replica, preferring a replica that already holds the prompt's prefix. The autoscaler adds replicas when requests start to wait.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    CLIENTS["Clients"] --> GW["API gateway<br/>(auth, rate limits, quotas)"]
-    GW --> ROUTER["Router<br/>(model, adapter, cache-aware)"]
-    ROUTER --> Q["Request queue"]
-    Q --> ENGINE["Inference engine replica<br/>continuous batching"]:::accent
-    ENGINE --> KV["Paged KV cache<br/>+ prefix cache"]
-    ENGINE --> GPUS["GPUs (tensor parallel)"]
-    ENGINE --> STREAM["Token streaming (SSE)"]
-    STREAM --> CLIENTS
-    ENGINE -.-> METRICS["Metrics: TTFT, ITL,<br/>throughput, queue time, cost"]
-    METRICS -.-> AUTOSCALE["Autoscaler"]
-    AUTOSCALE -.-> ENGINE
-```
+Follow one Brightpost support question from the customer to the GPU and back.
 
-A request's life:
+<AnimatedDiagram
+  spec="animated/serving/request-path"
+  stepper
+  caption="The request path has five hops, but only the engine on the GPU is expensive: everything else exists to keep that GPU full without letting the queue grow."
+/>
 
-1. The gateway authenticates, applies rate limits and quotas.
-2. The router picks the model, adapter and replica, preferring replicas with a matching prefix cache.
-3. The engine's scheduler adds the request to the running batch.
-4. Prefill fills the KV cache; decode streams tokens back as they are generated.
-5. Metrics feed autoscaling and capacity planning.
+<StepCards>
+  <StepCard n={1} title="A customer's question reaches the gateway">
+    The gateway checks the API key, rate limits and the team's token quota, and rejects what it must before any GPU time is spent. It is the same layer whether the model is self-hosted or an API; [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) covers it.
+  </StepCard>
+  <StepCard n={2} title="The router picks a replica">
+    Each replica is one copy of the engine and the model on its own GPU or GPUs. The router chooses the model and adapter, then a replica, by load and by which replica already holds the prompt's prefix.
+  </StepCard>
+  <StepCard n={3} title="The request waits in that replica's queue">
+    The queue is the only place a request waits on purpose. Its depth is the clearest sign of whether the fleet keeps up.
+  </StepCard>
+  <StepCard n={4} title="The batcher runs it with other requests on the GPU">
+    At the next iteration the scheduler adds the request to the running batch, so one forward pass serves every request in it.
+  </StepCard>
+  <StepCard n={5} title="Prefill writes the KV cache; decode reads it">
+    Prefill stores the prompt's keys and values in paged blocks; each decode step reads them all and appends one token's worth. [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) draws this loop in detail.
+  </StepCard>
+  <StepCard n={6} title="Tokens stream back as they are made">
+    Each token goes back through the gateway as a server-sent event, so the customer reads the answer while it is written. See [Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token).
+  </StepCard>
+  <StepCard n={7} title="The autoscaler adds a replica when the queue grows">
+    The autoscaler reads the waiting-request count each engine exports and starts Replica 3 at Brightpost's peak. The worked example below shows why three.
+  </StepCard>
+</StepCards>
 
-## Deep dive
+**The numbers:**
 
-### Speculative decoding
+- **Concurrency:** At 12 requests/s and 1.5 s per answer, Little's law puts 12 × 1.5 = 18 answers in flight across the fleet at any moment.
+- **Replicas:** Three replicas carry the peak and two carry the rest of the day (illustrative; worked below).
 
-```mermaid
-sequenceDiagram
-    participant D as Draft model (small)
-    participant T as Target model (large)
-    D->>D: Propose next 4 tokens
-    D->>T: Draft tokens
-    T->>T: Verify all 4 in one forward pass
-    T-->>D: Accept first 3, correct the 4th
-    Note over D,T: 4 tokens produced for one target pass
-```
+<Callout tone="red" title="What breaks">
+  Scaling on GPU utilisation: a healthy engine runs its GPU near full all the time, so the signal never says "add one" until latency has already gone. A new replica must also pull and load gigabytes of weights before it serves, so an autoscaler that reacts only when the queue overflows is always late.
+</Callout>
 
-Gains depend on how often the draft is accepted, so drafts must match the target's style; variants use extra heads on the target model or n-gram lookups instead of a separate draft model.
+## Technical mechanics
+
+### Prefill and decode with a KV cache
+
+Prefill and decode are one model doing two different jobs. Here is the cache that joins them.
+
+<AnimatedDiagram
+  spec="animated/transformer/kv-cache-generation"
+  stepper
+  caption="Prefill processes the whole prompt once and fills the cache; every decode step feeds one token and reuses the cached keys and values."
+/>
+
+**How to read it:**
+
+- **Step 1 (prefill):** All prompt tokens enter together, their keys and values land in the cache, and the first output token comes back.
+- **Steps 2 and 3 (decode):** Only the newest token enters, the stack reads every cached entry, and the cache grows by one entry per layer.
+
+**The numbers:**
+
+- **Per-token cache:** For an 8B model shaped like Llama 3.1 8B (32 layers, 8 key-value heads of 128 dimensions, 16-bit), one token's cache is 2 × 32 × 8 × 128 × 2 bytes = 128 KiB.
+- **Prompt and decode traffic:** Brightpost's 2,200-token prompt writes 2,200 × 128 KiB = 275 MiB in prefill, and each of the 250 decode steps reads all of it again.
+
+### Continuous batching
+
+Outputs differ in length, and a batch that waits for its longest member wastes every slot that finished early.
+
+<AnimatedDiagram
+  spec="animated/serving/continuous-batching"
+  stepper
+  caption="The static batch idles three slots while it waits for B; the continuous batch fills every slot and finishes six answers in the time the static one finishes four."
+/>
+
+**How to read it:**
+
+- **Grid layout:** Each row is a batch slot and each column is one iteration (one forward pass).
+- **Static batch:** A, C and D finish early and their slots sit idle until B ends at iteration 8.
+- **Continuous batch:** E takes A's slot immediately at iteration 4.
+
+**The numbers:**
+
+- **Slot utilisation:** Over iterations 1–8 the static batch keeps 3 + 8 + 4 + 6 = 21 of 32 slot-iterations busy (66 %); the continuous batch keeps 32 of 32.
+- **Throughput gain:** Six answers finish by iteration 8 instead of four, and E starts five iterations sooner (lengths are illustrative).
+
+Continuous batching creates a new problem: a newcomer's prefill and everyone else's decode now share each step, so one long prompt stalls every answer in the batch.
+
+- **Chunked prefill (Sarathi-Serve):** Cuts a long prefill into pieces that ride along with decode steps.
+- **Disaggregation (DistServe):** Runs prefill and decode on separate GPU pools sized for each, and ships the KV cache between them. As of November 2026, vLLM labels its disaggregated prefill experimental and states it improves tail latency control, not throughput.
 
 ### Latency budget for a chat response
 
+Users feel two numbers: how long until text appears, and how fast it then flows.
+
+<AnimatedDiagram
+  spec="animated/serving/latency-budget"
+  stepper
+  caption="Two numbers describe every LLM answer: the wait for the first token (queue plus prefill) and the pace after it (one decode step per token)."
+/>
+
+**How to read it:**
+
+- **First token vs. decode:** The budget starts when the request reaches a replica; queue wait and prefill end at the first token, and decode then runs for most of the answer.
+- **Gateway overhead:** The gateway adds a few milliseconds before this (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)).
+
+**The numbers:**
+
+- **Time to first token:** 80 ms queue + 320 ms prefill = 400 ms (the 80 ms queue wait is an illustrative budget).
+- **Full answer and decode rate:** 400 + 250 × 4.4 ms = 1,500 ms, a decode rate of 1,000 ÷ 4.4 = 227 tokens/s per answer.
+
 | Component | What drives it |
 | --- | --- |
-| Queue time | Load vs capacity, batching policy |
-| Time to first token | Prompt length, prefill speed, prefix cache hits |
-| Inter-token latency | Model size, quantization, batch size, memory bandwidth |
-| Total time | TTFT plus output length times inter-token latency |
+| Queue wait | Load against capacity; scaling lag; batch admission policy |
+| Time to first token | Queue wait, prompt length, prefill speed, prefix-cache hits |
+| Time per output token | Model size, quantisation, batch size, memory bandwidth, prefill interference |
+| Total time | Time to first token + output tokens × time per output token |
+
+### Speculative decoding
+
+- **Draft and verify:** A small drafter guesses the next few tokens and the large model checks them all in one pass, so time per output token falls while the output stays exactly the large model's.
+- **When to switch it off:** The gain shrinks at large batch sizes, which is why [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding) covers when to switch it off as well as how it works.
+
+### Worked example: Brightpost at 12 requests a second
+
+Brightpost self-hosts an 8B support model (2,200-token prompt, 250-token answer; 2.3 requests/s average, 12 peak). How many replicas does the Architecture figure need?
+
+1. **Token rates at the peak.** 12 × 2,200 = 26,400 prompt tokens/s and 12 × 250 = 3,000 output tokens/s. Prompt tokens are 90 % of the tokens, and of the arithmetic, so prefill sets the size.
+2. **Answers in flight.** 12 requests/s × 1.5 s = 18 (Little's law).
+3. **Memory.** Weights take about 16 GB. Each finished answer holds 154 KV blocks of 2 MiB = 308 MiB, so 18 answers need 18 × 308 MiB = 5.4 GiB. Memory is not the limit at this traffic.
+4. **Prefill compute.** A forward pass costs about 2 floating-point operations per parameter per token, so one prompt is 2 × 8 × 10⁹ × 2,200 = 35.2 TFLOP. At an illustrative 400 TFLOP/s sustained per GPU (about 40 % of an H100 SXM's 989 dense BF16 TFLOP/s), that is 88 ms of GPU time per request.
+5. **GPUs at the peak.** 12 × 0.088 = 1.06 GPU-seconds of prefill every second: one GPU cannot keep up. Keep prefill under 60 % of each GPU so decode steps and bursts have room: 1.06 ÷ 0.6 = 1.76, so 2 replicas, plus 1 spare for a failed replica or a burst = **3**. That is Replica 3 in step 7.
+6. **Off-peak.** 2.3 × 0.088 = 0.20 GPU-seconds per second fits one replica, but keep a minimum of 2 so one failure does not take the assistant down.
+7. **The budget check.** The 320 ms prefill slot in the latency budget is several times the 88 ms of pure compute, because the prompt shares each step with up to 17 other answers that are decoding. A prefix cache on the 200 shared instruction tokens skips 9 % of prefill.
+
+The autoscaler from step 7 can be one rule following the KEDA Prometheus scaler and vLLM's `vllm:num_requests_waiting` metric (checked November 2026; threshold illustrative):
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: brightpost-support-8b
+spec:
+  scaleTargetRef:
+    name: brightpost-support-8b   # the engine Deployment
+  minReplicaCount: 2
+  maxReplicaCount: 6
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus:9090
+        query: sum(vllm:num_requests_waiting)
+        threshold: "2"            # waiting requests per replica
+```
+
+- **Why threshold "2":** At the 80 ms queue budget, Little's law gives 12 × 0.08 ≈ 1 request waiting across the whole fleet at the peak, so more than 2 per replica means the queue budget is already blown.
+- **Validation and next steps:** All throughput figures here are illustrative and must be replaced by a load test at real prompt lengths; [Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation) turns them into a monthly bill, and [Load Balancing & Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling) covers cold starts.
 
 ## Trade-offs
 
-| Technique | Benefit | Cost | When to use |
+| Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
-| Continuous batching | Much higher throughput | Slightly more variable latency | Always for shared serving |
-| Larger batches | Lower cost per token | Higher per-request latency | Offline and bulk jobs |
-| 4-bit weight quantization | Fits bigger models, faster decode | Small accuracy loss | Cost- or memory-limited serving |
-| Speculative decoding | Lower latency | Extra draft compute, complexity | Latency-sensitive chat |
-| Tensor parallelism | Fits large models, lower latency | Inter-GPU communication | Models larger than one GPU |
-| Disaggregated prefill/decode | Better utilization at scale | Operational complexity | Large, mixed workloads |
+| Continuous batching | Several times the throughput of static batching | Prefill of newcomers interferes with decode | Always, for shared online serving |
+| Larger batches | Lower cost per token | Higher time per output token for everyone | Offline and bulk jobs |
+| Chunked prefill | Smooth time per output token under long prompts | Slightly slower first token for the chunked request | Mixed prompt lengths on one pool |
+| Disaggregated prefill and decode | Each phase sized and tuned for its bottleneck; no interference | KV cache transfer; two pools to run | Large fleets with strict time-to-first-token and per-token targets |
+| 4-bit weight quantisation | Fits bigger models; faster decode | Small accuracy loss, task-dependent | Cost- or memory-limited serving |
+| Tensor parallelism | Fits large models; lower latency per token | Inter-GPU communication on every layer | Models larger than one GPU |
+| Scale on queue depth | Tracks waiting users directly | Needs a per-replica threshold and warm-up time | Any GPU fleet; GPU utilisation is always high |
 
-## Real-world examples
+## Production systems
 
-- vLLM introduced PagedAttention and continuous batching and is widely used for open-model serving.
-- The Orca system popularized iteration-level scheduling, the idea behind continuous batching.
-- GPTQ and AWQ are common post-training weight quantization methods for LLMs.
-- Speculative decoding was shown to speed up large model inference without changing outputs.
+- **Orca (Yu et al., OSDI 2022).** Introduced iteration-level scheduling and selective batching; on GPT-3 175B it reported 36.9× the throughput of NVIDIA FasterTransformer at the same latency.
+- **vLLM (Kwon et al., SOSP 2023).** Found that existing systems used only 20.4–38.2 % of KV-cache memory for actual token states; PagedAttention raised throughput 2–4× over FasterTransformer and Orca at the same latency.
+- **DistServe (Zhong et al., OSDI 2024).** Placing prefill and decode on separate GPUs served up to 7.4× more requests, or met a 12.6× tighter latency target, with over 90 % of requests within their targets.
+- **Sarathi-Serve (Agrawal et al., 2024).** Chunked prefill with stall-free scheduling raised serving capacity 2.6× for Mistral-7B on one A100 against vLLM, under tail-latency limits.
+- **vLLM in production (as of November 2026).** Exports `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc` and time-to-first-token histograms for autoscalers and dashboards.
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Sizing GPUs by weights only and running out of KV cache memory.
-- Measuring only average latency; tail latency (p95, p99) and TTFT matter for users.
-- Quantizing without task-level evaluation.
-- No rate limits or quotas, so one client can starve others.
+- Sizing GPUs by weights only and running out of KV-cache memory at the target concurrency.
+- Counting requests instead of tokens: a 2,200-token prompt is ten times the prefill work of a 220-token one.
+- Measuring only average latency; time to first token and the p95 and p99 tails are what users feel.
+- Autoscaling on CPU or GPU utilisation, and starting replicas only after the queue has overflowed.
+- Quantising without a task-level evaluation on your own traffic.
+- No per-team rate limits or quotas, so one client's batch job starves the chat traffic.
 
-## How to answer in an interview
+## Interview framework
 
-1. Clarify model size, traffic, latency targets and prompt and output lengths.
-2. Explain prefill vs decode and what each means for latency.
-3. Propose the engine optimizations: continuous batching, paged KV cache, prefix caching, quantization, speculative decoding.
-4. Size hardware: weights plus KV cache, parallelism, replicas.
-5. Cover the platform: gateway, routing, autoscaling, metrics and cost tracking.
+1. Clarify the model size, traffic (requests per second and tokens per request), latency targets for first token and per token, and whether self-hosting is required at all.
+2. Explain prefill against decode, and which latency each sets.
+3. Draw the path: gateway, router, per-replica queue, engine with continuous batching and a paged KV cache, streaming back.
+4. Size it: tokens per second at peak, answers in flight, KV memory, prefill compute, replicas with headroom and a spare.
+5. Close with operations: autoscale on queue depth, the metrics to watch, and the levers (prefix caching, quantisation, speculative decoding, disaggregation) in order of cost.
 
-**What interviewers listen for:** a correct performance model and concrete sizing.
+**What interviewers listen for:** a correct performance model, sizing from tokens with real arithmetic, and the right scaling signal.
 
-**Red flags:** "put it behind a load balancer" with no batching or memory reasoning.
+**Red flags:** "put it behind a load balancer and scale on CPU", with no batching, KV-cache or token reasoning.
 
 ## Further reading
 
-- [Efficient Memory Management for LLM Serving with PagedAttention (Kwon et al., 2023)](https://arxiv.org/abs/2309.06180)
-- [Fast Inference from Transformers via Speculative Decoding (Leviathan et al., 2022)](https://arxiv.org/abs/2211.17192)
-- [GPTQ: Accurate Post-Training Quantization (Frantar et al., 2022)](https://arxiv.org/abs/2210.17323)
-- [AWQ: Activation-aware Weight Quantization (Lin et al., 2023)](https://arxiv.org/abs/2306.00978)
 - [Orca: A Distributed Serving System for Transformer-Based Generative Models (Yu et al., OSDI 2022)](https://www.usenix.org/conference/osdi22/presentation/yu)
+- [Efficient Memory Management for LLM Serving with PagedAttention (Kwon et al., SOSP 2023)](https://arxiv.org/abs/2309.06180)
+- [DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving (Zhong et al., OSDI 2024)](https://arxiv.org/abs/2401.09670)
+- [Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve (Agrawal et al., 2024)](https://arxiv.org/abs/2403.02310)
+- [vLLM metrics](https://docs.vllm.ai/en/latest/design/metrics.html) and [disaggregated prefill](https://docs.vllm.ai/en/latest/features/disagg_prefill/) documentation
+- [Scaling Laws for Neural Language Models (Kaplan et al., 2020)](https://arxiv.org/abs/2001.08361), for the 2 FLOPs per parameter per token rule
+- Related pages: [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding) · [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) · [Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization)
 
 <InterviewQuestions>
   <InterviewQuestion question="What are time to first token and inter-token latency, and what drives each?" category="Concepts" level="Junior">
-    Time to first token is how long until the first output token appears; it is driven by queue time and the prefill pass over the prompt, so long prompts raise it. Inter-token latency is the time between subsequent tokens, driven by the decode step, which depends on model size, memory bandwidth, batch size and quantization.
+    - **Time to first token (TTFT):** How long until the first output token appears, driven by queue time and the prefill pass over the prompt (so long prompts raise it).
+    - **Inter-token latency (ITL):** The time between later tokens, driven by the decode step, which depends on model size, memory bandwidth, batch size and quantisation.
+    - **Total latency:** Roughly TTFT plus the number of output tokens multiplied by ITL.
   </InterviewQuestion>
   <InterviewQuestion question="What is continuous batching and why does it help?" category="Concepts" level="Mid">
-    Instead of waiting for every sequence in a batch to finish, the scheduler adds new requests and removes finished ones at every decode step. GPUs stay full even when outputs have very different lengths, which greatly increases throughput compared with static batching.
+    - **Iteration-level scheduling:** Instead of waiting for every sequence in a batch to finish, the scheduler adds new requests and removes finished ones at every decode step.
+    - **Higher GPU utilisation:** The GPU stays full even when outputs have very different lengths, greatly increasing throughput compared with static batching.
+    - **Industry standard:** Orca introduced this as iteration-level scheduling, and every major serving engine now uses it.
   </InterviewQuestion>
-  <InterviewQuestion question="How does quantization speed up LLM inference?" category="Concepts" level="Mid">
-    Decoding is limited by how fast weights are read from memory. Storing weights in 8 or 4 bits instead of 16 means fewer bytes to move per token, so decode is faster and larger models or batches fit in memory. Quality must be checked because aggressive quantization can hurt some tasks.
+  <InterviewQuestion question="How does quantisation speed up LLM inference?" category="Concepts" level="Mid">
+    - **Memory-bandwidth bottleneck:** Decoding is limited by how fast weights are read from GPU memory.
+    - **Fewer bytes per token:** Storing weights in 8 or 4 bits instead of 16 means fewer bytes to move per token, speeding up decode and fitting larger models or batches in memory.
+    - **Task-level validation:** Quality must be checked on your own tasks because aggressive quantisation can hurt some of them.
   </InterviewQuestion>
   <InterviewQuestion question="Explain speculative decoding." category="Concepts" level="Senior">
-    A smaller draft model proposes several tokens, and the large target model checks them all in one forward pass. Tokens are accepted up to the first disagreement, where the target supplies its own token. With the standard acceptance rule, the output distribution matches the target model's, and when the draft is often right, several tokens are produced per expensive pass.
+    - **Draft and verify:** A smaller draft model proposes several tokens, and the large target model checks them all in one forward pass.
+    - **Acceptance rule:** Tokens are accepted up to the first disagreement, where the target supplies its own token; with the standard acceptance rule, the output distribution matches the target model's exactly.
+    - **Throughput vs. batch size:** When the draft is often right, several tokens come from each expensive pass, though the gain fades at large batch sizes where the GPU has no spare arithmetic left.
   </InterviewQuestion>
   <InterviewQuestion question="How would you size GPUs for serving a 70B model?" category="Architecture" level="Senior">
-    At 16-bit, weights take about 140 GB, so they need at least two 80 GB GPUs with tensor parallelism, or one GPU with 4-bit quantization at around 35 to 40 GB. Then add KV cache memory for the target concurrency and context length, which can be tens of GB more. Finally, choose replicas from peak tokens per second and the measured throughput per replica, with headroom.
+    - **Model weights:** At 16-bit, weights take about 140 GB, requiring at least two 80 GB GPUs with tensor parallelism, or one GPU with 4-bit quantisation at around 35 to 40 GB.
+    - **KV-cache memory:** Add KV-cache memory for the target concurrency and context length, which can be tens of GB more.
+    - **Replica count:** Choose replicas from peak tokens per second and the measured throughput per replica, with headroom and a spare.
   </InterviewQuestion>
-  <InterviewQuestion question="Which metrics would you monitor for an LLM serving platform?" category="Evaluation" level="Mid">
-    Request rate, queue time, time to first token and inter-token latency at p50, p95 and p99, output tokens per second, error and timeout rates, GPU utilization and memory, KV cache usage and prefix-cache hit rate, and cost per million tokens, broken down by model and customer.
+  <InterviewQuestion question="Which metrics would you monitor for an LLM serving platform?" category="Architecture" level="Mid">
+    - **Latency and throughput:** Request rate, queue wait, time to first token and time per output token at p50, p95 and p99, plus output tokens per second and error/timeout rates.
+    - **Resource and cache efficiency:** GPU memory, KV-cache usage, prefix-cache hit rate, and cost per million tokens broken down by model and customer.
+    - **Alerting and scaling signals:** Queue wait and the waiting-request count are the primary signals to alert and autoscale on.
+  </InterviewQuestion>
+  <InterviewQuestion question="A support assistant gets 12 requests a second at peak, with 2,200-token prompts and 250-token answers, on an 8B model. How many replicas do you start with?" category="Scaling" level="Senior">
+    - **Token rates and prefill compute:** Convert to tokens first (26,400 prompt tokens/s vs. 3,000 output tokens/s, so prefill dominates). At ~2 FLOPs per parameter per token, one prompt is 35 TFLOP, or ~88 ms on a GPU sustaining an illustrative 400 TFLOP/s, needing ~1.06 GPUs of prefill alone at peak.
+    - **Replica sizing:** Keeping each GPU under ~60 % busy for decode and bursts gives 2 replicas, plus a spare for failures, meaning 3 at peak and a minimum of 2 off-peak.
+    - **Memory check and validation:** Memory is not the limit (18 answers in flight need ~5 GiB of KV cache next to 16 GB of weights); confirm every number with a load test at real prompt lengths.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your GPUs show 95 % utilisation all day, yet p99 time to first token doubles every evening. What is wrong and what do you change?" category="Failure modes" level="Senior">
+    - **Wrong scaling signal:** A continuously batched engine keeps the GPU busy whether one user is waiting or fifty, so the autoscaler never sees the evening peak.
+    - **Root cause:** The doubling comes from requests waiting in replica queues, and possibly from long prompts whose prefill stalls everyone's decode.
+    - **Fixes:** Autoscale on waiting requests per replica, add capacity ahead of the known daily peak (since new replicas need time to load weights), alert on queue wait, and use chunked prefill or separate prefill capacity if long prompts are the trigger.
   </InterviewQuestion>
 </InterviewQuestions>

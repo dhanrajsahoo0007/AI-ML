@@ -1,0 +1,457 @@
+---
+title: "AI-First Environment & Tool Scaffolding"
+description: "Designing environments agents succeed in: clean tool schemas, deterministic linters and checks, sandboxes and human permission gates."
+icon: wrench
+---
+
+An agent can only be as good as the place it works in.
+
+- It sees the repository through its tools, learns it was wrong from the checks you run, and can do only what the sandbox and the permission rules allow.
+- This page is about building that place: a legible repository, a small set of sharp tools, checks that answer in seconds, errors the model can act on, gates for risky actions and a sandbox with three fences.
+- It is one level below [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering), which covers the whole harness; read that first.
+
+## Overview
+
+- The agent knows only what its context and its tools can reach. Make the repository **legible**: a short map file, predictable layout, one command that runs every check.
+- Give it **few, orthogonal tools**: each does one job, no two overlap, and none is a back door around the others.
+- **Deterministic checks** (linter, type check, tests, schema validation) run after every edit, cost no tokens and give the same answer every time. The harness runs them, not the model.
+- **Rewrite errors** before the model sees them: what failed, where, what to try. In the running example that is about 90 tokens instead of about 2,100 (illustrative).
+- Turn the team's rules into **golden principles** enforced by lints and structural tests, so a rule holds even when the model ignores the prompt.
+- **Gate actions by how hard they are to undo**, and run every command in a **sandbox** with three fences: file system, network and credentials.
+
+## Mental model
+
+- A good workshop is built for whoever works in it.
+- Drawers are labelled. There are a few good tools instead of a pile of half-broken ones.
+- A gauge beeps the moment a part is out of tolerance, and the beep says which part and by how much.
+- The dangerous machines are behind a door that needs a supervisor's key.
+
+- An AI-first environment is that workshop for an agent.
+- Nothing here makes the model smarter. It makes the model's mistakes cheap, visible and quick to fix.
+
+## Core concepts
+
+- Every figure follows the coding agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#worked-example-fixing-the-csv-bug-step-by-step).
+- It works on `brightpost-orders`, on the issue "Order import drops the last line of a CSV file".
+- A test, "keeps the last line", fails until the bug in `src/parser.ts` is fixed.
+- The agent has four tools, `search`, `read_file`, `edit_file` and `run_tests`, and the repository has 18 tests.
+
+### Designing repositories and APIs for agent legibility
+
+- A repository is **legible** to an agent when the agent can find what it needs with its own tools, in a few steps.
+- OpenAI's Codex team, which built a product of about a million lines with agents writing the code, put it bluntly in February 2026: what the agent cannot reach in context while it runs does not exist for it.
+
+Four habits make a repository legible:
+
+- **A short map at the root.** OpenAI keeps its top-level `AGENTS.md` to about 100 lines: a table of contents that points to deeper docs, not an encyclopedia. [Progressive Disclosure](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions) covers how the deeper files load.
+- **Predictable layout.** Tests sit next to the code they test (`parser.ts`, `parser.test.ts`), so `search` finds both at once.
+- **One command for every check.** The agent should not have to work out how to test. Anthropic's long-running harness writes an `init.sh` in the first session so every later session starts the app the same way.
+- **Readable APIs.** Return names, not opaque ids. Anthropic found that resolving UUIDs into readable names cut hallucinations in retrieval tasks.
+
+Here is the map file for `brightpost-orders`, in full:
+
+```markdown
+# brightpost-orders
+
+Order import service (TypeScript).
+
+- Run every check: `npm run check` (lint, types, tests)
+- Each file's tests sit next to it: parser.ts → parser.test.ts
+- Rules every change must keep: docs/principles.md
+- Module map: docs/architecture.md
+- Never edit or delete a test to make it pass. Add a test instead.
+```
+
+### Curating minimal, orthogonal toolsets
+
+- Every tool definition costs tokens on every call, and every extra tool is one more wrong choice the model can make.
+- Anthropic's advice (September 2025) is to build a few tools around the agent's tasks, not to wrap every API endpoint.
+- A `search_contacts` tool beats `list_contacts`, which makes the agent read every record.
+- One `schedule_event` tool beats three separate calls to list users, list events and create an event.
+
+- **Orthogonal** means no two tools do the same job.
+- The coding agent's four tools split the work cleanly: find, read, change, check.
+- Add a general `bash` tool beside them and the split breaks: `bash` can also read, edit and test, and it can push to a remote, which `run_tests` cannot.
+- The model now has two ways to do everything, and only one of them is gated.
+
+Here is `run_tests` as the model sees it (Claude Messages API shape; other APIs name the fields differently). The command is fixed inside the tool; the model can only narrow which tests run:
+
+```json
+{
+  "name": "run_tests",
+  "description": "Run the repository's tests in the sandbox. Use after every edit. Returns passes and failures; for each failure, what failed, where and what to try. The full log is saved to a file you can read.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "filter": {
+        "type": "string",
+        "description": "Only run tests whose name contains this text, such as \"empty file\"."
+      }
+    }
+  }
+}
+```
+
+### Deterministic feedback: linters, typechecks and schema validators
+
+- A **deterministic check** gives the same answer for the same input every time: a linter, a type checker, a test suite, a JSON schema validator.
+- Böckeler calls these computational checks. They are fast, cheap and certain, so they can run on every proposal.
+
+<AnimatedDiagram
+  spec="animated/agents/deterministic-feedback"
+  stepper
+  minWidth={620}
+  caption="The harness runs the checks, not the model, and only one short message goes back. Run times are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The model proposes an edit">
+    Step 3 of the run: change the loop bound in `src/parser.ts` from `< n - 1` to `< n`. Nothing has been checked yet;
+    the model believes it has fixed the bug.
+  </StepCard>
+  <StepCard n={2} title="Linter and type check pass in seconds">
+    The harness runs them without being asked, cheapest first. Both pass: the edit is valid TypeScript in the house
+    style. Neither can tell whether it is right.
+  </StepCard>
+  <StepCard n={3} title="The tests catch what types cannot">
+    "keeps the last line" now passes, but "parses an empty file" fails. The ringed box is the only check that knows what
+    the code is supposed to do.
+  </StepCard>
+  <StepCard n={4} title="One precise message goes back">
+    The harness sends the model one message: the test, the file and line, and the error. The model never reads the
+    runner's raw output.
+  </StepCard>
+</StepCards>
+
+**The numbers (illustrative):**
+
+- Linter 1 s + type check 4 s + tests 6 s = **11 seconds**, and 0 model tokens until the message.
+- The same three checks run again after the second edit, so the run spends 22 seconds on checks in all.
+
+- Schema validators do the same job one level earlier.
+- Before any tool runs, the harness checks the model's arguments against the tool's `input_schema`, and a bad argument goes back as an error instead of a crash.
+- [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation) covers schemas for the model's own output.
+
+<Callout tone="red" title="What breaks">
+  Checks the agent can change. An agent that may edit the tests or the lint config can make a failing check pass by
+  weakening it. Anthropic's long-running harness tells the model it is "unacceptable to remove or edit tests". Back the
+  instruction with code: write-protect the check config, and have the harness, not the model, decide which checks run.
+</Callout>
+
+### Permission gates and human-in-the-loop checkpoints
+
+- A **permission gate** is code that stands between a proposed tool call and its execution.
+- It decides from rules, not from the model's say-so.
+- The tiers come from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#core-concepts): the harder an action is to undo, the more stands in its way.
+
+<AnimatedDiagram
+  spec="animated/agents/permission-tiers"
+  minWidth={620}
+  caption="The harder an action is to undo, the more the harness stands between the proposal and the action."
+/>
+
+**How to read it:**
+
+- This page cares about the arrows between rows: each is a rule the environment enforces.
+- Write the rules down where code can read them.
+- Here are the coding agent's, in Claude Code's settings format (as of November 2026).
+- Claude Code checks deny rules first, then ask, then allow, and the first match wins:
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm run check)", "Bash(npm run test *)"],
+    "ask": ["Bash(git push *)"],
+    "deny": ["Read(~/.ssh/**)", "Read(./.env)", "Bash(curl *)"]
+  }
+}
+```
+
+- A **checkpoint** is a gate that waits for a person.
+- Put it where a mistake leaves the sandbox: merging, deploying, emailing a customer.
+- Make the person's job small. Show the diff, the test results and the agent's summary, and ask one question: merge or not.
+- [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) covers pausing and resuming a run.
+
+## Architecture
+
+- The environment acts at four moments in every tool call.
+- The parts themselves are drawn in the [harness anatomy](/ai-system-design/genai-system-design/harness-engineering#architecture); here is when each one acts on the coding agent's edit.
+
+| Moment          | What acts                                | What it decides                                          | In the bug-fix run                                |
+| --------------- | ---------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
+| Before the call | Schema validator, permission rules       | Is the call well formed? Is it allowed, asked or denied? | `edit_file` is allowed inside the repository copy |
+| During the call | Sandbox                                  | What the command can read, write and reach               | The edit touches only the copy                    |
+| After the call  | Linter, type check, tests, error rewrite | Did it work? What should the model read next?            | 17 passed, 1 failed; a 3-line message goes back   |
+| Before leaving  | Checkpoint, git proxy                    | Does a person approve? Is this push allowed?             | A person merges; the push goes to one branch      |
+
+The model takes part in none of these decisions. That is the design: each moment is code you can test, version and review like any other code.
+
+## Technical mechanics
+
+### Turning raw errors into actionable tool feedback
+
+A raw error is written for a person at a terminal, who can scroll. The model reads every line, pays for every token, and may anchor on the wrong frame. The harness should rewrite it.
+
+<AnimatedDiagram
+  spec="animated/agents/error-to-action"
+  stepper
+  minWidth={620}
+  caption="Three of the 46 raw lines carry what the model needs; the rewrite keeps them and adds the one thing a stack trace never says, what to do next. Token counts are illustrative."
+/>
+
+**How to read it:**
+
+- Step 1 is what a tool that pipes the runner's output would return: 46 lines.
+- The blue lines name the test, the error and the frame in `src/parser.ts`.
+- The grey lines are the test runner's own frames, useless to the model.
+- Step 2 keeps the three blue lines as two fields, "what failed" and "where", and adds the ringed third: what to try.
+- Anthropic's tool-writing guide asks for exactly this: errors that "communicate specific and actionable improvements" instead of codes or tracebacks.
+
+**The numbers (illustrative):**
+
+- About 2,100 tokens become about 90: 2,100 / 90 ≈ **23 times smaller**.
+- The run fails once, so the rewrite saves about 2,010 tokens of the 32,000-token budget.
+- A run that fails five times saves about 10,000, nearly a third of the budget.
+
+Here is step 2 as the `tool_result` the model receives:
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_04",
+  "content": [
+    { "type": "text", "text": "17 passed, 1 failed" },
+    { "type": "text", "text": "What failed: parses an empty file. Error: empty input has no lines" },
+    { "type": "text", "text": "Where: src/parser.ts:14, parseLines(), inside the loop you edited" },
+    {
+      "type": "text",
+      "text": "What to try: read lines 10–18, fix, then call run_tests() again. Full log: logs/run-04.txt"
+    }
+  ]
+}
+```
+
+Four rules for any tool's errors:
+
+1. **Same three fields every time**: what failed, where, what to try. The model learns the shape once.
+2. **Keep the raw log, out of the context.** Save it to a file and give the path, so the model can open it if the summary is not enough.
+3. **Cap the length.** Truncate long output and say so. In September 2025 Claude Code capped tool responses at 25,000 tokens by default.
+4. **Say only what the harness knows.** "Read lines 10–18" is a fact from the stack frame. A guessed fix is not.
+
+<Callout tone="red" title="What breaks">
+  A rewrite that guesses. If the harness says "add a null check" and that is wrong, the model follows confident advice
+  into a second wrong edit. Point to the place and the next check; leave the fix to the model.
+</Callout>
+
+### Enforcing golden principles automatically
+
+- A **golden principle** is a rule the team wants every change to keep, written so a machine can check it.
+- OpenAI's Codex team coined the term. Examples from its post: prefer shared utility packages over hand-rolled helpers, and validate data at system boundaries.
+- The team keeps them in the repository, enforces architecture with custom linters and structural tests, and runs background agent tasks that scan for drift and open refactoring pull requests.
+- Before that, it spent every Friday, about 20 % of the week, cleaning up after agents by hand.
+
+A rule only in the prompt is a suggestion. A rule in a check is a fact. `brightpost-orders` keeps two:
+
+- **"Every parser handles empty input."** A structural test fails the build if a parser's test file has no test named "parses an empty file". That is why the test that caught the first edit existed.
+- **"Split text with the shared helper."** A custom lint rule rejects `.split("\n")` in `src/`, because files from Windows end lines with `\r\n`.
+
+Write the lint message for the model, with the fix and the reason:
+
+```text
+src/parser.ts:9  error  brightpost/shared-split
+  Use splitLines() from src/shared/text.ts, not .split("\n").
+  Why: Windows files end lines with \r\n (docs/principles.md#text).
+```
+
+The habit that grows the list comes from the site's harness newsletter: when the same mistake happens twice, add a guide that makes it less likely, or a sensor that catches it.
+
+<Callout tone="red" title="What breaks">
+  Principles that live only in `AGENTS.md`. The map file said "handle empty input"; the first edit still broke it. The
+  structural test caught it in 6 seconds. Prose steers; only checks enforce.
+</Callout>
+
+### Sandboxing filesystem, network and credentials
+
+A **sandbox** limits what the agent's commands can touch, so a wrong or hijacked command costs a retry, not an incident. It needs three fences, and each covers a gap the others leave.
+
+<AnimatedDiagram
+  spec="animated/agents/sandbox-boundaries"
+  stepper
+  minWidth={620}
+  caption="Each fence covers what the others cannot: the file fence keeps secrets unread, the network fence keeps data from leaving, and the credential fence keeps the real token out of reach."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Commands run inside the sandbox">
+    `run_tests` and `npm install` run in a container on a copy of `brightpost-orders`. They can read and write the copy
+    and a temp folder, nothing else.
+  </StepCard>
+  <StepCard n={2} title="File system: writes stay in the copy">
+    A command that tries to read `~/.ssh` is refused. Writes outside the copy are refused too, including the agent's own
+    settings and git hooks, which a hijacked command could use to widen its access.
+  </StepCard>
+  <StepCard n={3} title="Network: one way out, through a proxy">
+    There is no direct route to the internet. Every connection goes through a proxy that checks the host against an
+    allow-list. The list starts empty; the package registry is added.
+  </StepCard>
+  <StepCard n={4} title="An unlisted host is blocked">
+    A command that tries to post the repository to `paste.example` never connects. Without this fence, anything the file
+    fence lets the agent read could leave the machine.
+  </StepCard>
+  <StepCard n={5} title="Credentials stay outside">
+    The sandbox holds only a scoped credential. A push goes to a git proxy, which checks that it targets the agent's
+    branch and only then adds the real token.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Anthropic reported in October 2025 that sandboxing cut permission prompts in Claude Code by **84 %** in its internal use.
+- The fences, not the prompts, now carry the safety, so people approve less and can read what they do approve.
+
+- Anthropic is explicit that sandboxing needs both the file and the network fence: without the network fence a compromised agent could send out SSH keys, and without the file fence it could escape and reach the network.
+- The credential fence is how Claude Code on the web keeps git credentials and signing keys out of the sandbox altogether.
+- Containers against microVMs, and how strong each wall is, are on [Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing).
+
+<Callout tone="red" title="What breaks">
+  Assuming the defaults fence your secrets. As of November 2026 Claude Code's sandbox lets commands read most of the
+  machine, `~/.ssh` and `~/.aws/credentials` included, and has no built-in credential deny list: only the files and
+  variables you list are blocked. It is off until you turn it on, and it covers shell commands only: Claude's own file
+  tools answer to the permission rules instead. A command that fails inside may be retried outside the sandbox, with
+  approval in most permission modes, unless you set `allowUnsandboxedCommands` to `false`.
+</Callout>
+
+### Worked example: the CSV fix through the environment
+
+- This follows the nine steps of the [bug-fix run](/ai-system-design/genai-system-design/harness-engineering#worked-example-fixing-the-csv-bug-step-by-step) through the environment, using the [feedback figure](#deterministic-feedback-linters-typechecks-and-schema-validators) for steps 3 to 6 and the [sandbox figure](#sandboxing-filesystem-network-and-credentials) for the rest.
+
+| Step | The agent                    | What the environment did                               | Part                    |
+| ---- | ---------------------------- | ------------------------------------------------------ | ----------------------- |
+| 0    | Reads `AGENTS.md`            | Learned `npm run check` and where tests live           | Legibility              |
+| 1    | `search("last line")`        | Found `parser.ts` and `parser.test.ts` side by side    | Legibility, tools       |
+| 2    | `read_file("src/parser.ts")` | Read the copy; no prompt (tier 1)                      | Permissions, sandbox    |
+| 3    | Edits the loop bound         | Allowed in the copy (tier 2); schema check passed      | Permissions, schema     |
+| 4    | `run_tests()`                | Lint and types passed in 5 s, tests in 6 s             | Deterministic checks    |
+| 5    | (result)                     | "parses an empty file" failed: a golden-principle test | Golden principles       |
+| 6    | (result)                     | 46 lines rewritten to 3, about 90 tokens               | Error rewrite           |
+| 7    | Returns `[]` for empty input | Allowed in the copy; lint rule `shared-split` passed   | Permissions, lint       |
+| 8    | `run_tests()`                | 18 passed, lint and types clean, 11 s                  | Deterministic checks    |
+| 9    | Summary, push                | Git proxy checked the branch; a person merged          | Credentials, checkpoint |
+
+Three things to take from it:
+
+- **The environment, not the model, found the second bug.** A test that existed because of a golden principle caught it in step 5.
+- **One person-prompt in nine steps.** Reads and sandboxed edits ran under rules; only the merge waited for a person.
+- **The context stayed small.** The rewrite kept about 2,010 tokens of runner noise out of the window.
+
+## Trade-offs
+
+| Decision                               | Option A                       | Option B                                  | Guidance                                                                             |
+| -------------------------------------- | ------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| One general shell tool vs narrow tools | Covers everything, one schema  | Gated per effect, fewer wrong choices     | Narrow tools for anything the agent does often; a shell only inside a strong sandbox |
+| Raw error output vs rewritten          | Nothing lost, no code to write | About 23× fewer tokens, a clear next step | Rewrite, and save the raw log to a file                                              |
+| Rules in the prompt vs in checks       | Fast to write                  | Enforced every time                       | Prompt first; move a rule into a check the second time it is broken                  |
+| Ask every time vs sandbox and rules    | Person sees everything         | Fewer prompts, each one meaningful        | Sandbox plus rules; ask only where the action leaves the sandbox                     |
+| Open network vs allow-list             | Installs and fetches just work | Data cannot leave                         | Allow-list; add hosts as tasks need them                                             |
+
+## Production systems
+
+- **OpenAI Codex team (February 2026).** About a million lines in five months with agents writing the code. A ~100-line `AGENTS.md` as a map, golden principles in the repository, custom linters and structural tests for the architecture, and background tasks that open refactoring pull requests.
+- **Anthropic's long-running harness (November 2025).** A first session writes `init.sh`, a JSON feature list (over 200 features in its example, all starting as failing) and `claude-progress.txt`. Anthropic chose JSON because the model was less likely to overwrite it than Markdown. Browser automation through a Puppeteer MCP server let agents test as a user would.
+- **Claude Code's sandbox (October 2025; docs as of November 2026).** Seatbelt on macOS and bubblewrap on Linux; a local proxy with an allow-list for the network; 84 % fewer permission prompts in Anthropic's own use.
+- **Claude Code on the web.** Git credentials stay outside the cloud sandbox; a proxy checks each push and attaches the real token.
+- **Anthropic's tool-writing guide (September 2025).** Fewer, task-shaped tools, namespaced names, and errors that tell the agent what to change.
+
+## Failure modes & pitfalls
+
+- Wrapping every API endpoint as a tool.
+- A general shell tool beside narrow ones, which turns every gate into a suggestion.
+- Returning stack traces, or whole logs, as tool results.
+- Letting the agent edit the tests or the check config.
+- Rules that live only in the prompt or `AGENTS.md`.
+- A sandbox with a file fence and an open network, or the reverse.
+- Real tokens inside the sandbox, in environment variables or config files.
+- Asking a person about every step, until they approve without reading.
+
+## Interview framework
+
+1. Say what the agent can see: its context and its tools. Then make the repository legible: a map file, layout, one check command.
+2. Design the toolset: few, orthogonal, task-shaped, with strict schemas.
+3. Add the feedback loop: deterministic checks after every edit, errors rewritten to what failed, where and what to try.
+4. Turn repeated mistakes into golden principles that lints and structural tests enforce.
+5. Close with safety: permission tiers by reversibility, a sandbox with file, network and credential fences, a person before anything leaves.
+
+**What interviewers listen for:** fixes that change the environment rather than the prompt, and checks that run whether or not the model asks for them.
+
+**Red flags:** "give the agent shell access and a good prompt", or a sandbox described without the network.
+
+## Further reading
+
+- [Effective harnesses for long-running agents (Anthropic, 26 Nov 2025)](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [Beyond permission prompts: making Claude Code more secure and autonomous (Anthropic, 20 Oct 2025)](https://www.anthropic.com/engineering/claude-code-sandboxing)
+- [Writing effective tools for agents, with agents (Anthropic, 11 Sep 2025)](https://www.anthropic.com/engineering/writing-tools-for-agents)
+- [Sandboxing (Claude Code documentation)](https://code.claude.com/docs/en/sandboxing)
+- [Configure permissions (Claude Code documentation)](https://code.claude.com/docs/en/permissions)
+- [Harness engineering: leveraging Codex in an agent-first world (OpenAI, 11 Feb 2026)](https://openai.com/index/harness-engineering/)
+- [Harness engineering: Codex agents at scale (InfoQ summary of OpenAI's post, 2026)](https://www.infoq.com/news/2026/02/openai-harness-engineering-codex/)
+- [Harness engineering for coding agent users (Birgitta Böckeler, martinfowler.com, 2026)](https://martinfowler.com/articles/harness-engineering.html)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What makes a codebase legible to a coding agent?" category="Concepts" level="Junior">
+    - The agent knows only what is in its context or reachable with its tools, so legibility means it can find what it needs in a few tool calls.
+    - Keep a short map file at the root that points to deeper docs, put tests next to the code they test, and give one command that runs every check.
+    - Return readable names from tools instead of opaque ids.
+    - OpenAI keeps its root `AGENTS.md` to about 100 lines for this reason.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you design the toolset for a bug-fixing coding agent?"
+    category="Architecture"
+    level="Mid"
+  >
+    - Start from the tasks: find code, read a file, change a file, run the checks.
+    - One tool per task, with strict schemas, and no two tools that overlap.
+    - Avoid a general shell beside them, because it can do everything the others do without their gates.
+    - Fix commands inside the tools, for example `run_tests` runs the test command and the model can only filter which tests.
+    - Then measure tool choice in evaluations and fix the descriptions that cause mistakes.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Why lean on deterministic checks for an agent's feedback, and where do they fall short?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - Linters, type checks, tests and schema validators give the same answer every time, run in seconds and cost no model tokens, so the harness can run them after every edit.
+    - They only check what someone encoded: a valid, well-typed change can still solve the wrong problem.
+    - That is where a reviewer model or a person comes in, but only on work that passed the cheap checks.
+    - The checks also need protecting, so the agent cannot weaken a test to pass it.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How should a tool report an error back to the model?"
+    category="Architecture"
+    level="Mid"
+  >
+    - As a short, consistent message with three fields: what failed, where, and what to try next.
+    - Keep the facts from the raw output, such as the test name and file and line, and drop the runner's own frames.
+    - Save the full log to a file and give its path.
+    - Do not guess the fix; point to the place and the next check.
+    - In the running example this cuts about 2,100 tokens to about 90.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Design the sandbox for a coding agent that installs packages and opens pull requests."
+    category="Architecture"
+    level="Senior"
+  >
+    - Run commands in a container or microVM on a copy of the repository, with writes allowed only there and in a temp folder, and reads of credential files denied.
+    - Give it no direct network: all traffic goes through a proxy with an allow-list that starts empty, plus the package registry.
+    - Keep real credentials outside: the agent pushes with a scoped credential to a git proxy that checks the branch and adds the real token.
+    - Merging waits for a person, and the agent cannot run commands outside the sandbox.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your coding agent keeps making the same mistake across runs. What do you change?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Change the environment, not only the prompt. Find the mistake in traces, then encode the rule as a check: a custom lint rule or a structural test, with an error message that says how to fix it.
+    - That is what OpenAI calls a golden principle.
+    - Add a line to the map file as a guide, and add the failing case to the evaluation suite so a regression shows up before release.
+  </InterviewQuestion>
+</InterviewQuestions>

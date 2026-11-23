@@ -1,0 +1,267 @@
+---
+title: "Choosing a Model"
+description: "How to pick a model for a task: closed or open weights, small or large, hosted API or self-hosted, and how to compare candidates."
+icon: scale
+updated: 2026-11-15
+---
+
+Almost every LLM design question hides a model choice. Start from the product's numbers—quality, latency, cost, and data rules—not a leaderboard, and design so the next model release is a config swap.
+
+## Overview
+
+- Start from the **task and its numbers**: a quality bar, a latency budget (**time to first token** and **tokens per second**), cost per request and per month, context length, modality, tools, languages, data residency, licence and deployment.
+- Filter in order: **hard constraints first** (pass or fail), then **quality on your own eval set**, then **cost at your real volume**. Keep a primary model and a tested fallback.
+- **Public benchmarks and leaderboards are a starting point only**: test sets leak into training data, popular benchmarks saturate, and they rarely match your task.
+- **Cost per month = requests × (input tokens × input price + output tokens × output price)**. Prices change often; the formula does not.
+- **Routing and cascades** send easy requests to a small model and escalate the rest. FrugalGPT reported matching GPT-4 with **up to 98% lower cost** on its tasks; RouteLLM cut cost by **up to 3.66×** on MT Bench.
+- Self-hosting memory is **parameters × bytes per parameter + KV cache**: a 70B model needs about **140 GB** of weights in 16-bit and **35 GB** in 4-bit.
+
+<KeyIdea>Filter on pass-or-fail constraints first, choose on quality from your own eval set, then on cost at real volume, and keep the model behind one interface so the next release is a config swap.</KeyIdea>
+
+## Mental model
+
+- **Hard constraints first:** A delivery company never buys a van from a racetrack ranking; first the van must fit under the loading-dock roof and be legal in the city.
+- **Test on your own routes:** Each shortlisted van drives the company's own routes with real parcels (your eval set), not a public test track.
+- **Price at real mileage and route by weight:** Fuel and insurance are priced at real volume; most parcels go in small vans while only heavy ones wait for the truck (routing).
+- **Keep a backup contract:** The company keeps a rental fallback ready in case a vehicle model is recalled (model deprecations).
+
+## Core concepts
+
+- **Start from the task and its numbers:** Write requirements before looking at any model so each item is either a pass-or-fail filter or a metric to compare:
+  - **Quality and latency:** Quality bar (how "good enough" is measured) and latency budget (TTFT and decode rate).
+  - **Cost and shape:** Cost per request and per month, longest prompt, modalities (text, images, audio), tool use, structured output, and languages served.
+  - **Governance and ops:** Data residency, acceptable licence terms, and whether you can run GPUs yourself.
+- **Closed APIs versus open-weight models:**
+  - **Closed APIs:** Used through the provider's API or a cloud reseller; you get frontier quality, zero GPU ops, and fast upgrades, while the provider sets prices, rate limits, data terms, and retirement dates.
+  - **Open-weight models:** Published weights let you host anywhere, fine-tune, pin a version for years, and keep data in your network, in exchange for running the serving stack, paying for idle GPUs, and owning security.
+  - **Hosted open weights:** Many providers serve open-weight models by the token, giving open weights on someone else's GPUs.
+- **Small, mid-size and frontier models:**
+  - **Size vs. cost:** Larger models reason better and know more; smaller ones answer faster and cost several times (often >10×) less per token within the same family.
+  - **Distillation and routing:** Because most products need the frontier tier only for a minority of requests, use [distillation](/ai-system-design/genai-system-design/distillation-and-small-models) and routing.
+  - **MoE dual sizing:** For self-hosting, a [mixture-of-experts](/ai-system-design/genai-system-design/mixture-of-experts) model has two sizes—compute per token follows active parameters, while GPU memory follows total parameters.
+- **Reasoning versus non-reasoning models:**
+  - **Test-time compute:** Reasoning models spend extra "thinking" tokens before answering, helping on maths, code, and multi-step planning (see [reasoning models and test-time compute](/ai-system-design/genai-system-design/reasoning-models-and-test-time-compute)).
+  - **Billing and context:** OpenAI bills reasoning tokens as output tokens that consume context window space, and suggests reserving at least 25,000 tokens for reasoning and output when starting.
+  - **When to skip:** For extraction, classification, or simple chat, a non-reasoning model is often as accurate and several times faster.
+- **Latency (time to first token and tokens per second):**
+  - **TTFT vs. decode:** Time to first token (TTFT) grows with prompt length and queueing; output speed is decode tokens per second ($r$) for $n_{\text{out}}$ output tokens:
+
+    $$
+    T_{\text{total}} \approx T_{\text{TTFT}} + \frac{n_{\text{out}}}{r}
+    $$
+
+  - **Worked timing:** At a 0.5 s TTFT and 80 tokens/s, a 400-token answer takes about 0.5 + 5 = 5.5 s.
+  - **Workload priority:** Chat UIs care most about TTFT (see [streaming](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)), whereas batch pipelines care about total throughput and cost; measure both under real concurrency and prompt lengths.
+- **Cost per request and per month:**
+  - **Per-token formula:** API pricing charges per million input and output tokens ($p_{\text{in}}, p_{\text{out}}$), with output costing several times more than input:
+
+    $$
+    C_{\text{month}} = R_{\text{day}} \times 30 \times \frac{n_{\text{in}}\, p_{\text{in}} + n_{\text{out}}\, p_{\text{out}}}{10^6}
+    $$
+
+  - **Discounts:** Cached prompt prefixes bill at a reduced rate (see [prompt caching](/ai-system-design/genai-system-design/prompt-caching)), and both OpenAI and Anthropic list a 50% discount for 24-hour batch jobs (see [batch vs real-time inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference)).
+
+<AnimatedDiagram
+  spec="animated/llm/choose-monthly-cost"
+  caption="With illustrative prices 10× apart, sending 20% of traffic to the large tier costs 28% of running everything on it; the formula holds for any prices you plug in."
+/>
+
+- **Context length, modality, tools and languages:**
+  - **Window limits:** If your longest prompt plus output exceeds the window, the model is out; if it fits near the limit, test quality there because long prompts degrade (see [context windows](/ai-system-design/genai-system-design/context-windows-and-in-context-learning)).
+  - **Capabilities and language:** Apply the same pass/fail check to image/audio input, reliable tool calling and structured output (see [tool use](/ai-system-design/genai-system-design/tool-use-and-mcp)), and non-English accuracy.
+- **Licences, data residency and privacy:**
+  - **API data terms:** Check prompt logging, retention, training opt-out, and regional processing (clouds host closed and open models inside specific regions like the EU).
+  - **Open-weight licences:** Read the exact licence—DeepSeek-R1 is MIT-licensed, whereas Llama 3.1's community licence requires services above 700 million monthly active users to request a separate licence from Meta; apply [data privacy and PII](/ai-system-design/genai-system-design/data-privacy-pii-handling) controls either way.
+
+## Architecture
+
+The selection process is a funnel. Step through it to see why the order matters.
+
+<AnimatedDiagram
+  spec="animated/llm/choose-shortlist-flow"
+  stepper
+  caption="Cheap pass-or-fail constraints go first, quality is measured only on the survivors with your own eval set, and cost at real volume picks between the models that clear the bar. The counts are an example."
+/>
+
+How to run it:
+
+<StepCards>
+  <StepCard n={1} title="Write the numbers down">
+    Quality bar, TTFT and total-latency targets, monthly budget at expected volume, longest prompt, data rules.
+  </StepCard>
+  <StepCard n={2} title="Apply hard constraints">
+    Drop anything that fails data residency, licence, deployment, modality, context length or the latency budget at your prompt length. These checks are cheap and need no eval.
+  </StepCard>
+  <StepCard n={3} title="Measure quality on your own eval set">
+    Run every survivor on the same cases with the same prompts and scoring. Drop those below the bar, whatever their public rank.
+  </StepCard>
+  <StepCard n={4} title="Price and load-test the rest">
+    Compute monthly cost at real volume and measure TTFT and tokens per second under realistic concurrency.
+  </StepCard>
+  <StepCard n={5} title="Keep a primary and a fallback">
+    Ship the cheapest model that clears the bar, keep a second one (ideally from another provider) tested and ready, and loop back to step 3 whenever a new model ships.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Building a shortlist with your own evals
+
+Public benchmarks are useful to pick candidates and useless to pick a winner:
+
+- **Contamination:** Test questions leak into training data, overstating ability; Zhang et al. (2024) built GSM1k in the style of GSM8K and found accuracy drops of up to 8% for some leading models, with several families showing overfitting.
+- **Saturation:** When top models all score in the 90s, the benchmark stops separating them; MMLU-Pro (Wang et al., 2024) used ten options instead of four and more reasoning questions, dropping accuracy by 16% to 33%.
+- **Task mismatch:** A maths or trivia score says little about summarizing your support tickets in your tone, in Portuguese, with your JSON schema.
+- **Preference leaderboards:** Chatbot Arena (Chiang et al., 2024) fits rankings from over 240,000 pairwise crowd votes, but still measures crowd preferences on crowd prompts.
+- **Private variant gaming:** "The Leaderboard Illusion" (Singh et al., 2025) found that some providers test many private variants before publishing the best, including 27 by Meta before the Llama 4 release.
+
+- Build your own eval set (see [building eval datasets](/ai-system-design/genai-system-design/building-eval-datasets)), using metrics from [LLM evaluation fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) and [offline evaluation](/ai-system-design/genai-system-design/offline-evaluation-benchmarks):
+
+1. **Stratified sampling:** Sample a few hundred real or realistic inputs stratified by type, plus edge cases (long inputs, other languages, adversarial prompts).
+2. **Ground truth and rubrics:** Define what a good answer is—exact answers where possible, a rubric where not.
+3. **Calibrated automated scoring:** Score with deterministic code checks and an [LLM judge](/ai-system-design/genai-system-design/llm-as-judge-evaluation) calibrated against human labels.
+4. **Fair prompt tuning:** Run every candidate with the same prompt, then give the top two a short prompt-tuning pass each so a prompt tuned for one model does not handicap another.
+5. **Versioned comparison table:** Record quality, latency, and cost per case in one versioned table so the next model faces the exact same test.
+
+### Routing and using more than one model
+
+Two patterns combine multiple models in one product:
+
+- **Router vs. cascade:** A **router** inspects the request before any model runs and picks one (by task type or learned difficulty); a **cascade** calls a cheap model first and escalates only when a check rejects the answer.
+
+<AnimatedDiagram
+  spec="animated/llm/choose-cascade"
+  stepper
+  caption="Every request pays for the small model and only the escalated 20% also pay for the large one, so with these illustrative prices the blend costs 30% of large-only, at the price of extra latency on the hard cases."
+/>
+
+- **FrugalGPT (Chen et al., 2023):** Built cascades over 12 LLM APIs from five providers using a DistilBERT scorer to trigger escalation, matching GPT-4 with up to 98% lower cost (or +4% accuracy at the same cost) across three datasets.
+- **RouteLLM (Ong et al., 2024):** Trained routers on human preference data between GPT-4 and Mixtral 8x7B; on MT Bench its best router recovered half the quality gap while sending ~13% of calls to GPT-4 (up to 3.66× cost saving, and 1.4×–1.5× on MMLU and GSM8K).
+- **Operational trade-off:** A router pays once per request but guesses difficulty up front; a cascade sees the actual answer before deciding but pays and waits twice on escalated requests.
+- **Gateway placement:** Production systems place routing and cascades inside an [LLM gateway](/ai-system-design/genai-system-design/llm-gateway) alongside retries and [fallbacks across providers](/ai-system-design/genai-system-design/multi-model-routing-fallbacks).
+
+### Self-hosting: sizing GPU memory
+
+Weights take parameters × bytes per parameter, and the KV cache takes bytes per token × tokens in flight (see [efficient attention](/ai-system-design/genai-system-design/efficient-attention)):
+
+<AnimatedDiagram
+  spec="animated/llm/choose-gpu-memory"
+  caption="Weights scale with parameters × bytes per parameter and the KV cache with tokens in flight: 4-bit weights fit a 70B model on one 80 GB GPU, until one full-length request fills it."
+/>
+
+- **KV cache ceiling:** The KV cache, not the weights, often decides how many concurrent users one GPU can serve.
+- **MoE total weight footprint:** A mixture-of-experts model needs memory for all parameters—DeepSeek-R1 activates 37B parameters per token but stores 671B (~671 GB at 1 byte/param) before any KV cache.
+- **Utilisation and hourly cost:** Self-hosted cost per million tokens is hourly GPU cost divided by tokens served per hour; it beats API pricing only when traffic keeps GPUs busy after counting engineering time, redundancy, and idle night hours (see [GPU performance](/ai-system-design/genai-system-design/gpu-performance-for-llms) and [capacity planning](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)).
+
+<Callout tone="red" title="What breaks">
+  Quantization: [quantization](/ai-system-design/genai-system-design/quantization-optimization) to 4 bits cuts weights by 4× but can cost quality, so evaluate it on the same golden set.
+</Callout>
+
+### Planning for model upgrades and deprecations
+
+Hosted models retire on the provider's schedule:
+
+- **Retirement windows:** Anthropic promises at least 60 days' notice before retiring a public model (for example, Claude Sonnet 3.7 from February 2025 was deprecated on October 28, 2025 and retired on February 19, 2026).
+- **Pin model versions:** Use dated snapshots rather than floating aliases so behaviour does not shift silently.
+- **Hide the provider behind one interface:** Make swapping a model a configuration change, not a rewrite.
+- **Keep the eval set and a fallback ready:** Run any new candidate through the eval set, compare cost and latency, and roll it out gradually with an [A/B test](/ai-system-design/genai-system-design/ab-testing-prompts-models).
+- **Re-evaluate on a schedule:** Review quarterly as prices fall and smaller models improve.
+
+<Callout tone="red" title="What breaks">
+  Prompts on a new model. Newer models follow instructions differently, so re-tune prompts and re-check structured output before switching.
+</Callout>
+
+## Trade-offs
+
+<Compare caption="Closed or open, small or frontier, one model or a router: what each choice buys and costs.">
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Closed API, frontier tier | Highest quality available, no infrastructure | Highest price per token; provider controls terms and retirement | Hard tasks, low to medium volume, fast start |
+| Closed API, small tier | Cheap, fast, same integration | Weaker on complex reasoning | High-volume simple tasks: classification, extraction, routing |
+| Open weights, hosted by a provider | Model choice and version pinning without GPUs | Fewer data and latency guarantees than your own stack | Cost-sensitive traffic, avoiding lock-in |
+| Open weights, self-hosted | Data stays inside; fine-tuning; fixed version | GPUs, serving stack and on-call; cost depends on utilization | Strict data rules, steady high volume, custom models |
+| Reasoning model | Better on maths, code, planning | More output tokens, slower, higher cost | Multi-step problems where accuracy matters most |
+| Router or cascade | Large savings when most requests are easy | Extra component; misroutes; cascade adds latency on escalation | Mixed-difficulty traffic at scale |
+
+</Compare>
+
+## Production systems
+
+- **FrugalGPT** (Chen et al., 2023): cascades over 12 LLM APIs matched GPT-4 with up to 98% lower cost, or beat it by 4% accuracy at the same cost, on three datasets.
+- **RouteLLM** (Ong et al., 2024): routers trained on preference data chose between GPT-4 and Mixtral 8x7B, saving up to 3.66× on MT Bench while recovering half the quality gap.
+- **Llama 3.1 70B** (Meta, July 2024): 80 layers, 8 KV heads of 128 dims and a 131,072-token window; about 140 GB of weights in bfloat16, under a community licence with a 700-million-user clause.
+- **DeepSeek-R1** (January 2025): an open-weight reasoning model under the MIT licence, 671B total and 37B active parameters, 128K context.
+- **Anthropic's deprecation policy** (as of November 2026): at least 60 days' notice before retirement; Claude Sonnet 3.7 was retired on February 19, 2026, about a year after its snapshot date.
+
+## Failure modes & pitfalls
+
+- Choosing from a leaderboard instead of your own eval set, then discovering the model is weak on your language, format or domain.
+- Comparing prices per token without the token counts: a model with a cheaper rate but longer answers, or more reasoning tokens, can cost more per request.
+- Checking quality first and data rules last, so the favourite fails a residency or licence review a week before launch.
+- Measuring latency with one short prompt at night instead of real prompt lengths under peak concurrency.
+- Coding directly against one provider's SDK and model alias, so a retirement notice becomes an emergency.
+- Picking one model for everything when 80% of requests are easy and a small model or a router would serve them.
+
+## Interview framework
+
+1. Ask for the requirements as numbers: traffic, latency budget (TTFT and total), quality bar, data rules, budget.
+2. Filter on hard constraints, then name two or three candidates across tiers (a closed frontier model, a small one, an open-weight one), and say how you would host each.
+3. Describe the eval: a few hundred real cases, a rubric or exact checks, an LLM judge calibrated on human labels, the same prompt for every candidate.
+4. Do the cost arithmetic out loud (requests × tokens × price), then propose a router or cascade if most traffic is easy, with its blended cost.
+5. Close with operations: a pinned version, a gateway, a tested fallback, and re-evaluation when new models ship.
+
+- **What interviewers listen for:** Requirements before models, constraint filtering, an eval built from real traffic, cost arithmetic with tokens and volume, and a plan for fallbacks and upgrades.
+- **Red flags:** "Just use the best model", quoting a leaderboard rank as proof, ignoring output or reasoning tokens in cost, or no answer for what happens when the model is retired.
+
+## Further reading
+
+- [FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance (Chen et al., 2023)](https://arxiv.org/abs/2305.05176)
+- [RouteLLM: Learning to Route LLMs with Preference Data (Ong et al., 2024)](https://arxiv.org/abs/2406.18665)
+- [Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference (Chiang et al., 2024)](https://arxiv.org/abs/2403.04132)
+- [A Careful Examination of Large Language Model Performance on Grade School Arithmetic (Zhang et al., 2024)](https://arxiv.org/abs/2405.00332)
+- [The Leaderboard Illusion (Singh et al., 2025)](https://arxiv.org/abs/2504.20879)
+- [Anthropic model deprecations (docs)](https://platform.claude.com/docs/en/about-claude/model-deprecations)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What do you need to know before choosing a model for a new feature?" category="Concepts" level="Junior">
+    - **Quality and latency:** The quality bar (and how it will be measured) plus latency budgets as TTFT and total response time.
+    - **Volume and budget:** Expected request volume, monthly cost ceiling, and maximum prompt and output lengths.
+    - **Capabilities and governance:** Required modalities, tool use, target languages, data residency, and acceptable licence terms so each requirement acts as a pass/fail filter or comparison metric before inspecting models.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose an open-weight model over a closed API?" category="Trade-offs" level="Mid">
+    - **Data control and longevity:** When data must stay inside your network/region, or when you need deep fine-tuning and multi-year version pinning.
+    - **High steady volume:** When sustained traffic keeps self-hosted GPUs busy enough to beat per-token API pricing.
+    - **Closed API and hybrid options:** Closed APIs win on frontier quality and zero serving ops; hosted open-weight providers offer a middle path, provided you verify licence terms (such as Llama 3.1's 700M MAU clause vs. MIT).
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not pick the model at the top of a public leaderboard?" category="Failure modes" level="Mid">
+    - **Contamination and saturation:** Test sets leak into training data (GSM1k showed up to 8% drops vs. GSM8K), and saturated benchmarks fail to separate top models (MMLU-Pro dropped scores by 16%–33%).
+    - **Leaderboard gaming:** Preference arenas reflect crowd prompts and can be skewed by providers testing dozens of private variants before publishing (Singh et al., 2025).
+    - **Domain mismatch:** Public benchmarks rarely match your specific task, language, and JSON schema; use them only to shortlist candidates before running your own eval set.
+  </InterviewQuestion>
+  <InterviewQuestion question="Estimate the monthly cost of an assistant with 50,000 requests a day." category="Scaling" level="Mid">
+    - **Per-request math:** At 2,000 input and 400 output tokens with illustrative prices of \$5 and \$20 per million, each request costs (2,000 × 5 + 400 × 20) ÷ 1,000,000 = \$0.018.
+    - **Monthly total:** 50,000 × 30 = 1.5 million requests/month, which costs 1.5M × \$0.018 = \$27,000/month (or \$2,700/month on a tier 10× cheaper).
+    - **Cost levers:** Add prompt caching for shared prefixes, check whether reasoning tokens inflate output counts, and test routing easy requests to the smaller tier.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a model cascade work, and what can go wrong?" category="Architecture" level="Senior">
+    - **Sequential escalation:** Every request hits a cheap model first; a verifier or small scoring model (such as DistilBERT in FrugalGPT, which cut cost by up to 98%) decides whether to return the answer or escalate to a larger model.
+    - **Blended cost math:** With a 20% escalation rate to a model 10× pricier, the blend costs ~30% of large-only because escalated requests pay for both tiers.
+    - **Failure modes:** Overconfident wrong answers slipping past the scorer, doubled latency on escalated requests, and escalation rate drift as live traffic changes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How much GPU memory do you need to serve a 70B model yourself?" category="Scaling" level="Senior">
+    - **Model weights:** Parameters × bytes per parameter gives ~140 GB in 16-bit and ~35 GB in 4-bit.
+    - **KV cache:** For Llama 3.1 70B (80 layers, 8 KV heads of 128 dims), 16-bit KV cache takes ~0.33 MB/token, so 16 concurrent 4,096-token requests add ~21.5 GB (and a single 128K-token request adds ~43 GB).
+    - **GPU count:** Total 16-bit memory (~161.5 GB) requires four 80 GB GPUs (splitting heads evenly across tensor parallelism), while 4-bit weights plus the 21.5 GB KV cache fit on one 80 GB GPU.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your provider announces your model will be retired in 60 days. What should already be in place?" category="Failure modes" level="Senior">
+    - **Gateway abstraction and pinned versions:** Route calls through a single gateway interface with pinned model snapshots so swapping is a config change.
+    - **Versioned eval set and wired fallback:** Keep a versioned eval benchmark (quality, latency, cost) and a pre-tested fallback model (ideally from a second provider) ready.
+    - **Migration playbook:** Evaluate the replacement candidate, re-tune prompts and structured outputs, roll out via a gradual A/B test, and monitor quality and cost before retiring the old model.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is a reasoning model the wrong choice?" category="Trade-offs" level="Junior">
+    - **Simple tasks:** Classification, extraction, and short chat rarely benefit from multi-step chain-of-thought reasoning.
+    - **Output token and latency overhead:** Thinking tokens are billed as output tokens and occupy context window space, increasing both cost and latency.
+    - **Selective routing:** Default to a fast non-reasoning model and route only complex math, coding, or planning prompts to a reasoning tier where your eval proves a gain.
+  </InterviewQuestion>
+</InterviewQuestions>

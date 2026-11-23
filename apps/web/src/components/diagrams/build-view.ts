@@ -1,7 +1,7 @@
 // Pure step and emphasis logic shared by the diagram renderers (no React), so it can be unit tested.
 
 import { boundsCentre, shapeBounds } from "./geometry";
-import type { DiagramEdge, DiagramNode, DiagramSpec, DiagramZone, LayoutShape, LayoutSpec } from "./types";
+import type { DiagramEdge, DiagramNode, DiagramSpec, DiagramZone, LayoutGroup, LayoutShape, LayoutSpec } from "./types";
 
 /** How an element is drawn at the current build step: added in this step, carried over, or full diagram. */
 export type Phase = "new" | "old" | "full";
@@ -131,8 +131,14 @@ interface ShapeView {
 
 const shapeStep = (s: LayoutShape) => s.step ?? 1;
 
-const inGroup = (g: DiagramZone, s: LayoutShape) => {
-  if (s.type === "arrow") return false;
+interface GroupView {
+  zone: LayoutGroup;
+  phase: Phase;
+}
+
+// Lines (arrows, paths) never make a group appear; boxes, cells, circles and text inside it do.
+const inGroup = (g: LayoutGroup, s: LayoutShape) => {
+  if (s.type === "arrow" || s.type === "path") return false;
   const [cx, cy] = boundsCentre(shapeBounds(s));
   return cx >= g.x && cx <= g.x + g.w && cy >= g.y && cy <= g.y + g.h;
 };
@@ -141,7 +147,7 @@ const inGroup = (g: DiagramZone, s: LayoutShape) => {
  * Which shapes and groups of a layout spec appear at build `step` (undefined = full drawing). An arrow waits for
  * the shapes it joins; a group shows once a shape inside it does.
  */
-export function layoutView(spec: LayoutSpec, step: number | undefined): { shapes: ShapeView[]; groups: ZoneView[] } {
+export function layoutView(spec: LayoutSpec, step: number | undefined): { shapes: ShapeView[]; groups: GroupView[] } {
   const visible = spec.shapes.filter((s) => step === undefined || shapeStep(s) <= step);
   const ids = new Set(visible.map((s) => s.id));
   const shapes = visible
@@ -149,7 +155,7 @@ export function layoutView(spec: LayoutSpec, step: number | undefined): { shapes
     .map((shape) => ({ shape, phase: phaseOf(shapeStep(shape), step) }));
   const groups = (spec.groups ?? [])
     .filter((g) => shapes.some((v) => inGroup(g, v.shape)))
-    .map((zone): ZoneView => ({
+    .map((zone): GroupView => ({
       zone,
       phase:
         step === undefined ? "full" : shapes.some((v) => v.phase === "new" && inGroup(zone, v.shape)) ? "new" : "old",
