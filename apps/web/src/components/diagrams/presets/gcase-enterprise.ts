@@ -274,9 +274,9 @@ export const PRINCIPALS = (() => {
  *   Event deltas (1 RU): 24,000 content + 15,000 ACL + 200 container + label changes = 39,200.
  *   Permission fetches (5 RU): (15,000 + 200) × 5 = 76,000 (inherited ACLs derived in the ACL store).
  *   Downloads (1 RU): 24,000 (deletes ride on the content deltas).
- *   P1 poll: 300 drives every 10 min: 43,200. P2 poll: 7,700 drives hourly: 184,800.
+ *   Hot-tier poll: 300 drives every 10 min: 43,200. Warm-tier poll: 7,700 drives hourly: 184,800.
  *   Site-group membership (SharePoint groups that hold users directly): one REST call a site expanding its groups,
- *   ≈ 4 RU (illustrative: REST has no fixed cost and usually costs more than Graph): P1 300 sites every 10 min + the
+ *   ≈ 4 RU (illustrative: REST has no fixed cost and usually costs more than Graph): hot tier 300 sites every 10 min + the
  *   other 2,700 hourly = 43,200 + 64,800 = 108,000 calls × 4 = 432,000 RU.
  *   Live checks: 11,256 × 35% = 3,940 × 5 = 19,698. Drift audit: 5,000 × 5 = 25,000.
  *   Planned ≈ 843,900 RU = 35% of the day; reserve 650,000 (27%) for a 410 re-enumeration of every drive:
@@ -404,7 +404,13 @@ export const PROPAGATION = (() => {
   const eventP50 = sum(event.map((e) => e.s)); // 35.1
   const p = (eventP50 - 30) / 60; // 0.085 min of processing
   const perSource = [
-    { id: "sp-doc-p1", label: "SharePoint document ACL, P1 sites (300)", bound: 10 + p, throttled: 20, dropOut: 30 },
+    {
+      id: "sp-doc-p1",
+      label: "SharePoint document ACL, hot-tier sites (300)",
+      bound: 10 + p,
+      throttled: 20,
+      dropOut: 30,
+    },
     {
       id: "sp-doc-p2",
       label: "SharePoint and OneDrive document ACL, other (7,700)",
@@ -414,7 +420,7 @@ export const PROPAGATION = (() => {
     },
     {
       id: "sp-groups-p1",
-      label: "SharePoint site-group membership, P1 sites",
+      label: "SharePoint site-group membership, hot-tier sites",
       bound: 10 + p,
       throttled: 20,
       dropOut: 30,
@@ -467,7 +473,7 @@ export const PROPAGATION = (() => {
  * Content freshness. Changed chunks a day: SharePoint 24,000 × 9 + Confluence 1,500 × 5 + Jira 6,000 × 2 + helpdesk
  * (16,000 new + 16,000 updated) × 3 + GitHub 2,000 × 3 = 216,000 + 7,500 + 12,000 + 96,000 + 6,000 = 337,500 →
  * 135M tokens = 0.75 GPU-hours. Event path p50: notify 30 + fetch 2 + parse 1 + embed batch wait 5 + embed 1 + index 1
- * = 40 s; bound = the content poll (P1 10 min, else 60 min).
+ * = 40 s; bound = the content poll (hot tier 10 min, else 60 min).
  */
 export const CONTENT = (() => {
   const changedChunks = 24_000 * 9 + 1_500 * 5 + 6_000 * 2 + 32_000 * 3 + 2_000 * 3; // 337,500

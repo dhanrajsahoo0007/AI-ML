@@ -51,7 +51,7 @@ The hard parts are a reply gap a caller tolerates at p95, knowing when they have
     { value: "≈ 1,100 ms", label: "response gap at p50", hint: "1,050–1,200 with the recogniser's commit time" },
     { value: "≈ 1,500 ms", label: "gap at p95, turns without a tool", hint: "estimated from stage spreads" },
     { value: "0.048 USD", label: "per call minute", hint: "speech, models and telephony" },
-    { value: "250", label: "concurrent calls on a sales day", hint: "64 in an ordinary busy hour" },
+    { value: "250", label: "concurrent calls sized for a sales day", hint: "≈ 200 expected; 64 in an ordinary busy hour" },
   ]}
 />
 
@@ -137,7 +137,7 @@ The hard parts are a reply gap a caller tolerates at p95, knowing when they have
 | G2 | Cost of a wrong answer | High: money moves, and a spoken promise is heard | Policy service in code; a sentence gate before speech; a spoken yes before any write |
 | G3 | Latency target | No-tool turns p50 1,200 ms, p95 1,600 ms at the ear; tool turns a filler within 1,200 ms | Streaming everywhere, preemptive generation, fillers, hedged model calls, one region |
 | G4 | Cost per request | ≤ 0.05 USD a call minute | Cascade, not speech-to-speech; small model on simple nodes |
-| G5 | Traffic shape | 64 concurrent calls, 250 on a sales day; calls last minutes | Capacity in concurrent calls, workers and committed streams, not requests |
+| G5 | Traffic shape | 64 concurrent calls, ≈ 200 on a sales day (sized for 250); calls last minutes | Capacity in concurrent calls, workers and committed streams, not requests |
 | G6 | Knowledge source and freshness | Same help centre and orders as chat | Reuse the chat agent's retrieval, tools and case store |
 | G7 | Context size | 3,600 tokens a call; a 4-minute call grows | Per-node prompts; history truncated to what was heard; case state |
 | G8 | Determinism and auditability | A refund agreed on a call must be traceable | Per-turn transcript, tool log, node and prompt versions |
@@ -573,6 +573,7 @@ The waterfall puts the same turn three ways on one time scale: sequential, with 
 
 - **Sequential:** 100 + 300 + 400 + 100 + 200 + 100 = 1,200 ms. **Filler on a tool turn:** 100 + 200 + 400 + 50 (clip start) + 100 = 850 ms, inside N2's 1,200.
 - **Preemptive:** legs + max(wait, commit + first token + clause + synthesis) = 100 + max(300, 200 + 400 + 100 + 200) + 100 = 1,100 ms. With the commit at 150–300 ms, the p50 is 1,050–1,200 ms.
+- **Behind the platform gateway:** each partial transcript's new words are name-scanned before a speculative call leaves, +13.5 ms p50 and +30 ms p95 ([LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway)): ≈ 1,114 ms p50 and ≈ 1,524 ms p95 by stage sum, still inside N2.
 - **What preemptive generation buys:** 100 ms here (vendors report 150–250 ms), and a free wait. The turn can wait up to 900 ms after speech ends without delaying playback, so the 600 ms backstop costs model calls, not latency.
 - **Against the concept page** ([Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents): 300 + 80 + 400 + 120 + 100 = 1,000 ms): commit 80 → 200 (sourced range), synthesis 120 → 200 (measured), network 100 → 200 (two phone legs). Add 100 for the first clause and take 300 off because the wait leaves the critical path: 1,000 + 120 + 80 + 100 + 100 − 300 = 1,100.
 
@@ -845,7 +846,7 @@ The trade-off figure puts false cut-offs against the wait, with the band that pr
 - [Carter's customer story](https://poly.ai/customers/carter%27s) (PolyAI, read 2026) and [Valon case study](https://decagon.ai/case-studies/valon) (Decagon, read 2026)
 - [PCI SSC FAQ 1210: card verification codes in call recordings](https://www.pcisecuritystandards.org/faqs/1210/) (PCI Security Standards Council, 2025)
 - [Timing in turn-taking and its implications for processing models of language](https://www.frontiersin.org/articles/10.3389/fpsyg.2015.00731/full) (Levinson and Torreira, 2015)
-- Related pages: [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents) · [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts) · [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)
+- Related pages: [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents) · [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts) · [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) · [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway)
 
 <InterviewQuestions>
   <InterviewQuestion

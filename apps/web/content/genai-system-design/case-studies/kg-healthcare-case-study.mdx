@@ -123,7 +123,7 @@ The answer must also cite every claim, be about the right patient, and keep pati
     { quantity: "PHI storage", assumption: "Fact rows ≈ 400 B with indexes 4.4 TB + vectors 0.51 TB + chunk text 0.69 TB", result: "≈ 5.6 TB on primary volumes, + 2 backup copies" },
     { quantity: "Prompt (safety)", assumption: "Stable 1,300 + question 100 + patient facts 590 + rule results and coverage 340 + paths 300 + 8 headers 240 + 8 passages 1,600", result: "4,470 tokens (1,300 cached); 250 out. Record 4,130; reference 3,240; the whole chart 35,250" },
     { quantity: "Answer call", assumption: "1,300 × 0.10 + 3,170 × 2.50 + 250 × 10.00, per million", result: "0.00013 + 0.00793 + 0.0025 = 0.0106 USD" },
-    { quantity: "Planner", assumption: "Encoder classifier on 85%; small model on 15%: 600 cached (if the small model's cache minimum allows) × 0.01 + 120 × 0.10 + 80 × 0.50 per million = 0.000058", result: "0.0000087 USD a question; negligible either way" },
+    { quantity: "Planner", assumption: "Encoder classifier on 85%; small model on 15%: 600 cached (above the 512-token minimum) × 0.01 + 120 × 0.10 + 80 × 0.50 per million = 0.000058", result: "0.0000087 USD a question; negligible either way" },
     { quantity: "Restart after a dropped sentence", assumption: "4,470 cached × 0.10 + 125 shown tokens × 2.00; 0.56 restarts an answer", result: "0.0007 USD each" },
     { quantity: "Safety question, model", assumption: "0.0000087 + 0.0106 + 0.56 × 0.0007; marginal adds the query half of the GPUs (120 USD) ÷ 7,200", result: "≈ 0.0110 USD (record 0.0101, reference 0.0078, card “Explain” 0.0076); marginal ≈ 0.028 (N9 ≤ 0.05)" },
     { quantity: "Model per day", assumption: "2,880 × 0.0110 + 3,240 × 0.0101 + 1,080 × 0.0078 + 154 × 0.0076", result: "≈ 74 USD a day (≈ 113 with no caching; 148 if prices double)" },
@@ -816,7 +816,7 @@ The abstention figure lists each template's inputs and what each input state bec
 | A prior authorisation assistant | Facts with provenance, rules, cited explanations | Payer policies become the knowledge layer; the output is a draft packet the clinician signs |
 | Pharmacovigilance from notes | Note NLP, assertion, linking | Batch over all patients in the PHI zone; signals reviewed by safety scientists |
 | A second health system on another EHR, 5× the patients | Snapshot, rules, model, checks | An adapter and capability matrix per EHR; ≈ 55B more fact rows (today's 1.02B + 9.88B ≈ 10.9B × 5, if their history is as deep); re-tuned linking and a second backfill; per-EHR delta baselines; a cross-system patient index |
-| An industrial knowledge graph | Ontology first, rules in code, provenance, abstention | No PHI; sensor data linked, not stored in the graph: [Semiconductor knowledge graph](/genai-system-design/case-studies/kg-semiconductor-case-study) |
+| An industrial knowledge graph | Ontology first, rules in code, provenance, abstention | No PHI; sensor data linked, not stored in the graph: [Yield Root-Cause Assistant on a Fab Knowledge Graph](/genai-system-design/case-studies/kg-semiconductor-case-study) |
 
 ## How real systems do it
 
@@ -870,7 +870,7 @@ The abstention figure lists each template's inputs and what each input state bec
 - [SapBERT](https://arxiv.org/abs/2010.11784) (2021), [MedCAT](https://arxiv.org/abs/2010.01165) (2021), [n2c2 2019 concept normalisation](https://pmc.ncbi.nlm.nih.gov/articles/PMC7647359/) (JAMIA, 2020)
 - [High-priority DDIs for EHRs](https://pmc.ncbi.nlm.nih.gov/articles/PMC3422823/) (JAMIA, 2012) and [overriding of drug safety alerts](https://pmc.ncbi.nlm.nih.gov/articles/PMC1447540/) (JAMIA, 2006); [LLMs against Micromedex on drug interactions](https://pmc.ncbi.nlm.nih.gov/articles/PMC10518176/) (2023)
 - [AbstentionBench](https://arxiv.org/abs/2506.09038) (2025), [vec2text](https://arxiv.org/abs/2310.06816) (2023), [clinical hallucination framework](https://pmc.ncbi.nlm.nih.gov/articles/PMC12075489/) (npj Digital Medicine, 2025)
-- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Knowledge Graph Systems for AI](/ai-system-design/genai-system-design/knowledge-graph-systems) · [GraphRAG](/ai-system-design/genai-system-design/graphrag) · [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Knowledge Graph Systems for AI](/ai-system-design/genai-system-design/knowledge-graph-systems) · [GraphRAG](/ai-system-design/genai-system-design/graphrag) · [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)
 
 <InterviewQuestions>
   <InterviewQuestion question="Why are standard vocabularies like SNOMED CT and RxNorm important for a healthcare knowledge graph?" category="Concepts" level="Junior">

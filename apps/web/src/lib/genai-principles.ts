@@ -56,6 +56,8 @@ const ROWS: PrincipleRow[] = [
     teach: concept("rag-fundamentals", "hallucination-mitigation"),
     caseStudies: [
       `${CASE}/customer-support-agent`,
+      `${CASE}/ai-answer-engine`,
+      `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
     ],
@@ -231,6 +233,7 @@ const ROWS: PrincipleRow[] = [
     caseStudies: [
       `${CASE}/ai-answer-engine`,
       `${CASE}/document-extraction-pipeline`,
+      `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
@@ -245,6 +248,7 @@ const ROWS: PrincipleRow[] = [
     caseStudies: [
       `${CASE}/customer-support-agent`,
       `${CASE}/voice-agent-call-centre`,
+      `${CASE}/document-extraction-pipeline`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/content-moderation-system`,
@@ -275,12 +279,14 @@ const ROWS: PrincipleRow[] = [
     teach: concept("data-privacy-pii-handling", "compliance-audit-logging"),
     caseStudies: [
       `${CASE}/voice-agent-call-centre`,
+      `${CASE}/document-extraction-pipeline`,
+      `${CASE}/conversational-assistant-design`,
       `${CASE}/kg-healthcare-case-study`,
       `${CASE}/kg-semiconductor-case-study`,
       `${CASE}/llm-platform-gateway`,
-      `${CASE}/code-assistant`,
       `${CASE}/content-moderation-system`,
       `${CASE}/chatgpt-style-chat-service`,
+      `${CASE}/code-assistant`,
     ],
   },
 ];

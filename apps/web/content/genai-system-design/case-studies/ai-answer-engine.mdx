@@ -541,7 +541,7 @@ The waterfall puts the own-index path, the API-routed path, a cache hit and a mu
 
 - **How to read it:** each bar is one stage at its start time; the first three lanes share one time scale and the multi-hop lane has its own. On the own path, index and ranking are one bar ending at `sources`; on the API path, fetch and parse are one bar.
 
-- **The numbers:** p50 in ms; decode at 80 tokens a second and a 500 ms first token are illustrative for a mid-size model behind an API.
+- **The numbers:** p50 in ms; decode at 80 tokens a second and a 500 ms first token (a 4,105-token prompt) are illustrative for a mid-size model behind an API.
 
 | Stage | Own-index path (75% of quick) | API-routed path (25%) |
 | --- | --- | --- |
@@ -751,6 +751,7 @@ A user asks to compare four phones on battery life, price and repairability (ill
 
 | Principle | Where in this design | Why it is needed here |
 | --- | --- | --- |
+| [P2 Ground before you generate](/genai-system-design/case-studies/design-principles#p2-ground-before-you-generate) | 12 spans of evidence before the model; every sentence checked against its span; "the sources do not say" | A cited answer that its source does not support is the product's main failure ([Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation)) |
 | [P3 Route by difficulty](/genai-system-design/case-studies/design-principles#p3-route-by-difficulty) | Quick, multi-hop, research tiers; small or mid-size model; the API only when flagged | 57% less model cost; research for 1.4% of questions ([Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)) |
 | [P4 Cascade from cheap to expensive](/genai-system-design/case-studies/design-principles#p4-cascade-from-cheap-to-expensive) | 400 → 300 → 60 → 12 spans; rules → 0.8B → 7B checks | The 7B sees 20% of sentences ([Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)) |
 | [P5 Budget latency per stage](/genai-system-design/case-studies/design-principles#p5-budget-latency-per-stage) | Max-of-n per fan-out; deadlines and hedges; per-path targets | A slow shard, vendor or page cannot hold the answer ([Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)) |
@@ -832,7 +833,7 @@ A user asks to compare four phones on battery life, price and repairability (ill
 - [Introducing pay per crawl](https://blog.cloudflare.com/introducing-pay-per-crawl/) and [Content Signals Policy](https://blog.cloudflare.com/content-signals-policy/) (Cloudflare, 2025); [RSL 1.0](https://rslstandard.org/rsl) (2025)
 - [RFC 9309: Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html) (IETF, 2022) and [robots meta tag and X-Robots-Tag](https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag) (Google Search Central)
 - [BrowseComp](https://arxiv.org/abs/2504.12516) (Wei et al., 2025), [BrowseComp-Plus](https://arxiv.org/abs/2508.06600) (Chen et al., 2025) and [Lost in the Middle](https://arxiv.org/abs/2307.03172) (Liu et al., 2023)
-- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Deep Research Agents](/ai-system-design/genai-system-design/deep-research-agents) · [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Deep Research Agents](/ai-system-design/genai-system-design/deep-research-agents) · [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)
 
 <InterviewQuestions>
   <InterviewQuestion

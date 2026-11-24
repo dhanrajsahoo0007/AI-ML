@@ -10,14 +10,14 @@ import { PROD_TONE, meter, meterSize, n } from "@/components/diagrams/presets/pr
 //     + refresh 1 = PROPAGATION.eventP50 = 35.1 s; the document is dirty (live-checked) PROPAGATION.dirtyAfterS = 1 s
 //     after the event. The worked example: link removed 10:00:00 → notified 10:00:30 → dirty 10:00:31 → ACL fetched
 //     10:00:33 (5 RU) → 9 chunks (SOURCES.sharepointChunksPerDoc) patched 10:00:34 → visible 10:00:35.
-//   Lost event: the P1 poll (300 drives every 10 min, 1 RU a call) sees it by ≈ 10:10:05: bound 10 min on P1 sites,
+//   Lost event: the hot-tier poll (300 drives every 10 min, 1 RU a call) sees it by ≈ 10:10:05: bound 10 min on hot-tier sites,
 //     60 on the other 7,700 drives (PROPAGATION.perSource sp-doc-p1 / sp-doc-p2).
 //   Throttled poll: one missed cycle stretches the bound to 20 min (120 elsewhere); 30 min without a successful
 //     reconcile (dropOut) and the site's results leave the answers.
-//   Membership: a user removed from a SharePoint site group on a P1 site is caught by the next site-group reconcile,
+//   Membership: a user removed from a SharePoint site group on a hot-tier site is caught by the next site-group reconcile,
 //     ≤ 10 min (60 elsewhere); the principal store changes, no chunk is rewritten (chunks carry group ids).
 //   Budget: 2,400,000 RU a day for one Graph app (CONNECTORS.sharepoint.budgetDay): events, fetches and downloads
-//     139,200 + P1 and P2 polls 228,000 + site-group reconcile 432,000 + live checks and drift audit 44,700 =
+//     139,200 + hot- and warm-tier polls 228,000 + site-group reconcile 432,000 + live checks and drift audit 44,700 =
 //     CONNECTORS.sharepoint.planned ≈ 843,900 (35%), plus a 650,000 reserve (27%) for a 410 re-enumeration of every
 //     drive (624,000 RU, ≈ 7 h). v1's 10-minute poll of all 8,000 drives alone would have used 96%.
 // Steps: 1 the event path · 2 a lost event, caught by the poll · 3 a throttled poll, and a membership change · 4 the
@@ -94,7 +94,7 @@ const lanes: LayoutShape[] = [
     LANE_X,
     6,
     856,
-    "FY27 pay bands: an org-wide link is removed at 10:00:00 on a P1 (Confidential) site",
+    "FY27 pay bands: an org-wide link is removed at 10:00:00 on a hot-tier (Confidential) site",
     1
   ),
   ...lane(
@@ -116,10 +116,10 @@ const lanes: LayoutShape[] = [
     `Event lost\n≤ ${s(p1?.bound ?? 0)} min`,
     [
       [`Notification\nlost (max ${PROPAGATION.graphNotifyMaxHours} h)`, GENAI_TONE.failure],
-      ["P1 poll every\n10 min, 1 RU", GENAI_TONE.data],
+      ["Hot poll every\n10 min, 1 RU", GENAI_TONE.data],
       ["≈ 10:10:05\nsees the change", GENAI_TONE.data],
       ["ACL fetched,\nchunks patched", GENAI_TONE.store],
-      [`≤ ${s(p1?.bound ?? 0)} min on P1,\n≤ ${s(p2?.bound ?? 0)} elsewhere`, GENAI_TONE.check],
+      [`Hot: ≤ ${s(p1?.bound ?? 0)} min,\n≤ ${s(p2?.bound ?? 0)} elsewhere`, GENAI_TONE.check],
     ],
     2
   ),
@@ -128,8 +128,8 @@ const lanes: LayoutShape[] = [
     2,
     `Poll throttled\ndrop-out ${p1?.dropOut} min`,
     [
-      ["429: one P1\ncycle missed", GENAI_TONE.failure],
-      ["≈ 10:20 the\nnext P1 poll", GENAI_TONE.data],
+      ["429: one hot\ncycle missed", GENAI_TONE.failure],
+      ["≈ 10:20 the\nnext hot poll", GENAI_TONE.data],
       [`Bound ≤ ${p1?.throttled} min\n(≤ ${p2?.throttled} others)`, GENAI_TONE.check],
       [`No reconcile\nfor ${p1?.dropOut} min`, GENAI_TONE.failure],
       ["The site drops\nout of results", GENAI_TONE.failure],
@@ -139,13 +139,13 @@ const lanes: LayoutShape[] = [
   ...lane(
     "member",
     3,
-    `Membership\n≤ ${s(g1?.bound ?? 0)} min on P1`,
+    `Membership\n≤ ${s(g1?.bound ?? 0)} min on hot sites`,
     [
       ["User removed\nfrom site group", GENAI_TONE.user],
       ["Reconcile site\ngroups, 10 min", GENAI_TONE.data],
       ["Principal store\nupdated", GENAI_TONE.store],
       ["No chunk is\nrewritten", GENAI_TONE.store],
-      [`≤ ${s(g1?.bound ?? 0)} min on P1,\n≤ ${s(g2?.bound ?? 0)} elsewhere`, GENAI_TONE.check],
+      [`Hot: ≤ ${s(g1?.bound ?? 0)} min,\n≤ ${s(g2?.bound ?? 0)} elsewhere`, GENAI_TONE.check],
     ],
     3
   ),
@@ -182,12 +182,12 @@ const LEG = MY + ms.height + 8;
 
 const spec: LayoutSpec = {
   kind: "layout",
-  title: `Permission propagation: ≈ ${s(PROPAGATION.eventP50)} s by event, ≤ ${s(p1?.bound ?? 0)} min by poll on P1 sites, drop-out at ${p1?.dropOut} min, inside ${pct(sp.planned)} of SharePoint's budget`,
+  title: `Permission propagation: ≈ ${s(PROPAGATION.eventP50)} s by event, ≤ ${s(p1?.bound ?? 0)} min by poll on hot-tier sites, drop-out at ${p1?.dropOut} min, inside ${pct(sp.planned)} of SharePoint's budget`,
   width: 880,
   height: LEG + 2 * 20 + 8,
   steps: [
     { title: `The event path: dirty in ${PROPAGATION.dirtyAfterS} s, visible in ≈ ${s(PROPAGATION.eventP50)} s` },
-    { title: `A lost event: the P1 poll catches it within ${s(p1?.bound ?? 0)} min` },
+    { title: `A lost event: the hot-tier poll catches it within ${s(p1?.bound ?? 0)} min` },
     {
       title: `A throttled poll stretches the bound; past ${p1?.dropOut} min the site drops out. Membership: the next reconcile`,
     },
@@ -201,7 +201,7 @@ const spec: LayoutSpec = {
       LANE_X,
       LEG,
       856,
-      `Events, fetches, downloads ${n(events)} · P1 + P2 polls ${n(polls)} · site groups ${n(L.siteGroups)} · live checks + drift ${n(checks)} = ${n(planned)}`,
+      `Events, fetches, downloads ${n(events)} · hot + warm polls ${n(polls)} · site groups ${n(L.siteGroups)} · live checks + drift ${n(checks)} = ${n(planned)}`,
       4
     ),
     text(

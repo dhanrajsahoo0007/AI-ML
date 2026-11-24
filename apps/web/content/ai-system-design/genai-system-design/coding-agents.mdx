@@ -17,7 +17,7 @@ A coding agent is the agent loop pointed at a repository: it searches and reads 
 - Edits come in three formats: **whole file, unified diff and search-and-replace**. The same one-line fix costs about 3,200 output tokens as a whole file and about 40 as a search-and-replace (illustrative).
 - **Tests are the feedback signal.** They run in a sandbox after every edit, and they catch what the model misses.
 - The output is a **pull request**. A person reviews and merges it; the agent never merges its own work.
-- **SWE-bench** grades an agent's patch with tests the agent never saw. As of November 2026 OpenAI no longer reports SWE-bench Verified, citing contamination and flawed tests. Your own task suite decides whether an agent is ready.
+- **SWE-bench** grades an agent's patch with tests the agent never saw. As of November 2026 OpenAI no longer reports SWE-bench Verified, citing contamination and flawed tests, and in July 2026 it also withdrew its recommendation of SWE-bench Pro. Your own task suite decides whether an agent is ready.
 
 ## Mental model
 
@@ -359,7 +359,7 @@ As of November 2026:
 - **OpenAI Codex** runs as a CLI, an IDE extension and in the cloud, where each task has its own workspace and can finish while your computer sleeps.
 - **GitHub Copilot cloud agent** takes a task from an issue, a pull request or chat, runs in GitHub Actions or a cloud sandbox, and opens one pull request per task. A session on Actions is capped at 59 minutes.
 - **Aider** is an open-source terminal agent that picks an edit format per model: whole, diff (search-and-replace), diff-fenced, udiff and editor variants for its architect mode.
-- **OpenAI stopped reporting SWE-bench Verified** in February 2026 and recommends SWE-bench Pro, whose held-out set stays private.
+- **OpenAI stopped reporting SWE-bench Verified** in February 2026 and pointed to SWE-bench Pro instead; in July 2026 it withdrew that recommendation too, estimating about 30% of Pro tasks broken, and called for new benchmarks built by experienced developers.
 - **Used in our case studies:** [Code Assistant](/genai-system-design/case-studies/code-assistant)
 
 ## Failure modes & pitfalls
@@ -403,6 +403,7 @@ As of November 2026:
 - [Why we no longer evaluate SWE-bench Verified (OpenAI, 2026)](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)
 - [SWE-bench Verified review (Epoch AI, 2026)](https://epoch.ai/benchmarks/swe-bench-verified/review)
 - [SWE-Bench Pro (Deng et al., Scale AI, 2025)](https://arxiv.org/abs/2509.16941)
+- [Separating signal from noise in coding evaluations (OpenAI, 2026)](https://openai.com/index/separating-signal-from-noise-coding-evaluations/)
 
 <InterviewQuestions>
   <InterviewQuestion
@@ -452,7 +453,7 @@ As of November 2026:
     level="Senior"
   >
     - Less than it seems. The score is for a model and a scaffold together, on 500 tasks from 12 Python repositories.
-    - The tasks and fixes are public, and in February 2026 OpenAI stopped reporting the benchmark because frontier models had seen some of them; its audit also found flawed tests in a large share of the tasks it checked.
+    - The tasks and fixes are public, and in February 2026 OpenAI stopped reporting the benchmark because frontier models had seen some of them; its audit also found flawed tests in a large share of the tasks it checked. In July 2026 it said about 30% of SWE-bench Pro tasks were broken as well.
     - Hidden tests check behaviour, not whether a reviewer would accept the diff.
     - I would shortlist with public scores, then run the candidates on my own held-out past issues, several times each, with FAIL_TO_PASS and PASS_TO_PASS grading.
   </InterviewQuestion>
