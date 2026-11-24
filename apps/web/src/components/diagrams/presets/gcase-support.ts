@@ -6,15 +6,17 @@
 // Model prices are list prices as of November 2026 (Anthropic pricing page, read 17 November 2026): a mid-size model
 // (Claude Sonnet 5.5 class) 2.00 USD per million input tokens, 0.10 cached, 10.00 output; a small model (Claude Haiku
 // 5.5 class) 0.10 input, 0.01 cached, 0.50 output. Everything else is ILLUSTRATIVE unless a comment names a source.
+// The prices are read from gcase-answer.ts PRICES, the one price table for all eleven case studies.
 
 import { BRIGHTPOST } from "./agents";
+import { PRICES as SITE_PRICES } from "./gcase-answer";
 import { TRAFFIC } from "./production";
 import { CORPUS } from "./rag";
 
-/** USD per million tokens, as of November 2026. */
+/** USD per million tokens, as of November 2026 (the input, cached and output columns of gcase-answer PRICES). */
 export const PRICES = {
-  mid: { input: 2.0, cached: 0.1, output: 10.0 },
-  small: { input: 0.1, cached: 0.01, output: 0.5 },
+  mid: { input: SITE_PRICES.mid.input, cached: SITE_PRICES.mid.cached, output: SITE_PRICES.mid.output }, // 2.00 / 0.10 / 10.00
+  small: { input: SITE_PRICES.small.input, cached: SITE_PRICES.small.cached, output: SITE_PRICES.small.output }, // 0.10 / 0.01 / 0.50
 } as const;
 
 const usd = (tokens: number, perMillion: number) => (tokens * perMillion) / 1_000_000;
@@ -97,12 +99,17 @@ export const COST = (() => {
   const sh = VOLUME.shapes;
   const agentPerMessage = sh.none * noTool + sh.one * oneTool + sh.two * twoTools;
   const router = usd(600, s.input) + usd(50, s.output); // 0.000085
-  const badActor = 0.0001; // illustrative small classifier call
+  // Illustrative flat price for the small classifier call. Its tokens (600 in + 10 out on the small model) price to
+  // 0.000065 USD, but deriving it would move perDay from 1,801 to 1,794 USD, which gcase-gateway imports and the
+  // gateway page prints; kept until both pages move together.
+  const badActor = 0.0001;
   const supervisor = usd(2_800, s.input) + usd(40, s.output); // 0.0003
-  const retrieval = 0.5 * 0.0005; // half of messages; 0.0005 a query, illustrative
+  const retrieval = 0.5 * 0.0005; // half of messages; 0.0005 a query for the reranker, illustrative (not a token price)
   const smallPerMessage = router + badActor + supervisor + retrieval;
-  const handoffSummary = 0.32 * 0.006; // 0.32 hand-offs a conversation × one mid-size call
-  const conversationJudge = 0.0008; // small model over the whole conversation, illustrative ≈ 7,000 tokens
+  const handoffCall = usd(2_500, m.input) + usd(100, m.output); // mid: 0.005 + 0.001 = 0.006
+  const handoffSummary = 0.32 * handoffCall; // 0.32 hand-offs a conversation: 0.00192
+  // Small model over the whole conversation (illustrative ≈ 7,000 tokens in, 200 out): 0.0007 + 0.0001 = 0.0008.
+  const conversationJudge = usd(7_000, s.input) + usd(200, s.output);
   const perConversation =
     VOLUME.messagesPerConversation * (agentPerMessage + smallPerMessage) + handoffSummary + conversationJudge;
   const noCacheNoTool = usd(CONTEXT.averageTotal, m.input) + usd(OUTPUT.reply, m.output); // 0.0112
@@ -114,7 +121,9 @@ export const COST = (() => {
     router,
     supervisor,
     smallPerMessage,
+    handoffCall,
     handoffSummary,
+    conversationJudge,
     perConversation, // ≈ 0.036
     perDay: perConversation * VOLUME.conversationsPerDay, // ≈ 1,800
     noCacheNoTool,
@@ -131,7 +140,7 @@ export const COST = (() => {
 export const LATENCY_MS = (() => {
   const msPerToken = 12.5;
   const firstToken = 400;
-  const gateway = 30;
+  const gateway = 30; // case load; the gateway's own spans are 5.6 ms p50 inside it (gcase-gateway OVERHEAD)
   const router = 250;
   const search = 60;
   const rerank = 150;
@@ -146,7 +155,9 @@ export const LATENCY_MS = (() => {
   const oneTool = preModel + toolCall + orderApi + firstToken + reply + supervisor; // 3,475
   const kettle = preModel + toolCall + orderApi + toolCall + policy + firstToken + reply + supervisor; // 4,450
   const revise = 700;
-  const p95 = kettle + revise + 3 * firstToken; // first token doubled on each of 3 calls: 6,350
+  // Superseded by LATENCY_P95 (p50 + root-sum-square of stage spreads, the later pages' method). This hand-built tail
+  // (first token doubled on each of 3 calls: 6,350) is kept only because tests pin it; the page no longer prints it.
+  const p95 = kettle + revise + 3 * firstToken;
   return {
     msPerToken,
     firstToken,
@@ -167,6 +178,81 @@ export const LATENCY_MS = (() => {
     revise,
     p95,
   };
+})();
+
+const sum = (xs: readonly number[]) => xs.reduce((a, x) => a + x, 0);
+const rss = (xs: readonly number[]) => Math.sqrt(sum(xs.map((x) => x * x)));
+
+/**
+ * p95 of the kettle turn from per-stage spreads (P5), as gcase-voice, gcase-answer and gcase-gateway do. Spread =
+ * p95 − p50 of a stage, ILLUSTRATIVE. Stages assumed independent: p95 ≈ p50 + √(Σ spread²); the stage-sum bound
+ * (every stage at its own p95 at once) is given beside it.
+ *   stage (p50 / spread, ms): case load 30 / 10; router 250 / 150 (retrieval 210 runs beside it, off the critical
+ *   path); assemble 20 / 10; three first tokens 400 / 400 each; two tool-call decodes 375 / 94 each; get_order
+ *   200 / 300; policy 200 / 200; reply decode 1,500 / 375; supervisor 300 / 200.
+ *   Σ spread² = 100 + 22,500 + 100 + 3 × 160,000 + 2 × 8,836 + 90,000 + 40,000 + 140,625 + 40,000 = 830,997
+ *   p95 = 4,450 + √830,997 = 4,450 + 912 ≈ 5,362 ms; stage-sum bound 4,450 + 2,633 = 7,083 ms.
+ *   A revise (5% of replies) adds LATENCY_MS.revise = 700 on top: ≈ 6,062 ms.
+ * N3 target: any turn p95 ≤ 7,000 ms. Met by the p95 (5,362, 6,062 with a revise); the stage-sum bound is 83 ms over,
+ * so the target holds only while slow stages do not all coincide; the 3 × peak load test checks that.
+ */
+export const LATENCY_P95 = (() => {
+  const L = LATENCY_MS;
+  const decode = OUTPUT.toolCall * L.msPerToken; // 375
+  const stages = [
+    { id: "case", label: "Case load", p50: L.gateway, spread: 10 },
+    { id: "router", label: "Router (retrieval beside it)", p50: L.router, spread: 150 },
+    { id: "assemble", label: "Assemble context", p50: L.assemble, spread: 10 },
+    { id: "first-1", label: "First token, call 1", p50: L.firstToken, spread: 400 },
+    { id: "tool-1", label: "Tool call 1 decode", p50: decode, spread: 94 },
+    { id: "order", label: "get_order", p50: L.orderApi, spread: 300 },
+    { id: "first-2", label: "First token, call 2", p50: L.firstToken, spread: 400 },
+    { id: "tool-2", label: "Tool call 2 decode", p50: decode, spread: 94 },
+    { id: "policy", label: "Gate and policy service", p50: L.policy, spread: 200 },
+    { id: "first-3", label: "First token, call 3", p50: L.firstToken, spread: 400 },
+    { id: "reply", label: "Reply decode", p50: L.reply, spread: 375 },
+    { id: "supervisor", label: "Supervisor check", p50: L.supervisor, spread: 200 },
+  ] as const;
+  const p50 = sum(stages.map((x) => x.p50)); // 4,450 = LATENCY_MS.kettle
+  const spreadSquares = sum(stages.map((x) => x.spread * x.spread)); // 830,997
+  const tail = Math.sqrt(spreadSquares); // ≈ 911.6
+  const p95 = p50 + rss(stages.map((x) => x.spread)); // ≈ 5,362
+  const spreadSum = sum(stages.map((x) => x.spread)); // 2,633
+  const stageSum = p50 + spreadSum; // 7,083
+  const targetMs = 7_000; // N3: any turn p95
+  return {
+    stages,
+    p50,
+    spreadSquares,
+    tail,
+    p95,
+    spreadSum,
+    stageSum,
+    withRevise: p95 + L.revise, // ≈ 6,062
+    targetMs,
+    meets: p95 + L.revise <= targetMs,
+    boundOverMs: stageSum - targetMs, // 83
+  };
+})();
+
+/**
+ * The kettle turn as event times, ms from the message reaching the chat gateway (p50; the request-sequence figure):
+ *   case loaded 30 → router done (damaged_item) 280 → context assembled, call 1 starts 300 → get_order asked 1,075
+ *   ("Checking your order…") → order back 1,275 → request_refund asked 2,050 → policy answers 2,250 → reply decoded
+ *   4,150 → supervisor passes, reply sent 4,450.
+ */
+export const KETTLE_TIMELINE = (() => {
+  const L = LATENCY_MS;
+  const caseLoaded = L.gateway; // 30
+  const routed = caseLoaded + L.router; // 280
+  const callStarts = L.preModel; // 300
+  const getOrderAsked = callStarts + L.toolCall; // 1,075
+  const orderBack = getOrderAsked + L.orderApi; // 1,275
+  const refundAsked = orderBack + L.toolCall; // 2,050
+  const policyBack = refundAsked + L.policy; // 2,250
+  const replyDecoded = policyBack + L.firstToken + L.reply; // 4,150
+  const sent = replyDecoded + L.supervisor; // 4,450 = LATENCY_MS.kettle
+  return { caseLoaded, routed, callStarts, getOrderAsked, orderBack, refundAsked, policyBack, replyDecoded, sent };
 })();
 
 /** Retrieval: Brightpost's 3,600 chunks → hybrid top 40 → reranked → the passages that fit 2,000 tokens. */

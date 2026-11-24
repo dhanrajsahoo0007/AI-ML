@@ -228,3 +228,12 @@ describe("gcase-chat: the chat service's numbers", () => {
     expect(Math.round(DEGRADE.inflightSlots.withoutSlot)).toBe(40_675);
   }, 30_000);
 });
+
+describe("gcase-support: the kettle turn's p95 from stage spreads", () => {
+  it("keeps the derived p95 inside the 7 s target and the stage-sum bound beside it", async () => {
+    const { LATENCY_P95 } = await import("@/components/diagrams/presets/gcase-support");
+    expect(Math.round(LATENCY_P95.p95)).toBe(5_362);
+    expect(Math.round(LATENCY_P95.stageSum)).toBe(7_083);
+    expect(LATENCY_P95.p95).toBeLessThan(LATENCY_P95.targetMs);
+  });
+});

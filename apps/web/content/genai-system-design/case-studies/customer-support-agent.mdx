@@ -93,7 +93,7 @@ The hard parts are the refunds it must not make, knowing when to hand over to a 
 ## Estimates and decision drivers
 
 - Brightpost's traffic and help centre come from the shared running example; every other share and price below is illustrative unless it names a source.
-- Prices are list prices as of November 2026: a mid-size model (Claude Sonnet 5.5 class) costs 2.00 USD per million input tokens, 0.10 cached, 10.00 output; a small model (Claude Haiku 5.5 class) 0.10 input, 0.50 output. Writing a prompt to the cache costs 1.25 × input (Anthropic, 5-minute cache, as of November 2026).
+- Prices are list prices as of November 2026: a mid-size model (Claude Sonnet 5.5 class) costs 2.00 USD per million input tokens, 0.10 cached, 10.00 output; a small model (Claude Haiku 5.5 class) 0.10 input, 0.01 cached, 0.50 output. Writing a prompt to the cache costs 1.25 × input (Anthropic, 5-minute cache, as of November 2026).
 
 <EstimateTable
   rows={[
@@ -109,7 +109,7 @@ The hard parts are the refunds it must not make, knowing when to hand over to a 
     { quantity: "Two-tool message", assumption: "0.00517 + tool follow-up 0.00143 + reply follow-up 0.00236 + cache writes 2,600 × 0.50 per million 0.0013", result: "0.0103 USD" },
     { quantity: "Agent cost a message", assumption: "0.5 × 0.00607 + 0.35 × 0.00862 + 0.15 × 0.0103", result: "0.00304 + 0.00302 + 0.00154 = 0.0076 USD" },
     { quantity: "Small calls a message", assumption: "Router 600 in + 50 out 0.000085; bad-actor 0.0001; supervisor 2,800 in + 40 out 0.0003; retrieval on half 0.00025", result: "0.00074 USD" },
-    { quantity: "Calls per conversation", assumption: "Hand-off summary: 0.32 hand-offs × one mid-size call at 0.006; judge: a small model reads ≈ 7,000 tokens", result: "0.0019 + 0.0008 USD" },
+    { quantity: "Calls per conversation", assumption: "Hand-off summary: 0.32 hand-offs × one mid-size call (2,500 in + 100 out = 0.006); judge: a small model reads ≈ 7,000 tokens, writes 200", result: "0.0019 + 0.0008 USD" },
     { quantity: "Cost per conversation", assumption: "4 × (0.0076 + 0.00074) + 0.0019 + 0.0008", result: "≈ 0.036 USD; × 50,000 ≈ 1,800 USD a day (≈ 54,000 a month)" },
     { quantity: "Without prefix caching", assumption: "No-tool message: 5,000 × 2.00 + 120 × 10.00 per million", result: "0.0112 against 0.00607: caching saves 46%" },
     { quantity: "Provider capacity", assumption: "20 calls/s × 5,000 in; 20 × 90 average out; about 1,500 of the 5,000 are uncached ((2,300 + 0.65 × 300) ÷ 1.65)", result: "6.0 M input tokens a minute (1.8 M uncached; check how the provider counts cache reads) and 108,000 output; × 3 on a sale day" },
@@ -415,6 +415,16 @@ The cracked kettle, step by step (refund R-2291):
 
 - **Fewer calls than a free agent:** the agents pages' happy path makes 5 model calls, with `search_help` and `send_email` as tools. Here the procedure prefetches the article and the policy service sends the email, so the model makes 3.
 
+The sequence puts steps 1 to 6 of that walk-through on one clock, at p50.
+
+<AnimatedDiagram spec="animated/support-agent/request-sequence" stepper caption="The model makes three calls and asks for each tool, but the orchestrator runs every tool as the verified customer: the customer sees progress at 1,075 ms and the checked reply at 4,450 ms." />
+
+**How to read it:**
+
+- Solid arrows are calls, dashed arrows answers, each label the ms it lands after the chat gateway. The model only asks for tools; the orchestrator runs them as the verified customer (Step 4).
+
+**The numbers:** first call at 30 + 250 + 20 = 300 ms; each tool call 400 + 30 × 12.5 = 775; policy back at 2,250; reply 400 + 1,500 to 4,150; supervisor 300 → 4,450 (N3: ≤ 4.5 s).
+
 ## Component choices and why
 
 - Every box in the final diagram: what we picked, why, and why the usual alternatives lose. Driver ids (G) refer to the drivers table; F and N to the requirements.
@@ -428,7 +438,7 @@ The cracked kettle, step by step (refund R-2291):
 
 ### Agent model: a mid-size frontier model
 
-- **Choice:** a mid-size frontier model (for example Claude Sonnet 5.5, as of November 2026) behind the platform's LLM gateway.
+- **Choice:** a mid-size frontier model (for example Claude Sonnet 5.5, as of November 2026) behind the platform's [LLM gateway](/genai-system-design/case-studies/llm-platform-gateway).
 - **Why:** multi-step tool use and policy reading at 0.0076 USD a message on average (G4, N4).
 - **Why not the largest model:** higher price and first-token time; choose it only if it beats the mid-size model on the refund simulator by a set margin.
 - **Why not a small model everywhere:** keep it for routing and checks until it passes the refund simulator (G2).
@@ -566,7 +576,7 @@ The waterfall puts a question turn and the kettle's two-tool action turn on one 
 
 | Stage | Question turn (ms) | Action turn, the kettle with 2 tools (ms) |
 | --- | --- | --- |
-| Gateway, load case | 0 → 30 | 0 → 30 |
+| Load case (gateway spans ≈ 6 ms inside) | 0 → 30 | 0 → 30 |
 | Router (250) and retrieval (search 60 + rerank 150) in parallel | 30 → 280 | 30 → 280 |
 | Assemble context | 280 → 300 | 280 → 300 |
 | Model: first token 400 + 30-token tool call 375 | | 300 → 1,075 |
@@ -581,7 +591,8 @@ The waterfall puts a question turn and the kettle's two-tool action turn on one 
 - **Question:** 30 + 250 + 20 + 400 + 1,500 + 300 = 2,500 ms (N3: p50 2.5 s).
 - **Actions:** one tool 300 + 775 + 200 + 400 + 1,500 + 300 = 3,475 ms; two tools 4,450 ms (N3: action p50 4.5 s).
 - **Revise once** (5% of replies, illustrative): a small model rewrites the flagged sentence (40 tokens at 200 a second = 200 ms) + its first token 200 ms + a re-check 300 ms ≈ 700 ms.
-- **p95:** an illustrative tail path: two tools + revise + the first token doubled under load on each of 3 calls: 4,450 + 700 + 3 × 400 = 6,350 ms, inside 7,000; a load test at 3 × peak confirms the real p95.
+- **p95:** from stage spreads (p95 − p50, illustrative), stages independent: 4,450 + √830,997 ≈ 4,450 + 912 ≈ 5,360 ms for the kettle turn. A revise (700 ms on 5% of replies) gives ≈ 6,060, inside N3's 7,000.
+- **Bound:** every stage at its own p95 at once is 4,450 + 2,633 ≈ 7,080 ms, 80 over. Spreads: each first token 400, reply 375, `get_order` 300; a load test at 3 × peak checks they do not coincide.
 - **Headroom:** the question turn sits exactly on 2,500 ms. Waiting for the router's query before searching would add 210 ms and miss it.
 - **Sensitivity:** at 50 tokens a second the reply alone takes 2,400 ms and a question turn 3.4 s; then a shorter reply or a faster model is the lever.
 - **Progress events:** "typing" at 30 ms meets N3's 1 s first event; "Checking your order…" follows when the first tool call starts, at 1,075 ms.
@@ -594,7 +605,7 @@ The waterfall puts a question turn and the kettle's two-tool action turn on one 
 | Order status on the small model (40% of intents) | Most of those messages' cost, and first-token time | A second prompt to evaluate |
 | Evidence only where the procedure needs it | 1,000 tokens a call on average (already applied) | A procedure that forgets an article answers without one: test it |
 | Short replies (120 tokens) | 1,625 ms against 250 tokens | Less room to explain |
-| Batch the nightly evals | About half of eval spend (batch discounts, illustrative) | Results next morning |
+| Batch the nightly evals | Half of eval spend (the 50% Batch API discount, list as of November 2026) | Results next morning |
 
 ## Evaluation and release gates
 
@@ -838,7 +849,7 @@ The funnel takes one day's conversations from "ended without a person" down to "
 - [Air Canada chatbot ruling](https://www.cbsnews.com/news/aircanada-chatbot-discount-customer) (CBS News, 2024)
 - [τ-bench: benchmarking AI agents](https://sierra.ai/blog/benchmarking-ai-agents) (Sierra, 2024) and [the τ-bench paper](https://arxiv.org/abs/2406.12045) (arXiv, 2024)
 - [τ-knowledge](https://sierra.ai/blog/tau-knowledge) (Sierra, 2026) and [the τ-bench leaderboard](https://taubench.com) (read 2026)
-- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre) · [Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) · [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre) · [Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) · [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway)
 
 <InterviewQuestions>
   <InterviewQuestion
