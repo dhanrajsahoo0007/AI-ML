@@ -10,10 +10,11 @@ import { AGENT, CHAT, CLOUD, COST, SEATS } from "@/components/diagrams/presets/g
 //   0.108 + rerank 0.108 + index 0.05 = COST.fixed ≈ 5.55 USD.
 //   Usage on SEATS.usageDays = 14.7 active days a seat-month, by segment (light 60%: 1 task, 4 chats a day; median 30%:
 //   4 tasks, 10 chats; heavy 10%: 12 tasks at twice the cost, 25 chats): agent tasks at AGENT.perTask ≈ 0.363 USD,
-//   chats at CHAT.perChat ≈ 0.0283, cloud VMs for 25% of tasks at CLOUD.perTask ≈ 0.0104.
-//   Mean seat: 5.55 + agent 22.40 + chat 3.29 + cloud 0.11 = COST.meanSeat ≈ 31.3 USD at list prices (agent 71%).
+//   chats at CHAT.perChat ≈ 0.0283, cloud VMs for 25% of tasks at CLOUD.perTask ≈ 0.0142
+//   (task minutes with the mid model at 80 tokens a second).
+//   Mean seat: 5.55 + agent 22.40 + chat 3.28 + cloud 0.16 = COST.meanSeat ≈ 31.4 USD at list prices (agent 71%).
 //   Price: 39 USD a seat with a 20 USD pooled allowance; usage above it billed at list × 1.25. Revenue on the mean
-//   organisation 39 + 1.25 × (25.80 − 20) ≈ 46.25: margin 1 − 31.35 ÷ 46.25 ≈ 32%. An organisation of only light,
+//   organisation 39 + 1.25 × (25.84 − 20) ≈ 46.30: margin 1 − 31.39 ÷ 46.30 ≈ 32%. An organisation of only light,
 //   only median or only heavy seats: 68%, 32%, 23%; the floor tends to 1 − 1 ÷ 1.25 = 20% (N5).
 // Steps: 1 the mean seat's cost · 2 cost and revenue for three organisation mixes.
 // Layout (880 wide): step 1 one stacked bar (x 200, 14 px a USD) with a revenue marker; step 2 three pairs of bars

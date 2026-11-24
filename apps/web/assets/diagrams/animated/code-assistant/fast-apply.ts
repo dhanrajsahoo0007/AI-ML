@@ -1,7 +1,7 @@
 import type { LayoutShape, LayoutSpec, LayoutTone } from "@/components/diagrams/types";
 import { GENAI_TONE } from "@/components/diagrams/presets/genai-case";
 import { LATENCY, PROD_TONE, n } from "@/components/diagrams/presets/production";
-import { AGENT, APPLY } from "@/components/diagrams/presets/gcase-code";
+import { AGENT, APPLY, MID_DECODE_MS } from "@/components/diagrams/presets/gcase-code";
 
 // Applying an edit fast and exactly (code-assistant, design sheet §10.7, §12 "Edits", Step 6; preset APPLY and AGENT in
 // presets/gcase-code.ts; the speculative speed is Cursor's 2024 vendor figure for a 70B model, dossier F19, held as
@@ -11,15 +11,15 @@ import { AGENT, APPLY } from "@/components/diagrams/presets/gcase-code";
 //   tokens. APPLY.speculative = 1,000 tokens/s against ≈ 77 vanilla (13×). A 40-line region is 40 × 10 = 400 tokens:
 //   0.4 s. Rewriting a 2,000-line file: 20 s speculative, 260 s vanilla (APPLY.rewrite2000).
 //   End to end, from the agent's edit step to the diff (one step = 400 ms first token + (visible + 800 thinking) ×
-//   4.4 ms):
-//     search-and-replace: 400 + (60 + 800) × 4.4 + 10 ms harness = APPLY.searchReplaceS ≈ 4.2 s;
-//     sketch + region apply: 400 + (150 + 800) × 4.4 = 4.58 s, + 50 network + 10 prefill + 30 first token + 400
-//       tokens at 1,000/s = 0.49 s → APPLY.sketchApplyS ≈ 5.1 s;
-//     the agent model rewriting a 400-line file: 400 + (4,000 + 800) × 4.4 = APPLY.wholeFile400S ≈ 21.5 s;
-//     a 2,000-line file: APPLY.wholeFile2000S ≈ 91.9 s.
+//   12.5 ms, MID_DECODE_MS: the hosted mid-size model at 80 tokens a second, section review N1):
+//     search-and-replace: 400 + (60 + 800) × 12.5 + 10 ms harness = APPLY.searchReplaceS ≈ 11.2 s;
+//     sketch + region apply: 400 + (150 + 800) × 12.5 = 12.28 s, + 50 network + 10 prefill + 30 first token + 400
+//       tokens at 1,000/s = 0.49 s → APPLY.sketchApplyS ≈ 12.8 s;
+//     the agent model rewriting a 400-line file: 400 + (4,000 + 800) × 12.5 = APPLY.wholeFile400S ≈ 60.4 s;
+//     a 2,000-line file: APPLY.wholeFile2000S ≈ 260.4 s.
 // Steps: 1 one region, mostly copied · 2 four ways to land the same edit, end to end.
 // Layout (880 wide): 40 line cells across 800 px (lines 18–20 edited), labels under them; then four bars on one
-// seconds scale (x 230 = 0 s, 6 px a second), each split into the agent model's step (green) and the apply model's
+// seconds scale (x 250 = 0 s, 2 px a second), each split into the agent model's step (green) and the apply model's
 // rewrite (teal), the time printed after the bar.
 // Colours: copied lines neutral; edited lines orange (the change); agent model green; apply model teal (compute).
 
@@ -130,12 +130,11 @@ const step1: LayoutShape[] = [
 // ── Step 2: four ways to land the same edit ───────────────────────────────────────────────────────────────────────
 const H2_Y = LINE_Y + LINE_H + 86;
 const BAR_X = 250;
-const PX_PER_S = 6;
+const PX_PER_S = 2;
 const ROW_Y0 = H2_Y + 34;
 const ROW_PITCH = 34;
 const BAR_H = 20;
-const stepS = (visible: number) =>
-  (LATENCY.firstTokenMs + (visible + AGENT.thinkingOf.edit) * LATENCY.decodeMsPerToken) / 1_000;
+const stepS = (visible: number) => (LATENCY.firstTokenMs + (visible + AGENT.thinkingOf.edit) * MID_DECODE_MS) / 1_000;
 
 const rows = [
   { id: "sr", label: "Exact search-and-replace", agent: APPLY.searchReplaceS, apply: 0, total: APPLY.searchReplaceS },
@@ -165,7 +164,7 @@ const rows = [
 const bars: LayoutShape[] = rows.flatMap((r, i): LayoutShape[] => {
   const y = ROW_Y0 + i * ROW_PITCH;
   const agentW = Math.max(3, Math.round(r.agent * PX_PER_S));
-  const applyW = Math.round(r.apply * PX_PER_S);
+  const applyW = r.apply > 0 ? Math.max(3, Math.round(r.apply * PX_PER_S)) : 0;
   const out: LayoutShape[] = [
     {
       id: `${r.id}-label`,
@@ -220,12 +219,12 @@ const step2: LayoutShape[] = [
     y: 0,
     points: [
       [BAR_X, AXIS_Y - 6],
-      [BAR_X + 100 * PX_PER_S, AXIS_Y - 6],
+      [BAR_X + 250 * PX_PER_S, AXIS_Y - 6],
     ],
     tone: PROD_TONE.infra,
     step: 2,
   },
-  ...[0, 20, 40, 60, 80, 100].map((s) => ({
+  ...[0, 50, 100, 150, 200, 250].map((s) => ({
     ...text(`tick-${s}`, BAR_X + s * PX_PER_S - 14, AXIS_Y, `${s} s`, 2),
     w: 28,
   })),

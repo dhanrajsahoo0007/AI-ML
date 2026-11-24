@@ -47,15 +47,15 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
 - **Triggering is capacity.** One 75 ms debounce on every key, a client-side pre-request gate, a typed-through cache and cancellation turn 12,000 key events a developer-day into 5,355 requests, 65% of them cancelled.
 - **Search on the developer's machine first.** A local grep index and a symbol index serve every path, with an `explore` subagent for open questions; a server embeddings index is an A/B arm on large repositories, not a default. A Merkle tree of file hashes syncs only changed files.
 - **Edits applied by the harness, the agent fenced by the OS.** Exact search-and-replace first, then a fast-apply model on the enclosing region. Commands run in an OS sandbox with no network, packages come only through the company's read-only registry mirror, and the agent cannot write its own configuration.
-- **Seat economics on the mean seat.** ≈ 31.3 USD a seat a month at list prices, 71% of it the agent, with a heavy decile at ≈ 144. An illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25 gives ≈ 32% gross margin, never below 20%.
+- **Seat economics on the mean seat.** ≈ 31.4 USD a seat a month at list prices, 71% of it the agent, with a heavy decile at ≈ 145. An illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25 gives ≈ 32% gross margin, never below 20%.
 - **Measured by what is kept.** Retained characters and agent lines still present after 7 days lead; acceptance and a survey are guardrails; public SWE-bench scores only shortlist models.
 
 <Numbers
   items={[
     { value: "225 ms", label: "last key to ghost text at p50", hint: "≈ 308 at p95; 265 and ≈ 367 behind a proxy" },
     { value: "375M", label: "completion requests a working day", hint: "on 355 GPUs in three regions; 65% cancelled" },
-    { value: "0.36 USD", label: "a median agent task", hint: "≈ 3.9 minutes; 1.35 USD with no prompt caching" },
-    { value: "31.3 USD", label: "mean seat a month at list prices", hint: "71% the agent; ≈ 32% gross margin at a 39 USD seat" },
+    { value: "0.36 USD", label: "a median agent task", hint: "≈ 6.1 minutes; 1.35 USD with no prompt caching" },
+    { value: "31.4 USD", label: "mean seat a month at list prices", hint: "71% the agent; ≈ 32% gross margin at a 39 USD seat" },
   ]}
 />
 
@@ -86,8 +86,8 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
     { id: "N1", property: "Quality", target: "Completion: retained AI share of characters ≥ 25% (accepted characters still present after 10 minutes ÷ typed + accepted). Agent: ≥ 70% of agent-written lines in accepted diffs still present after 7 days. Offline suites not below the current release", why: "Acceptance alone can be gamed (Evaluation and release gates); 25% is a floor under the 38% the funnel predicts" },
     { id: "N2", property: "Completion latency, last keystroke → ghost text, every shown suggestion, cancelled requests excluded", target: "p50 ≤ 300 ms, p95 ≤ 500 ms, for developers within 50 ms RTT of a region, direct or behind a proxy adding ≤ 40 ms at p50", why: "A suggestion after the next keystroke is wasted; one vendor moved p50 from 800 to 300 ms (How real systems do it); 300 ms is our choice" },
     { id: "N3", property: "Chat latency", target: "First token p50 ≤ 1,200 ms, p95 ≤ 2,500 ms; a “searching” status within 300 ms", why: "An 8,000-token uncached prompt alone takes ≈ 700 ms to a first token" },
-    { id: "N4", property: "Agent time and spend (cost per request)", target: "Median task ≤ 5 minutes, p95 ≤ 20; first streamed text ≤ 1 s; first tool call ≤ 3 s locally (cloud adds 1 minute of setup on a snapshot hit). Caps per task in binding order: 2 USD, 6M input tokens, 120 steps, 30 minutes", why: "The agent is judged on minutes and money" },
-    { id: "N5", property: "Cost and margin", target: "Gross margin ≥ 20% on every organisation mix and ≈ 32% on the mean organisation, at an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25", why: "A heavy decile costs ≈ 144 USD a seat; a cost cap the pool makes true by construction would say nothing" },
+    { id: "N4", property: "Agent time and spend (cost per request)", target: "Median task ≤ 7 minutes, p95 ≤ 20; first streamed text ≤ 1 s; first tool call ≤ 8 s locally (cloud adds 1 minute of setup on a snapshot hit). Caps per task in binding order: 2 USD, 6M input tokens, 120 steps, 30 minutes", why: "The agent is judged on minutes and money; at 80 tokens a second of hosted decode, step 1’s 500 output tokens alone take 6.25 s" },
+    { id: "N5", property: "Cost and margin", target: "Gross margin ≥ 20% on every organisation mix and ≈ 32% on the mean organisation, at an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25", why: "A heavy decile costs ≈ 145 USD a seat; a cost cap the pool makes true by construction would say nothing" },
     { id: "N6", property: "Search freshness", target: "Local grep and symbols ≤ 1 s after a save; first query on a new 50,000-file clone ≤ 10 s (ripgrep until the ≈ 8 s build ends); embeddings arm ≤ 2 minutes at p95", why: "An agent that cannot find text it wrote a minute ago chases a false negative" },
     { id: "N7", property: "Safety", target: "No agent connection outside the mode’s allow-list; no push outside its task branch; a task on a public repository pushes only to that repository, with a token scoped to it and no organisation data or MCP servers; no push from a private repository to a public one; no merge or deploy; no write to IDE, harness, MCP or hook configuration; no known-pattern secret in any prompt or tool result sent to a model", why: "Anything the agent reads can carry instructions" },
     { id: "N8", property: "Privacy mode", target: "The privacy-mode table under Safety and guardrails is the only statement of what is stored; no training on privacy-mode code; model providers under zero data retention by contract, with their stated exceptions", why: "Enterprise buyers read it line by line" },
@@ -113,15 +113,15 @@ The hard parts are triggering and cancellation as capacity, keeping a changing r
     { quantity: "Completion fleet", assumption: "US 40%, EU 35%, Asia-Pacific 25%, each peaking at 4 × its 24-hour mean; ceil(share × 3,403 × 4 ÷ 50 × 1.3)", result: "142 + 124 + 89 = 355 GPUs; 141,539 GPU-hours a month × 2.5 USD = 3.54 USD a seat" },
     { quantity: "Completion in all", assumption: "+ a 6-person model team at 25,000 USD a month (loaded) + 6,400 GPU-hours of fine-tuning", result: "5.20 USD a seat (6.32 on a dedicated provider deployment, 48.9 on a per-token FIM API)" },
     { quantity: "Chat turn", assumption: "12,000 tokens (4,000 cached, 8,000 not), 900 out; 30% of turns miss the 5-minute cache", result: "0.0283 USD a turn" },
-    { quantity: "Agent task (median)", assumption: "20 mid-model steps, 5,300 → 52,800 tokens (+ 2,500 a step); thinking budgets per step type; 3 small-model explore runs; 10% lose the cache once on resume", result: "0.344 + 0.011 + 0.007 ≈ 0.36 USD; ≈ 3.9 minutes; p95 ≈ 1.03 USD and ≈ 12.6 minutes" },
-    { quantity: "Caps", assumption: "A long task at the average thinking mix", result: "2 USD binds at step 99 (≈ 16.8 minutes), before 6M input tokens at step 117" },
-    { quantity: "Cloud tasks", assumption: "25% of tasks; a microVM at 0.10 USD an hour; setup 1 minute on a snapshot hit (80%), 8 on a miss", result: "0.010 USD a task; snapshots 0.08 USD a seat" },
+    { quantity: "Agent task (median)", assumption: "20 mid-model steps, 5,300 → 52,800 tokens (+ 2,500 a step); thinking budgets per step type; 3 small-model explore runs; 10% lose the cache once on resume", result: "0.344 + 0.011 + 0.007 ≈ 0.36 USD; ≈ 6.1 minutes at 80 tokens a second; p95 ≈ 1.03 USD and ≈ 18.2 minutes" },
+    { quantity: "Caps", assumption: "A long task at the average thinking mix", result: "2 USD binds at step 99 (≈ 28.0 minutes), before the 30-minute cap and 6M input tokens at step 117" },
+    { quantity: "Cloud tasks", assumption: "25% of tasks; a microVM at 0.10 USD an hour; setup 1 minute on a snapshot hit (80%), 8 on a miss", result: "0.014 USD a task; snapshots 0.08 USD a seat" },
     { quantity: "Local index", assumption: "50,000 files × 8 KB = 400 MB of source; index ≈ 0.3 × source, built at 50 MB a second", result: "120 MB in ≈ 8 s; a 1M-file monorepo would be 2.4 GB and 160 s" },
-    { quantity: "Usage segments", assumption: "Active seats: light 60% (1 task, 4 chats a day), median 30% (4, 10), heavy 10% (12 tasks at twice the cost, 25 chats)", result: "Usage 7.04, 25.65 and 138.87 USD a seat-month" },
-    { quantity: "Mean seat", assumption: "Fixed 5.55 (completion 5.20, snapshots, apply, rerank, index) + 0.6 × 7.04 + 0.3 × 25.65 + 0.1 × 138.87", result: "≈ 31.3 USD at list prices; agent 22.4 (71%); heavy decile ≈ 144" },
-    { quantity: "Margin", assumption: "Revenue = 39 + 1.25 × max(0, usage − 20); margin = 1 − cost ÷ revenue", result: "Mean organisation 46.25 revenue, ≈ 32%; all-light 68%, all-median 32%, all-heavy 23%; floor 20%" },
+    { quantity: "Usage segments", assumption: "Active seats: light 60% (1 task, 4 chats a day), median 30% (4, 10), heavy 10% (12 tasks at twice the cost, 25 chats)", result: "Usage 7.05, 25.70 and 139.03 USD a seat-month" },
+    { quantity: "Mean seat", assumption: "Fixed 5.55 (completion 5.20, snapshots, apply, rerank, index) + 0.6 × 7.05 + 0.3 × 25.70 + 0.1 × 139.03", result: "≈ 31.4 USD at list prices; agent 22.4 (71%); heavy decile ≈ 145" },
+    { quantity: "Margin", assumption: "Revenue = 39 + 1.25 × max(0, usage − 20); margin = 1 − cost ÷ revenue", result: "Mean organisation 46.30 revenue, ≈ 32%; all-light 68%, all-median 32%, all-heavy 23%; floor 20%" },
   ]}
-  note="Completion is 375M requests a day and only 5.20 USD of a 31.3 USD seat; the agent is a few tasks a day and 71% of the cost. So completion is designed for latency and capacity, and the agent for safety and spend."
+  note="Completion is 375M requests a day and only 5.20 USD of a 31.4 USD seat; the agent is a few tasks a day and 71% of the cost. So completion is designed for latency and capacity, and the agent for safety and spend."
 />
 
 | # | Driver | For this system | What it forces |
@@ -305,7 +305,7 @@ A saved file changes one path of hashes from leaf to root, so the client finds i
 
 - **Adds:** the agent orchestrator, the small hosted model for `explore`, the sessions store.
 - **Flow:**
-  1. The task arrives; step 1 is a search, so the first tool call is out in ≈ 2.6 s.
+  1. The task arrives; step 1 is a search, so the first tool call is out in ≈ 6.7 s (500 output tokens at 80 a second).
   2. The model plans (the developer may approve the plan), sends open questions to `explore`, and reads files by line range.
   3. It edits, runs `diagnostics` (≈ 2 s), then targeted tests; the done rules require clean diagnostics and passing tests.
   4. Context grows 2,500 tokens a step and is compacted at 100,000; parallel agents each work on their own git worktree.
@@ -321,7 +321,7 @@ The concept page's CSV fix runs on this loop unchanged: same repository, issue, 
 
 **The numbers:**
 
-- On this product the run is 9 mid-model steps (2 edits, 3 checks, 4 searches or reads), context 5,300 → 25,500 tokens, ≈ 0.13 USD and ≈ 1.5 minutes. Both edits are exact `str_replace` calls of about 40 tokens.
+- On this product the run is 9 mid-model steps (2 edits, 3 checks, 4 searches or reads), context 5,300 → 25,500 tokens, ≈ 0.13 USD and ≈ 2.4 minutes. Both edits are exact `str_replace` calls of about 40 tokens.
 - Two rows differ on this product: where row 4 says "in the container", the local agent runs the tests in the OS sandbox of Step 7 (a cloud task uses a microVM); where row 9 says the harness opened a pull request, here the developer reviews the diff and opens it (a cloud task's harness opens its own).
 
 ### Step 6: Apply edits fast and exactly (F4)
@@ -338,15 +338,15 @@ The concept page's CSV fix runs on this loop unchanged: same repository, issue, 
 
 Rewriting a region is fast because most of its tokens are already in the original.
 
-<AnimatedDiagram spec="animated/code-assistant/fast-apply" stepper caption="Most of an edited region is copied from the original, so a fast-apply model drafts it and verifies in long runs; an exact search-and-replace still wins at 4.2 s." />
+<AnimatedDiagram spec="animated/code-assistant/fast-apply" stepper caption="Most of an edited region is copied from the original, so a fast-apply model drafts it and verifies in long runs; an exact search-and-replace still wins at 11.2 s." />
 
 - **How to read it:** step 1 colours the region's tokens: long runs drafted from the original and accepted in one verification step, and short runs the model writes at the edit itself. Step 2 compares four ways to land one edit, end to end from the agent's step to the diff on screen.
 
 **The numbers:**
 
-- Search-and-replace: one edit step of 400 ms + (60 + 800 thinking) tokens × 4.4 ms + 10 ms in the harness ≈ 4.2 s.
-- Sketch and region apply: (400 + 950 × 4.4) + 50 network + 10 prefill + 30 first token + 400 tokens at 1,000 a second ≈ 5.1 s.
-- The agent model rewriting a whole 400-line file takes ≈ 21.5 s, a 2,000-line file ≈ 92 s; our apply model rewriting 2,000 lines with speculative edits would take 20 s against 260 s without (the vendor's 13×).
+- Search-and-replace: one edit step of 400 ms + (60 + 800 thinking) tokens × 12.5 ms (the hosted model at 80 tokens a second) + 10 ms in the harness ≈ 11.2 s.
+- Sketch and region apply: (400 + 950 × 12.5) + 50 network + 10 prefill + 30 first token + 400 tokens at 1,000 a second ≈ 12.8 s.
+- The agent model rewriting a whole 400-line file takes ≈ 60.4 s, a 2,000-line file ≈ 260 s; our apply model rewriting 2,000 lines with speculative edits would take 20 s against 260 s without (the vendor's 13×).
 - The apply fleet is a floor of 3 regions × 2 replicas × 720 hours = 4,320 GPU-hours a month (use is ≈ 510), 0.108 USD a seat.
 
 ### Step 7: Sandbox, permission tiers, packages, MCP and cloud tasks (F3, F6, N7)
@@ -395,7 +395,7 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 3. **Chat:** they ask "where do we import order CSVs?"; "searching" shows at once; local grep and symbols find `src/import.ts` and `parseCsv`; the first token arrives at ≈ 1.0 s, with file citations.
 4. **Agent:** they hand the agent the issue; it searches, reads 3,200 tokens, edits the loop bound, runs 18 tests, sees 1 fail ("parses an empty file"), edits again, and all pass.
 5. **Fences:** both edits are exact `str_replace`; `npm test` runs in the sandbox with no network, and a test helper's call to a telemetry host is refused without a prompt.
-6. **Review:** the run costs ≈ 0.13 USD and ≈ 1.5 minutes; the developer reviews the diff and opens the pull request, and CI runs the original tests.
+6. **Review:** the run costs ≈ 0.13 USD and ≈ 2.4 minutes; the developer reviews the diff and opens the pull request, and CI runs the original tests.
 7. **Kept lines:** seven days later both changed lines are still in the code, so they count as kept (one task, an illustration rather than a measurement).
 
 ## Component choices and why
@@ -444,14 +444,14 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 ### Chat and agent models: a hosted mid-size model, a small one for `explore`, thinking budgets per step type
 
 - **Choice:** the mid-size model plans and edits; the small model explores; thinking budgets of 2,000 tokens to plan, 800 to edit, 400 to check and 200 to search or read.
-- **Why:** plans and edits need the strongest model we can afford; exploration on the small model saves 0.20 USD a task; the budgets keep the median task at 3.9 minutes and 0.36 USD instead of 6.0 minutes and 0.65 USD with 2,000 on every step (G4, N4).
+- **Why:** plans and edits need the strongest model we can afford; exploration on the small model saves 0.20 USD a task; the budgets keep the median task at 6.1 minutes and 0.36 USD instead of 12.2 minutes and 0.65 USD with 2,000 on every step (G4, N4).
 - **Why not self-host the agent model:** bursty, minutes-long sessions on a model behind the frontier.
 - **Why not one model for everything:** completion cannot wait 400 ms for a first token.
 
 ### Edit application: exact search-and-replace, then a fast-apply model on the region
 
 - **Choice:** `edit` with an exact `old_str` (or a context-anchored patch for models trained on that format); a sketch or a failed match goes to a 7B-class merge model with speculative edits, on the enclosing region only.
-- **Why:** ≈ 4.2 s and ≈ 5.1 s end to end, against ≈ 21.5 s for the agent model rewriting a 400-line file and ≈ 92 s for 2,000 lines (F4, G3).
+- **Why:** ≈ 11.2 s and ≈ 12.8 s end to end, against ≈ 60.4 s for the agent model rewriting a 400-line file and ≈ 260 s for 2,000 lines (F4, G3).
 - **Why not unified diffs with line numbers:** they drift, and models count lines badly.
 - **Why not a hosted fast-apply API:** a good start, but another sub-processor under privacy mode; our floor costs 0.108 USD a seat.
 - **Why not predicted outputs on a hosted model:** rejected tokens are billed and tool calls are unsupported (as of November 2026).
@@ -473,7 +473,7 @@ The walk-through follows one Brightpost developer in the EU, privacy mode on, th
 ### Privacy, cloud tasks and pricing
 
 - **Choice:** the privacy-mode table, client scanning of prompts and tool output, a `cache_salt` per organisation; cloud snapshots built without secrets and a git proxy holding the token; an illustrative 39 USD seat with a 20 USD pooled allowance, overage at list price × 1.25.
-- **Why:** ignore files are not a security boundary, and shared prefix caches leak through timing (G9). The mean seat costs ≈ 31.3 USD because the heavy decile costs ≈ 144, so a flat seat cannot carry the tail (N5).
+- **Why:** ignore files are not a security boundary, and shared prefix caches leak through timing (G9). The mean seat costs ≈ 31.4 USD because the heavy decile costs ≈ 145, so a flat seat cannot carry the tail (N5).
 - **Why not a 30 USD seat:** the mean organisation's margin falls to ≈ 16%, under N5.
 - **Why not unlimited seats:** the heavy tail sets the price for everyone.
 - **Why not clone and install per cloud task:** 8 minutes and a fresh supply-chain exposure every time, against 1 minute from a snapshot.
@@ -548,7 +548,7 @@ The completion budget is ten stages from the last key to ghost text, with a spre
 
 - **Behind a proxy** adding 40 ms at p50 (spread 60, illustrative; 20–100 in practice): p50 265, p95 ≈ 265 + √(83² + 60²) ≈ 367; adding every spread gives an upper bound of 500, at the target. An organisation whose proxy adds more is outside N2, and its admin dashboard says so.
 - **Chat first token:** 30 context + 100 local search + 25 upload + 5 fusion + 20 rerank queue + 80 rerank + 10 assemble + 40 provider hop + 700 first token + 25 back = 1,035 ms; p95 ≈ 1,642 (N3: 1,200 and 2,500).
-- **Agent:** first streamed text ≈ 450 ms; first tool call ≈ 2.6 s; median task ≈ 3.9 minutes (81.9 s of model, 19.8 s of exploration, 129.9 s of tools); p95 ≈ 12.6. Cloud tasks add 1 minute of setup on a snapshot hit, 8 on a miss.
+- **Agent:** first streamed text ≈ 450 ms; first tool call ≈ 6.7 s; median task ≈ 6.1 minutes (218.0 s of model at 80 tokens a second, 19.8 s of exploration, 129.9 s of tools); p95 ≈ 18.2. Cloud tasks add 1 minute of setup on a snapshot hit, 8 on a miss.
 
 <Callout tone="red" title="What breaks">
   The first request after an idle connection pays a TLS handshake, 50–100 ms more, and a proxy that re-inspects TLS adds it every time. Keep-alive pings, pre-warming on file focus and bypass guidance for the completion host keep the p95 under 500.
@@ -556,14 +556,14 @@ The completion budget is ten stages from the last key to ghost text, with a spre
 
 The seat cost is shown on the mean seat, because the heavy decile sets the margin.
 
-<AnimatedDiagram spec="animated/code-assistant/seat-cost" stepper caption="The mean seat costs ≈ 31.3 USD at list prices, 71% of it the agent; the pooled allowance and a 1.25 mark-up keep margin at 23% even for an all-heavy organisation." />
+<AnimatedDiagram spec="animated/code-assistant/seat-cost" stepper caption="The mean seat costs ≈ 31.4 USD at list prices, 71% of it the agent; the pooled allowance and a 1.25 mark-up keep margin at 23% even for an all-heavy organisation." />
 
 - **How to read it:** step 1 splits the mean seat into fixed cost, agent and chat; step 2 compares organisations of only light, only median and only heavy users: cost, revenue and margin, with the 20% floor marked.
 
 **The numbers:**
 
-- Fixed 5.55 USD a seat (completion 5.20, snapshots 0.08, apply 0.108, rerank 0.108, index 0.05) + usage 25.80 = ≈ 31.3 USD; the agent is 22.4 of it.
-- Revenue = 39 + 1.25 × max(0, usage − 20): the mean organisation pays 46.25, a ≈ 32% margin; all-light 68%, all-median 32%, all-heavy 23%. As usage grows the margin tends to 1 − 1 ÷ 1.25 = 20%.
+- Fixed 5.55 USD a seat (completion 5.20, snapshots 0.08, apply 0.108, rerank 0.108, index 0.05) + usage 25.84 = ≈ 31.4 USD; the agent is 22.4 of it.
+- Revenue = 39 + 1.25 × max(0, usage − 20): the mean organisation pays 46.30, a ≈ 32% margin; all-light 68%, all-median 32%, all-heavy 23%. As usage grows the margin tends to 1 − 1 ÷ 1.25 = 20%.
 
 | Lever | Saves | Costs you |
 | --- | --- | --- |
@@ -573,7 +573,7 @@ The seat cost is shown on the mean seat, because the heavy decile sets the margi
 | Prompt-lookup drafting | First line ≈ 75 → 50 ms (8 steps instead of 12) | Less gain at larger batches |
 | Per-region sizing and autoscaling | ≈ 399 of 720 hours a GPU paid (392 + 6.3 of pre-scaling) | Pre-scaling 30 minutes before each morning ramp |
 | Prompt caching | Agent task 1.35 → 0.36 USD (73%, resume misses included) | Byte-stable prefixes; a 5-minute lifetime |
-| Small-model exploration and thinking budgets | 0.20 USD, and 0.65 → 0.36 USD with 6.0 → 3.9 minutes a task | A second model to evaluate; hard steps may need more thinking |
+| Small-model exploration and thinking budgets | 0.20 USD, and 0.65 → 0.36 USD with 12.2 → 6.1 minutes a task | A second model to evaluate; hard steps may need more thinking |
 | Pooled allowance + 1.25 mark-up | Margin ≥ 20% on any organisation | Organisations see a usage bill |
 
 ## Evaluation and release gates
@@ -695,7 +695,7 @@ Privacy mode, the one statement of what is stored (N8):
 
 - The three calls cost the developer no prompt at all (the install failed the mirror's check before the ask tier) and the attacker everything: no outside host was reached, no package landed, no setting changed.
 - A sandbox cut permission prompts by 84% in one vendor's internal use (How real systems do it), which is the point: people read the few prompts that remain.
-- Caps bind in order: on a long task at the average thinking mix, 2 USD at step 99 (≈ 16.8 minutes), before 6M input tokens at step 117.
+- Caps bind in order: on a long task at the average thinking mix, 2 USD at step 99 (≈ 28.0 minutes), just before the 30-minute cap and well before 6M input tokens at step 117.
 
 <Callout tone="red" title="What breaks">
   Load permission rules from the workspace and the agent can write its own policy: an injected instruction adds an MCP server or a hook, and the next command runs outside every fence. Rules come only from managed settings, and those files are write-denied.
@@ -704,9 +704,9 @@ Privacy mode, the one statement of what is stored (N8):
 ### Worked example: a month of one heavy seat
 
 - **The seat (illustrative):** a heavy user runs 12 agent tasks a day at twice the median cost and 25 chat turns, on 14.7 active days a month.
-- **Usage:** 14.7 × (12 × 2 × 0.363 + 25 × 0.0283 + 0.25 × 12 × 0.0104) ≈ 138.87 USD; with 5.55 USD of fixed cost the seat costs ≈ 144.4.
-- **Revenue:** 39 + 1.25 × (138.87 − 20) ≈ 187.6 USD, so the margin is 1 − 144.4 ÷ 187.6 ≈ 23%.
-- **Without the pool:** a flat 39 USD seat would lose ≈ 105 USD on this seat, and 10% of seats like it put the mean seat at 31.3 USD, 80% of the seat price.
+- **Usage:** 14.7 × (12 × 2 × 0.363 + 25 × 0.0283 + 0.25 × 12 × 0.0142) ≈ 139.03 USD; with 5.55 USD of fixed cost the seat costs ≈ 144.6.
+- **Revenue:** 39 + 1.25 × (139.03 − 20) ≈ 187.8 USD, so the margin is 1 − 144.6 ÷ 187.8 ≈ 23%.
+- **Without the pool:** a flat 39 USD seat would lose ≈ 106 USD on this seat, and 10% of seats like it put the mean seat at 31.4 USD, 80% of the seat price.
 - **The task cap:** none of these tasks reaches the 2 USD cap; a task that loops would stop at step 99 with a summary, at most 2 USD.
 
 ## Design decisions and why
@@ -733,7 +733,7 @@ Privacy mode, the one statement of what is stored (N8):
 | [P1 Start with the simplest design that passes the evals](/genai-system-design/case-studies/design-principles#p1-start-with-the-simplest-design-that-passes-the-evals) | Grep before embeddings (an arm, not a default); search-and-replace before fast apply | Each extra component must win an A/B or an offline gate ([Coding Agents](/ai-system-design/genai-system-design/coding-agents)) |
 | [P3 Route by difficulty](/genai-system-design/case-studies/design-principles#p3-route-by-difficulty) | Small FIM model for completion; small `explore` subagent; mid model for plans and edits | 375M requests a day cannot touch a frontier model, and exploration does not need one ([Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)) |
 | [P5 Budget latency per stage](/genai-system-design/case-studies/design-principles#p5-budget-latency-per-stage) | Ten stages to 225 ms for every suggestion, p95 ≈ 308, ≈ 367 behind a proxy; chat 1,035 and ≈ 1,642 | A suggestion after the next keystroke is wasted ([Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)) |
-| [P6 Count and cap in tokens](/genai-system-design/case-studies/design-principles#p6-count-and-cap-in-tokens) | Thinking budgets per step type; caps of 2 USD, 6M tokens, 120 steps; a pooled allowance | A heavy seat costs ≈ 144 USD a month ([Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)) |
+| [P6 Count and cap in tokens](/genai-system-design/case-studies/design-principles#p6-count-and-cap-in-tokens) | Thinking budgets per step type; caps of 2 USD, 6M tokens, 120 steps; a pooled allowance | A heavy seat costs ≈ 145 USD a month ([Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)) |
 | [P7 Cache at every layer and keep the prefix stable](/genai-system-design/case-studies/design-principles#p7-cache-at-every-layer-and-keep-the-prefix-stable) | Typed-through cache, frozen completion blocks, salted KV reuse, prompt caching | Prefill 2,000 → 490 tokens; an agent task 1.35 → 0.36 USD ([Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)) |
 | [P8 Manage context deliberately](/genai-system-design/case-studies/design-principles#p8-manage-context-deliberately) | 2,000, 12,000 and 5,300-token layouts; subagent summaries; compaction at 100,000 | Each path has its own budget and its own failure ([Context Engineering](/ai-system-design/genai-system-design/context-engineering)) |
 | [P10 Enforce rules in code, not in the prompt](/genai-system-design/case-studies/design-principles#p10-enforce-rules-in-code-not-in-the-prompt) | Policy engine from managed settings; the sandbox; the mirror | An injected README can talk a model out of a rule ([Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing)) |
@@ -769,7 +769,7 @@ Privacy mode, the one statement of what is stored (N8):
 - **2025 and 2026, completion latency:** GitHub's custom completion model reports 20% more accepted-and-retained characters, 12% higher acceptance and 35% lower latency, relative figures only (vendor, 2025). Alibaba's Qoder NEXT reports cutting p50 from 800 to 300 ms (vendor, 2026).
 - **2025 and 2026, Cursor's indexing:** a November 2025 A/B found +2.6% code retention with semantic search on codebases over 1,000 files. In 2026 it described Merkle sync with content proofs (January) and a local regex index anchored to git commits (March); its docs in November say its search does not store embeddings of the codebase, and team replies on its forum date that to late July.
 - **2025, sandboxes:** Claude Code's sandbox uses bubblewrap and Seatbelt with a network proxy and cut permission prompts by 84% internally; OpenAI's Codex runs the agent with network access off by default (vendors).
-- **2025, agent configuration as an attack path:** CVE-2025-53773 (code execution in Copilot and Visual Studio), CVE-2025-54135 (Cursor's agent creating `.cursor/mcp.json` without approval) and CVE-2025-54136 (an approved MCP config swapped silently).
+- **2025, agent configuration as an attack path:** CVE-2025-53773 (code execution in GitHub Copilot and Visual Studio), CVE-2025-54135 (Cursor's agent creating `.cursor/mcp.json` without approval) and CVE-2025-54136 (an approved MCP config swapped silently).
 - **2025, the supply chain:** the Shai-Hulud worm compromised over 500 npm packages (CISA, September); malicious nx versions harvested credentials (August), and a security vendor reports the script prompted local AI agent CLIs to list files likely to hold secrets.
 - **Where this design differs:** embeddings stay as a measured arm rather than gone, and the agent never installs a package outside a read-only mirror. Both cost little and answer questions the public write-ups leave open.
 
@@ -786,7 +786,7 @@ Privacy mode, the one statement of what is stored (N8):
 ## Interview framework
 
 1. **Minutes 0 to 5:** features, scale, latency per feature, privacy and residency, what the agent may run, pricing.
-2. **Minutes 5 to 10:** numbers: 5,355 sent and 65% cancelled a developer-day, 375M requests a day on 355 GPUs, 225 ms for every suggestion, 0.36 USD a median agent task, 31.3 USD a mean seat and ≈ 32% margin at 39 USD.
+2. **Minutes 5 to 10:** numbers: 5,355 sent and 65% cancelled a developer-day, 375M requests a day on 355 GPUs, 225 ms for every suggestion, 0.36 USD a median agent task, 31.4 USD a mean seat and ≈ 32% margin at 39 USD.
 3. **Minutes 10 to 20:** steps 1 to 3: the completion path and its budget; triggering and cancellation; local search and Merkle sync.
 4. **Minutes 20 to 30:** steps 4 to 6: chat context; the agent loop; applying edits.
 5. **Minutes 30 to 37:** steps 7 and 8: sandbox, packages, MCP and the trifecta; retained characters and the gates.
@@ -809,12 +809,12 @@ Privacy mode, the one statement of what is stored (N8):
 - Search and edits: Cursor, [secure codebase indexing](https://cursor.com/blog/secure-codebase-indexing) (2026), [fast regex search](https://cursor.com/blog/fast-regex-search) (2026), [semantic search](https://cursor.com/blog/semsearch) (2025), [semantic search docs](https://cursor.com/docs/context/semantic-search), [instant apply](https://cursor.com/blog/instant-apply) (2024); Anthropic, [effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) (2025)
 - Sandboxes and security: Anthropic, [Claude Code sandboxing](https://www.anthropic.com/engineering/claude-code-sandboxing) (2025); OpenAI, [Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing) and [approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security); [Invariant Labs on the GitHub MCP server](https://invariantlabs.ai/blog/mcp-github-vulnerability) (2025); [CISA on the npm compromise](https://www.cisa.gov/news-events/alerts/2025/09/23/widespread-supply-chain-compromise-impacting-npm-ecosystem) (2025); [the nx advisory](https://github.com/nrwl/nx/security/advisories/GHSA-cxm3-wv7p-598c) (2025); Spracklen et al., [package hallucinations](https://arxiv.org/abs/2406.10279) (2025); Gu et al., [prompt-cache auditing](https://arxiv.org/abs/2502.07776) (2025); [vLLM prefix caching](https://docs.vllm.ai/en/latest/design/prefix_caching.html)
 - Evaluation: Ziegler et al., [productivity and acceptance](https://arxiv.org/abs/2205.06537) (2022); METR, [2025 study](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/) and [2026 update](https://metr.org/blog/2026-02-24-uplift-update/); OpenAI, [why it stopped reporting SWE-bench Verified](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/) and [separating signal from noise](https://openai.com/index/separating-signal-from-noise-coding-evaluations/) (2026); [Epoch AI's review](https://epoch.ai/benchmarks/swe-bench-verified/review) (2026)
-- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [Coding Agents](/ai-system-design/genai-system-design/coding-agents) · [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding) · [Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [LLM platform gateway](/genai-system-design/case-studies/llm-platform-gateway)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Coding Agents](/ai-system-design/genai-system-design/coding-agents) · [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding) · [Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway)
 
 <InterviewQuestions>
   <InterviewQuestion question="Design a code assistant: repo indexing, context assembly, edit application and evaluation." category="Architecture" level="Senior" followUps={[{ question: "Where does the index live, and why not on your servers?", level: "Senior", answer: "On the laptop: a sparse n-gram grep index and a symbol table anchored to the git commit with dirty files as an overlay, 120 MB built in ≈ 8 s for 50,000 files. A server index adds a round trip to every search and puts every customer’s code at rest with us; Merkle sync uploads only changed files, and only for cloud tasks and the embeddings arm." }, { question: "With a team of four, what do you build first?", level: "Senior", answer: "Completion on a dedicated provider deployment (2 people; 6.32 USD a seat at 100,000 seats, more at small scale, where a few replicas a region are the floor), grep and symbols, search-and-replace edits and the OS sandbox. Self-hosting, fast apply and the embeddings arm wait until volume (≈ 47,000 seats) or evidence pays for them." },]}>
   - Two paths sharing a plugin and an index: completion on our own small FIM model behind a debounce, a pre-request gate and cancellation; chat and the agent on hosted models. Context is assembled per path from a local grep and symbol index; edits land by exact search-and-replace, then region fast apply; the agent runs in an OS sandbox under a policy engine.
-  - Size it first: 375M completion requests a working day on 355 GPUs at 225 ms p50 and ≈ 308 p95; a median agent task ≈ 0.36 USD and 3.9 minutes; a mean seat ≈ 31.3 USD a month at list prices.
+  - Size it first: 375M completion requests a working day on 355 GPUs at 225 ms p50 and ≈ 308 p95; a median agent task ≈ 0.36 USD and 6.1 minutes; a mean seat ≈ 31.4 USD a month at list prices.
   - The trade-off is ownership: self-hosting the completion and apply models buys abort on cancel, a cache salt per organisation and regional pinning, at the price of a 6-person team and its fine-tuning runs (1.66 USD a seat); below ≈ 47,000 seats a dedicated provider deployment is cheaper.
   - Verify with retained characters (≥ 25%, ≈ 38% predicted) and agent lines still present after 7 days (≥ 70%) online, and a FIM set, 300 chat questions and 300 past issues × 3 offline. The first thing to break is completion latency: a slower model or a proxy shows as falling retained characters, so any 50 ms p95 regression rolls back.
   </InterviewQuestion>
@@ -857,7 +857,7 @@ Privacy mode, the one statement of what is stored (N8):
   </InterviewQuestion>
   <InterviewQuestion question="How do you apply an edit to a 2,000-line file quickly and in the right place?" category="Architecture" level="Mid">
   - The model writes an exact search-and-replace that must match once; if it writes a sketch or the match fails, a fast-apply model rewrites only the enclosing region, drafting from the original text.
-  - End to end: search-and-replace ≈ 4.2 s and a sketch plus region apply ≈ 5.1 s, against ≈ 92 s for the agent model rewriting all 2,000 lines, or ≈ 20 s for our apply model rewriting the whole file.
+  - End to end: search-and-replace ≈ 11.2 s and a sketch plus region apply ≈ 12.8 s, against ≈ 260 s for the agent model rewriting all 2,000 lines, or ≈ 20 s for our apply model rewriting the whole file.
   - The trade-off is a self-hosted apply model with a floor of 0.108 USD a seat, and region detection with tree-sitter; unified diffs with line numbers are rejected because they drift.
   - It fails in two ways: 0 or 2+ matches return a message the model can act on ("2 matches; include more lines"), and a merge model can silently drop or alter lines. So the harness rejects an applied region whose lines outside the sketch's changed span differ from the original, then shows a diff with undo, takes a checkpoint and runs `diagnostics` before tests.
   </InterviewQuestion>
@@ -880,8 +880,8 @@ Privacy mode, the one statement of what is stored (N8):
   - At a 60% solve rate one run's 95% interval is ± 5.5 points, so compare paired per task and require pass^3 (all 3 runs pass) per task not to fall; also watch cost and minutes per task against the 2 USD cap.
   </InterviewQuestion>
   <InterviewQuestion question="What does a seat cost to serve, and what do you do about heavy users?" category="Cost" level="Junior">
-  - The mean seat costs ≈ 31.3 USD a month at list prices: 5.55 fixed (completion 5.20) plus 25.80 of usage, 71% of it the agent.
-  - Heavy users set the mean cost: the top 10% run 12 agent tasks a day at twice the median cost, ≈ 144 USD a seat a month and 46% of the mean seat's cost, while a light seat costs ≈ 12.6.
+  - The mean seat costs ≈ 31.4 USD a month at list prices: 5.55 fixed (completion 5.20) plus 25.84 of usage, 71% of it the agent.
+  - Heavy users set the mean cost: the top 10% run 12 agent tasks a day at twice the median cost, ≈ 145 USD a seat a month and 46% of the mean seat's cost, while a light seat costs ≈ 12.6.
   - Price as an illustrative 39 USD seat with a 20 USD pooled allowance and overage at list price × 1.25: ≈ 32% margin on the mean organisation, 23% for an all-heavy one, never below 20%. The trade-off is a usage bill; a 30 USD seat with the same pool would leave ≈ 16%.
   - Verify margin per organisation monthly and revisit if the mean falls below 25%; per-task caps (2 USD) and thinking budgets bound the tail.
   </InterviewQuestion>
