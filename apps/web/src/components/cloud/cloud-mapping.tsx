@@ -10,7 +10,15 @@ import { PROVIDER_ORDER, PROVIDER_TONE, ProviderTag, serviceHref } from "./share
 export function CloudMapping({ diagram, lead = "aws" }: { diagram: string; lead?: ProviderId }) {
   const spec = DIAGRAMS[diagram];
   if (!spec) return <p className="text-sm text-muted-foreground">Unknown diagram: {diagram}</p>;
-  const rows = spec.nodes.filter((n) => n.cloud);
+  // One row per distinct component: repeated nodes (three workers, two replicas) share one row.
+  const seen = new Set<string>();
+  const rows = spec.nodes.filter((n) => {
+    if (!n.cloud) return false;
+    const key = `${n.label}|${JSON.stringify(n.cloud)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const order = [lead, ...PROVIDER_ORDER.filter((p) => p !== lead)];
 
   return (
