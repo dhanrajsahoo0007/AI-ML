@@ -12,7 +12,7 @@ updated: 2026-11-13
 
 ## The story
 
-About 60 gift shops buy Brightpost's cards wholesale. They order through a wholesale app that a contractor built on one virtual machine, with its own MySQL database. It holds 60 GB: 110,000 orders and 18 GB of invoice PDFs inside the tables. Asha wants it in the managed PostgreSQL engine that runs the shop's orders, so the team has one engine to look after. Her first try is a dump and restore on a Saturday. At 20:00 she stops all writes and plans 6 hours. The dump takes 1 hour. Loading rows and building indexes on PostgreSQL is slower, and at 02:00 the invoice table is still loading. At 05:00 the load stops on 212 rows with a date of `0000-00-00`, which PostgreSQL refuses. At 07:30 Asha gives up and reopens MySQL. Writes were frozen for 11.5 hours, and about 40 orders that shops sent by email are typed in by hand on Monday.
+About 300 gift shops buy Brightpost's cards wholesale. They order through a wholesale app that a contractor built on one virtual machine, with its own MySQL database. It holds 60 GB: 110,000 orders and 18 GB of invoice PDFs inside the tables. Asha wants it in the managed PostgreSQL engine that runs the shop's orders, so the team has one engine to look after. Her first try is a dump and restore on a Saturday. At 20:00 she stops all writes and plans 6 hours. The dump takes 1 hour. Loading rows and building indexes on PostgreSQL is slower, and at 02:00 the invoice table is still loading. At 05:00 the load stops on 212 rows with a date of `0000-00-00`, which PostgreSQL refuses. At 07:30 Asha gives up and reopens MySQL. Writes were frozen for 11.5 hours, and about 40 orders that shops sent by email are typed in by hand on Monday.
 
 Every step below removes one reason that night went wrong. The second try freezes writes for 9 minutes.
 
@@ -165,7 +165,7 @@ The method is the same on all three clouds: convert, full load, CDC from the log
     - **Schema conversion:** for Oracle and SQL Server sources, a conversion workspace converts the schema to PostgreSQL. Same-engine jobs need no conversion.
     - **Full load and CDC:** a continuous job copies the data, then replays changes from the source's log until you promote the target.
     - **Validation:** the open-source Data Validation Tool compares row counts and column checksums between source and target.
-    - **Engine pairs:** MySQL to MySQL, PostgreSQL to PostgreSQL, and Oracle or SQL Server to PostgreSQL. MySQL to PostgreSQL is not one of its paths, so a move like Brightpost's uses an outside converter and CDC tool.
+    - **Engine pairs:** MySQL, PostgreSQL and SQL Server into the same engine, and Oracle or SQL Server to PostgreSQL. MySQL to PostgreSQL is not one of its paths, so a move like Brightpost's uses an outside converter and CDC tool.
 
     **The difference that changes a design.** Cutover here is **promotion**: the target runs as a replica during the job, and promoting it makes it a writable primary and ends the job. Plan the rollback copy to the source as a separate piece of work, and test it in the rehearsal.
   </Tab>

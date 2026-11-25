@@ -30,7 +30,7 @@ Three words first. A **resource** is one thing you rent, such as a server, a net
 - **SDKs.** Libraries that let your own program call the cloud, such as an app that makes a storage folder for each new customer.
 - **Infrastructure as code.** Files that describe the result you want. A tool compares them with the cloud and makes the changes.
 
-All five go through the same door: the cloud's API, the set of requests it accepts. Each request is checked by the identity service. [API design basics](/system-design/fundamentals/api-design) explains what an API is. The difference is what stays behind. A click leaves no file that a teammate can read, review or run again. Only the last way does.
+All five go through the same door: the cloud's API, the set of requests it accepts, each checked by the identity service. [API design basics](/system-design/fundamentals/api-design) explains what an API is. The difference is what stays behind. Only the last way leaves a file that a teammate can read, review and run again.
 
 <PremiumBreak />
 
@@ -40,7 +40,7 @@ All five go through the same door: the cloud's API, the set of requests it accep
 
 <Term id="drift">Drift</Term> is the gap between what you believe your cloud looks like and what it really looks like. A hand change opens it. Each one feels small: a number lowered, a firewall rule added, a setting tried "for now".
 
-Brightpost believed both copies said 10. The test copy did. The shop said 3. Nothing showed the difference, because the only record of the setup was the live cloud itself.
+Brightpost believed both copies said 10. The test copy did; the shop said 3. Nothing showed the difference, because the only record of the setup was the live cloud itself.
 
 <Callout tone="red" title="What breaks">
   At 10:05 the scaling rule asks for 9 servers. The cloud stops at 3, because that is the maximum it was given. About 1,200 shoppers wait on pages that time out. The audit trail later shows the change, five weeks old, but nobody thought to look until 11:50. About 650 of the day's orders are gone.
@@ -67,7 +67,7 @@ scaling_group "shop" {
 }
 ```
 
-The file states the **desired state**: what should exist. A script must know where it starts from. A template does not. The tool reads what exists, compares, and does only what is missing.
+The file states the **desired state**: what should exist. A script must know where it starts from; a template does not. The tool reads what exists, compares, and does only what is missing.
 
 ### Step 4: A plan before any change
 
@@ -75,9 +75,9 @@ The file states the **desired state**: what should exist. A script must know whe
 
 The tool works in two moves. **Plan** reads the template and the live cloud, then lists the difference. **Apply** makes that difference real. Asha's first plan against the shop showed one line: change the maximum from 3 to 10. That one line was the sale-day failure, found before the next sale.
 
-A plan marks each resource as added, changed, deleted or **replaced**. Replaced means deleted and then built again, because some settings cannot change in place. A rename can mean a new, empty database. So the plan is the part a reviewer must read.
+A plan marks each resource as added, changed, deleted or **replaced**: deleted and built again, because some settings cannot change in place. A rename can mean a new, empty database, so the plan is the part a reviewer must read.
 
-Apply is <Term id="idempotent">idempotent</Term>: running it again with no new change does nothing. The tool sees that the cloud already matches and stops.
+Apply is <Term id="idempotent">idempotent</Term>: running it again with no new change does nothing, because the cloud already matches.
 
 ### Step 5: One template, many environments
 
@@ -121,11 +121,9 @@ Three rules for state:
 - **A lock.** A run takes a lock before it starts. A second run waits or stops, so two applies never change the same servers at once.
 - **Guarded like a secret.** State can hold passwords and other <Term id="secret">secrets</Term> in plain text. Encrypt it, keep old versions, and let only the pipeline write it.
 
-The tabs below show which engines keep state for you.
-
 ### Step 8: Catching drift every night
 
-Hand changes still happen, in an outage or by mistake. So Brightpost runs a plan every night against each environment, without applying it. An empty plan means no drift. Any line in it means someone changed the cloud outside the template.
+Hand changes still happen, in an outage or by mistake. So Brightpost runs a plan every night against each environment, without applying it. An empty plan means no drift; any line means someone changed the cloud outside the template.
 
 When the nightly plan finds drift:
 
@@ -222,7 +220,7 @@ Clicks win on the first afternoon. Every later change, review and rebuild costs 
 
 ## Common pitfalls
 
-- **Fixing production in the console and moving on.** The next apply undoes the fix, or the fix becomes drift nobody knows about. Write every hand change back into the template within a day.
+- **Fixing production in the console and moving on.** The next apply undoes the fix, or it becomes drift. Write every hand change back into the template within a day.
 - **Applying without reading the plan.** A "replace" line on a database means delete, then create an empty one. Make the plan part of every review, and block a replace on data stores unless someone confirms it.
 - **State on a laptop or in the repository.** Two copies disagree, and secrets in state end up in version history. Keep one remote copy, encrypted and locked, that only the pipeline writes.
 - **A copy of the template per environment.** The copies drift apart the same way clicks do. Use one module with inputs, and let test receive every change first.
@@ -238,7 +236,7 @@ Clicks win on the first afternoon. Every later change, review and rebuild costs 
   <InterviewQuestion question="What does declarative mean for infrastructure?" level="Junior" category="Cloud">
     **Short answer.** You describe the end result you want, such as "a scaling group with at most 10 servers", and the tool works out the steps. An imperative script lists the steps yourself, in order.
 
-    **Why.** A declarative tool reads what exists, compares it with the file, and changes only the difference. So the same file works on an empty account and on a running one, and a second run does nothing. When Brightpost's maximum had been lowered to 3 by hand, the first plan showed one change, 3 back to 10.
+    **Why.** The tool reads what exists, compares it with the file, and changes only the difference. So the same file works on an empty account and on a running one, and a second run does nothing. Brightpost's first plan showed one change: the hand-lowered maximum, 3 back to 10.
 
     <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} highlight={["repo", "engine", "plan", "api"]} caption="The engine compares the template with what is live, and the plan lists only the difference." />
 
@@ -266,7 +264,7 @@ Clicks win on the first afternoon. Every later change, review and rebuild costs 
   <InterviewQuestion question="Brightpost's production and test setups drifted apart. How do you find drift and stop it coming back?" level="Mid" category="Cloud">
     **Short answer.** Find it with a plan run against each environment on a schedule, every night, without applying. Stop it by making the template the only normal way to change production: people get read-only roles there, and changes go through review and the pipeline.
 
-    **Why.** Brightpost's maximum was lowered from 10 to 3 by hand five weeks before the sale, and nothing compared the shop with anything. A nightly plan would have shown that line the next morning, not after 650 lost orders. Each finding is either written into the template through review or undone by an apply.
+    **Why.** Brightpost's maximum was lowered by hand five weeks before the sale. A nightly plan would have shown that line the next morning, not after 650 lost orders. Each finding is either written into the template through review or undone by an apply.
 
     <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={2} caption="Built by clicks, the two copies differ and nothing shows it until sale day." />
 
@@ -280,7 +278,7 @@ Clicks win on the first afternoon. Every later change, review and rebuild costs 
   <InterviewQuestion question="A team runs on one cloud only. CloudFormation, Bicep or Infrastructure Manager, or Terraform: how do you decide?" level="Mid" category="Cloud">
     **Short answer.** Start from three questions: who keeps the state, what else the template must reach, and what the team already knows. A native engine keeps or avoids state for you and needs nothing outside the cloud to run. A multi-cloud tool also reaches outside services, such as DNS or monitoring, and one language serves several clouds.
 
-    **Why.** For Brightpost, on one cloud with 3 engineers, the native engine removes a whole design task: no state store, no lock, no access to guard. If the shop also manages its DNS, help desk alerts or a second cloud, a multi-cloud tool covers them in one plan. Google Cloud's native engine runs Terraform itself, which narrows the gap there. Either way, the habits matter more than the tool: plan in review, apply from a pipeline, no stored keys.
+    **Why.** For Brightpost, on one cloud with 3 engineers, the native engine removes a whole design task: no state store, no lock, no access to guard. If the shop also manages its DNS or a second cloud, a multi-cloud tool covers them in one plan. Google Cloud's native engine runs Terraform itself, which narrows the gap. Either way, the habits matter more than the tool: plan in review, apply from a pipeline, no stored keys.
 
     **Follow-ups the interviewer may ask.**
     - What does moving from one tool to the other cost later?

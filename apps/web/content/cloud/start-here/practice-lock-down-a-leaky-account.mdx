@@ -1,11 +1,328 @@
 ---
 title: "Practice: Lock Down a Leaky Account"
 description: "Review a cloud account with leaked keys, a public bucket and wide-open firewall rules, and fix it in the order that cuts risk fastest."
-status: outline
+updated: 2026-11-25
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** an interview-style exercise: an account has long-lived keys in code, a public bucket and firewall rules open to the world. You rank the risks and fix them with the identity, network and encryption controls from the concept pages, then answer senior-level questions.
+<KeyIdea>
+  Fix a leaking account in order of harm: stop what an attacker is using now, close what anyone can reach, then make sure it cannot reopen.
+</KeyIdea>
 
-**Related reading on this site:** [Security overview](/system-design/fundamentals/security) · [Common attacks and defences](/system-design/fundamentals/common-attacks) · [Identity & Security on AWS](/cloud/aws/security)
+## The brief
+
+Brightpost has bought a framing workshop, the framing shop, so it can sell framed posters. [Migration and Modernization](/cloud/operations/migration-and-modernization) moves its back-office servers. It also has a small cloud account, the photo-site account, built by a freelancer 3 years ago: customers upload about 40 photos a day to be printed and framed. On the Monday the purchase closes, Asha gets the one admin password and writes down six findings.
+
+1. **Keys in the code.** Two long-lived access keys sit in the site's code repository, public for its first 8 months. One has full admin rights and was last used 2 days ago, from a network abroad.
+2. **A public bucket.** Anyone online can list and download the photos <Term id="object-storage">bucket</Term>: about 21,000 photos from about 8,000 customers.
+3. **Firewall rules open to the world.** One server runs the site and its database. Its rules accept remote login (SSH, port 22) and the database port (5432) from any address, and its login log shows about 3,000 password guesses a day.
+4. **One shared admin login.** The account's owner login is shared by 3 people: the workshop manager, an assistant and the freelancer. It has no <Term id="mfa">MFA</Term>.
+5. **No audit trail.** The account has only the cloud's default record of setting changes, which nobody reads. Nothing records who reads a file, and no alarm watches anything.
+6. **Unencrypted backups.** Every night a script writes the database to a plain dump file in a second bucket: names, emails, home addresses and orders, kept for 400 nights.
+
+The interviewer's version is one line: "Here is the account. Rank the risks, fix them in order, and tell me what each fix costs."
+
+## How to approach it
+
+1. **Contain.** Is anything being used against you right now? Stop that first, and keep the evidence.
+2. **Rank.** Score every other finding on four questions: who can reach it, what it exposes, whether anyone is using it, and how long the fix takes.
+3. **Fix.** One finding at a time, highest first, each with a check that proves it worked.
+4. **Prevent.** Add the alarm that would catch it again and the rule that stops it coming back.
+
+<Compare
+  columns={["Finding", "Who can reach it", "What it exposes", "In use now?", "Fix takes", "Rank"]}
+  rows={[
+    ["Admin key in the code", "Anyone who saw the repository", "Everything in the account", "Yes, 2 days ago", "1 hour", "1"],
+    ["Public bucket", "Anyone online", "21,000 customer photos", "Unknown", "2 hours", "2"],
+    ["SSH and database port open", "Any script on the internet", "The server and the database", "3,000 guesses a day", "Half a day", "3"],
+    ["Shared owner login", "3 people, and anyone they told", "Everything, with no name on it", "Unknown", "1 day", "4"],
+    ["No audit trail", "Nobody: it hides the others", "Nothing directly", "No", "1 day", "5"],
+    ["Plain backups", "Anyone holding the admin key", "400 nights of customer data", "Unknown", "2 days", "6"],
+  ]}
+  caption="Asha's ranking of the framing shop's account. A finding that is in use, or open to anyone, goes first; the backups rank last because the admin key was their only door."
+/>
+
+## Decision 1: Contain the leaked keys first
+
+<Callout tone="blue" title="Decide first">
+  The admin key was used 2 days ago from abroad. Do you delete it, rotate it, or something else? And what do you look for next?
+</Callout>
+
+**The answer.** Deactivate both keys; do not delete them yet. A deactivated key is refused at once, can be switched back on, and keeps its last-used record. Then look for what the stranger left: the default record of setting changes shows a user nobody made, `support-backup`, created 6 days ago with its own admin key. Asha deactivates that too; a search of every region finds nothing else. She changes the owner password and turns on the audit trail, so the rest of the work is recorded.
+
+The site still needs to save photos, so its server gets an attached <Term id="service-account">service identity</Term> that may write to the photos bucket and nothing else. The database password, also in the code, moves to a secret store read with that identity.
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={3} minWidth={620} caption="The same repair on the shop's own diagram: the key is gone, the server's attached identity gets a 1-hour token, and a copy of the old key is refused." />
+
+**The trade-off.** Uploads fail for about 40 minutes, until the server has its identity, and 2 customers see an error. Rotating would keep uploads working, but the new key would sit in the same code. Deleting at once loses the last-used record, the only evidence of where the key went.
+
+<AnimatedDiagram spec="animated/cloud/secret-fetch-rotate" step={1} minWidth={620} caption="The database password leaves the code: the server proves who it is with its own identity and reads the secret from the store." />
+
+Concept pages: [Identity and Access](/cloud/fundamentals/identity-and-access) and [Secrets management](/cloud/resilience/secrets-management).
+
+<PremiumBreak />
+
+## Decision 2: Close the public bucket
+
+<Callout tone="blue" title="Decide first">
+  The site shows each customer a preview of their photo, loaded straight from the bucket. Blocking public access breaks that preview. Block now, or change the site first?
+</Callout>
+
+**The answer.** Block now, for the whole account, so no bucket in it can be made public, even one created next year. The preview page then uses a **signed URL**: a link the app makes for one file, with a signature and a 15-minute expiry. A stranger who guesses a file name is refused.
+
+Check it from outside: an anonymous request to read a photo or list the bucket is refused.
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={2} minWidth={620} caption="The same shape as the photo bucket: an account outside the organisation, so the no-public-buckets guardrail never reaches it, and anyone online can download." />
+
+**The trade-off.** For about 2 hours, until signed URLs ship, the preview shows a grey placeholder; orders still go through. The other choice is 21,000 photos open for those 2 hours. Closing the bucket cannot say whether anyone already downloaded them; Decision 5 deals with that.
+
+Concept pages: [Object storage](/cloud/data/object-storage) and [Landing zones](/cloud/fundamentals/landing-zones), where Brightpost's wholesale team made the same mistake.
+
+## Decision 3: Shrink the firewall
+
+<Callout tone="blue" title="Decide first">
+  The freelancer's monthly sales report connects to the database from his laptop. The assistant restarts the site over SSH from home. What stays open to the internet?
+</Callout>
+
+**The answer.** Nothing. Asha deletes both rules that allow any address. The database shares the site's machine, so it now listens only there. When it moves to its own server, its rule will name the site's <Term id="security-group">security group</Term>, not an address.
+
+SSH is replaced by an identity-checked remote access service: the cloud opens a shell after a sign-in with MFA, and no inbound port is open. The monthly report becomes a scheduled export into a private bucket.
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={6} minWidth={620} caption="Remote access with no open port: the person signs in, and the cloud's own service opens the shell on the server." />
+
+Check it from outside: both ports time out, and the 3,000 guesses a day drop to 0.
+
+**The trade-off.** The freelancer loses his direct line to the database, and the assistant's restart takes about 20 seconds longer, through a browser shell. Opening port 22 to the office address only is weaker: that address changes, and everyone on the office network can reach the port.
+
+Concept pages: [Firewalls](/cloud/networking/firewalls) and [Zero trust](/cloud/resilience/zero-trust).
+
+## Decision 4: One person, one identity, with MFA and roles
+
+<Callout tone="blue" title="Decide first">
+  Three people share one owner login. The manager asks for "the same access as now, but safer". Who gets what, and what happens to the owner login?
+</Callout>
+
+**The answer.** Each person gets their own sign-in through Brightpost's single sign-on, with MFA, and a role through a group. Each role holds only what the job needs, which is <Term id="least-privilege">least privilege</Term>.
+
+- **The workshop manager:** read-only access and the bill.
+- **The assistant:** a narrow role that may start and stop the site's server, nothing else.
+- **Asha:** Brightpost's existing developer group.
+- **The freelancer:** removed. If he is hired again, he gets a contractor role that expires.
+
+The owner login stays for rare tasks, such as closing the account, and nobody uses it day to day. It gets a new long password in a safe, a hardware MFA key and no access keys.
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={5} minWidth={620} caption="People sign in once, with a password and a second proof, and their group decides which role they get." />
+
+**The trade-off.** The manager used to change settings himself in minutes; now he asks Asha, which can take a day. In return, every audit line names one person, and removing someone from the directory closes every door.
+
+Concept page: [Identity and Access](/cloud/fundamentals/identity-and-access), Step 7.
+
+## Decision 5: Turn on audit and detection
+
+<Callout tone="blue" title="Decide first">
+  Brightpost must tell customers whether their photos were taken. What must the account record so that, next time, the answer takes an hour instead of "we do not know"?
+</Callout>
+
+**The answer.** Three layers, built on the trail Asha started in Decision 1.
+
+1. **An audit trail** in every region, recording every setting change and every read of the two customer-data buckets; reads are off by default. A copy goes to the log archive in Brightpost's audit account, out of reach of anyone here.
+2. **A threat detector** that reads the trail, the network's flow logs and its DNS logs, and raises findings such as "a key used from an unknown network".
+3. **An alert rule** that sends high findings to the on-call engineer's phone. On [Threat detection](/cloud/resilience/threat-detection), a finding in a weekly email waited 55 hours.
+
+<AnimatedDiagram spec="animated/cloud/detection-pipeline" step={6} minWidth={620} caption="High findings go to the on-call engineer's phone within minutes; low ones stay in the weekly email." />
+
+**The trade-off.** Read records add a log line per read and grow the logs line of the bill, so only the 2 customer-data buckets record them. Having none costs more: nobody can say whether the photos or dumps were downloaded, so Brightpost writes to all 8,000 customers.
+
+Concept page: [Threat detection](/cloud/resilience/threat-detection).
+
+## Decision 6: Encrypt, then bring the account under guardrails
+
+<Callout tone="blue" title="Decide first">
+  The storage service already encrypts files at rest. Does encrypting the backups add anything? And what stops the next freelancer from undoing decisions 1 to 5?
+</Callout>
+
+**The answer, part one: encryption.** Encryption at rest by the storage service stops a stolen disk, not a caller with read permission: the service decrypts for anyone allowed to read. So the backup job encrypts each dump itself with <Term id="envelope-encryption">envelope encryption</Term>. Each file gets a fresh data key, wrapped by a managed key in the <Term id="kms">key service</Term>. Reading a dump then needs the file and the key, and only the restore role may use both.
+
+The dumps move into the backup vault in the audit account, with a delete lock, and 400 nights become 35. The key gets an `owner` tag and the longest deletion wait, the lesson from [Encryption and keys](/cloud/resilience/encryption-and-keys).
+
+<AnimatedDiagram spec="animated/cloud/encryption-states" step={3} minWidth={620} caption="Each state of the data has its own control and its own key holder. A key the storage service holds protects against a stolen disk, not against a caller." />
+
+**Part two: guardrails.** A guardrail is a rule set at the top of the <Term id="organization">organisation</Term> that no account below can override. The photo-site account joins Brightpost's organisation, in the production folder. On arrival the root guardrails reach it: 2 allowed regions, and no public buckets. Brightpost adds a third at the root: no new long-lived keys. Fixes 1 and 2 can no longer be undone from inside the account.
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={3} minWidth={620} caption="The account joins the tree, the root guardrail reaches it, and the public read is refused." />
+
+**The trade-off.** A restore gains one step, unwrapping the data key, about 10 minutes. A lost key means lost backups, hence the tag and the wait. Before the move, Asha checks that the site runs in one of the 2 allowed regions; otherwise the guardrail would stop it.
+
+Concept pages: [Encryption and keys](/cloud/resilience/encryption-and-keys), [Backups and vaults](/cloud/resilience/backups-and-vaults) and [Landing zones](/cloud/fundamentals/landing-zones).
+
+## The finished account
+
+<Compare
+  columns={["Finding", "Before", "After", "Kept shut by"]}
+  rows={[
+    ["Keys", "2 long-lived keys in the code, 1 with admin rights", "No keys; an attached identity with 1-hour tokens", "Guardrail: no new long-lived keys"],
+    ["Photos bucket", "21,000 photos open to anyone", "Private; 15-minute signed links", "Guardrail: no public buckets"],
+    ["Firewall", "Ports 22 and 5432 open to the internet", "No inbound port open; shell through remote access", "A posture check flags any rule open to the world"],
+    ["People", "1 owner login shared by 3", "3 named sign-ins with MFA; the owner login in a safe", "Single sign-on: leave the directory, lose every door"],
+    ["Audit", "A default record nobody read", "Trail and read records, copied to the log archive", "High findings page the on-call engineer"],
+    ["Backups", "400 plain dumps in the same account", "35 encrypted dumps in a vault with a delete lock", "A tagged key with the longest deletion wait"],
+  ]}
+  caption="The framing shop's account before and after. The last column is the prevent step: what stops each finding coming back."
+/>
+
+Decision 1 took the first hour. Decisions 2 and 3 took the first day, and decisions 4 to 6 the first week.
+
+## On AWS, Google Cloud and Azure
+
+The order is the same on all three clouds: contain, rank, fix, prevent. The names and some defaults differ.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Leaked keys:** IAM access keys. Deactivate, then delete. The credential report shows when each key was last used.
+    - **Public storage:** S3 Block Public Access, on for the whole account. Presigned URLs for one-photo links.
+    - **Firewall:** security groups. Systems Manager Session Manager opens a shell with no open port.
+    - **People:** IAM Identity Center with MFA. The root user gets MFA and no access keys.
+    - **Audit and detection:** CloudTrail event history keeps 90 days of management events; a trail keeps more and can add S3 data events. GuardDuty detects.
+    - **Encryption and guardrails:** AWS KMS keys. The account joins AWS Organizations by invitation, and service control policies then cap it.
+
+    **The difference that changes a design.** With SSE-KMS, reading an S3 object also needs permission to use its KMS key. A key policy naming only the backup and restore roles then keeps a leaked storage credential away from the dumps. On the other two clouds the storage service uses the key for the caller, so the split needs encryption inside the backup job.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Leaked keys:** service account keys. Disable, then delete. An organization policy constraint can forbid new ones.
+    - **Public storage:** public access prevention, on a bucket or enforced by organization policy. Signed URLs for one-photo links.
+    - **Firewall:** VPC firewall rules; the default network allows SSH and RDP from anywhere. IAP TCP forwarding gives SSH with no public address.
+    - **People:** Cloud Identity or Google Workspace accounts and groups, with 2-Step Verification.
+    - **Audit and detection:** Admin Activity audit logs are always on. Data Access audit logs are off by default for most services, Cloud Storage included. Security Command Center detects.
+    - **Encryption and guardrails:** data at rest is always encrypted; Cloud KMS gives a key you control. The project moves into a folder of the organization.
+
+    **The difference that changes a design.** Grants and policies inherit down the tree. When the project moves under the production folder, every role and organization policy set on that folder reaches it on arrival. Review the folder's grants before the move.
+  </Tab>
+  <Tab label="Azure">
+    - **Leaked keys:** storage account keys and service principal secrets. Regenerate both storage keys, then turn off Shared Key authorization.
+    - **Public storage:** turn off anonymous blob access on the storage account. A user delegation SAS gives one-photo links.
+    - **Firewall:** network security groups. Azure Bastion opens SSH with no public address on the VM.
+    - **People:** Microsoft Entra ID users and groups, with MFA through Conditional Access.
+    - **Audit and detection:** the Activity log keeps control-plane events for 90 days; diagnostic settings send it and storage read logs to a Log Analytics workspace. Microsoft Defender for Cloud detects.
+    - **Encryption and guardrails:** storage is encrypted at rest by default; Key Vault holds customer-managed keys. The subscription moves under a management group, where Azure Policy applies.
+
+    **The difference that changes a design.** A bought subscription often sits in the seller's own Entra tenant. Moving it into Brightpost's tenant deletes all of its role assignments, and managed identities must be set up again. List them first, then recreate them in the new directory.
+  </Tab>
+</Tabs>
+
+<CloudMapping diagram="cloud/iam-role-chain" lead="aws" />
+
+## Common mistakes in this interview
+
+- **Fixing the scariest finding first.** Open ports look alarming, but the admin key was in use. Ask what is being used right now.
+- **Deleting or rotating the key at once.** Deleting destroys the last-used record; a new key in the same repository is the same finding with a new date. Deactivate, investigate, then delete.
+- **Forgetting what the attacker left.** The `support-backup` user would have survived every other fix. List every identity and key in the account.
+- **Calling encryption the fix for a public bucket.** "Public" allows everyone to read, and the storage service decrypts for them.
+- **Stopping at the fix.** Without guardrails, the next freelancer can reopen any of the six.
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="You find an admin access key in a repository that was public for 8 months. What do you do in the first hour?" level="Senior" category="Cloud">
+    **Short answer.** Deactivate the key, look for what it did and left behind, and replace it with an attached identity. I keep its records as evidence and turn on the audit trail early.
+
+    **Why.** A key public for 8 months has been copied. Deactivating refuses it at once and keeps its last-used record, which at the framing shop showed calls from abroad. The settings history showed a user nobody made, with its own admin key. Rotating would only put a new key in the same code.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={2} caption="A valid key works for whoever holds it, and the cloud cannot tell the stranger from the owner." />
+
+    **Follow-ups the interviewer may ask.**
+    - What else could an admin key have created that survives its deletion?
+    - When do you finally delete the key?
+
+    **Watch out for.** Deleting the key first. It feels decisive, but it removes the one record of where the key was used.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An account has six security findings and you can fix one at a time. How do you rank them?" level="Senior" category="Cloud">
+    **Short answer.** Anything in use right now first, then anything open to anyone, then the rest by exposure and effort. I ask who can reach it, what it exposes, and how long the fix takes.
+
+    **Why.** At the framing shop the admin key came first: used 2 days earlier, and it opened everything. The public bucket came next: anyone online, 21,000 photos. The plain backups came last, because their only door was the admin key, already shut.
+
+    **Follow-ups the interviewer may ask.**
+    - Would you ever fix a low-ranked item first?
+    - How does the ranking change if the bucket held payment data?
+
+    **Watch out for.** Ranking by category, such as "identity first, always". The order comes from this account's facts.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A colleague says the public bucket is safe because the storage service encrypts everything at rest. Is that right?" level="Senior" category="Cloud">
+    **Short answer.** No. Encryption at rest protects against a stolen disk. The storage service decrypts for every caller it allows, and a public bucket allows everyone.
+
+    **Why.** With the service holding the key, only the permission check stands between a stranger and a photo, and "public" turns it off. The framing shop's dumps are now encrypted by the backup job itself, so reading one also needs a separate permission on the key.
+
+    <AnimatedDiagram spec="animated/cloud/encryption-states" step={2} caption="Each control stops one thing: encryption at rest stops a stolen disk, not a caller the store lets in." />
+
+    **Follow-ups the interviewer may ask.**
+    - When does a key you manage yourself add real protection?
+    - What new risk comes with managing the key?
+
+    **Watch out for.** Treating "encrypted" as "private". They answer different questions.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Three people share one owner login and work from home. How do you move them off it without locking anyone out?" level="Senior" category="Cloud">
+    **Short answer.** Give each person a named sign-in through single sign-on with MFA, and a role through a group. Test each one, then lock the owner login away with a new password and a hardware key.
+
+    **Why.** A shared login never names a person in the audit trail, and nobody can remove one of the three. At the framing shop the manager got read-only and billing, the assistant a restart-only role, and the freelancer nothing.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={5} highlight={["sso", "dev"]} caption="People sign in once with MFA, and the group decides the role." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the single sign-on service itself is down?
+    - How do you give the freelancer access for one week next month?
+
+    **Watch out for.** Adding MFA to the shared login and calling it done. It is still one login for 3 people.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The account kept no audit trail of its own. What can you still learn about the intrusion, and what will you never know?" level="Senior" category="Cloud">
+    **Short answer.** You can learn what changed: the default record of setting changes, each key's last-used data, and the server's own logs. You cannot learn what was read, because reads were never recorded.
+
+    **Why.** At the framing shop the settings record showed the stranger's new user, and the key's data a network abroad. Nothing showed whether anyone downloaded the photos or the dumps, so Brightpost wrote to all 8,000 customers.
+
+    <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={1} caption="Every call written to a trail, with a locked copy in the log archive: the record the photo-site account never had." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the copy live in a different account?
+    - Which reads would you record, and which would you skip?
+
+    **Watch out for.** Saying "the logs show nothing happened". A log that never recorded reads cannot show that.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You bought a company that has its own cloud account. How do you bring it under your guardrails without breaking its site?" level="Senior" category="Cloud">
+    **Short answer.** Contain the urgent findings, then check the account against every guardrail before it joins. Fix each conflict, then move it into its folder, where the guardrails apply on arrival.
+
+    **Why.** A guardrail applies the moment the account joins, so a conflict becomes an outage. The photo site had to run in one of Brightpost's 2 allowed regions, and it did. Its preview used a public bucket, so signed links shipped first, and the rule against long-lived keys waited until the site's keys were gone.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={3} caption="The account joins the production folder, and the root guardrail refuses the public read." />
+
+    **Follow-ups the interviewer may ask.**
+    - What changes if the account sits in the seller's own directory?
+    - Would you rather rebuild the site in a new account?
+
+    **Watch out for.** Moving the account on day one "so the guardrails fix it". A guardrail refuses things; it does not repair them.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Firewalls](/cloud/networking/firewalls)
+- [Secrets management](/cloud/resilience/secrets-management)
+- [Threat detection](/cloud/resilience/threat-detection)
+- [Encryption and keys](/cloud/resilience/encryption-and-keys)
+- [Backups and vaults](/cloud/resilience/backups-and-vaults)
+- [Landing zones](/cloud/fundamentals/landing-zones)
+- [Zero trust](/cloud/resilience/zero-trust)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Identity & Security on AWS](/cloud/aws/security), [on Google Cloud](/cloud/gcp/security) and [on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security) and [Common attacks and defences](/system-design/fundamentals/common-attacks)
+
+## Further reading
+
+- [AWS IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html): keys, root user and least privilege.
+- [AWS Security Incident Response Guide](https://docs.aws.amazon.com/whitepapers/latest/aws-security-incident-response-guide/welcome.html): contain, investigate, recover.
+- [Google Cloud security best practices](https://cloud.google.com/security/best-practices): an index by topic.
+- [Azure security best practices and patterns](https://learn.microsoft.com/azure/security/fundamentals/best-practices-and-patterns): identity, network and data.

@@ -1,27 +1,52 @@
 ---
 title: "Caching on AWS"
 description: "ElastiCache (Valkey, Redis OSS, Memcached), ElastiCache Serverless, MemoryDB and DAX: which cache fits, and the Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 A cache in a system design diagram is usually **ElastiCache** on AWS. The choices that matter are the engine (Valkey for new clusters), node-based versus Serverless, and whether the data may be lost. Data you cannot lose belongs in **MemoryDB** or a real database. For DynamoDB-heavy designs, **DAX** caches without any cache code.
+
+## The idea
+
+A managed cache keeps answers you will need again in fast memory, and the cloud runs the servers, the copies and the failover. You still decide what goes in, under which key, for how long, and what happens on a miss.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's 9:00 sale-day stampede, is in [Managed Caches](/cloud/data/managed-caches). The theory of cache strategies and invalidation is in [Caching](/system-design/patterns/caching).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" stepper cloud="aws" minWidth={620} caption="Brightpost's cache on AWS: ElastiCache in front of RDS PostgreSQL, guarded against stampedes, with a replica, shards and CloudWatch alarms." />
+
+<CloudMapping diagram="cloud/cache-patterns" lead="aws" />
 
 ## TL;DR
 
 - **ElastiCache for Valkey** for cache-aside, sessions, counters, leaderboards, rate limits and ephemeral state such as presence.
 - **ElastiCache Serverless** when traffic is unpredictable or you don't want to size shards; **node-based clusters** for steady, large caches at the lowest cost.
 - **MemoryDB** when Redis data structures are the system of record and must survive failover without data loss.
-- **DAX** for read-heavy DynamoDB tables.
-- **CloudFront** is also a cache, for HTTP responses at the edge.
+- **DAX** for read-heavy DynamoDB tables. **CloudFront** is also a cache, for HTTP responses at the edge.
 
 ## At a glance
 
 <CloudGroupTable group="caching" lead="aws" />
+
+## How it fits together on AWS
+
+In step 2 the app servers read the hero poster's key from an ElastiCache node and fill it from RDS on a miss. Steps 3 and 4 are code in the app. ElastiCache has no built-in guard against a stampede, so the rebuild lock is a `SET … NX EX 5` on the same cache. In step 5 the node becomes a **replication group**: a primary plus a replica in a second Availability Zone, with Multi-AZ automatic failover. In step 6, **cluster mode enabled** spreads the slots over shards. Step 7 is CloudWatch.
+
+| The concept says | On AWS | What to know |
+|---|---|---|
+| The cache's one address | Primary endpoint (one shard) or configuration endpoint (cluster mode enabled) | The endpoint name stays the same after a failover; clients must reconnect |
+| Replica in zone B | A replica in the same replication group, Multi-AZ on | A reader endpoint spreads reads over replicas |
+| Shards | Cluster mode enabled | Needs a cluster-aware client; resharding is online |
+| What to watch | CloudWatch: `CacheHitRate`, `Evictions`, `DatabaseMemoryUsagePercentage`, `EngineCPUUtilization`, `ReplicationLag` | Alarm on engine CPU, not the node's average CPU |
 
 ## Services
 
 ### Amazon ElastiCache
 
 <CloudServiceProfile id="aws-elasticache" />
+
+Pick it when the data can be rebuilt from a database or other source: page caches, sessions, counters, presence.
 
 | Use | Data structure | Example |
 |---|---|---|
@@ -37,9 +62,13 @@ A cache in a system design diagram is usually **ElastiCache** on AWS. The choice
 
 <CloudServiceProfile id="aws-memorydb" />
 
+Pick it when the Redis-style data is the only copy and an acknowledged write must survive a failover.
+
 ### Amazon DynamoDB Accelerator (DAX)
 
 <CloudServiceProfile id="aws-dax" />
+
+Pick it when a DynamoDB table is read far more than it is written and eventually consistent reads are fine.
 
 ## Where this shows up in system design
 
@@ -52,19 +81,52 @@ A cache in a system design diagram is usually **ElastiCache** on AWS. The choice
 
 - **Using the cache as the database.** A failover or eviction can lose recent writes. Rebuild from the source, or use MemoryDB.
 - **No TTLs.** Stale data never leaves and memory fills. Give every key a TTL unless there is a clear reason not to.
-- **Cache stampede on a hot key.** When it expires, thousands of requests hit the database at once. Use request coalescing, early refresh or a lock (see [Caching](/system-design/patterns/caching)).
+- **Cache stampede on a hot key.** When it expires, thousands of requests hit the database at once. Use a rebuild lock, early refresh and jittered TTLs (see [Managed Caches](/cloud/data/managed-caches)).
 - **Multi-key operations across shards.** In cluster mode, keys in one transaction must share a hash slot. Use hash tags such as `{user42}:cart`.
-- **Picking Redis OSS by habit.** Valkey is protocol-compatible and cheaper on ElastiCache.
+- **Picking Redis OSS by habit.** Valkey is protocol-compatible and priced lower on ElastiCache.
 
 ## Related
 
-[Databases on AWS](/cloud/aws/databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Caching](/system-design/patterns/caching) · [Key-Value Stores](/system-design/databases/key-value-stores) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing)
+[Managed Caches](/cloud/data/managed-caches) · [Caching on Google Cloud](/cloud/gcp/caching) · [Caching on Azure](/cloud/azure/caching) · [Databases on AWS](/cloud/aws/databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Caching](/system-design/patterns/caching) · [Key-Value Stores](/system-design/databases/key-value-stores) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing)
 
 <InterviewQuestions>
   <InterviewQuestion question="ElastiCache or MemoryDB?" category="Cloud" level="Mid">
-    ElastiCache when the data can be rebuilt from a source of truth: caches, sessions you can recreate, counters that may reset. MemoryDB when the in-memory store is the source of truth and must not lose acknowledged writes on failover; it pays for that with slower writes and a higher price.
+    **Short answer.** ElastiCache when the data can be rebuilt from a source of truth: page caches, sessions you can recreate, counters that may reset. MemoryDB when the in-memory store is the source of truth and must not lose an acknowledged write.
+
+    **Why.** ElastiCache copies writes to its replica a moment later, so a failover can drop the last few. For Brightpost's product pages that is only a miss. MemoryDB writes each change to a log across several zones before it answers. That makes writes take a few milliseconds instead of well under one, and it costs more.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={5} cloud="aws" highlight={["cache", "replica"]} minWidth={620} caption="ElastiCache copies to the replica after it answers, so the newest writes can be lost in a failover." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would snapshots on ElastiCache make it safe for orders?
+    - Where would Brightpost's baskets go, and why?
+
+    **Watch out for.** Calling ElastiCache with Multi-AZ "durable". It survives a node, not every recent write.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you keep a presence system in ElastiCache?" category="Architecture" level="Mid">
-    Each connected client's chat server sets a key per user with a short TTL (say 30 seconds) and refreshes it on every heartbeat. A missing key means offline. Last-seen times are written when a key expires or the user disconnects. Status changes are pushed to interested users through pub/sub or the messaging pipeline.
+
+  <InterviewQuestion question="How would you keep a presence system in ElastiCache?" category="Cloud" level="Mid">
+    **Short answer.** Each chat server sets a key per connected user with a short TTL, say 30 seconds, and refreshes it on every heartbeat. A missing key means offline.
+
+    **Why.** The TTL does the clean-up: a crashed server stops refreshing, and its users go offline within 30 seconds with no extra code. The value can hold the user's chat server, so the same key routes messages. Last-seen times are written to the database when a user disconnects. Status changes reach friends through pub/sub or the messaging pipeline.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to presence during an ElastiCache failover?
+    - How do you avoid sending every status change to every friend?
+
+    **Watch out for.** Storing presence in the database. Millions of heartbeats a minute are writes nobody needs to keep.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost outgrows one ElastiCache shard. What changes when you turn on cluster mode, and what still breaks?" category="Cloud" level="Senior">
+    **Short answer.** The keys spread over several shards, each with its own replica, and the app connects through the configuration endpoint with a cluster-aware client. Multi-key commands now need related keys in one slot, and a hot key still lives on one shard.
+
+    **Why.** Brightpost's 260 MB fits one node today, so this is the growth plan. With cluster mode on, the client learns which shard owns each slot and sends each command straight there. Resharding moves slots online. A transaction on `basket:42` and `basket:42:items` fails unless both use a hash tag such as `{basket:42}`. The hero poster's 600 reads a second still land on one shard's main thread.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={6} cloud="aws" highlight={["cache", "shards", "key"]} minWidth={620} caption="Cluster mode hands slots to new shards; the hero poster's key stays on the shard that owns its slot." />
+
+    **Follow-ups the interviewer may ask.**
+    - When is a bigger node a better answer than more shards?
+    - Would ElastiCache Serverless remove this decision?
+
+    **Watch out for.** Pointing the old single-shard client at the configuration endpoint. A client that is not cluster-aware gets redirect errors on most keys.
   </InterviewQuestion>
 </InterviewQuestions>

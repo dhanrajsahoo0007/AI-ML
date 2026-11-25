@@ -167,7 +167,7 @@ This hub is for a learner who has finished Fundamentals and can say what a regio
 - Needs: none.
 - Questions: 6 (1J/3M/2S). "SSE or WebSockets for a one-way live dashboard?" · "Why do CDNs and L7 proxies break long polling and SSE in surprising ways?" · "Design live order tracking for 1M concurrent users on the cloud of your choice."
 - Exams: SAA 2.1 (API Gateway WebSocket, loosely coupled); AZ-305 messaging/event-driven.
-- Links: load-balancing, api-gateways, /system-design/fundamentals/websockets, /system-design/fundamentals/server-sent-events, /system-design/fundamentals/long-polling, /system-design/fundamentals/ajax-polling, /cloud/data/streaming-and-messaging-services, /system-design/case-studies/facebook-messenger.
+- Links: load-balancing, api-gateways, /system-design/fundamentals/websockets, /system-design/fundamentals/server-sent-events, /system-design/fundamentals/long-polling, /system-design/fundamentals/ajax-polling, /cloud/data/streaming-and-messaging-services, /system-design-case-studies/case-studies/facebook-messenger.
 
 #### 13. webhooks-on-the-cloud — Receiving and Sending Webhooks on the Cloud (Intermediate, ~1600 words)
 - Scope: The reverse of an API call: a provider POSTs to your URL when something happens. Delivery, retries, signatures, idempotency and the receiver design that never loses an event.

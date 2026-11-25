@@ -6,7 +6,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // spans the three zones. Step 3 (the failure step): at 9:02 on sale day the group adds 5 servers; each one waits on
 // the slow mirror, takes 11 minutes to be ready, and the load balancer keeps them out of service. Step 4: an image
 // build installs the packages once into a golden image, v12, and the template points to it. Step 5: new servers boot
-// from v12 and join the load balancer about 3 minutes later.
+// from v12 and join the load balancer about 4 minutes later.
 //
 // Nodes never move between steps. The boot-time download is not a node: it is the step-1 edge from the mirror
 // (`until: 1`) and the three red step-3 edges (`until: 3`). The step-3 "not ready" edges and the step-5 "in service"
@@ -41,7 +41,7 @@ const spec: DiagramSpec = {
     { title: "A group of servers in three zones" },
     { title: "Sale day: new servers take 11 minutes" },
     { title: "Bake the packages into an image" },
-    { title: "New servers ready in 3 minutes" },
+    { title: "New servers ready in 4 minutes" },
   ],
   zones: [
     { id: "region", title: "London region", tone: "neutral", kind: "region", x: 10, y: 215, w: 525, h: 390 },
@@ -267,10 +267,10 @@ const spec: DiagramSpec = {
     { from: "build", to: "golden", label: "bakes v12", packet: true, delay: 1.2, step: 4 },
     { from: "golden", to: "template", label: "uses v12", dashed: true, step: 4 },
 
-    // Step 5: new servers boot from v12 and pass the health check about 3 minutes later.
-    { from: "golden", to: "new-c", label: "boots: 3 min", packet: true, step: 5 },
+    // Step 5: new servers boot from v12 and pass the health check about 4 minutes later.
+    { from: "golden", to: "new-c", label: "ready: 4 min", packet: true, step: 5 },
     { from: "lb", to: "new-a", tone: "green", packet: true, delay: 1, step: 5 },
-    { from: "lb", to: "new-b", label: "in at 9:05", tone: "green", packet: true, delay: 1, step: 5 },
+    { from: "lb", to: "new-b", label: "in at 9:06", tone: "green", packet: true, delay: 1, step: 5 },
     { from: "lb", to: "new-c", tone: "green", packet: true, delay: 1, step: 5 },
   ],
 };

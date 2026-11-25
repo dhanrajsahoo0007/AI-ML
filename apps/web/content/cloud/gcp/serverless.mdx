@@ -1,20 +1,47 @@
 ---
 title: "Serverless & Orchestration on Google Cloud"
-description: "Cloud Run functions, Workflows, Eventarc, Cloud Scheduler, API Gateway and Apigee, with the AWS and Azure equivalents."
+description: "Cloud Run functions, Workflows, Eventarc, Cloud Scheduler, API Gateway and Apigee: when each fits and how they combine on Google Cloud."
+updated: 2026-11-14
 ---
 
-On Google Cloud, serverless means **Cloud Run**. Functions (Cloud Run functions, formerly Cloud Functions) run on it, events reach it through **Eventarc** or **Pub/Sub**, **Workflows** coordinates multi-step processes, and **API Gateway** or **Apigee** sits in front. Because a Cloud Run instance serves many requests at once, serverless designs here hit fewer cold starts and database-connection limits than on Lambda.
+Brightpost resizes every product photo with a function, and a sale-day burst of 1,500 photos once took every database connection the shop had. On Google Cloud, the services in this group decide how such a burst arrives, how many copies run, and what happens to a photo that fails. The fact that changes a design here: functions run on **Cloud Run**, and one instance can serve many requests at once.
+
+## The idea
+
+A <Term id="serverless">serverless</Term> function is code the cloud runs once per event, in as many copies as there are events in flight. You choose the trigger and a cap on copies; Google Cloud owns the machines, the start-up and the scaling.
+
+<Callout tone="blue" title="Learn the idea">
+  [Serverless Functions](/cloud/compute/serverless-functions) explains triggers, cold starts and why copies multiply. [API Gateways & API Management](/cloud/networking/api-gateways) covers the front door. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers Cloud Run services, for when a function is the wrong shape.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" stepper cloud="gcp" minWidth={620} caption="Brightpost's resize function in six steps, with Google Cloud names. Step 2 is the 1,500-photo burst; steps 3 and 4 repair it." />
+
+<CloudMapping diagram="cloud/serverless-event-triggers" lead="gcp" />
 
 ## TL;DR
 
-- **Cloud Run functions** for event-driven glue; **Cloud Run services** for anything longer-lived.
-- **Workflows** for multi-step processes and sagas, defined in YAML or JSON.
-- **Eventarc** routes Google Cloud and custom events; **Pub/Sub** carries high-volume events.
-- **API Gateway** for simple serverless APIs; **Apigee** for full API management.
+- **Cloud Run functions** run event-driven glue code; **Cloud Run services** run anything longer-lived or container-shaped.
+- **Eventarc** delivers events from Google Cloud services to functions; **Pub/Sub** carries high-volume events and holds a burst.
+- **Workflows** coordinates multi-step processes and sagas; **Cloud Scheduler** starts work on a timetable.
+- **API Gateway** fronts a few serverless APIs from an OpenAPI file; **Apigee** is full API management for partners.
 
 ## At a glance
 
 <CloudGroupTable group="serverless" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Step 1: a photo lands in the Cloud Storage uploads bucket. Eventarc turns that into an event and calls the resize function, a Cloud Run function. It writes a thumbnail to a second bucket and saves its address in Cloud SQL. In step 2 the burst arrives. Each instance holds its own database connection, so the instance count is what matters.
+
+Step 3 sets **maximum instances** on the function and a concurrency per instance. A connection pool such as PgBouncer sits in front of Cloud SQL. Step 4 routes the bucket's events through a Pub/Sub topic. A subscription feeds the function, and a dead-letter topic parks photos that keep failing. Step 5 is a Cloud Scheduler job, and step 6 is the function's own HTTPS address.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| A copy | An instance | Serves up to its concurrency setting at once, not one event |
+| Cap on copies | Maximum instances | Set per function or service |
+| Keeping copies warm | Minimum instances | Billed while idle |
+| Failed event | Retry on failure, then a dead-letter topic | Event-driven functions retry only when retries are turned on |
+| Scheduled trigger | Cloud Scheduler job | Calls an HTTP address or publishes to a Pub/Sub topic |
 
 ## Services
 
@@ -22,34 +49,80 @@ On Google Cloud, serverless means **Cloud Run**. Functions (Cloud Run functions,
 
 <CloudServiceProfile id="gcp-cloud-run-functions" />
 
-### Workflows
-
-<CloudServiceProfile id="gcp-workflows" />
+Pick it when a small piece of code reacts to one event, such as a new file, a Pub/Sub message or an HTTP call. Because functions are Cloud Run underneath, a function can grow into a Cloud Run service when it needs more control. That service's profile is on [Containers on Google Cloud](/cloud/gcp/containers#gcp-cloud-run).
 
 ### Eventarc
 
 <CloudServiceProfile id="gcp-eventarc" />
 
+Pick it when a function or service should react to a change in a Google Cloud resource, or to your own events. Eventarc Standard routes events with triggers; Eventarc Advanced adds buses and pipelines for many producers and consumers.
+
+### Workflows
+
+<CloudServiceProfile id="gcp-workflows" />
+
+Pick it when a process has several steps that must run in order with retries, such as charging a card, telling the printing partner and sending a dispatch email. A workflow can also wait for a callback from an outside system.
+
 ### Apigee
 
 <CloudServiceProfile id="gcp-apigee" />
 
-## Coming from AWS
+Pick it when partners call your API with their own keys, quotas and a developer portal. For a few Cloud Run services that need a JWT check, the lighter **API Gateway** is enough.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| Lambda | Cloud Run functions | Many requests per instance, so fewer cold starts and connections |
-| Step Functions | Workflows | YAML/JSON definitions; no visual designer as the main authoring tool |
-| EventBridge | Eventarc | Built on Pub/Sub; Advanced tier adds buses and pipelines |
-| API Gateway WebSocket APIs | Cloud Run with WebSockets | No managed connection service; you hold connections in Cloud Run |
-| EventBridge Scheduler | Cloud Scheduler | Cron jobs that call HTTP, Pub/Sub or Workflows |
+## Common mistakes
+
+- **Leaving maximum instances unset in front of Cloud SQL.** A burst starts as many instances as it needs, and each opens connections. Set the cap from what the database can take.
+- **Assuming failed events are retried.** An event-driven function drops a failed event unless retries are turned on. Turn them on, make the handler <Term id="idempotent">idempotent</Term>, and add a dead-letter topic.
+- **Doing work after the reply.** With request-based billing, an instance has CPU only while it handles a request. Background work after the response stalls; use a Cloud Run job or a queue instead.
+
+## Where this shows up in system design
+
+- **Image and file pipelines:** Cloud Storage events through Pub/Sub to a capped function, as in the resize story above.
+- **Order follow-up:** a [saga](/system-design/patterns/saga) in Workflows that charges, reserves and ships, with an undo step for each.
+- **Partner APIs:** Apigee in front of Cloud Run, with a plan per partner (see [Rate Limiting](/system-design/patterns/rate-limiting)).
 
 ## Related
 
-[Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Serverless & Orchestration on Azure](/cloud/azure/serverless) · [Messaging on Google Cloud](/cloud/gcp/messaging) · [Saga and Distributed Transactions](/system-design/patterns/saga)
+[Serverless Functions](/cloud/compute/serverless-functions) · [API Gateways & API Management](/cloud/networking/api-gateways) · [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Serverless & Orchestration on Azure](/cloud/azure/serverless) · [Messaging on Google Cloud](/cloud/gcp/messaging) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="What is the Google Cloud equivalent of Step Functions?" category="Cloud" level="Junior">
-    Workflows. It orchestrates calls to Cloud Run, functions and Google APIs with retries, branching and callbacks, defined in YAML or JSON. For code-first durable workflows, teams also use Cloud Tasks with idempotent handlers.
+  <InterviewQuestion question="When would you use Workflows instead of having one Cloud Run function call the next?" category="Cloud" level="Junior">
+    **Short answer.** When a process has several steps that must run in order, each with its own retries, and someone needs to see where it stopped. Workflows holds the order and the error handling; the functions stay small.
+
+    **Why.** In a chain, each function waits and pays while the next one runs, and a failure in step 3 leaves no record of steps 1 and 2. A workflow keeps the state of each run, retries a step with backoff, and can run an undo step. Brightpost's order follow-up has three steps: charge the card, tell the printing partner, send the email. That is a workflow, not a chain.
+
+    **Follow-ups the interviewer may ask.**
+    - How would the workflow undo the charge if the printing partner refuses?
+    - When is a Pub/Sub topic better than a workflow?
+
+    **Watch out for.** Putting heavy work inside the workflow itself. It should call services, not do the processing.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Cloud Run functions can serve many requests per instance. How does that change Brightpost's 1,500-photo burst?" category="Cloud" level="Mid">
+    **Short answer.** It cuts the number of instances, and so the number of database connections. At a concurrency of 80, 300 photos in flight need about 4 instances, not 300. The code must then be safe to share between requests.
+
+    **Why.** Connections follow instances. On a platform with one event per copy, every extra photo starts a copy with its own connection. On Cloud Run, a busy instance takes the next request too, until it reaches its concurrency setting. Maximum instances still caps the total, and a pool still protects Cloud SQL.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-request" step={3} caption="With one photo per copy, a second photo starts copy B. On Cloud Run, copy A would take both." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does shared concurrency ask of global variables in your code?
+    - When would you set concurrency to 1 on purpose?
+
+    **Watch out for.** Raising concurrency for heavy image work. Each request needs memory and CPU, so too many at once slows them all.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An Eventarc-triggered function fails on some photos. How do you make sure no photo is lost?" category="Cloud" level="Mid">
+    **Short answer.** Turn on retries for the function, make the handler idempotent, and add a dead-letter topic to the Pub/Sub subscription. Then alert on any message in the dead-letter topic.
+
+    **Why.** Without retries, an event-driven function drops a failed event. With retries, a bad photo can retry for a long time. A dead-letter topic parks it after a set number of tries, so it stops blocking and nobody loses it. Brightpost's handler writes under the photo's own name, so a repeated run changes nothing.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={4} cloud="gcp" path="uploads>queue>fn" caption="Each photo becomes one Pub/Sub message; photos that fail too often go to a dead-letter topic." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you replay the parked photos once the bug is fixed?
+    - What does the 04:00 Cloud Scheduler sweep add on top?
+
+    **Watch out for.** Turning retries on without idempotency. Every retry of a non-idempotent handler repeats its side effects.
   </InterviewQuestion>
 </InterviewQuestions>

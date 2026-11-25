@@ -1,20 +1,47 @@
 ---
 title: "Storage on Azure"
 description: "Blob Storage, Data Lake Storage, Managed Disks, Azure Files and NetApp Files, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Azure groups blob, file, queue and table storage under a **storage account**, and **redundancy is chosen per account**: locally (LRS), across zones (ZRS), to a paired Region (GRS) or both (GZRS). **Blob Storage** has hot, cool, cold and archive tiers, and turning on the **hierarchical namespace** makes it Data Lake Storage for analytics.
+Brightpost renders about 400 print files a day, stores product photos and runs servers that need disks. On Azure one object shapes that design: the **storage account**. Blob Storage and Azure Files live inside one, and the account sets redundancy, network rules and keys for everything in it. So you group data by how it must be copied, one account per group.
+
+## The idea
+
+A cloud keeps data in three shapes: a disk for one machine, a folder many machines mount, and a bucket of whole files fetched by key. You pick the shape by how your program reaches the data, then give each shape its own backup.
+
+<Callout tone="blue" title="Learn the idea">
+  New to the three shapes? [Object, Block and File](/cloud/data/storage-types) follows one Brightpost print file from a private disk to a share and a bucket. [Object Storage](/cloud/data/object-storage), [Block Storage](/cloud/data/block-storage), [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) and [Backups and Vaults](/cloud/resilience/backups-and-vaults) go deeper. This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" stepper cloud="azure" minWidth={620} caption="Brightpost's print files on Azure in five steps: Managed Disks, a retry that cannot find its file, an Azure Files share, a Blob container and Azure Backup." />
+
+<CloudMapping diagram="cloud/storage-three-shapes" lead="azure" />
 
 ## TL;DR
 
-- **Blob Storage** for blobs; choose **ZRS** or **GZRS** for zone or Region resilience.
-- **Lifecycle policies** move blobs from hot to cool, cold and archive.
-- **Managed Disks** (Premium SSD v2, Ultra) for VMs; **Azure Files** for SMB/NFS shares.
-- **SAS tokens** give clients direct, time-limited access.
+- **Blob Storage** for whole files, in containers inside a storage account. Access tiers run hot, cool, cold and archive.
+- **Redundancy is an account setting:** LRS, ZRS, GRS or GZRS. Choose it before you fill the account.
+- **Managed Disks** for VM disks, **Azure Files** for SMB and NFS shares. Disks are zonal unless you pick a zone-redundant type.
+- **Shared access signatures** give time-limited links; **Azure Backup** keeps copies in vaults.
 
 ## At a glance
 
 <CloudGroupTable group="storage" lead="azure" />
+
+## How it fits together on Azure
+
+In step 1 two Azure VMs sit behind an internal Azure Load Balancer, each saving print files on its own Managed Disk. In step 2 a retry lands on the other VM, which finds nothing on its disk.
+
+In step 3 both VMs mount one Azure Files share at `/print`, so either can finish any job. In step 4 print files move to a Blob Storage container, one blob per order. The partner downloads each with a **user delegation SAS**, a signed link that Microsoft Entra ID vouches for instead of the account key. A lifecycle management policy deletes print files after 30 days. In step 5 Azure Backup protects the disks and the share in a vault, and blob versioning keeps old copies.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Bucket | Storage account plus container | Redundancy, network rules and keys belong to the account |
+| Storage class | Access tier: hot, cool, cold, archive | Archive is offline; a blob is rehydrated first, which can take hours |
+| Disk for one VM | Managed Disk, LRS or ZRS | ZRS disks write to three zones; only some disk types offer it |
+| Signed link | Shared access signature (SAS) | Prefer user delegation SAS; turn shared key access off where you can |
+| Backup copies | Recovery Services vault or Backup vault | A vault's redundancy cannot change once items are protected |
 
 ## Services
 
@@ -22,24 +49,101 @@ Azure groups blob, file, queue and table storage under a **storage account**, an
 
 <CloudServiceProfile id="azure-blob" />
 
+**Pick it when** the data is whole files: uploads, photos, exports, logs or a data lake.
+
+Every storage account has one of four redundancy options:
+
+| Option | Copies kept | Survives |
+|---|---|---|
+| **LRS** (locally redundant) | Three, in one datacenter | A failed disk or server |
+| **ZRS** (zone-redundant) | Three, across three zones of the region | A zone failure |
+| **GRS** (geo-redundant) | LRS, plus a copy sent later to the paired region | A region failure, after a failover |
+| **GZRS** (geo-zone-redundant) | ZRS, plus a copy sent later to the paired region | A zone failure, and a region failure after a failover |
+
+You can read from the second region only with the RA- (read-access) variants, and its copy can lag behind the first.
+
 ### Azure Managed Disks
 
 <CloudServiceProfile id="azure-managed-disks" />
+
+**Pick it when** one VM or AKS pod needs a disk; Premium SSD v2 or Ultra Disk when IOPS matter more than size.
 
 ### Azure Files
 
 <CloudServiceProfile id="azure-files" />
 
-## Coming from AWS
+**Pick it when** several VMs must open the same files by path, such as Windows apps that expect an SMB drive.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| S3 bucket | Storage account + container | Redundancy and some limits are set per account |
-| S3 Cross-Region Replication | GRS / GZRS | Replication to the paired Region is an account setting |
-| Pre-signed URL | Shared access signature (SAS) | Prefer user-delegation SAS signed with Entra ID |
-| EFS / FSx for Windows | Azure Files | SMB and NFS in one service |
-| EBS gp3 / io2 | Premium SSD v2 / Ultra Disk | Performance set independently of size |
+### Moving and syncing data: Data Box and File Sync
+
+- **Data Box:** devices Microsoft ships you to load tens of terabytes or more into Blob Storage or Azure Files.
+- **File Sync:** keeps Windows file servers in step with an Azure file share, and can leave rarely used files in the cloud only.
+
+<CloudServiceProfile id="azure-data-box" />
+
+<CloudServiceProfile id="azure-file-sync" />
+
+### Backup and recovery: Azure Backup and Site Recovery
+
+<CloudServiceProfile id="azure-backup" />
+
+**Pick it when** VMs, disks and shares need backups that one stolen admin login cannot wipe.
+
+<CloudServiceProfile id="azure-site-recovery" />
+
+**Pick it when** whole VMs must start in another region within minutes.
+
+## Common mistakes
+
+- **Leaving production data on LRS.** Three copies in one datacenter do not survive a zone failure. Use ZRS, or GZRS when a region outage must not lose the data.
+- **Signing links with the account key.** Such a SAS can reach anything in the account and is hard to revoke. Use a user delegation SAS.
+- **Archiving data you may need quickly.** An archived blob must be rehydrated before it can be read, which can take hours. Use the cold tier instead.
+
+## Where this shows up in system design
+
+- **Media and uploads:** photos and videos go straight to Blob Storage with a SAS, then a function makes thumbnails. [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) covers the pattern.
+- **Lift-and-shift:** Windows apps keep their shared drive on Azure Files; branch offices keep a local copy with File Sync.
 
 ## Related
 
-[Storage on AWS](/cloud/aws/storage) · [Storage on Google Cloud](/cloud/gcp/storage) · [Databases on Azure](/cloud/azure/databases) · [Object / Blob Storage](/system-design/databases/object-storage)
+[Object, Block and File](/cloud/data/storage-types) · [Object Storage](/cloud/data/object-storage) · [Block Storage](/cloud/data/block-storage) · [Backups and Vaults](/cloud/resilience/backups-and-vaults) · [Storage on AWS](/cloud/aws/storage) · [Storage on Google Cloud](/cloud/gcp/storage) · [Databases on Azure](/cloud/azure/databases) · [System Design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Two print servers on Azure VMs each save files on their own Managed Disk. A retry on the second server cannot find the file. What do you change?" category="Cloud" level="Junior">
+    **Short answer.** Move the files off the private disks. Mount one Azure Files share on both servers if the tool must write to a folder. Better still, write each file to a Blob Storage container by name.
+
+    **Why.** A Managed Disk attaches to one VM, so the other server cannot see its files. An Azure Files share is a folder both VMs mount, over SMB or NFS, so any server can finish any job. A blob can be fetched by any program with access, including the partner with a SAS.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={3} cloud="azure" highlight={["pa", "pb", "share"]} caption="Both print servers mount one Azure Files share, so the retry on server B finds the file." />
+
+    **Follow-ups the interviewer may ask.**
+    - Azure offers shared disks. Why are they not the fix here?
+    - Which redundancy option should the share's storage account use?
+
+    **Watch out for.** Forgetting that the share inherits its storage account's redundancy. A share in an LRS account is lost with that one datacenter.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="LRS, ZRS, GRS or GZRS for Brightpost's product photos?" category="Cloud" level="Mid">
+    **Short answer.** ZRS for the photos the shop serves, so a zone failure changes nothing. Add GZRS, or object replication to another account, if losing a whole region must not lose the photos.
+
+    **Why.** LRS keeps three copies in one datacenter, so a zone outage makes them unreachable. ZRS spreads the copies over three zones and keeps serving. The geo options send copies to the paired region in the background, so the latest writes can be missing after a failover.
+
+    **Follow-ups the interviewer may ask.**
+    - Who starts the failover to the paired region, and what happens to the account afterwards?
+    - Why would a separate locked copy in another account still be worth having?
+
+    **Watch out for.** Treating GRS as a backup. It copies deletes and overwrites as faithfully as new photos; versioning and soft delete are what undo them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How should the printing partner download print files from Blob Storage without ever seeing an account key?" category="Cloud" level="Mid">
+    **Short answer.** The print service asks Entra ID for a user delegation key, then signs a short-lived, read-only SAS for one blob. The partner downloads with that link, and shared key access stays off on the account.
+
+    **Why.** An account-key SAS is signed with a key that can reach everything in the account, and revoking it means rotating that key. A user delegation SAS is signed with the service's own Entra identity. Its rights can never exceed that identity's role, and revoking the delegation key cancels every link it signed.
+
+    **Follow-ups the interviewer may ask.**
+    - How long should each link live, given that the partner may retry?
+    - How do you restrict the links to the partner's own network addresses?
+
+    **Watch out for.** Signing links that cover a whole container "to make it easier". One leaked link then exposes every customer's print file.
+  </InterviewQuestion>
+</InterviewQuestions>

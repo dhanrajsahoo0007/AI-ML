@@ -1,14 +1,27 @@
 ---
 title: "Compute on Azure"
 description: "Virtual Machines, Scale Sets, Spot VMs, App Service and Azure Batch, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Azure's VM service is **Virtual Machines**, with **Virtual Machine Scale Sets** for autoscaling fleets. The Azure-specific strengths are Windows and SQL Server licensing (**Azure Hybrid Benefit** reuses existing licences) and **App Service**, the most widely used code-to-web-app platform of the three clouds. For new event-driven or containerised services, **Container Apps** and **Functions** usually come first.
+Brightpost's shop runs on two app servers on a normal day and up to 10 on a sale day. On Azure those servers are **Azure Virtual Machines**, grouped in a **Virtual Machine Scale Set** that adds and removes them. One choice shapes the design: how to spread the VMs. **Availability zones** put them in separate datacenters of a region. An **availability set** only spreads them across racks inside one datacenter. Azure is also strong for Windows and SQL Server, because **Azure Hybrid Benefit** reuses licences you already own.
+
+## The idea
+
+A VM fleet is identical servers built from one template. A control loop keeps it the right size: it measures a metric such as average processor use, compares it with a target, adds or removes servers, then waits. On Azure the template is the scale set model, the group is the scale set, and the loop is an autoscale setting in Azure Monitor.
+
+<Callout tone="blue" title="Learn the idea">
+  New to this? [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) covers VM series, images and fleets, and [Autoscaling: The Control Loop](/cloud/compute/autoscaling) walks through the loop with Brightpost's newsletter evening. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers App Service, and [Choosing Compute](/cloud/start-here/choosing-compute) helps you decide whether you need VMs at all.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" stepper cloud="azure" minWidth={620} caption="Brightpost's newsletter evening on Azure, in seven steps. Switch the toggle to compare names on the other clouds." />
+
+<CloudMapping diagram="cloud/autoscaling-loop" lead="azure" />
 
 ## TL;DR
 
-- **Virtual Machines + Scale Sets** across availability zones when you need the machine.
-- **Reservations** or the **savings plan for compute** for steady load; **Spot VMs** for interruptible work (about 30 seconds of notice).
+- **Virtual Machines in a Scale Set**, spread across <Term id="availability-zone">availability zones</Term>, when you need the machine.
+- **Reservations** or the **savings plan for compute** for the steady base; **Spot VMs** for interruptible work (about 30 seconds of notice).
 - **App Service** for classic web apps and APIs, with deployment slots for zero-downtime swaps.
 - **Azure Batch** for large parallel jobs.
 
@@ -16,35 +29,92 @@ Azure's VM service is **Virtual Machines**, with **Virtual Machine Scale Sets** 
 
 <CloudGroupTable group="compute" lead="azure" />
 
+## How it fits together on Azure
+
+Follow the stepper. In step 1, two VMs in a scale set serve shoppers through Application Gateway, Azure's web load balancer, and report processor use to Azure Monitor. An **autoscale setting** compares the average with a 60% target. In step 2 its scale-out rule raises the instance count, and new VMs are built from the **scale set model**.
+
+Step 3 is the failure: an eager scale-in rule removes four VMs two minutes after the wave. On Azure, scale-out and scale-in are **separate rules**, each with its own window, threshold and cooldown. The fix in step 4 gives scale-in a longer window, removes one VM at a time, and lets Application Gateway drain open connections. Step 5 uses a **recurrence profile** for the evening newsletter and **predictive autoscale** for the daily curve. Step 6 is a **standby pool** of stopped VMs. In step 7, a second scale set of receipt workers scales on a Service Bus queue's message count.
+
+| Concept word | On Azure | What to know |
+|---|---|---|
+| Server group | Virtual Machine Scale Set | Flexible orchestration, the usual choice for new sets, can mix VM sizes and Spot |
+| Template | Scale set model | Running VMs move to a new model only as the upgrade policy allows |
+| Autoscaler | Autoscale setting in Azure Monitor | Separate scale-out and scale-in rules; keep their thresholds apart |
+| Spreading | Availability zones or an availability set | Chosen when the VM is created; a VM cannot use both |
+| Spare capacity | Spot VMs | About 30 seconds of notice through Scheduled Events |
+
 ## Services
 
 ### Azure Virtual Machines
 
 <CloudServiceProfile id="azure-vm" />
 
+**Pick it when** you need control of the machine, Windows or SQL Server licences to reuse, or a fleet that runs busy all day.
+
 ### Azure App Service
 
 <CloudServiceProfile id="azure-app-service" />
+
+**Pick it when** a steady web app or API should run from code or a container with no VMs to patch.
 
 ### Azure Batch
 
 <CloudServiceProfile id="azure-batch" />
 
-## Coming from AWS
+**Pick it when** a large parallel job, such as rendering, should run on a pool of VMs that shrinks afterwards.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| EC2 + Auto Scaling group | Virtual Machines + Scale Sets | Flexible orchestration mixes VM sizes and Spot |
-| Savings Plans | Savings plan for compute, Reservations | Hybrid Benefit cuts Windows and SQL Server costs further |
-| Elastic Beanstalk | App Service | Deployment slots, built-in auth, more widely used |
-| Graviton | Cobalt 100 | Arm-based VMs; same arm64 caveats |
+## Common mistakes
+
+- **An availability set when you needed zones.** It survives a rack failure, not the loss of a whole datacenter.
+- **Changing the model and assuming the fleet changed.** Under a manual upgrade policy, running VMs keep the old image until you upgrade them.
+- **Deleting a VM and forgetting its parts.** A VM is a bundle: network interface, disks, often a public IP. A disk left behind keeps costing money.
+
+## Where this shows up in system design
+
+- **Web tiers** in a zone-spread scale set behind Application Gateway or Azure Load Balancer.
+- **Windows and .NET estates** moved from a company's own datacenter, where Hybrid Benefit lowers the bill.
+- **Queue workers** that scale on a Service Bus backlog, often on Spot VMs, as in [Back Pressure and Load Shedding](/system-design/patterns/back-pressure).
 
 ## Related
 
-[Compute on AWS](/cloud/aws/compute) · [Compute on Google Cloud](/cloud/gcp/compute) · [Containers on Azure](/cloud/azure/containers) · [Choosing Compute](/cloud/start-here/choosing-compute)
+[Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) · [Autoscaling: The Control Loop](/cloud/compute/autoscaling) · [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) · [Compute on AWS](/cloud/aws/compute) · [Compute on Google Cloud](/cloud/gcp/compute) · [Choosing Compute](/cloud/start-here/choosing-compute) · [Containers on Azure](/cloud/azure/containers) · [System design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How does App Service achieve a zero-downtime deploy?" category="Cloud" level="Mid">
-    Deploy to a staging slot, let it warm up and run checks, then swap it with production. The swap redirects traffic to the already-warm instances; if something goes wrong, swap back.
+  <InterviewQuestion question="Availability zones or an availability set: which protects Brightpost's app servers if a whole datacenter goes dark?" category="Cloud" level="Junior">
+    **Short answer.** Availability zones. Put the scale set's VMs in three zones behind a load balancer that spans them.
+
+    **Why.** Zones are separate datacenters with their own power, cooling and network. An availability set spreads VMs over fault domains, which are racks with shared power, all inside one datacenter. It protects against a failed rack or a host update, not a building-wide outage.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} cloud="azure" minWidth={620} caption="One scale set, one VM per zone, one load balancer across all three." />
+
+    **Follow-ups the interviewer may ask.**
+    - When is an availability set still used? (In regions without zones, or for older designs.)
+    - What must be true of the app for zones to help? (The VMs are stateless, and baskets live in the shared database.)
+
+    **Watch out for.** Treating "spread across fault domains" as "spread across zones". They protect against different failures.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost's scale set grows for each newsletter wave and shrinks 2 minutes later. How do you set the autoscale rules?" category="Cloud" level="Mid">
+    **Short answer.** Keep scale-out fast but make scale-in slow: a longer time window, a lower threshold well apart from the scale-out one, a cooldown, and "remove 1". Add a recurrence profile that raises the minimum before the evening newsletter.
+
+    **Why.** Each VM takes about 4 minutes to start, so removing it between waves means the next wave pays that lag again. Azure checks whether a scale-in would trip the scale-out rule at once, but that does not help when the next wave is 15 minutes away. A schedule handles load you can predict.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={3} cloud="azure" minWidth={620} caption="The failure: 2 quiet minutes after the wave, autoscale removes 4 VMs at once, and the next wave meets 2." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which VM leaves first? (The scale-in policy decides: newest, oldest, or balanced across zones.)
+    - How do the receipt workers scale? (On the Service Bus queue's message count, not on processor use.)
+
+    **Watch out for.** Copying the scale-out rule and flipping the sign. Thresholds that sit close together make the set flap.
+  </InterviewQuestion>
+  <InterviewQuestion question="You pointed a scale set at a new image, but the running VMs still use the old one. Why, and how do you roll it out safely?" category="Cloud" level="Mid">
+    **Short answer.** The upgrade policy is manual, so only new VMs get the new model. Switch to a rolling upgrade policy, which replaces VMs in small batches and waits for each batch to be healthy.
+
+    **Why.** A rolling upgrade keeps most of the fleet serving while a few VMs update. It needs a health signal, from the Application Health extension or a load balancer probe, to know when a batch is ready. The same signal lets automatic instance repairs replace VMs that stop answering.
+
+    **Follow-ups the interviewer may ask.**
+    - What batch size would you use? (Small, such as one VM in ten, so one bad image hurts few shoppers.)
+    - How do you roll back? (Point the model at the previous image and run the upgrade again.)
+
+    **Watch out for.** An automatic upgrade policy on a live tier. It may update many VMs at the same time, so a broken image can take the whole tier down.
   </InterviewQuestion>
 </InterviewQuestions>

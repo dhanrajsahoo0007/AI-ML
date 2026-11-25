@@ -12,9 +12,9 @@ updated: 2026-11-13
 
 ## The story
 
-Brightpost's shop runs on a group of rented virtual machines, one in each of three zones near London. Each new server started from a plain operating system and ran a start-up script. The script downloaded about 600 MB of packages from a public package mirror, a website that hands out free software. On a normal day a new server was ready in 4 minutes. At 9:00 on the spring sale, shoppers online rose from 40 to about 1,500 in five minutes. Three servers serve about 600, so at 9:02 the group asked for 5 more. That morning the mirror was slow, and each new server took 11 minutes. Until 9:13, about 900 shoppers at a time saw timeouts, and about 150 orders were lost.
+Brightpost's shop runs on a group of rented virtual machines, spread across three zones near London. Each new server started from a plain operating system and ran a start-up script. The script downloaded about 600 MB of packages from a public package mirror, a website that hands out free software. On a normal day a new server was ready in 7 minutes. At 9:00 on the spring sale, shoppers online rose from 40 to about 1,500 in five minutes. Three servers serve about 600, so at 9:02 the group asked for 5 more. That morning the mirror was slow, and each new server took 11 minutes. Until 9:13, about 900 shoppers at a time saw timeouts, and about 150 orders were lost.
 
-The servers were healthy; their recipe ran its slowest part at the worst moment. The steps below open up one VM, then rebuild the fleet so a new server is ready in 3 minutes.
+The servers were healthy; their recipe ran its slowest part at the worst moment. The steps below open up one VM, then rebuild the fleet so a new server is ready in about 4 minutes.
 
 ## How it works
 
@@ -103,7 +103,7 @@ A new server is useful only once the VM has booted, the app has started and the 
   At 9:02 the group adds 5 servers, as its rule says. Each boots in under a minute, then asks the public mirror for 600 MB of packages. The mirror is slow that morning, so each server takes 11 minutes. The load balancer rightly keeps them out until their health checks pass. From 9:02 to 9:13, three servers face about 1,500 shoppers, and about 150 orders are lost.
 </Callout>
 
-Autoscaling asked for servers on time. The delay sat inside each VM, in a download from a site outside Brightpost's control. A quiet-afternoon test took 4 minutes and hid the risk.
+Autoscaling asked for servers on time. The delay sat inside each VM, in a download from a site outside Brightpost's control. A quiet-afternoon test took 7 minutes and hid the risk.
 
 ### Step 8: Bake an image
 
@@ -113,11 +113,11 @@ Autoscaling asked for servers on time. The delay sat inside each VM, in a downlo
 
 The mirror is now used once per build. If it is slow, the build is slow, and no shopper waits. The template points to v12, and the start-up script only reads a few settings from metadata, such as which database to use. Settings stay out of the image, so the same v12 runs in test and in production.
 
-### Step 9: Ready in 3 minutes, and replace instead of repair
+### Step 9: Ready in 4 minutes, and replace instead of repair
 
-<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={5} minWidth={620} caption="New servers boot from v12 and pass the health check at 9:05, 3 minutes after the group added them." />
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={5} minWidth={620} caption="New servers boot from v12 and pass the health check at 9:06, about 4 minutes after the group added them." />
 
-From the baked image, a new server boots, reads its settings, starts the app and passes its health check in about 3 minutes. With v12 on sale day, the 5 extra servers would have served from 9:05, not 9:13. The rest of the gap belongs to autoscaling: how soon it notices load and how much spare it keeps.
+From the baked image, a new server boots, reads its settings, starts the app and passes its health check in about 4 minutes. With v12 on sale day, the 5 extra servers would have served from 9:06, not 9:13. The rest of the gap belongs to autoscaling: how soon it notices load and how much spare it keeps.
 
 The image also changes how fixes happen. Nobody patches a running server. The team changes the build, bake v13, point the template at it, and let the group replace servers one at a time. This is **immutable infrastructure**: servers are replaced, never edited. Rolling back means pointing the template at v12 again. [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management) covers the rollout.
 
@@ -191,7 +191,7 @@ A managed virtual desktop is a VM fleet for people. A worker signs in from a lap
 
 <Quiz>
   <QuizItem question="The group adds 5 servers at 9:02. When do they start serving with the old start-up script on sale day, and when with golden image v12?" hint="Add each recipe's time to ready.">
-    9:13 with the script, because each took 11 minutes. 9:05 with v12, because a baked server is ready in about 3 minutes.
+    9:13 with the script, because each took 11 minutes. 9:06 with v12, because a baked server is ready in about 4 minutes.
   </QuizItem>
   <QuizItem question="An engineer logs in to one server and fixes a setting by hand. That night the server fails a health check and the group replaces it. What happens to the fix?" hint="Where does the group get its recipe?">
     It is gone. The new server comes from the template and image, which never saw the fix. The change belongs in the image build or in the template's settings.
@@ -206,7 +206,7 @@ A managed virtual desktop is a VM fleet for people. A worker signs in from a lap
 <Compare
   columns={["", "Configure at boot", "Everything baked in", "Baked image + settings at boot"]}
   rows={[
-    ["Time to ready on sale day", "4 min, or 11 min with a slow mirror", "About 3 min", "About 3 min"],
+    ["Time to ready on sale day", "7 min, or 11 min with a slow mirror", "About 4 min", "About 4 min"],
     ["Needs an outside website at boot", true, false, false],
     ["One image for test and production", true, false, true],
     ["To change a setting", "Edit the script; next boot", "Bake a new image", "Change the metadata; next boot"],
@@ -250,7 +250,7 @@ Configuring at boot wins only on the first day. Brightpost picked the third colu
   <InterviewQuestion question="Why must a VM be stateless before you can autoscale it?" level="Mid" category="Cloud">
     **Short answer.** The group adds and removes servers on its own. Data kept on a server, such as baskets or sessions, is lost when it goes, and other servers cannot see it. Stateless servers can be added, removed and replaced at any time.
 
-    **Why.** Brightpost's baskets live in the shared database, so the load balancer can send any shopper to any of 3 to 10 servers. When the group replaces a failed server, no shopper loses anything. With baskets in one server's memory, every scale-in would empty some baskets.
+    **Why.** Brightpost's baskets live in the shared database, so the load balancer can send any shopper to any of 2 to 10 servers. When the group replaces a failed server, no shopper loses anything. With baskets in one server's memory, every scale-in would empty some baskets.
 
     <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} highlight={["lb", "server-a", "server-b", "server-c", "group"]} caption="Any server can take any shopper, because none of them holds a basket." />
 
@@ -290,9 +290,9 @@ Configuring at boot wins only on the first day. Brightpost picked the third colu
   </InterviewQuestion>
 
   <InterviewQuestion question="New servers take 11 minutes to be ready, and your sale traffic quadruples in 5 minutes. What do you change?" level="Senior" category="Cloud">
-    **Short answer.** Cut time to ready first: bake a golden image so boot downloads nothing, which took Brightpost from 11 minutes to about 3. Then cover the rest with spare capacity: scale up on a schedule before a known sale.
+    **Short answer.** Cut time to ready first: bake a golden image so boot downloads nothing, which took Brightpost from 11 minutes to about 4. Then cover the rest with spare capacity: scale up on a schedule before a known sale.
 
-    **Why.** Time to ready is boot, app start and health check. Brightpost's 11 minutes were mostly a download from a mirror it does not control. Baking moves that work to the image build, where a slow mirror delays nobody. Even 3 minutes is long against a 5-minute surge, so for a planned sale the fleet should reach 8 servers by 8:55.
+    **Why.** Time to ready is boot, app start and health check. Brightpost's 11 minutes were mostly a download from a mirror it does not control. Baking moves that work to the image build, where a slow mirror delays nobody. Even 4 minutes is long against a 5-minute surge, so for a planned sale the fleet should reach 8 servers by 8:55.
 
     <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={3} highlight={["mirror", "new-a", "new-b", "new-c", "lb"]} caption="All of the delay sits between the mirror and the new servers, inside each boot." />
 

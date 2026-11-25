@@ -64,7 +64,7 @@ const ROWS: { id: string; label: string; step: number; cells: Record<ColId, Cell
     label: "New copy ready in",
     step: 2,
     cells: {
-      vm: { label: "1 to 3 minutes", sub: "boot, then set up", tone: O },
+      vm: { label: "Minutes", sub: "boot, then set up", tone: O },
       cvm: { label: "Seconds", sub: "if a VM has room", tone: G },
       k8s: { label: "Seconds", sub: "minutes if a new node", tone: N },
       sc: { label: "1 to 10 seconds", sub: "pull image, start app", tone: N, highlight: true },

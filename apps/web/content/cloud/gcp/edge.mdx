@@ -1,20 +1,51 @@
 ---
 title: "Edge, DNS & CDN on Google Cloud"
 description: "Cloud DNS, Cloud CDN, Media CDN and the global external load balancer, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-On Google Cloud the edge is built into the load balancer. The **global external Application Load Balancer** terminates TLS at Google's edge and routes to the nearest healthy backend, **Cloud CDN** is a switch on that load balancer, and **Cloud Armor** attaches to it. **Cloud DNS** handles names and routing policies; **Media CDN** serves large video and downloads.
+Brightpost's photos and pages must reach shoppers in the UK and Australia quickly, and floods and scrapers must stop before they reach the app servers. On Google Cloud one product does most of this job: the **global external Application Load Balancer**. It takes traffic at Google's edge on one anycast address, an IP address announced from many places at once. Caching and the web firewall are settings on that load balancer, so there is no second front door to configure or to forget.
+
+## The idea
+
+A managed edge stands in front of everything you serve: copies come from a site near the customer, and bad traffic is stopped before it reaches your servers. DNS points the shop's name at that edge.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's sale-day scraper, is in [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf). Zones and routing policies are in [DNS on the Cloud](/cloud/networking/dns), and serving two regions is in [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" stepper cloud="gcp" minWidth={620} caption="Brightpost's sale day on Google Cloud: Cloud CDN on the global load balancer, then Cloud Armor and a firewall that admits only the load balancer." />
+
+<CloudMapping diagram="cloud/cdn-request-path" lead="gcp" />
 
 ## TL;DR
 
-- **Global external Application Load Balancer** as the single entry point for HTTP, worldwide.
-- **Cloud CDN** enabled per backend for caching; **Media CDN** for streaming-scale video.
-- **Cloud DNS** with geolocation, weighted and failover routing policies.
-- **Cloud Armor** on the same load balancer for WAF and DDoS protection.
+- **Global external Application Load Balancer** as the one entry point for web traffic: one anycast address, backends in any region.
+- **Cloud CDN** switched on per backend of that load balancer; **Media CDN** for video streaming and very large downloads.
+- **Cloud Armor** on the same load balancer: always-on flood protection, WAF rules and rate limits.
+- **Cloud DNS** for public and private zones, with weighted, geolocation and failover routing policies.
 
 ## At a glance
 
 <CloudGroupTable group="edge" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Step 1: a shopper connects to the load balancer's anycast address and reaches the nearest Google edge site, where TLS ends. The load balancer's **URL map** sends `/photos/` to a **backend bucket**, a Cloud Storage bucket behind it. Everything else goes to a **backend service**, the group of app servers. With Cloud CDN on, a cached photo is answered at the edge.
+
+Step 2: product pages are not cached during a sale, so the scraper's 900 requests a second reach the backend service. Step 3: Cloud Armor Standard drops floods of junk packets for the global load balancer, with no rule from Brightpost. Step 4: a **Cloud Armor security policy** attached to the backend service adds preconfigured WAF rules and a rate-limiting rule. Step 5: the app servers have no public address. A VPC firewall rule admits only Google's load balancer and health-check ranges, so there is no side door.
+
+One more choice sits under all of this. **Network Service Tiers** decide how traffic crosses the world. Premium Tier, the default, carries it on Google's own network from the edge nearest the shopper. Standard Tier crosses the public internet and enters Google's network near your region. The global external Application Load Balancer, and so Cloud CDN, needs Premium Tier.
+
+| The concept says | On Google Cloud | What to know |
+|---|---|---|
+| Edge cache | Cloud CDN, a setting on a backend service or backend bucket | No separate CDN address or distribution |
+| Origin | Backend service (servers) or backend bucket (storage) | The URL map picks one per path |
+| Flood absorber and web firewall | Cloud Armor | Standard is always on; Enterprise is the paid tier with Adaptive Protection |
+| Count mode | Preview mode on a Cloud Armor rule | Logs what it would block, blocks nothing |
+| Origin lock | A firewall rule for Google's load balancer ranges | Backends need no public address |
+
+The load balancer's own profile is on [Networking on Google Cloud](/cloud/gcp/networking), and Cloud Armor's is on [Identity & Security on Google Cloud](/cloud/gcp/security).
 
 ## Services
 
@@ -22,19 +53,68 @@ On Google Cloud the edge is built into the load balancer. The **global external 
 
 <CloudServiceProfile id="gcp-cloud-dns" />
 
+Pick it when you need public names for the load balancer's address, private names inside VPC networks, or DNS failover for traffic that skips the global load balancer.
+
 ### Cloud CDN and Media CDN
 
 <CloudServiceProfile id="gcp-cloud-cdn" />
 
-## Coming from AWS
+Pick Cloud CDN for photos, scripts and pages behind the global load balancer; pick Media CDN for video streaming and large downloads.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| Route 53 | Cloud DNS | Routing policies similar; health checks via the load balancer |
-| CloudFront | Cloud CDN on the global load balancer | CDN is a backend setting, not a separate distribution |
-| Global Accelerator | Global external load balancer | Anycast IP is built in, no extra service |
-| Lambda@Edge | Service Extensions | Plugins on load balancers and Media CDN; narrower than Lambda@Edge |
+## Common mistakes
+
+- **Giving app servers public addresses.** The load balancer does not need them, and a scraper can use them to skip Cloud Armor.
+- **Choosing Standard Tier to save money, then wanting a global load balancer.** The global load balancer and Cloud CDN need Premium Tier.
+- **Caching every response by default.** A cache mode that keeps everything can store a basket page. Mark personal paths as never cached.
+
+## Where this shows up in system design
+
+- **Two regions, one address:** one global load balancer with backends near London and Sydney replaces DNS steering between regions.
+- **Media-heavy designs:** photo and video products serve their files through Cloud CDN or Media CDN, with signed URLs for private files.
+- **Abuse protection:** rate rules in Cloud Armor act before requests reach your servers.
 
 ## Related
 
-[Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [Networking on Google Cloud](/cloud/gcp/networking) · [Caching](/system-design/patterns/caching)
+[CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf) · [DNS on the Cloud](/cloud/networking/dns) · [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [Networking on Google Cloud](/cloud/gcp/networking) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Where do you switch on Cloud CDN for a site's photos, and why is there no separate CDN address?" category="Cloud" level="Junior">
+    **Short answer.** On the backend of the global external Application Load Balancer that serves the photos, usually a backend bucket. The CDN runs inside that load balancer, so shoppers keep using its one anycast address.
+
+    **Why.** The load balancer already meets every shopper at Google's edge. Turning on Cloud CDN lets that same edge keep copies. A hit is answered there; a miss goes to the bucket. The bucket can stay private and grant read access only to Cloud CDN's own service account.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={1} cloud="gcp" path="customers>cdn>bucket" minWidth={620} caption="Cloud CDN answers at the edge; only a miss reaches the private bucket." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which cache mode would you choose for versioned photo files?
+    - How do you replace a photo that is already cached?
+
+    **Watch out for.** Making the bucket public so the CDN can read it. Grant the CDN's identity read access instead.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Premium or Standard Network Service Tier: what changes for a shopper in Sydney?" category="Cloud" level="Mid">
+    **Short answer.** On Premium Tier the shopper enters Google's network at a nearby edge, and the long trip runs on Google's own network. On Standard Tier the trip crosses the public internet until it nears your region.
+
+    **Why.** For Brightpost, each Sydney round trip to London is about 250 ms, and the path over the public internet is less predictable. Premium Tier is also what the global external Application Load Balancer and Cloud CDN need. Standard Tier costs less and suits regional services whose users sit near the region.
+
+    **Follow-ups the interviewer may ask.**
+    - Can one project use both tiers?
+    - Does Premium Tier remove the need for a second region near Sydney?
+
+    **Watch out for.** Expecting either tier to remove distance. A cached photo gets fast, but checkout still travels to London.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A scraper floods product pages behind the global load balancer. How do you stop it on Google Cloud, and how could it get around you?" category="Cloud" level="Mid">
+    **Short answer.** Attach a Cloud Armor security policy with a rate-limiting rule on product pages, first in preview mode. Then make sure the app servers have no public address and a firewall rule admits only Google's load balancer ranges.
+
+    **Why.** The scraper's requests are valid page views, so Cloud Armor Standard's flood protection lets them through. Brightpost's rule blocks any address over 300 requests in 5 minutes on `/products/*`; a busy shopper sends about 40. A server with a public address would let the scraper skip the policy.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={5} cloud="gcp" highlight={["bots", "waf", "lb", "lock"]} minWidth={620} caption="Cloud Armor blocks the scraper at the edge; the firewall refuses its direct try." />
+
+    **Follow-ups the interviewer may ask.**
+    - The scraper spreads over 5,000 addresses. What does bot management add?
+    - When is Cloud Armor Enterprise worth it?
+
+    **Watch out for.** One rate limit for the whole site. Keep checkout out of the rule's scope, so a shared office address can still pay.
+  </InterviewQuestion>
+</InterviewQuestions>

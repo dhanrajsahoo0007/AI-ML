@@ -32,7 +32,7 @@ const ROWS = [
     label: "First byte arrives in",
     cells: ["Milliseconds", "Milliseconds", "Milliseconds", "Hours"],
   },
-  { id: "min", label: "Minimum stay billed", cells: ["None", "About 30 days", "About 90 days", "180 days or more"] },
+  { id: "min", label: "Minimum stay billed", cells: ["None", "About 30 days", "About 90 days", "Several months"] },
   {
     id: "fits",
     label: "Pays off if read",

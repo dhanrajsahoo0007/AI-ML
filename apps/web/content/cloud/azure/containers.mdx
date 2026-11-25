@@ -1,63 +1,122 @@
 ---
 title: "Containers on Azure"
 description: "AKS, AKS Automatic, Container Apps, Container Instances and ACR: what each one does, when to pick it, and the matching AWS and Google Cloud service."
+updated: 2026-11-14
 ---
 
-Azure's container options line up with the other clouds once you see the pattern: **AKS** for Kubernetes, **Container Apps** for serverless containers that hide Kubernetes, and **Container Instances** for single containers on demand. App Service also runs containers for classic web apps.
+Brightpost's shop runs as containers: three copies of shop-web, one per zone, beside checkout and search. On Azure, Azure Kubernetes Service (AKS) runs them on a cluster, Container Apps runs services with no cluster to see, and Azure Container Registry (ACR) stores the images. One AKS rule changes a design: every cluster needs a system node pool for its own add-ons.
+
+## The idea
+
+A <Term id="kubernetes">Kubernetes</Term> cluster keeps a written list of what should run in its control plane, and its nodes keep changing until they match it. On AKS, Azure always runs the control plane; AKS Automatic hands it the nodes as well.
+
+<Callout tone="info" title="Learn the idea">
+  [Kubernetes Concepts](/cloud/compute/kubernetes-concepts) explains the cluster with Brightpost's shop. [Containers and Registries](/cloud/compute/containers-and-registries) covers images; [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers images with no cluster.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" stepper cloud="azure" minWidth={620} caption="One AKS cluster: Azure runs the control plane at the top, and three nodes in three zones run Brightpost's pods." />
+
+<CloudMapping diagram="cloud/k8s-cluster-anatomy" lead="azure" />
 
 ## TL;DR
 
-- **Default to Container Apps** for microservices, APIs and event-driven workers. It scales on HTTP or queue depth (via KEDA), down to zero.
-- **Use AKS when Kubernetes is the requirement.** Start with **AKS Automatic** so Azure runs nodes, scaling and security defaults.
-- **Use Container Instances** for one-off tasks and burst capacity, not long-running services.
-- **Coming from AWS:** Container Apps ≈ ECS on Fargate + Express Mode; AKS Automatic ≈ EKS Auto Mode; AKS ≈ EKS; ACI ≈ a single Fargate task.
+- **Container Apps first** for APIs, microservices and queue workers. It scales on traffic or queue length, down to zero.
+- **AKS when Kubernetes is the requirement.** Start with **AKS Automatic**, where Azure picks, scales and upgrades the nodes.
+- **Container Instances for one-off containers:** a build, a nightly task, burst room. Not for long-running services.
+- **ACR for every image.** Choose the Premium tier from day one if you need copies in other regions.
 
 ## At a glance
 
 <CloudGroupTable group="containers" lead="azure" />
 
+## How it fits together on Azure
+
+A deploy pipeline sends the desired state, "3 copies of shop-web", to the AKS control plane, which Azure runs out of sight. People sign in with Microsoft Entra ID, Azure's identity service. The nodes sit in <Term id="node-pool">node pools</Term>, each a Virtual Machine Scale Set: identical virtual machines that Azure grows and shrinks. A system pool runs the cluster's add-ons, such as its DNS; user pools run Brightpost's apps. The kubelet on each node pulls images from ACR with the cluster's managed identity, so no registry password exists.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Control plane | AKS, Free or Standard tier | The Free tier has no uptime SLA; production uses Standard. |
+| Nodes | Node pools on Scale Sets | One system pool for add-ons, user pools for apps, each across three zones. |
+| Hands-off nodes | AKS Automatic | Azure picks, scales and upgrades nodes, with preset security defaults. |
+| Who may change the cluster | Entra ID with RBAC | Grant access to groups, never to people one by one. |
+
 ## Services
-
-### Azure Container Apps
-
-<CloudServiceProfile id="azure-container-apps" />
-
-Container Apps is built from open-source pieces that you can also use directly on AKS: **KEDA** for event-driven scaling, **Dapr** for service invocation, pub/sub and state, and **Envoy** for ingress. You get revisions with traffic splitting for blue-green and canary releases. The consumption plan scales to zero; **dedicated workload profiles** give reserved capacity, larger sizes and GPUs.
 
 ### Azure Kubernetes Service
 
 <CloudServiceProfile id="azure-aks" />
 
-**AKS Automatic** (generally available since September 2025) creates production-ready clusters with node auto-provisioning, autoscaling, Azure Linux nodes and security guardrails turned on. Use AKS Standard for clusters where you tune node pools yourself. Production clusters should use the Standard pricing tier for its uptime SLA.
+**Pick it when** several teams share one platform, or you need Kubernetes tools such as Helm charts. Start with AKS Automatic.
+
+### Azure Container Apps
+
+<CloudServiceProfile id="azure-container-apps" />
+
+**Pick it when** services and workers should scale on traffic or a queue, with no cluster. Each change makes a revision, and traffic can split between revisions.
 
 ### Azure Container Instances
 
 <CloudServiceProfile id="azure-container-instances" />
 
+**Pick it when** one container must start in seconds, run a task and stop, or AKS needs burst room.
+
 ### Azure Container Registry
 
 <CloudServiceProfile id="azure-acr" />
 
-## What changes when you move a design from AWS
+**Pick it when** you run containers on Azure at all. Deploy by digest, the fingerprint of an image's exact bytes, not by a moving `latest` tag.
 
-| AWS design | On Azure | What actually changes |
-|---|---|---|
-| ECS on Fargate | Container Apps | Scaling rules use KEDA scalers (Service Bus, Event Hubs, Kafka) directly |
-| ECS Express Mode | Container Apps or App Service | Revisions and traffic splitting are built in |
-| EKS Auto Mode | AKS Automatic | Entra ID handles cluster sign-in |
-| EKS | AKS | Free control-plane tier for dev; Standard tier for the SLA |
-| RunTask on Fargate | Container Instances or Container Apps jobs | Jobs can be triggered by events or a schedule |
-| ECR | ACR | Geo-replication needs the Premium tier |
+## Common mistakes
+
+- **Apps on the system node pool.** A pod with no memory limit can starve the cluster's DNS. Keep apps on user pools.
+- **The Free tier in production.** It has no uptime SLA. Use Standard for anything customers reach.
+- **Container Instances as a service platform.** It has no rollouts or scaling. Use Container Apps.
+
+## Where this shows up in system design
+
+- **Queue workers:** Container Apps scaling on Service Bus queue length, down to zero overnight. See [back pressure](/system-design/patterns/back-pressure).
+- **Stateless web tier:** shop-web on AKS with a readiness check, behind Application Gateway for Containers. See [load balancing patterns](/system-design/patterns/load-balancing).
 
 ## Related
 
-[Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute)
+[Kubernetes Concepts](/cloud/compute/kubernetes-concepts) · [Containers and Registries](/cloud/compute/containers-and-registries) · [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) · [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Container Apps or AKS for a new set of microservices on Azure?" category="Cloud" level="Mid">
-    Container Apps, unless you need the Kubernetes API itself: CRDs and operators, DaemonSets, or a shared cluster that other teams already use. Container Apps gives you KEDA scaling, Dapr and revisions without running a cluster.
+  <InterviewQuestion question="What does AKS run for you, and what is still your job?" category="Cloud" level="Junior">
+    **Short answer.** Azure runs the control plane: API server, state store, scheduler and controllers. The nodes are yours unless you use AKS Automatic, and so is everything you deploy.
+
+    **Why.** In Standard AKS, Brightpost sizes and upgrades the nodes; AKS Automatic takes them over. In both, requests, limits and readiness checks stay Brightpost's, so its 90-second warm-up gap would break any AKS cluster.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" cloud="azure" highlight={["api", "store", "controllers", "scheduler"]} minWidth={620} caption="These four parts are Azure's job in every AKS tier; the nodes below are yours unless you choose AKS Automatic." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the Standard tier add over Free?
+    - Who decides when the Kubernetes version is upgraded?
+
+    **Watch out for.** "The cluster is Azure's problem." Node upgrades in Standard AKS, and every workload, stay yours.
   </InterviewQuestion>
+
+  <InterviewQuestion question="Container Apps or AKS for a new set of microservices on Azure?" category="Cloud" level="Mid">
+    **Short answer.** Container Apps, unless you need the Kubernetes API itself: operators, node-level agents, or a shared cluster other teams already use.
+
+    **Why.** Container Apps gives event-based scaling and traffic splits with no cluster to upgrade. For Brightpost's 3 engineers, node pools and version upgrades leave their week. AKS pays off when many teams share one platform, or the tools you need ship only as Helm charts.
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you move a container app onto AKS later?
+    - How does a container app reach a private database?
+
+    **Watch out for.** "Container Apps cannot scale like Kubernetes." It runs on Kubernetes and KEDA underneath; you cannot reach that layer.
+  </InterviewQuestion>
+
   <InterviewQuestion question="How would you scale queue workers on Azure?" category="Cloud" level="Mid">
-    Run them in Container Apps with a KEDA scale rule on the Service Bus queue length (or Event Hubs lag). Workers scale out as the backlog grows and back to zero when it is empty, and you pay only while they run.
+    **Short answer.** Run them in Container Apps with a KEDA scale rule on the Service Bus queue length. KEDA is an open-source autoscaler that reads the backlog; workers grow with it and return to zero.
+
+    **Why.** CPU is a late signal: by the time it is high, the queue is already long. A rule such as "one copy per 20 messages, at most 10" reacts to the backlog itself. On Brightpost's sale day, 4,000 orders fill the queue by noon; overnight the workers fall to zero.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a message in progress when a copy is removed?
+    - How would you run the same workers on AKS?
+
+    **Watch out for.** Forgetting that a message can arrive twice. Make each handler safe to repeat.
   </InterviewQuestion>
 </InterviewQuestions>

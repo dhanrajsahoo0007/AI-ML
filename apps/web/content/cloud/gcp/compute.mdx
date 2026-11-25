@@ -1,20 +1,47 @@
 ---
 title: "Compute on Google Cloud"
 description: "Compute Engine, managed instance groups, Spot VMs, App Engine and Batch, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Google Cloud's VM service, **Compute Engine**, works much like EC2. The differences that matter in a design are smaller conveniences: custom machine shapes, live migration during host maintenance, **regional managed instance groups** that spread VMs across zones in one resource, and automatic sustained-use discounts on some machine families. For new stateless services, Google's own default is **Cloud Run**, not VMs.
+Brightpost's shop runs on two app servers on a normal day and up to 10 on a sale day. On Google Cloud those servers are **Compute Engine** virtual machines (VMs). This group of services starts them from a known image, keeps enough of them running across three zones, and charges less for the ones that may be interrupted. One fact shapes the design: a single **regional managed instance group** spreads VMs over a region's zones, and one global load balancer can sit in front of it. For a new stateless service, consider [Cloud Run](/cloud/gcp/containers) before VMs.
+
+## The idea
+
+A VM fleet is identical servers built from one template. A control loop keeps it the right size: it measures a metric such as average processor use, compares it with a target, adds or removes servers, then waits. On Google Cloud the template is an instance template, the group is a managed instance group (MIG), and the autoscaler belongs to the group.
+
+<Callout tone="blue" title="Learn the idea">
+  New to this? [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) covers machine families, images and fleets, and [Autoscaling: The Control Loop](/cloud/compute/autoscaling) walks through the loop with Brightpost's newsletter evening. [Choosing Compute](/cloud/start-here/choosing-compute) helps you decide whether you need VMs at all.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" stepper cloud="gcp" minWidth={620} caption="Brightpost's newsletter evening on Google Cloud, in seven steps. Switch the toggle to compare names on the other clouds." />
+
+<CloudMapping diagram="cloud/autoscaling-loop" lead="gcp" />
 
 ## TL;DR
 
 - **Compute Engine** when you need the machine: GPUs or TPUs, licensed software, steady high load.
-- **Regional managed instance groups** autoscale and auto-heal VMs across zones, behind the global load balancer.
-- **Spot VMs** for interruptible work (about 30 seconds of notice); **committed use discounts** for steady load.
+- **Regional managed instance groups** autoscale and auto-heal VMs across <Term id="availability-zone">zones</Term>, behind Cloud Load Balancing.
+- **Spot VMs** for interruptible work (about 30 seconds of notice); **committed use discounts** for the steady base.
 - **Batch** for queued jobs; **App Engine** mostly for existing apps, since Cloud Run is the default for new ones.
 
 ## At a glance
 
 <CloudGroupTable group="compute" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Follow the stepper. In step 1, two VMs in a regional MIG serve shoppers through Cloud Load Balancing and report processor use to Cloud Monitoring. The MIG autoscaler compares the average with a 60% target. In step 2 it raises the group's size, and new VMs boot from the **instance template**. The **initialisation period** keeps a booting VM's numbers out of the average until the app is ready.
+
+Step 3 is the failure: the group shrinks two minutes after the wave and the next wave meets two VMs. The fix in step 4 uses two settings. **Scale-in controls** cap how many VMs may leave within a time window. The load balancer's **connection draining** timeout lets open requests finish before a VM goes. Step 5 adds a **scaling schedule** for known rushes and **predictive autoscaling** for the daily curve. Step 6 is a **standby pool** of stopped VMs. In step 7, a second MIG of receipt workers scales on the backlog of a Pub/Sub subscription.
+
+| Concept word | On Google Cloud | What to know |
+|---|---|---|
+| Server group | Managed instance group, zonal or regional | Pick regional for a web tier; it spreads VMs across zones for you |
+| Template | Instance template | You cannot edit one. Make a new template and roll the group onto it |
+| Image | Custom image, often in an image family | Images are global, so a second region needs no copy |
+| Several signals | One autoscaler, many signals | It works out a size per signal and uses the largest, so a schedule acts as a floor |
+| Spare capacity | Spot VMs | About 30 seconds of notice, then the VM is stopped or deleted |
 
 ## Services
 
@@ -22,32 +49,72 @@ Google Cloud's VM service, **Compute Engine**, works much like EC2. The differen
 
 <CloudServiceProfile id="gcp-compute-engine" />
 
-Compute Engine **live-migrates** VMs to other hosts during maintenance, so most planned maintenance doesn't reboot your instances. Custom machine types let you choose vCPU and memory freely instead of picking the nearest predefined size.
+**Pick it when** you need control of the machine, special hardware, or a fleet that runs busy all day. Compute Engine **live-migrates** VMs to other hosts during maintenance, so most planned maintenance does not reboot them. Custom machine types let you choose vCPU and memory freely instead of the nearest fixed size.
 
 ### App Engine
 
 <CloudServiceProfile id="gcp-app-engine" />
 
+**Pick it when** you already run an App Engine app; start new web apps on Cloud Run.
+
 ### Batch
 
 <CloudServiceProfile id="gcp-batch" />
 
-## Coming from AWS
+**Pick it when** jobs run for minutes to days and should run on VMs (often Spot) that disappear afterwards.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| EC2 | Compute Engine | Custom machine shapes; live migration for maintenance |
-| Auto Scaling group | Managed instance group (regional) | One regional MIG spans zones; autoscaling and auto-healing are built in |
-| Spot (2-minute notice) | Spot VMs (about 30 seconds) | Shut down faster; save state more often |
-| Savings Plans | Committed use discounts | Some machine families also get automatic sustained-use discounts |
-| Graviton | Axion (C4A), Tau T2A | Same arm64 build caveats |
+## Common mistakes
+
+- **A zonal group for a web tier.** One zone's outage takes the whole tier down. Use a regional MIG.
+- **Auto-healing with no initial delay.** The health check fails while the app is still booting, so the group recreates VMs in a loop. Set the delay to the real start time.
+- **Spot VMs with no shutdown plan.** Thirty seconds is too short to finish a long task. Save progress often and make each task safe to run twice.
+
+## Where this shows up in system design
+
+- **Stateless web tiers** behind the global external Application Load Balancer, one regional MIG per region.
+- **Queue workers** that scale on a Pub/Sub backlog, often on Spot VMs, as in [Back Pressure and Load Shedding](/system-design/patterns/back-pressure).
+- **GPU and TPU fleets** for model training and inference.
 
 ## Related
 
-[Compute on AWS](/cloud/aws/compute) · [Compute on Azure](/cloud/azure/compute) · [Containers on Google Cloud](/cloud/gcp/containers) · [Choosing Compute](/cloud/start-here/choosing-compute)
+[Autoscaling: The Control Loop](/cloud/compute/autoscaling) · [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) · [Compute on AWS](/cloud/aws/compute) · [Compute on Azure](/cloud/azure/compute) · [Choosing Compute](/cloud/start-here/choosing-compute) · [Containers on Google Cloud](/cloud/gcp/containers) · [System design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you make a VM tier highly available on Google Cloud?" category="Reliability" level="Mid">
-    Run it in a regional managed instance group, which spreads instances across zones, replaces unhealthy ones using health checks, and autoscales. Put the global external Application Load Balancer in front, and keep the instances stateless.
+  <InterviewQuestion question="How do you make a VM tier highly available on Google Cloud?" category="Cloud" level="Junior">
+    **Short answer.** Run it in a regional managed instance group, with an auto-healing health check, behind the external Application Load Balancer. Keep the VMs stateless so any one can be replaced.
+
+    **Why.** A regional MIG puts VMs in several zones of the region, so one zone's failure leaves the others serving. Auto-healing recreates a VM whose app stops answering its health check. The load balancer sends shoppers only to healthy VMs.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} cloud="gcp" minWidth={620} caption="One regional managed instance group, one VM per zone, one load balancer across all three." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you ship a new image? (A new instance template, then a rolling update on the group.)
+    - Where does the shopper's basket live? (In a shared database, so any VM can serve any shopper.)
+
+    **Watch out for.** A zonal MIG. It auto-heals VMs but cannot survive the loss of its one zone.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost's MIG adds 4 VMs for each newsletter wave and removes them 2 minutes later. What do you change?" category="Cloud" level="Mid">
+    **Short answer.** Set scale-in controls so only one VM may leave in a window of several minutes. Turn on connection draining at the load balancer, and add a scaling schedule that raises the floor before each newsletter.
+
+    **Why.** Each VM takes about 4 minutes to start, so removing it between waves means the next wave pays that lag again. Scale-in controls slow the shrink without touching scale-out. The autoscaler uses the largest size any signal asks for, so a schedule raises the floor while CPU can still push higher.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} cloud="gcp" minWidth={620} caption="The fix: scale-in waits, drains for 60 s and removes one VM at a time, so the next wave meets 6." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the initialisation period do? (It keeps a booting VM's numbers out of the average.)
+    - Could a standby pool help? (Yes: stopped VMs resume faster than new ones boot.)
+
+    **Watch out for.** Fixing flapping by raising the maximum. The group never reaches it; the problem is the speed of scale-in.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you run Brightpost's receipt workers on Compute Engine cheaply and safely?" category="Cloud" level="Mid">
+    **Short answer.** Put them in their own MIG of Spot VMs that scales on the Pub/Sub subscription's backlog. Each worker acknowledges a message only after the receipt is sent.
+
+    **Why.** Receipts can wait a minute, so Spot VMs fit. If Google Cloud takes a VM back, its unacknowledged message is delivered again to another worker. The backlog measures waiting work directly; processor use does not.
+
+    **Follow-ups the interviewer may ask.**
+    - What if a receipt is sent twice? (Make the send idempotent, keyed on the order number.)
+    - What runs in the 30 seconds of notice? (A shutdown script that stops taking new messages.)
+
+    **Watch out for.** Acknowledging a message when the work starts. A preempted VM then loses that receipt for good.
   </InterviewQuestion>
 </InterviewQuestions>

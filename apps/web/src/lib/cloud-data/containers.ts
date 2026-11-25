@@ -40,7 +40,7 @@ export const services: CloudService[] = [
     scaling:
       "Horizontal Pod Autoscaler for pods; Karpenter or Cluster Autoscaler for nodes. Auto Mode manages nodes for you.",
     pricing:
-      "$0.10 per cluster-hour in standard support, $0.60 in extended support (versions older than about 14 months). Auto Mode adds a fee on the instances it manages. Nodes are billed as EC2 or Fargate.",
+      "A fee per cluster-hour, higher once a Kubernetes version moves into extended support. Auto Mode adds a fee on the instances it manages. Nodes are billed as EC2 or Fargate.",
     useWhen: [
       "Your team already runs Kubernetes, or the same platform must run on several clouds or on-prem.",
       "You need the ecosystem: operators, CRDs, Helm, Argo CD, service mesh, GPU scheduling.",
@@ -51,7 +51,7 @@ export const services: CloudService[] = [
       "You cannot commit people to cluster upgrades every few months.",
     ],
     gotchas: [
-      "Kubernetes minor versions leave standard support after about 14 months; staying longer costs 6× the cluster fee.",
+      "Kubernetes minor versions leave standard support after about 14 months; staying on one in extended support raises the cluster fee.",
       "EKS Auto Mode (2024) provisions, patches and replaces nodes for you (Karpenter-based), close to GKE Autopilot.",
       "Pods on Fargate cannot run DaemonSets or privileged containers.",
     ],
@@ -68,7 +68,7 @@ export const services: CloudService[] = [
     youManage: "The container image, CPU and memory per task, and scaling rules. No hosts, AMIs or patching.",
     scaling: "ECS service auto scaling or Kubernetes HPA adds tasks; there is no cluster capacity to plan.",
     pricing:
-      "Per second for the vCPU and memory a task requests. Fargate Spot (ECS only) is up to 70% cheaper and can be interrupted.",
+      "Per second for the vCPU and memory a task requests. Fargate Spot (ECS only) costs less and can be interrupted.",
     useWhen: [
       "Long-running services and workers where you want containers without managing servers.",
       "Uneven or unpredictable load across many small services.",
@@ -134,7 +134,7 @@ export const services: CloudService[] = [
       "Standard: node pools, their upgrades and sizing. Autopilot: only your workloads; Google runs nodes and bills per pod request.",
     scaling: "HPA and VPA for pods; cluster autoscaler or node auto-provisioning for nodes (automatic in Autopilot).",
     pricing:
-      "$0.10 per cluster-hour for both modes, with a monthly credit that covers one Autopilot or zonal cluster per billing account. Standard bills nodes; Autopilot bills pod resource requests.",
+      "A fee per cluster-hour for both modes, with a monthly credit that covers one Autopilot or zonal cluster per billing account. Standard bills nodes; Autopilot bills pod resource requests.",
     useWhen: [
       "Kubernetes is the platform and you want the most automated upgrades and node management.",
       "Autopilot when you want Kubernetes APIs without node operations at all.",
@@ -201,7 +201,7 @@ export const services: CloudService[] = [
       "Standard clusters: node pools and their upgrades. AKS Automatic: mostly your workloads; Azure handles nodes, scaling and security defaults.",
     scaling: "HPA and KEDA for pods; cluster autoscaler or node auto-provisioning (Karpenter-based) for nodes.",
     pricing:
-      "Free tier control plane (no SLA); Standard tier about $0.10 per cluster-hour with an uptime SLA; Premium adds long-term support. Nodes billed as VMs.",
+      "Free tier control plane (no SLA); Standard tier adds a fee per cluster-hour and an uptime SLA; Premium adds long-term support. Nodes billed as VMs.",
     useWhen: [
       "Kubernetes on Azure, especially with Entra ID for cluster access and Azure Monitor.",
       "AKS Automatic when you want Kubernetes without node operations, like GKE Autopilot or EKS Auto Mode.",

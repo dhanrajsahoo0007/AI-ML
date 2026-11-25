@@ -134,7 +134,7 @@ Format of each line: id — owner page — kind — what it shows.
 - `deployment-strategies` — operations/ci-cd-and-deployment-strategies — architecture — all at once, rolling, blue-green and canary on the same fleet, with an alarm-driven rollback.
 - `ci-cd-pipeline` — operations/ci-cd-and-deployment-strategies — layout — commit, build and test, registry, staging, approval, production and rollback.
 - `image-pipeline` — operations/config-patching-and-fleet-management — architecture — base image, bake, test, registry and fleet refresh.
-- `cost-levers` — operations/cloud-cost-models — architecture — Brightpost's stack with a meter on each part, then rightsizing, commitments, spot and tiers (fundamentals/pricing-basics embeds a step).
+- `cost-levers` — operations/cloud-cost-models — architecture — Brightpost's stack with a meter on each part, then rightsizing, commitments, spot and tiers (fundamentals/pricing-basics links to the page but uses its own spec `pricing-basics-1`).
 - `data-transfer-paths` — operations/cloud-cost-models — layout — same zone, cross-zone, cross-region, internet and private endpoint paths, each marked free or charged.
 - `cost-allocation` — operations/finops-and-cost-tools — architecture — tagged resources flowing into a billing export and per-team views, with one untagged resource left unallocated.
 - `finops-loop` — operations/finops-and-cost-tools — layout — see, decide and act as a loop, with the cloud tools on one arc and team habits on the others.

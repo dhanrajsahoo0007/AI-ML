@@ -2,7 +2,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Moving a live database from one engine to another, told as Brightpost's wholesale move from MySQL on a VM into the
 // managed PostgreSQL engine (cloud/data/database-migration).
-// Step 1: about 60 gift shops order through the wholesale app, which reads and writes a 60 GB MySQL database on one
+// Step 1: about 300 gift shops order through the wholesale app, which reads and writes a 60 GB MySQL database on one
 // VM. The managed PostgreSQL target already runs the shop's orders. Step 2 (the only failure step): the first try,
 // dump and restore in one window, freezes writes for 11.5 hours and is rolled back. Step 3: a converter turns the
 // MySQL schema into PostgreSQL tables and keys first. Step 4: a replication task copies every table while the app
@@ -58,7 +58,7 @@ const spec: DiagramSpec = {
     {
       id: "shops",
       label: "Gift shops",
-      sub: "about 60, any hour",
+      sub: "about 300, any hour",
       icon: "users",
       tone: "neutral",
       variant: "glyph",

@@ -12,7 +12,7 @@ updated: 2026-11-13
 
 ## The story
 
-Brightpost's spring sale starts at 9:00. Asha has added a live counter to the sale banner: "1,240 posters sold, 300 people looking now". The counter is one item in a NoSQL table, stored under the key `sale-42`. Every page view and every basket add adds 1 to it. At 9:00 about 2,000 shoppers arrive, and by 9:01 the counter takes about 400 writes a second. The table is set for 1,000 writes a second, so Asha expects no trouble. Instead, about 150 writes a second are refused. Adding to the basket waits for the counter write, so from 9:01 to 9:19 about 1 in 3 basket adds shows an error. At 9:19 Asha switches the counter off. About 160 orders are lost.
+Brightpost's spring sale starts at 9:00. Asha has added a live counter to the sale banner: "1,240 posters sold, 300 people looking now". The counter is one item in a NoSQL table, stored under the key `sale-42`. Every page view and every basket add adds 1 to it. At 9:00 about 2,000 shoppers arrive, and by 9:01 the counter takes about 400 writes a second. The table is set for 1,000 writes a second, so Asha expects no trouble. Instead, about 150 writes a second are refused. Adding to the basket waits for the counter write, so from 9:01 to 9:19 about 1 in 3 basket adds shows an error. At 9:19 Asha switches the counter off. About 110 orders are lost.
 
 The table had room to spare. All of it sat on the wrong machines. The steps below show why, and how to design keys so it cannot happen again.
 

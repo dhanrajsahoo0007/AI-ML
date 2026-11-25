@@ -24,7 +24,7 @@ Five words first. A **data centre** is a building full of servers. A <Term id="r
 
 <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={1} minWidth={620} caption="Brightpost's first setup: one app server and its database, both in zone A of the home region." />
 
-You pick a region from a list when you create a server or a database. Each region holds several zones, and the zones sit kilometres apart. That is far enough that one fire, flood or power fault should not reach two of them. It is close enough that a round trip between zones takes a few milliseconds or less.
+You pick a region when you create a server or a database. Its zones sit kilometres apart, far enough that one fire, flood or power fault should not reach two of them. Yet a round trip between zones takes a few milliseconds or less.
 
 Brightpost let the cloud choose one zone for everything, so the whole shop is one failure domain. How much downtime a target allows is covered in [Availability, reliability and the nines](/system-design/fundamentals/availability).
 
@@ -51,7 +51,7 @@ A good design names the biggest failure it must survive. Then it keeps copies in
 
 <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={2} minWidth={620} caption="A load balancer that spans both zones shares the requests, and every write is copied to a standby in zone B." />
 
-Brightpost adds a second app server in zone B. A <Term id="load-balancer" /> now shares every request between the two servers. The cloud runs it in several zones, so no single building holds it. Every few seconds it sends each server a small test request, a **health check**. A server that stops answering gets no more customers.
+Brightpost adds a second app server in zone B. A <Term id="load-balancer" /> now shares every request between the two, and the cloud runs it in several zones. Every few seconds it sends each server a small test request, a **health check**. A server that stops answering gets no more customers.
 
 The database gets a **standby**, a second copy in zone B. Each write goes to both copies before the shop says "order placed". This is a **synchronous** copy, one kind of <Term id="replication" />, and it adds a millisecond or two to each write. Running copies in several zones like this is called <Term id="multi-az">multi-AZ</Term>.
 
@@ -65,11 +65,11 @@ Replay that Thursday with the new setup. At 7 pm zone A loses power, and server 
   The primary database goes dark with zone A. The cloud notices and promotes the standby: it becomes the primary, and the database's address now points at it. This <Term id="failover" /> takes about 2 minutes in Brightpost's setup. Orders placed in those 2 minutes fail, and customers retry. No saved order is lost, because each one was already in zone B.
 </Callout>
 
-Three hours of downtime became about 2 minutes. When zone A comes back, the old primary rejoins as the new standby. But server B carried the whole evening alone, which is the subject of step 5.
+Three hours of downtime became about 2 minutes, and the old primary rejoins as the standby when zone A returns. But server B carried the whole evening alone, the subject of Step 5.
 
 ### Step 5: Why three zones, not two
 
-At its 4,000-order peak, Brightpost needs the power of 2 app servers. Count what each layout must run so that losing a zone changes nothing.
+On its 30 busiest days, Brightpost needs the power of 2 app servers. Count what each layout must run so that losing a zone changes nothing on such a day.
 
 <Compare
   columns={["", "Two zones", "Three zones"]}
@@ -79,10 +79,10 @@ At its 4,000-order peak, Brightpost needs the power of 2 app servers. Count what
     ["Servers left with one zone dark", "2: enough", "2: enough"],
     ["Spare capacity you pay for", "100% extra", "50% extra"],
   ]}
-  caption="Each layout must still carry the 4,000-order peak with one zone dark."
+  caption="Each layout must still carry a busy day with one zone dark. Sale days add servers on top."
 />
 
-With two zones, each zone must carry the whole peak alone, so you pay for double. With three, the two survivors share the load. Some databases also keep three copies that vote on which one is in charge, a <Term id="quorum" />, and losing one still leaves a majority. Brightpost moves to three zones before its next sale day; the picture keeps two so it stays readable.
+With two zones, each zone must carry the whole load alone, so you pay for double. With three, the two survivors share the load. Some databases also keep three copies that vote on which one is in charge, a <Term id="quorum" />, and losing one still leaves a majority. Brightpost moves to three zones before its next sale day; the picture keeps two so it stays readable.
 
 ### Step 6: The edge: close to the customer
 
@@ -121,7 +121,7 @@ The idea is the same on all three clouds: regions you choose, zones inside them 
 <Tabs title="On each cloud">
   <Tab label="AWS">
     - **Regions:** named by code, such as eu-west-2 for London. Each region is isolated from the others, and most services are regional. AWS GovCloud (US) and the China regions are separate partitions with their own accounts.
-    - **Zones:** Availability Zones, such as eu-west-2a. In older accounts the same zone name can mean different buildings in two accounts. The zone ID, such as euw2-az1, names the same place in every account.
+    - **Zones:** Availability Zones, such as eu-west-2a. The same zone name can mean different buildings in two accounts. The zone ID, such as euw2-az1, names the same place in every account.
     - **Network scope:** a VPC belongs to one region, and each subnet lives in exactly one zone.
     - **Edge:** Amazon CloudFront, Route 53 and AWS Global Accelerator run at edge locations.
     - **Closer than a region:** Local Zones in some cities, Wavelength Zones inside mobile 5G networks, and Outposts racks in your own building.
@@ -144,7 +144,7 @@ The idea is the same on all three clouds: regions you choose, zones inside them 
     - **Edge:** Azure Front Door serves cached files and takes traffic at Microsoft's edge sites.
     - **Closer than a region:** Azure Extended Zones in some cities, and Azure Local for servers in your own building.
 
-    **The difference that changes a design.** Check for zones before you pick a region: a region without them cannot give Brightpost the step 3 design. Many services ask you to choose zonal (pinned to one zone) or zone-redundant (spread across zones for you). Pairs matter for recovery: geo-redundant storage copies data to the pair, and planned updates reach one region of a pair at a time. Some newer regions have no pair.
+    **The difference that changes a design.** Check for zones before you pick a region: a region without them cannot give Brightpost the two-zone design from Step 3. Many services ask you to choose zonal (pinned to one zone) or zone-redundant (spread across zones for you). Pairs matter for recovery: geo-redundant storage copies data to the pair, and planned updates reach one region of a pair at a time. Some newer regions have no pair.
   </Tab>
 </Tabs>
 
@@ -182,8 +182,8 @@ The idea is the same on all three clouds: regions you choose, zones inside them 
 />
 
 <Quiz>
-  <QuizItem question="Brightpost needs 2 servers' worth of power at its 4,000-order peak. How many servers must it run across three zones so that losing one zone changes nothing?" hint="Count what is left when one zone is dark.">
-    Three: one in each zone. With one zone dark, the other two still carry the peak. With only two zones it would need four, two in each.
+  <QuizItem question="Brightpost needs 2 servers' worth of power on its busiest days. How many servers must it run across three zones so that losing one zone changes nothing?" hint="Count what is left when one zone is dark.">
+    Three: one in each zone. With one zone dark, the other two still carry the load. With only two zones it would need four, two in each.
   </QuizItem>
   <QuizItem question="A customer in Sydney opens a product page whose photo is already at the edge site. Roughly how long does the photo's round trip take, and what about the checkout?" hint="The edge holds copies, not the database.">
     About 10 ms for the photo, because it comes from the edge site. The checkout still writes to the database in London, so each of its round trips takes about 250 ms.
@@ -198,7 +198,7 @@ The idea is the same on all three clouds: regions you choose, zones inside them 
 <Compare
   columns={["", "One zone", "Three zones, one region", "Two regions"]}
   rows={[
-    ["App servers for the 4,000-order peak", "2", "3", "3, plus a small standby fleet"],
+    ["App servers on a busy day", "2", "3", "3, plus a small standby fleet"],
     ["Down when a zone fails", "About 3 hours", "About 2 minutes", "About 2 minutes"],
     ["Down when the region fails", "Until it returns", "Until it returns", "Tens of minutes, if the switch is practised"],
     ["Copies of the orders data", "1", "2 or 3, in sync", "One more, a few seconds behind"],
@@ -240,17 +240,17 @@ For Brightpost, three zones buy almost all the safety for one extra server. A se
   </InterviewQuestion>
 
   <InterviewQuestion question="Why spread across three zones rather than two?" level="Mid" category="Cloud">
-    **Short answer.** Spare capacity and voting. With two zones, each must carry the full peak alone, so you run double. With three, the two survivors share the load, so you run half again. Three copies also let a database keep a majority after losing one.
+    **Short answer.** Spare capacity and voting. With two zones, each must carry the full load alone, so you run double. With three, the two survivors share the load, so you run half again. Three copies also let a database keep a majority after losing one.
 
-    **Why.** Brightpost needs 2 servers' worth of power at its 4,000-order peak. Two zones need 2 servers each, 4 in total. Three zones need 1 each, 3 in total, and still have 2 when a zone is dark. Systems that elect a leader need a majority. With two copies and a broken link, each side sees a 1–1 tie, and neither can safely take writes.
+    **Why.** Brightpost needs 2 servers' worth of power on its busiest days. Two zones need 2 servers each, 4 in total. Three zones need 1 each, 3 in total, and still have 2 when a zone is dark. Systems that elect a leader need a majority. With two copies and a broken link, each side sees a 1–1 tie, and neither can safely take writes.
 
-    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={3} caption="With one zone dark, the zones that remain must carry the whole peak." />
+    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={3} caption="With one zone dark, the zones that remain must carry the whole load." />
 
     **Follow-ups the interviewer may ask.**
     - Does every region offer three zones?
     - What does the load balancer do in the seconds before it marks a zone unhealthy?
 
-    **Watch out for.** Saying three zones "triple the cost". For stateless servers, three zones cost less than two zones that are each sized for the full peak.
+    **Watch out for.** Saying three zones "triple the cost". For stateless servers, three zones cost less than two zones that are each sized for the full load.
   </InterviewQuestion>
 
   <InterviewQuestion question="A product page is slow for customers far from your region. What do you change first?" level="Mid" category="Cloud">
@@ -270,7 +270,7 @@ For Brightpost, three zones buy almost all the safety for one extra server. A se
   <InterviewQuestion question="Which costs rise when you run in two regions?" level="Mid" category="Cloud">
     **Short answer.** A second set of servers and databases, data copied between regions, a way to move traffic, and time to practise the switch. Teams most often forget the transfer.
 
-    **Why.** Every write in the home region is copied to the second region, and that traffic is billed per gigabyte. A warm standby, such as Brightpost's small fleet, keeps the server bill low but still needs the full data copy. Logs, backups and monitoring run in both regions. Drills cost hours, but an unpractised switch tends to fail when needed.
+    **Why.** Every write in the home region is copied to the second region, and that traffic is billed per gigabyte. A warm standby keeps the server bill low but still needs the full data copy. Logs, backups and monitoring run in both regions. Drills cost hours, but an unpractised switch tends to fail when needed.
 
     <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={5} caption="The second region adds a data copy and a standby fleet, and both cost money every day." />
 

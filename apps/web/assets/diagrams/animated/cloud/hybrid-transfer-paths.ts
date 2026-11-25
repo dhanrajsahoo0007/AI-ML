@@ -140,7 +140,7 @@ const spec: DiagramSpec = {
       y: 250,
       w: 190,
       cloud: {
-        aws: { id: "aws-snow-family", label: "Snowball" },
+        aws: { id: "aws-snow-family", label: "Snowball Edge" },
         gcp: "gcp-transfer-appliance",
         azure: "azure-data-box",
       },

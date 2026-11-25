@@ -178,7 +178,7 @@ const spec: DiagramSpec = {
     {
       id: "stream",
       label: "Order stream",
-      sub: "3 partitions, 7 days",
+      sub: "kept 7 days, replays",
       icon: "log",
       tone: "orange",
       step: 6,

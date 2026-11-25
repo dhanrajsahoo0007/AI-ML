@@ -74,6 +74,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Data you cannot lose without a durable source behind it."],
     gotchas: [
       "Memorystore for Valkey has been generally available since April 2025 and is the default for new caches.",
+      "No cache has a public address: Valkey and Redis Cluster are reached through Private Service Connect from one VPC network, so plan the network first.",
     ],
     docs: "https://cloud.google.com/memorystore",
     main: "managed-cache",
@@ -92,7 +93,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: [
       "Azure Cache for Redis is closed to new customers; Basic, Standard and Premium retire September 30, 2028, Enterprise tiers March 31, 2027.",
-      "Clustered by default, so clients must support Redis Cluster.",
+      "Clustered by default. With the OSS clustering policy clients must support Redis Cluster; the Enterprise policy hides the shards behind one endpoint.",
     ],
     docs: "https://azure.microsoft.com/en-us/products/managed-redis",
     main: "managed-cache",
