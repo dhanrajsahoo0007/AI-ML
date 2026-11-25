@@ -40,7 +40,7 @@ Three rules come with it:
 
 1. **One way.** The consumer starts every conversation. The producer can answer, but it cannot use the endpoint to reach anything else in Brightpost's network.
 2. **The producer agrees.** Creating the endpoint sends a request, and the provider accepts it for Brightpost's account. Unknown accounts wait or are refused.
-3. **One address per zone.** Brightpost puts the endpoint in all three zones, so losing one zone leaves two addresses working.
+3. **Spread across zones.** On some clouds the endpoint takes one address in each zone you pick. Brightpost picks all three, so losing one zone leaves two addresses working.
 
 <Callout tone="red" title="What breaks">
   At 9:00 the provider stops accepting Brightpost's NAT addresses. The app asks DNS for the payment API's name and still gets the public address. So every card check still goes out through the NAT and is refused at the provider's front door. For 40 minutes, 16 checkouts fail while the endpoint sits idle.
@@ -57,7 +57,7 @@ Every network has a **DNS resolver**: the service that answers its machines' loo
 Why not type 10.0.31.10 into the app's settings instead? Three reasons:
 
 1. **The certificate.** The provider's TLS certificate names the API, not an address. A call to a bare address fails the check.
-2. **Zones.** The endpoint has a different address in each zone. A name can return the right ones; a fixed address cannot.
+2. **Zones.** On some clouds the endpoint has a different address in each zone. A name can return the right ones; a fixed address cannot.
 3. **Code.** With the zone in place, the same code works on either path. Nothing in the app changes.
 
 Brightpost adds the zone and tests by name from an app server. Two days later the provider removes the public addresses again, and nothing fails. [DNS on the Cloud](/cloud/networking/dns) covers private zones in full.
@@ -200,7 +200,7 @@ The middle column costs an endpoint and buys nothing. The DNS zone is what turns
 
 - **An endpoint with no DNS change.** The app keeps resolving the public address, and the endpoint carries nothing. Add a private DNS zone, or the endpoint's private DNS option, before anything depends on it.
 - **Testing by address.** A request to the endpoint's address proves the link works, not that the app uses it. Test by name, from the same kind of machine the app runs on, and watch the endpoint's traffic graph.
-- **One zone only.** An endpoint address in one zone fails with that zone. Give it an address in every zone the app runs in.
+- **One zone only.** Where an endpoint takes one address per zone, an address in one zone fails with that zone. Give it an address in every zone the app runs in.
 - **Allow-all endpoint policies.** An endpoint for storage that allows any bucket is a private road for stolen data. Name your own buckets or accounts in the policy.
 - **Peering for one service.** Joining whole networks gives both sides about 65,000 addresses to reach, and fails if the ranges overlap. Publish the one service through an endpoint instead.
 
@@ -236,7 +236,7 @@ The middle column costs an endpoint and buys nothing. The DNS zone is what turns
     - How do machines in an office reach the same private name?
     - Why not put the endpoint's address in the app's config?
 
-    **Watch out for.** Hard-coding the endpoint's address. The certificate names the service, not the address, and each zone has a different address.
+    **Watch out for.** Hard-coding the endpoint's address. The certificate names the service, not the address, and on some clouds each zone has a different address.
   </InterviewQuestion>
 
   <InterviewQuestion question="On AWS, when do you use a gateway endpoint and when an interface endpoint?" level="Mid" category="Cloud">

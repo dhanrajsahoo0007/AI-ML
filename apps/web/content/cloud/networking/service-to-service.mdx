@@ -102,7 +102,7 @@ A **service mesh** puts a small proxy beside every service, and a control plane 
   caption="What a mesh adds, and what it costs. Managed meshes take over the control plane, not the thinking."
 />
 
-A mesh pays off when dozens of services and several teams need the same rules. Brightpost has 3 services and 3 engineers, so it does not run one.
+A mesh pays off when dozens of services and several teams need the same rules. Brightpost has a handful of services and two small teams, so it does not run one.
 
 ## On AWS, Google Cloud and Azure
 
@@ -131,7 +131,7 @@ On all three clouds the pieces are the same: a private name or registry, a balan
     - **Service identity:** a managed identity per service, which gets tokens from Microsoft Entra ID. The receiving service checks the token's issuer and audience.
     - **Mesh or service network:** the Istio-based service mesh add-on for AKS, whose control plane Microsoft upgrades. Dapr in Container Apps adds service calls with retries.
 
-    **The difference that changes a design.** For services on plain virtual machines, Azure has no managed layer 7 balancer that speaks HTTP/2 to backends. Per-call balancing for gRPC then comes from the client library or a proxy you run. Put gRPC services in Container Apps or AKS, and the platform balances each call.
+    **The difference that changes a design.** For services on plain virtual machines, Azure has no managed internal layer 7 balancer that speaks HTTP/2 to backends. Per-call balancing for gRPC then comes from the client library or a proxy you run. Put gRPC services in Container Apps or AKS, and the platform balances each call.
   </Tab>
 </Tabs>
 
@@ -188,7 +188,7 @@ Describe how one of your services calls another, and see what should sit between
     ["Extra hops per call", "1, packets only", "1 proxy", "None", "2 proxies"],
     ["mTLS between services", "Passes through untouched", "Ends at the balancer", "In the library", "On for every pair"],
     ["What you run", "Nothing", "Nothing", "A library in every service", "A control plane and a proxy per server"],
-    ["Brightpost uses it for", "Nothing now", "The print service", "Nothing", "Nothing: 3 services"],
+    ["Brightpost uses it for", "Nothing now", "The print service", "Nothing", "Nothing: a handful of services"],
   ]}
   caption="Four ways to spread calls between services. Details differ by cloud and product."
 />
@@ -269,7 +269,7 @@ For a few services, a layer 7 internal balancer behind a private name does the j
   <InterviewQuestion question="Your team wants a service mesh. When is it worth it, and when is it not?" level="Senior" category="Cloud">
     **Short answer.** It is worth it when many services and several teams need the same per-call balancing, mTLS, retry rules and tracing. With a handful of services, managed balancers, service identity and a shared client library cost far less to run.
 
-    **Why.** Every call gains 2 proxy hops, every server gains a proxy to size and patch, and someone must understand the mesh when calls fail. A managed mesh runs the control plane, but the proxies and the debugging stay yours. Brightpost has 3 services and 3 engineers, so it uses a layer 7 balancer and written retry rules instead.
+    **Why.** Every call gains 2 proxy hops, every server gains a proxy to size and patch, and someone must understand the mesh when calls fail. A managed mesh runs the control plane, but the proxies and the debugging stay yours. Brightpost has a handful of services and two small teams, so it uses a layer 7 balancer and written retry rules instead.
 
     **Follow-ups the interviewer may ask.**
     - How would you roll a mesh out one service at a time?

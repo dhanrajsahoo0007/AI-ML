@@ -66,9 +66,9 @@ Scaling out works only if a copy keeps nothing the others need. A shopper's bask
 
 <AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={5} minWidth={620} caption="A scaling rule watches how busy the servers are. It asks the API for more copies when they are busy and removes them when it is quiet." />
 
-Nobody should have to stay awake pressing buttons. An <Term id="autoscaling">autoscaling</Term> rule does it instead. Brightpost's rule says: keep the servers' average processor use near 60%. Above that, the rule asks the API for another copy. Well below it, the rule removes one. A new copy is ready in about 3 minutes.
+Nobody should have to stay awake pressing buttons. An <Term id="autoscaling">autoscaling</Term> rule does it instead. Brightpost's rule says: keep the servers' average processor use near 60%. Above that, the rule asks the API for another copy. Well below it, the rule removes one. A new copy is ready in about 4 minutes.
 
-This is what **elastic** means. Capacity stretches when demand grows and shrinks back when demand falls, with no person in the loop. On sale morning Brightpost goes from 1 server to 10 by about 9:15. After 10 p.m. shoppers thin out, and the rule removes copies until only the first server is left. For a sale it knows about, Brightpost also books 6 servers from 8:45, because 3 minutes is a long time when 2,000 people arrive at once.
+This is what **elastic** means. Capacity stretches when demand grows and shrinks back when demand falls, with no person in the loop. On sale morning Brightpost goes from 1 server to 10 by about 9:15. After 10 p.m. shoppers thin out, and the rule removes copies until only the first server is left. For a sale it knows about, Brightpost also schedules 10 servers from 8:30, because 4 minutes is a long time when 2,000 people arrive at once.
 
 Two limits keep the rule safe. A **minimum**, 1 for Brightpost, keeps the shop open. A **maximum**, 10, stops a bug or a flood of fake traffic from renting servers without end. [Autoscaling: The Control Loop](/cloud/compute/autoscaling) covers the details.
 
@@ -186,7 +186,7 @@ The idea is the same on all three clouds. You rent servers through an API, a rul
   columns={["", "Buy your own servers", "Rent one fixed server", "Elastic cloud"]}
   rows={[
     ["Money before the first order", "The whole cost of the machines", "None", "None"],
-    ["Time to add capacity", "Weeks: order, ship, install", "About 5 minutes to resize, with a restart", "About 3 minutes a copy, automatic"],
+    ["Time to add capacity", "Weeks: order, ship, install", "About 5 minutes to resize, with a restart", "About 4 minutes a copy, automatic"],
     ["Server-hours paid for in a year", "87,600 if sized for the peak", "8,760, and the sale fails", "About 10,000"],
     ["Who replaces a broken part", "You", "The provider", "The provider"],
     ["Survives a day at 10 times the load", "Only if bought ahead", false, true],
@@ -215,7 +215,7 @@ Elastic wins whenever demand swings. For load that is flat and full all year, ow
   <InterviewQuestion question="What does it mean that the cloud is elastic?" level="Junior" category="Cloud">
     **Short answer.** Capacity grows when demand grows and shrinks when demand falls, automatically, and you pay only for what ran. Elastic means both halves: up for the rush, and back down after it.
 
-    **Why.** Brightpost needs 1 server on an ordinary day and 10 for a few hours of a sale. A scaling rule watches processor use and adds or removes copies behind a load balancer, each in about 3 minutes. Sized for the peak, the shop would pay for 87,600 server-hours a year. Elastic, it pays for about 10,000. Without the shrinking half you can scale, but you keep paying for idle servers.
+    **Why.** Brightpost needs 1 server on an ordinary day and 10 for a few hours of a sale. A scaling rule watches processor use and adds or removes copies behind a load balancer, each in about 4 minutes. Sized for the peak, the shop would pay for 87,600 server-hours a year. Elastic, it pays for about 10,000. Without the shrinking half you can scale, but you keep paying for idle servers.
 
     <AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={5} highlight={["autoscaler", "extra", "api"]} caption="The rule asks the provider's API to add copies when busy and remove them when quiet." />
 

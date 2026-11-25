@@ -12,7 +12,7 @@ updated: 2026-11-13
 
 ## The story
 
-Brightpost's shop app now ships as a container image: the app packed with everything it needs. It still runs on the VMs. On a busy Friday, three app servers each run one copy, and each fetches the image tagged `latest` when it starts. At 10:50 Asha pushes a half-tested build of a new basket page, also tagged `latest`, to try it in the test account. At 11:00 autoscaling adds a third server, and at 11:12 a health check replaces server 2. Both fetch `latest` and get the test build, while server 1 still runs version 1.4. The test build saves baskets in a new format that 1.4 cannot read. For 40 minutes the shop runs two versions at once. 52 shoppers who move between servers find an empty basket, and 19 leave without ordering. Rolling back is slow, because all three servers report the same tag.
+Brightpost's shop app now ships as a container image: the app packed with everything it needs. It still runs on the VMs. On a busy Friday, two app servers each run one copy, and each fetches the image tagged `latest` when it starts. At 10:50 Asha pushes a half-tested build of a new basket page, also tagged `latest`, to try it in the test account. At 11:00 autoscaling adds a third server, and at 11:12 a health check replaces server 2. Both fetch `latest` and get the test build, while server 1 still runs version 1.4. The test build saves baskets in a new format that 1.4 cannot read. For 40 minutes the shop runs two versions at once. 52 shoppers who move between servers find an empty basket, and 19 leave without ordering. Rolling back is slow, because all three servers report the same tag.
 
 Nothing in the cloud failed. A name pointed at a new build. Each step below closes one gap that let a test build reach customers.
 
@@ -34,7 +34,7 @@ A **virtual machine** (VM) is different. A program called a **hypervisor** split
 
 <AnimatedDiagram spec="animated/cloud/container-vs-vm" step={2} minWidth={620} caption="A new container starts a process in seconds. The price is a thinner wall: one kernel serves every container." />
 
-Sharing one kernel is why a container is cheap. A new VM boots an OS in 1 to 3 minutes. A new container starts a process in seconds, once its image is on the server.
+Sharing one kernel is why a container is cheap. A new VM takes minutes to boot its OS. A new container starts a process in seconds, once its image is on the server.
 
 The same sharing makes the wall thinner. A kernel flaw can let a process break out of its fence and reach every container on that machine. A VM has a kernel of its own. So clouds never run a stranger's containers on your kernel: each customer's containers run on that customer's VMs, or on tiny VMs built for the job.
 
@@ -67,7 +67,7 @@ An image has two kinds of name. A **tag** is a label a person picks, such as `v1
 `latest` is only a tag. It does not mean "the newest tested release". It means "whatever was pushed last under this name".
 
 <Callout tone="red" title="What breaks">
-  At 10:50 the test build takes the `latest` tag. Server 1 pulled `latest` at its 07:00 start and holds 1.4. Servers 2 and 3 start at 11:00 and 11:12 and get the test build. Shoppers move between servers, and 52 of them see an empty basket in 40 minutes. All three servers report `latest`, so Asha spends the first 25 minutes finding out which one runs what.
+  At 10:50 the test build takes the `latest` tag. Server 1 pulled `latest` at its 07:00 start and holds 1.4. Server 3 starts at 11:00 and a replacement server 2 at 11:12, and both get the test build. Shoppers move between servers, and 52 of them see an empty basket in 40 minutes. All three servers report `latest`, so Asha spends the first 25 minutes finding out which one runs what.
 </Callout>
 
 ### Step 5: Pin the digest, lock the tag
@@ -192,7 +192,7 @@ All three clouds sell a private registry that scans, copies and cleans images. T
 />
 
 <Quiz>
-  <QuizItem question="Server 1 pulled latest at 07:00. Servers 2 and 3 pulled latest at 11:00 and 11:12. Why did they get different builds?" hint="What happened at 10:50?">
+  <QuizItem question="Server 1 pulled latest at 07:00. Servers 3 and 2 pulled latest at 11:00 and 11:12. Why did they get different builds?" hint="What happened at 10:50?">
     At 10:50 the test build took the latest tag. A tag points at whatever was pushed last, so the same name meant 1.4 at 07:00 and the test build after 10:50.
   </QuizItem>
   <QuizItem question="Version 1.5 changes only the code layer, about 4 MB. A server already holds 1.4. How much does it download to run 1.5?" hint="Which layers does it already hold?">
@@ -237,7 +237,7 @@ Use both. People talk about `v1.5`; the deploy file holds the digest the pipelin
   <InterviewQuestion question="What is the difference between a container and a virtual machine?" level="Junior" category="Cloud">
     **Short answer.** A VM is a pretend computer with its own OS and kernel, made by a hypervisor. A container is a process fenced off by the host's kernel, carrying only the app and its libraries. So it is smaller and starts in seconds.
 
-    **Why.** Three VMs boot three OSs, 1 to 3 minutes each. Three containers share one kernel and start as processes. The price is the wall: a kernel flaw can reach every container on that machine. So clouds keep each customer's containers on that customer's VMs.
+    **Why.** Three VMs boot three OSs, minutes each. Three containers share one kernel and start as processes. The price is the wall: a kernel flaw can reach every container on that machine. So clouds keep each customer's containers on that customer's VMs.
 
     <AnimatedDiagram spec="animated/cloud/container-vs-vm" step={2} caption="Each VM carries a kernel; the containers share one, which makes them fast and their wall thinner." />
 

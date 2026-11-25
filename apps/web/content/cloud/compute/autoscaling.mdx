@@ -264,7 +264,7 @@ Speed costs money when nobody is shopping. Pay for running spares only before a 
   <InterviewQuestion question="How do you remove servers from a web tier without dropping requests?" level="Mid" category="Cloud">
     **Short answer.** Drain each server before it stops, remove servers slowly and one at a time, and protect servers that are doing long work. Keep no user state on the server, so any server can finish a shopper's visit.
 
-    **Why.** Brightpost's group once removed 4 servers at once with no drain, and about 15 checkouts failed. Now the balancer stops sending a leaving server new requests and gives open ones up to 60 seconds; Pay takes about 4. Scale-in waits 15 quiet minutes and removes one server per decision. Baskets live in a shared database, so a shopper's next click works on any server.
+    **Why.** Brightpost's group once removed 4 servers at once with no drain, and about 15 checkouts failed. Now the balancer stops sending a leaving server new requests and gives open ones up to 60 seconds. The slowest request, the Pay step, takes about 4. Scale-in waits 15 quiet minutes and removes one server per decision. Baskets live in a shared database, so a shopper's next click works on any server.
 
     <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} path="autoscaler>servers36>lb" caption="The autoscaler picks one server, the balancer drains it, and only then does it stop." />
 
@@ -286,7 +286,7 @@ Speed costs money when nobody is shopping. Pay for running spares only before a 
     - How do you show that the fix worked?
     - What does flapping cost apart from money?
 
-    **Watch out for.** Raising the minimum to the peak to make it stop. The flapping ends, but you pay for peak capacity all day: 10 servers all year is 87,600 server-hours, against about 10,000 used.
+    **Watch out for.** Raising the minimum to the peak to make it stop. The flapping ends, but you pay for peak capacity all day: 10 servers all year is 87,600 server-hours, against fewer than 20,000 used.
   </InterviewQuestion>
 
   <InterviewQuestion question="A scale-out takes six minutes and the sale lasts five. What are your options?" level="Senior" category="Cloud">

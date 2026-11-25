@@ -35,13 +35,13 @@ Step 1 is a Cloud SQL for PostgreSQL instance with high availability on: a stand
 
 In step 2 a Cloud SQL read replica, built for the finance lead's report, also takes the order page. It copies changes asynchronously: the primary does not wait for it. In step 3 it falls 40 seconds behind and about 130 shoppers pay twice; the standby cannot help, because it serves no reads. Step 4 sends a shopper's reads to the primary for 60 seconds after a write, and Cloud Monitoring alerts on lag.
 
-Step 5 differs most here. The Cloud SQL Auth Proxy secures connections but does not pool them, so you run the pooler, such as PgBouncer. In step 6 the standby is promoted, and the instance keeps its IP address.
+Step 5 differs most here. The Cloud SQL Auth Proxy secures connections but does not pool them. Enterprise Plus instances can turn on managed connection pooling; otherwise you run the pooler, such as PgBouncer. In step 6 the standby is promoted, and the instance keeps its IP address.
 
 | The idea | On Google Cloud | What to know |
 |---|---|---|
 | Standby in a second zone | Cloud SQL high availability | Synchronous and serves no reads; it covers a zone, not a region |
 | Read copy | Cloud SQL read replica; AlloyDB read pool | Asynchronous; a read pool puts several read nodes behind one address |
-| Connection pooler | PgBouncer or an app-side pool you run | The Auth Proxy secures connections; it does not share them |
+| Connection pooler | Managed connection pooling (Enterprise Plus), or PgBouncer or an app-side pool you run | The Auth Proxy secures connections; it does not share them |
 | Copy in another region | Cross-region read replica | Asynchronous, so a region loss can cost the last seconds of writes |
 | Writes beyond one primary | Spanner, regional or multi-region | Sized in nodes, or smaller processing units; strongly consistent |
 
@@ -96,7 +96,7 @@ Bigtable sorts rows by one row key and indexes nothing else. Put a spread-out fi
 ## Common mistakes
 
 - **Counting the high-availability standby as read capacity.** It serves no queries until a failover.
-- **One connection per function copy.** The Auth Proxy does not pool, so a burst of functions can use every connection. Put a pooler in front.
+- **One connection per function copy.** The Auth Proxy does not pool, so a burst of functions can use every connection. Put a pooler in front, managed or your own.
 - **Counting keys in Spanner or Bigtable.** Every new row lands in the same range, and one server does all the work.
 
 ## Where this shows up in system design

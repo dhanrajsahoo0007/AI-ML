@@ -135,11 +135,11 @@ The idea is the same on all three clouds: a private range, slices per tier, only
   <Tab label="Azure">
     - **Network:** a virtual network (VNet) belongs to one region and one subscription, with one or more address ranges.
     - **Subnets:** a subnet covers every zone of the region, so Brightpost's plan is three subnets. Azure keeps 5 addresses in each.
-    - **What makes it public:** a public IP address on a VM's network card or a load balancer. There is no internet gateway to create: built-in system routes cover every subnet, and a route table can override them.
+    - **What makes it public:** a public IP address on a VM's network card or a load balancer. There is no internet gateway to create: built-in system routes cover every subnet, and a route table can override them. Subnets in newly created VNets are private by default, so a VM without a public IP needs a NAT gateway or similar to reach out.
     - **Load balancer:** Application Gateway needs a subnet of its own, and it holds the public IP.
     - **Database:** Azure Database for PostgreSQL flexible server sits in a subnet handed over to it (a delegated subnet), or behind a private endpoint.
 
-    **The difference that changes a design.** The default routes already lead to the internet, so "private" on Azure means no public IP on anything but the gateway, plus network security group rules. Subnets span zones, so a zone failure takes the machines in that zone, not the subnet. You pick a zone for each VM, or a zone-redundant option where a service offers one.
+    **The difference that changes a design.** The built-in routes already lead to the internet, so "private" on Azure means no public IP on anything but the gateway, plus network security group rules. Older subnets may still give VMs an implicit way out, so check each subnet's default outbound setting. Subnets span zones, so a zone failure takes the machines in that zone, not the subnet. You pick a zone for each VM, or a zone-redundant option where a service offers one.
   </Tab>
 </Tabs>
 

@@ -41,7 +41,7 @@ The image, its libraries, the data and the settings stay hers. [The Compute Spec
 
 A copy of the card maker is a normal web server, so it can serve many requests at the same time. Most of an upload is waiting for bytes to arrive, and a waiting request costs almost no processor time. The number of requests one copy may hold at once is its **concurrency** setting. Asha sets 20.
 
-The platform's <Term id="autoscaling">autoscaler</Term> counts the requests in flight. On a busy evening about 40 are open at once, so 2 copies are enough. On a sale evening 50 are open, so it starts a third. A platform that sends one request per copy would need 50.
+The platform's <Term id="autoscaling">autoscaler</Term> counts the requests in flight: uploads, plus the editor pages and previews around them. On a busy evening about 40 are open at once, so 2 copies are enough. On a sale evening 50 are open, so it starts a third. A platform that sends one request per copy would need 50.
 
 Set concurrency from memory. If one upload needs 100 MB, 20 at once need 2 GB on that copy. The card maker also keeps a minimum of 1 copy, for the reasons the spectrum page explains.
 
@@ -266,7 +266,7 @@ The two middles cost about the same to start. Choose by the traffic shape, the r
   <InterviewQuestion question="Why does a platform that sends many requests to one copy need fewer copies than a one-request-per-copy platform?" level="Mid" category="Cloud">
     **Short answer.** Most of a web request is waiting: for bytes to arrive, or for a database to answer. A copy that serves 20 requests at once fills that waiting time with other requests. So 50 requests in flight need 3 copies, not 50.
 
-    **Why.** Brightpost's card maker sets concurrency to 20. On a sale evening 50 uploads are open at once, so 3 copies run. One request per copy means 50 copies and 50 database connections. Memory sets the limit: at 100 MB per upload, 20 at once need 2 GB.
+    **Why.** Brightpost's card maker sets concurrency to 20. On a sale evening 50 requests are open at once, so 3 copies run. One request per copy means 50 copies and 50 database connections. Memory sets the limit: at 100 MB per upload, 20 at once need 2 GB.
 
     <AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={2} highlight={["autoscaler", "v1", "front"]} caption="The autoscaler adds a copy only when the open copies are full." />
 

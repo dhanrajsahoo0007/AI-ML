@@ -116,13 +116,13 @@ The idea is the same on all three clouds: private servers share a public address
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
-    - **Where it sits:** a NAT gateway is a resource in one public subnet. Each private subnet's route table sends internet-bound traffic to it, and the public subnet routes on to an internet gateway.
-    - **Zones:** a NAT gateway lives in one Availability Zone. One per zone, with each zone's private route table pointing at the gateway in its own zone, keeps a zone failure inside that zone.
+    - **Where it sits:** a zonal NAT gateway is a resource in one public subnet. Each private subnet's route table sends internet-bound traffic to it, and the public subnet routes on to an internet gateway.
+    - **Zones:** a zonal NAT gateway lives in one Availability Zone. One per zone, each zone's routes pointing at its own, keeps a zone failure inside that zone. A newer regional NAT gateway attaches to the VPC and expands into the zones where your workloads run.
     - **Fixed address:** each public NAT gateway has an Elastic IP address, which stays yours until you release it.
     - **Private path to storage:** a gateway endpoint for Amazon S3 is a route-table entry, the route kind. Interface endpoints (AWS PrivateLink) put a private address in your subnets, the address kind.
     - **Egress filter:** AWS Network Firewall can allow traffic by domain name. Route 53 Resolver DNS Firewall can refuse lookups of names not on a list. Security groups limit outbound ports and addresses.
 
-    **The difference that changes a design.** On AWS the zone choice lives in the route tables. Nothing stops three private subnets pointing at one NAT gateway, and nothing warns you. So the design has one gateway and one private route table per zone. For IPv6, an egress-only internet gateway gives "out yes, in no" without translation.
+    **The difference that changes a design.** With zonal gateways, the zone choice lives in the route tables. Nothing stops three private subnets pointing at one NAT gateway, and nothing warns you. So the design has one gateway and one private route table per zone, or one regional gateway. For IPv6, an egress-only internet gateway gives "out yes, in no" without translation.
   </Tab>
   <Tab label="Google Cloud">
     - **Where it sits:** Cloud NAT is a configuration on a Cloud Router in one region. No gateway machine sits in the path: Google's network software translates the traffic for each VM. Subnets have no public or private type; a VM without an external address is private.
@@ -135,12 +135,12 @@ The idea is the same on all three clouds: private servers share a public address
   </Tab>
   <Tab label="Azure">
     - **Where it sits:** a NAT Gateway resource attaches to one or more subnets of a virtual network. Once attached, it becomes those subnets' way out to the internet, with no route to add. No public subnet is needed.
-    - **Zones:** a NAT gateway is either zonal, pinned to one zone, or non-zonal, placed by Azure. A non-zonal gateway is not spread across zones.
+    - **Zones:** a Standard NAT gateway is either zonal, pinned to one zone, or non-zonal, placed by Azure, and neither is spread across zones. The newer StandardV2 NAT gateway is zone-redundant in regions that support it.
     - **Fixed address:** public IP addresses, or a public IP prefix (a block of consecutive addresses), attached to the gateway.
     - **Private path to storage:** a service endpoint is a subnet setting that sends storage traffic over Azure's own network. A private endpoint (Azure Private Link) puts a private address in your subnet for one storage account.
     - **Egress filter:** Azure Firewall can allow traffic by domain name, with a route that sends the subnets' outbound traffic through it. Network security groups limit outbound addresses and ports.
 
-    **The difference that changes a design.** Azure subnets span zones, and a subnet takes one NAT gateway. So one zonal gateway per zone means splitting each tier into one subnet per zone, each with its own gateway. The simpler design, one subnet and one gateway, still depends on whichever zone that gateway runs in.
+    **The difference that changes a design.** Azure subnets span zones, and a subnet takes one NAT gateway. With Standard gateways, one per zone means splitting each tier into one subnet per zone, each with its own gateway. A zone-redundant StandardV2 gateway removes that split: one subnet and one gateway survive a zone failure.
   </Tab>
 </Tabs>
 
@@ -201,7 +201,7 @@ The shared gateway wins only on the hourly line. The endpoint then removes the l
 
 ## Common pitfalls
 
-- **One NAT for every zone.** The incoming path survives a zone failure, and the outgoing path does not. Put one gateway in each zone and point each zone's routes at its own.
+- **One NAT for every zone.** The incoming path survives a zone failure, and the outgoing path does not. Put one gateway in each zone and point each zone's routes at its own, or use a gateway the cloud spreads across zones.
 - **Health checks that never leave the network.** A check that loads the home page stays green while every checkout fails. Add a check that calls a real outside dependency.
 - **The cloud's own traffic through the NAT.** Storage downloads pay the NAT meter for a trip that never needed the internet. Add a private endpoint for storage and other heavy provider services.
 - **Addresses that change.** An address the cloud picks for you can change, and a partner's allow-list then refuses you. Reserve each address, and send new ones before you switch traffic.
@@ -209,7 +209,7 @@ The shared gateway wins only on the hourly line. The endpoint then removes the l
 
 ## How to say it in an interview
 
-"Private servers have no public address, so they leave through a NAT gateway that swaps in its own address and lets only replies back. A route table sends traffic to it, so I check which gateway each zone's routes point at. I put one gateway per zone; one shared gateway turns a zone failure into an outage for every zone. The NAT bills per hour and per gigabyte, so I send the cloud's own services, such as storage, through private endpoints instead. If a partner allow-lists us, I reserve a fixed address per gateway and give them all of them. Finally, I filter egress to known destinations, because open egress is how stolen data leaves."
+"Private servers have no public address, so they leave through a NAT gateway that swaps in its own address and lets only replies back. A route table sends traffic to it, so I check which gateway each zone's routes point at. I put one gateway per zone, or one the cloud spreads across zones; one zonal gateway shared by all turns a zone failure into an outage for every zone. The NAT bills per hour and per gigabyte, so I send the cloud's own services, such as storage, through private endpoints instead. If a partner allow-lists us, I reserve a fixed address per gateway and give them all of them. Finally, I filter egress to known destinations, because open egress is how stolen data leaves."
 
 ## Interview questions
 
@@ -237,7 +237,7 @@ The shared gateway wins only on the hourly line. The endpoint then removes the l
 
     **Follow-ups the interviewer may ask.**
     - How would you catch this before an outage?
-    - Does this apply on Google Cloud, where Cloud NAT is regional?
+    - Does this apply on Google Cloud, where Cloud NAT is regional, or to a NAT gateway that spans zones by itself?
 
     **Watch out for.** Adding gateways without changing the routes. Three gateways with every route still pointing at zone A's gateway fail the same way.
   </InterviewQuestion>

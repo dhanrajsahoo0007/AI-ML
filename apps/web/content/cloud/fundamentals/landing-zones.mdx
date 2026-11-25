@@ -26,7 +26,7 @@ Three words first. An **estate** is all of a company's cloud accounts, with the 
 
 Brightpost already has an <Term id="organization">organisation</Term>, a tree that holds all its accounts. A guardrail on the root allows 2 regions and no public buckets. Three folders hang below it: non-production, production and security. Each holds one account: test, shop and audit. Staff sign in once, with a password and a second proof. The shop account sends its audit trail, the record of every call, to the log archive in the audit account.
 
-It works because one team built it and the same team uses it. But the shape lives in people's heads: "new accounts go under a folder", "switch on logging". Nothing written down says how an account joins the estate. Keeping each mistake inside one wall is an old security idea; the [Security overview](/system-design/fundamentals/security) covers it.
+It works because the team that built it also uses it. But the shape lives in people's heads, and nothing written down says how an account joins the estate. Keeping each mistake inside one wall is an old security idea; the [Security overview](/system-design/fundamentals/security) covers it.
 
 <PremiumBreak />
 
@@ -40,13 +40,13 @@ Brightpost had no way to request an account, so the wholesale team made one the 
   For 41 days the wholesale bucket hands its files to anyone who asks. The guardrail that forbids public buckets exists, but it hangs on a tree this account is not part of. The account sends no audit trail to the archive and never recorded reads of its files. So when the researcher writes, Brightpost cannot tell whether one stranger or a thousand downloaded the orders.
 </Callout>
 
-Nothing here was a clever attack. Someone with a good reason made a bucket public, in an account no rule could see. Missing: a place in the tree, logs sent to the archive, and a way to make accounts that always does both.
+Nothing here was a clever attack: a bucket made public for a good reason, in an account no rule could see. Missing: a place in the tree, logs sent to the archive, and a way to make accounts that always does both.
 
 ### Step 3: Every account inside the tree
 
 <AnimatedDiagram spec="animated/cloud/landing-zone" step={3} minWidth={620} caption="The wholesale account joins the production folder. The root guardrail now reaches it, and the public download is refused." />
 
-First, Brightpost brings the wholesale account into the organisation, under the production folder. From that minute the root guardrail applies. The bucket's public setting is switched off, and the next anonymous download fails. Price lists move to a page that shop owners reach after they sign in.
+First, Brightpost brings the wholesale account into the organisation, under the production folder. From that minute the root guardrail applies, and the next anonymous download fails. Price lists move to a page that shop owners reach after they sign in.
 
 The tree follows two rules, in this order:
 
@@ -76,9 +76,9 @@ The wholesale account's shared owner password is gone; its owner login gets MFA 
 
 <AnimatedDiagram spec="animated/cloud/landing-zone" step={4} minWidth={620} caption="The wholesale account's audit trail flows to the archive, and a security tooling account collects findings from every account." />
 
-Every account in the tree now sends its audit trail to the log archive. The archive is **append only**: records can be added, but not changed or removed until a retention period ends. Brightpost keeps them for 1 year. Application teams have no role in the audit account. Someone who breaks into the wholesale account cannot erase the evidence, because their rights stop at that account's wall. Buckets with customer data now also record every read.
+Every account in the tree now sends its audit trail to the log archive. The archive is **append only**: records can be added, but not changed or removed until a retention period ends, 1 year at Brightpost. Application teams have no role in the audit account, so an intruder in the wholesale account cannot erase the evidence. Buckets with customer data now also record every read.
 
-The second shared account holds **security tooling**: services that scan every account for risky settings. Each problem becomes a **finding**, a short report such as "this bucket is readable by anyone". The tooling reads every account and changes none. Brightpost's scan runs every hour, so a public bucket becomes a finding the same day, not an email on day 41. More on [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection).
+The second shared account holds **security tooling**: services that scan every account for risky settings and change none. Each problem becomes a **finding**, a short report such as "this bucket is readable by anyone". Brightpost's scan runs every hour, so a public bucket becomes a finding the same day, not an email on day 41. More on [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection).
 
 ### Step 6: A shared network hub
 
@@ -90,7 +90,7 @@ A <Term id="transit-hub">transit hub</Term> fixes this. Each network attaches on
 
 ### Step 7: Guardrails and a baseline from day one
 
-A guardrail on the root reaches every account below it, including accounts made next year. So a landing zone sets its guardrails before the first team arrives. They come in two kinds:
+A guardrail on the root reaches every account below it, including accounts made next year, so a landing zone sets its guardrails before the first team arrives. They come in two kinds:
 
 - **Preventive** guardrails refuse a request. No public buckets, 2 regions only, and nobody may switch off the audit trail.
 - **Detective** guardrails let a request through and raise a finding. A server without an `owner` tag, or a database with no backup plan.
@@ -206,7 +206,7 @@ The idea is the same on all three clouds: folders by environment, shared account
   caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
 />
 
-A landing zone costs the most on its first day and the least on every day after. A hand-made account is cheapest only until something goes wrong inside it.
+A landing zone costs the most on its first day and the least on every day after.
 
 ## Common pitfalls
 
@@ -226,7 +226,7 @@ A landing zone costs the most on its first day and the least on every day after.
   <InterviewQuestion question="What is a landing zone, in plain words?" level="Junior" category="Cloud">
     **Short answer.** It is the standard layout of a company's cloud accounts, set up before teams start building. It says where accounts go, what they share, such as logs, security tools and the network, and which rules every account starts with.
 
-    **Why.** Without one, each team sets up its own account its own way. Brightpost's wholesale team made an account through the public sign-up page. It sat outside the organisation, so the guardrail against public buckets never reached it, and a bucket of trade orders stayed public for 41 days. With a landing zone, every account is made in the tree, with logging and guardrails from its first minute.
+    **Why.** Without one, each team sets up its own account its own way. Brightpost's wholesale account, made through the public sign-up page, sat outside the organisation, so the guardrail against public buckets never reached it. With a landing zone, every account is made in the tree, with logging and guardrails from its first minute.
 
     <AnimatedDiagram spec="animated/cloud/landing-zone" step={6} highlight={["org", "nonprod", "prod", "security", "archive", "tooling", "hub", "vending"]} caption="The shape: folders by environment, shared accounts for logs, security and the network, and vending for new accounts." />
 
@@ -240,7 +240,7 @@ A landing zone costs the most on its first day and the least on every day after.
   <InterviewQuestion question="Why keep audit logs in a separate account that application teams cannot change?" level="Mid" category="Cloud">
     **Short answer.** So the evidence survives the incident it records. A person or attacker with full control of an application account cannot reach across the account wall to delete or edit the logs.
 
-    **Why.** Logs kept inside the account they describe share its blast radius. A thief with the wholesale account's admin rights could switch off logging and delete what was written. In Brightpost's landing zone, every account sends its audit trail to the audit account. Application teams hold no role there, and the archive is append only for 1 year.
+    **Why.** Logs kept inside the account they describe share its blast radius: a thief with that account's admin rights can switch off logging and delete what was written. In Brightpost's landing zone, every audit trail goes to the audit account. Application teams hold no role there, and the archive is append only for 1 year.
 
     <AnimatedDiagram spec="animated/cloud/landing-zone" step={4} path="wholesale>archive" caption="The wholesale account writes its audit trail into an account its own admins cannot change." />
 
@@ -268,7 +268,7 @@ A landing zone costs the most on its first day and the least on every day after.
   <InterviewQuestion question="What goes wrong if guardrails are set inside each account instead of on the tree?" level="Mid" category="Cloud">
     **Short answer.** Every new account starts without them, and any admin of an account can remove them. A rule on the tree reaches every account below it, including future ones, and no account admin can switch it off.
 
-    **Why.** A rule inside an account depends on that account's admins, and on whoever creates the next account remembering it. Brightpost's wholesale account was the extreme case: it was not in the tree at all, and its bucket stayed public for 41 days. Once the account joined the production folder, the same request was refused without anyone touching the account.
+    **Why.** A rule inside an account depends on that account's admins, and on whoever creates the next account remembering it. Brightpost's wholesale account was the extreme case: it was not in the tree at all, and its bucket stayed public for 41 days. Once it joined the production folder, the same request was refused.
 
     <AnimatedDiagram spec="animated/cloud/landing-zone" step={2} highlight={["guardrail", "org", "wholesale", "bucket"]} caption="The guardrail hangs on the root, and the hand-made account is not under it." />
 
@@ -282,7 +282,7 @@ A landing zone costs the most on its first day and the least on every day after.
   <InterviewQuestion question="Design an account vending process: what happens between 'we need an account' and the first deploy?" level="Senior" category="Cloud">
     **Short answer.** A short request goes into a pipeline that applies the whole baseline in code. It creates the account, places it in the right folder, connects logging, security tooling, sign-in, network and budget, and hands the team a ready account.
 
-    **Why.** The request names the team, the environment and an owner. The pipeline creates the account under the matching folder, so guardrails apply from the first minute. It sends the audit trail to the archive, enrols the account in security tooling and gives the team's groups their roles. It assigns a non-overlapping address range, attaches it to the hub, and sets tags and budget alerts. Brightpost's wholesale test account took about 20 minutes. Make vending faster than any side door, or people will use the side door.
+    **Why.** The request names the team, the environment and an owner. The pipeline creates the account under the matching folder, so guardrails apply from the first minute. It connects the audit trail, enrols security tooling, grants the team's groups their roles, assigns a non-overlapping address range on the hub, and sets tags and budget alerts. Brightpost's wholesale test account took about 20 minutes. Make vending faster than any side door, or people will use the side door.
 
     <AnimatedDiagram spec="animated/cloud/landing-zone" step={6} path="vending>wtest>nonprod>org" caption="Vending creates the account directly under its folder, so the root's rules apply from the first minute." />
 

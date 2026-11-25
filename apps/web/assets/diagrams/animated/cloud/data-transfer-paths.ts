@@ -142,7 +142,7 @@ const shapes: LayoutShape[] = [
     y: 404,
     w: 506,
     h: 22,
-    label: "Real rates differ by cloud and change over time.",
+    label: "Some private endpoints bill their own. Real rates differ by cloud.",
     tone: "neutral",
   },
 ];

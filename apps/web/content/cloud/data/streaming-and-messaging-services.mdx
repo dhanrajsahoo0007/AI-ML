@@ -26,7 +26,7 @@ Three words first. An **event** is a record that something happened, such as "1 
 
 A stream is split into <Term id="partition">partitions</Term>, separate logs that grow side by side. The producer attaches a **partition key** to each event. The service turns the key into a number with a hash, and that number picks the partition. All events for one product land on the same partition, in the order they were sent.
 
-Inside one consumer group, each partition is read by one worker at a time. That keeps each product's events in order, and it caps speed: 3 partitions allow at most 3 busy workers in a group. Most scaling questions about streams come back to that rule. The theory is on [Message Queues and Pub/Sub](/system-design/patterns/message-queues).
+Inside one consumer group, each partition is read by one worker at a time. That keeps each product's events in order, and it caps speed: 3 partitions allow at most 3 busy workers in a group. The theory is on [Message Queues and Pub/Sub](/system-design/patterns/message-queues).
 
 <PremiumBreak />
 
@@ -40,7 +40,7 @@ A hash spreads keys evenly, not events. When one key gets most of the traffic, i
   From 9:00, 200 hero-poster events arrive each minute and the worker counts 50, at about 1.2 seconds each. After 2 hours, 18,000 events wait in line. At 50 a minute, the last of them is counted 360 minutes later, at 5 p.m. Checkout trusted the count, so between 9:50 and 12:20 it sold 380 posters that did not exist.
 </Callout>
 
-Two things failed. Nobody saw the delay, and the key put a whole sale on one worker.
+Two things failed: nobody saw the delay, and the key put a whole sale on one worker.
 
 ### Step 3: Lag is the number to watch
 
@@ -148,7 +148,7 @@ The ideas are the same on all three clouds. The products differ in where partiti
     - **Workflow:** Workflows. Steps are written in YAML or JSON, with retries and timeouts. Callbacks pause a run until an outside system or a person replies.
     - **Kafka:** Managed Service for Apache Kafka.
 
-    **The difference that changes a design.** Pub/Sub moves the scaling question from partitions to keys. You never reshard, but each ordering key is delivered in order, one message at a time, so a hot key is still slow. Pub/Sub offers exactly-once delivery on pull subscriptions, and Dataflow offers exactly-once processing inside a pipeline. Neither covers an email your code sends.
+    **The difference that changes a design.** Pub/Sub moves the scaling question from partitions to keys. You never reshard, but messages with one ordering key are delivered in order, one after another, so a hot key is still slow. Pub/Sub offers exactly-once delivery on pull subscriptions, and Dataflow offers exactly-once processing inside a pipeline. Neither covers an email your code sends.
   </Tab>
   <Tab label="Azure">
     - **Stream:** Azure Event Hubs, with partitions, consumer groups and retention. Capture writes events to Blob Storage or Data Lake Storage.
@@ -220,7 +220,7 @@ Pick the managed service for a job that a plain queue or topic does not fit.
   caption="The cost shape follows what you size. Brightpost's quiet nights and 4,000-order sale days favour the on-demand stream."
 />
 
-A sized stream is cheapest at steady load; an on-demand one needs no planning. Managed Kafka buys the Kafka tools at the price of brokers that run all day.
+A sized stream is cheapest at steady load; an on-demand one needs no planning. Managed Kafka buys the Kafka tools with brokers that run all day.
 
 ## Common pitfalls
 
