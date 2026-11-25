@@ -46,7 +46,7 @@ Small scattered reads need IOPS; big sequential reads need throughput. [B-trees]
 
 <AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={2} minWidth={620} caption="The failure: at 9:50 the credit bucket is empty, so the volume serves 300 reads a second while the database asks for 1,200." />
 
-Some disk types give a **baseline**, a speed held all day, plus a **burst** above it that runs on **credits**. Below the baseline, each unused read is saved as a credit in a bucket; above it, each extra read spends one. Brightpost's disk had a baseline of 300 IOPS, a burst of 3,000 and a full bucket of 2.7 million credits.
+Some disk types give a **baseline**, a speed held all day, plus a **burst** above it that runs on **credits**. Below the baseline, each unused read is saved as a credit in a bucket; above it, each extra read spends one. Brightpost's disk had a baseline of 300 IOPS, a burst of 3,000 and a full bucket of 2.7 million credits. Real bucket sizes differ by cloud and disk type.
 
 On a normal day the busiest minute needs 80 IOPS, so the bucket stays full.
 
@@ -157,7 +157,7 @@ Volumes, IOPS, snapshots and keys work the same way on all three clouds. The nam
     - **Encryption:** per volume, with a key in AWS KMS; an account setting turns it on by default, one region at a time. A copy to another region names a key there.
     - **Across zones:** a volume lives in one Availability Zone; to move it, snapshot and restore.
 
-    **The difference that changes a design.** EBS has no volume that spans zones. A self-run database that must survive a zone failure needs its own replica in a second zone, or accepts a restore from the last snapshot. Moving gp2 to gp3 removes the credit bucket that hurt Brightpost.
+    **The difference that changes a design.** EBS has no volume that spans zones. A self-run database that must survive a zone failure needs its own replica in a second zone, or accepts a restore from the last snapshot. Moving from gp2 to gp3 removes credit bursting, the trap in Brightpost's story.
   </Tab>
   <Tab label="Google Cloud">
     - **Volume types:** Persistent Disk (standard, balanced, SSD and extreme) and Hyperdisk (Balanced, Extreme and Throughput). Local SSD sits in the host; keep only data you can lose on it.

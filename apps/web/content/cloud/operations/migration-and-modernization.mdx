@@ -12,7 +12,7 @@ updated: 2026-11-14
 
 ## The story
 
-Brightpost buys a framing workshop in its home city, so it can sell framed posters. Everyone calls it the framing shop. It cuts about 120 frames a day. Its order system runs on 6 servers: virtual machines on two VMware hosts in a back-office cupboard. The hosts are 7 years old, and their hardware support ends in 6 months. Asha plans the move. A tool lists the 6 machines, and on a Friday night wave 1 moves the order app to the cloud in 25 minutes. On Monday at 7:30 the workshop has no cutting tickets, the printed sheets that say which frame to cut. On Tuesday afternoon the manager remembers an old PC under the bench. Every night at 02:00 it fetched the day's orders from the old order server, now switched off, and printed them. For 2 days no frames were cut: about 240 orders slipped, and 31 customers cancelled.
+Brightpost buys a framing workshop, the framing shop, so it can sell framed posters. It cuts about 120 frames a day. Its order system runs on 6 servers: virtual machines on two VMware hosts in a back-office cupboard. The hosts are 7 years old, and their hardware support ends in 6 months. Asha plans the move. A tool lists the 6 machines, and on a Friday night wave 1 moves the order app to the cloud in 25 minutes. On Monday at 7:30 the workshop has no cutting tickets, the printed sheets that say which frame to cut. On Tuesday afternoon the manager remembers an old PC under the bench. Every night at 02:00 it fetched the day's orders from the old order server, now switched off, and printed them. For 2 days no frames were cut: about 240 orders slipped, and 31 customers cancelled.
 
 Every step below follows the move, and shows where that PC should have been found.
 
@@ -24,9 +24,9 @@ Three words first. **Migration** is moving a running system from one place to an
 
 <AnimatedDiagram spec="animated/cloud/migration-waves" step={1} minWidth={620} caption="The assessment tool gets its list of machines from the VMware manager: 6 virtual machines, nothing else." />
 
-Start with the reason, because it sets the deadline. The framing shop's is hardware support that ends in 6 months. Others are a data-centre lease that ends, or a merger.
+Start with the reason, because it sets the deadline: for the framing shop, hardware support that ends in 6 months.
 
-Then **discover** and **assess**. Discovery builds an **inventory**: every machine, with its processors, memory, disks, operating system and software. Assessment asks, for each one: who owns it, how busy is it, how long may it be down, and what does it talk to? An assessment tool gathers the numbers and estimates each machine's size and cost in the cloud. The framing shop's tool read its list from the VMware manager, the software that runs the two hosts. That list held exactly 6 machines.
+Then **discover** and **assess**. Discovery builds an **inventory**: every machine, with its processors, memory, disks, operating system and software. Assessment asks, for each one: who owns it, how busy is it, how long may it be down, and what does it talk to? An assessment tool gathers the numbers and estimates each machine's size and cost in the cloud. The framing shop's tool read its list from the VMware manager, the software that runs the two hosts: exactly 6 machines.
 
 <PremiumBreak />
 
@@ -50,13 +50,13 @@ Most estates use four or five of the seven. The framing shop used six.
 
 <AnimatedDiagram spec="animated/cloud/migration-waves" step={2} minWidth={620} caption="Before any copy arrives, a new account exists inside the landing zone, and a VPN joins it to the back office." />
 
-A copied server needs somewhere to land: an account, a network, sign-in rules, logs and guardrails. That set-up is a <Term id="landing-zone">landing zone</Term>, and [Landing zones](/cloud/fundamentals/landing-zones) shows how to build one. Brightpost already has one. It creates a new account, "framing", in its production folder, under the same guardrails and log archive as the shop.
+A copied server needs somewhere to land: an account, a network, sign-in rules, logs and guardrails. That set-up is a <Term id="landing-zone">landing zone</Term>, and [Landing zones](/cloud/fundamentals/landing-zones) shows how to build one. Brightpost already has one, and creates a new account, "framing", in its production folder.
 
-Next comes a private link. A <Term id="vpn">VPN</Term>, an encrypted tunnel over the internet, joins the back office to the account's network. During the move, machines on both sides talk across it. [Hybrid connectivity](/cloud/networking/hybrid-connectivity) compares it with a <Term id="dedicated-connection">dedicated connection</Term>.
+Next comes a private link. A <Term id="vpn">VPN</Term>, an encrypted tunnel over the internet, joins the back office to the account's network, so machines on both sides can talk during the move. [Hybrid connectivity](/cloud/networking/hybrid-connectivity) compares it with a <Term id="dedicated-connection">dedicated connection</Term>.
 
 ### Step 4: Waves: a few applications at a time
 
-A **wave** is a group of applications that move in one cutover. Things that talk a lot belong in one wave, and the first wave is small, so the team learns cheaply.
+A **wave** is a group of applications that move in one cutover. Things that talk a lot share a wave, and the first wave is small, so the team learns cheaply.
 
 1. **Wave 1:** the order app (rehost), and the file server's 2 TB of photos into a managed file share. [Moving bulk data](/cloud/data/file-hybrid-and-transfer) covers that transfer.
 2. **Wave 2, two weeks later:** the order database (replatform) and the accounting package (repurchase).
@@ -68,7 +68,7 @@ Splitting the order app from its database has a cost. For 2 weeks every query cr
 
 <AnimatedDiagram spec="animated/cloud/migration-waves" step={3} minWidth={620} caption="Wave 1: the replication service copies the order app's disk, launches the copy, and the shop's address points at it." />
 
-A server moves by **replication**: an agent, or the VMware manager, sends every disk block to a replication service in the cloud. The first copy of the order app's 200 GB takes about 9 hours, capped at half the workshop's 100 Mbit/s line. After that only changed blocks travel, so the copy stays seconds behind. The team launches a **test copy** in an isolated network while the real server keeps running.
+A server moves by **replication**: an agent, or the VMware manager, sends every disk block to a replication service in the cloud. The first copy of the order app's 200 GB takes about 9 hours, capped at half the workshop's 100 Mbit/s line. Then only changed blocks travel, so the copy stays seconds behind. The team launches a **test copy** in an isolated network while the real server keeps running.
 
 Two days before, the team lowers the <Term id="ttl">TTL</Term> of the shop's DNS name from 1 hour to 5 minutes. On Friday at 22:00 they stop the app, wait for the last blocks, launch the copy and point the name at it. It takes 25 minutes. The old server is stopped, not deleted.
 
@@ -76,7 +76,7 @@ Two days before, the team lowers the <Term id="ttl">TTL</Term> of the shop's DNS
 
 <AnimatedDiagram spec="animated/cloud/migration-waves" step={4} minWidth={620} caption="The failure: at 02:00 the ticket PC asks the old order server for the day's orders. The server is off, and nothing prints." />
 
-The inventory came from the VMware manager, so it listed virtual machines. The ticket PC was a desktop, and no list named an owner for it. Discovery sees only what it is pointed at.
+The inventory came from the VMware manager, so it listed only virtual machines. The ticket PC was a desktop. Discovery sees only what it is pointed at.
 
 <Callout tone="red" title="What breaks">
   At 02:00 on Saturday the PC asks the old order server for the day's orders. The server is off, so the job prints nothing and raises no alarm. The workshop is shut at weekends, so the gap shows on Monday at 7:30. Restarting the old server would have fixed it in minutes, but nobody links missing tickets to the move. About 240 orders slip 2 days, and 31 customers cancel.
@@ -86,15 +86,15 @@ The inventory came from the VMware manager, so it listed virtual machines. The t
 
 <AnimatedDiagram spec="animated/cloud/migration-waves" step={5} minWidth={620} caption="The dependency map shows the 02:00 flow. The PC stays and reads its export over the VPN, and wave 2 moves the database." />
 
-A list of machines is not a map of who calls whom. Before each wave the team now records network traffic: which address connects to which, on which port, and when. **Dependency mapping** turns that record into a map. Agents on the servers or flow records from the office router can supply it. The PC appears as an unknown address that calls the order server every night at 02:00.
+A list of machines is not a map of who calls whom. Before each wave the team now records network traffic: which address connects to which, on which port and when. **Dependency mapping** turns that record into a map. Agents on the servers or flow records from the office router can supply it. The PC appears as an unknown address that calls the order server every night at 02:00.
 
 Record long enough to catch rare jobs. The team records 35 days, so a month-end falls inside, and finds a second flow: a month-end accounting run.
 
-The PC is retained, because it must sit beside the printer. It now fetches its export from the cloud app over the VPN. Wave 2 moves the database with a full load and change data capture, which [Database migration](/cloud/data/database-migration) teaches.
+The PC is retained beside its printer, and now fetches its export from the cloud app over the VPN. Wave 2 moves the database with a full load and change data capture, which [Database migration](/cloud/data/database-migration) teaches.
 
 ### Step 8: Moving VMware as it is, and licences
 
-Each cloud rents VMware's software on dedicated hosts in its regions. Moving onto it is **relocate**: VMs move with VMware's own tools, often keeping their IP addresses. That fits hundreds of VMs and a short deadline, not 6 VMs, because it is rented as whole hosts. It also keeps the work: someone still patches every guest operating system.
+Each cloud rents VMware's software on dedicated hosts in its regions. Moving onto it is **relocate**: VMs move with VMware's own tools, often keeping their IP addresses. It is rented as whole hosts, so it fits hundreds of VMs and a short deadline, not 6. Someone still patches every guest operating system.
 
 Licences can change which R wins. Windows Server and SQL Server can be rented inside the hourly price, or you bring licences you own if your agreement allows it. The framing shop's old SQL Server licences had no right to move, so a managed engine with the licence included was cheaper. The accounting package's licence was tied to one machine, a common push towards repurchase.
 
@@ -129,7 +129,7 @@ The method is the same on all three clouds: discover, choose an R, land, replica
     - **Licences:** Windows Server and SQL Server can be licence-included on EC2 and RDS. Some bring-your-own licences need Dedicated Hosts.
     - **Guidance:** the AWS Cloud Adoption Framework, and Control Tower for the landing zone.
 
-    **The difference that changes a design.** Replication lands in a staging area inside your own account: small replication servers and low-cost disks in a subnet you choose, billed while the copy runs. So the landing zone needs that staging subnet, and a route to it from the back office, before wave 1.
+    **The difference that changes a design.** Replication lands in a staging area inside your own account: small replication servers and disks in a subnet you choose, billed while the copy runs. The landing zone needs that subnet, and a route to it from the back office, before wave 1.
   </Tab>
   <Tab label="Google Cloud">
     - **Discover and plan:** Migration Center collects an inventory, with a discovery client or imported files, and estimates each server's cost on Google Cloud.
@@ -147,7 +147,7 @@ The method is the same on all three clouds: discover, choose an R, land, replica
     - **Licences:** Azure Hybrid Benefit applies Windows Server and SQL Server licences you own, with the right agreement, to Azure VMs and Azure SQL.
     - **Guidance:** the Microsoft Cloud Adoption Framework, with Azure landing zones as its reference set-up.
 
-    **The difference that changes a design.** Discovery, dependency analysis, assessment and replication live in one Azure Migrate project, so the map that plans a wave is the one that moves it. Hybrid Benefit can decide between a VM and a managed engine for SQL Server, so assess with it and without it.
+    **The difference that changes a design.** Discovery, dependency analysis, assessment and replication live in one Azure Migrate project. The map that plans a wave is the one that moves it. Hybrid Benefit can decide between a VM and a managed engine for SQL Server, so assess with it and without it.
   </Tab>
 </Tabs>
 
@@ -216,19 +216,18 @@ The method is the same on all three clouds: discover, choose an R, land, replica
   caption="Brightpost's numbers for three pieces of the framing shop. Effort grows left to right, and so does the payoff."
 />
 
-Rehost buys time and refactor buys change. Doing them in that order keeps every cutover night small.
+Rehost buys time and refactor buys change. In that order, every cutover night stays small.
 
 ## Common pitfalls
 
 - **Trusting one inventory source.** A hypervisor's list misses desktops. Add a traffic map that covers a month-end.
-- **Moving and modernizing on the same night.** You cannot tell which change broke. Move first, then change one thing at a time.
 - **A rollback plan with no deadline.** Every hour on the new side adds data a rollback must carry back. Write the deadline down.
 - **Splitting chatty pairs across a long gap.** An app far from its database pays the link's delay on every query. Keep such pairs in one wave.
 - **Watching servers, not the business.** Every server was healthy while no frames were cut. Track one business number per wave.
 
 ## How to say it in an interview
 
-"I start with the reason, because it sets the deadline. Then I discover and assess: an inventory, plus a dependency map from at least a month of traffic. For each application I pick one of the seven Rs: retire, retain, rehost, relocate, replatform, repurchase or refactor. The landing zone and the private link come first, then small waves that group things that talk a lot. Servers move by replication: a full copy, changed blocks, a test launch, and a short cutover with the DNS TTL lowered in advance. Every wave has a rollback trigger, a deadline and a data path. I modernize only after the move."
+"I start with the reason, because it sets the deadline. Then I discover and assess: an inventory, plus a dependency map from at least a month of traffic. For each application I pick one of the seven Rs. The landing zone and the private link come first, then small waves that group things that talk a lot. Servers move by replication: a full copy, changed blocks, a test launch, and a short cutover with the DNS TTL lowered in advance. Every wave has a rollback trigger, a deadline and a data path. I modernize only after the move."
 
 ## Interview questions
 
@@ -248,9 +247,9 @@ Rehost buys time and refactor buys change. Doing them in that order keeps every 
   </InterviewQuestion>
 
   <InterviewQuestion question="Why plan a migration in waves instead of moving everything in one weekend?" level="Mid" category="Cloud">
-    **Short answer.** Waves keep each cutover small enough to test, watch and roll back. The first wave teaches the team on something cheap, and each later wave uses what the last one found.
+    **Short answer.** Waves keep each cutover small enough to test, watch and roll back. The first wave teaches the team on something cheap, and each later wave uses what it found.
 
-    **Why.** Wave 1 at the framing shop moved only the order app, and it surfaced the forgotten ticket PC. In one big weekend, that gap would have landed with the database move and the accounting switch, three changes to untangle at once.
+    **Why.** Wave 1 moved only the order app, and it surfaced the forgotten ticket PC. In one big weekend, that gap would have landed with the database move and the accounting switch: three changes to untangle at once.
 
     <AnimatedDiagram spec="animated/cloud/migration-waves" step={3} caption="Wave 1 moved one application; the database waited for wave 2, two weeks later." />
 
@@ -264,7 +263,7 @@ Rehost buys time and refactor buys change. Doing them in that order keeps every 
   <InterviewQuestion question="How does replication-based server migration keep downtime to minutes?" level="Mid" category="Cloud">
     **Short answer.** The disk is copied while the server keeps running: one full copy, then only changed blocks, so the cloud copy stays seconds behind. At cutover you stop the app, send the last blocks, launch the copy and switch DNS.
 
-    **Why.** The order app's 200 GB took about 9 hours to copy, during the week, with the shop open. A test copy ran first in an isolated network. The DNS TTL was lowered to 5 minutes two days before, so the Friday cutover took 25 minutes. The old server stayed stopped but intact for 14 days, as the rollback path.
+    **Why.** The order app's 200 GB took about 9 hours to copy, with the shop open. A test copy ran first in an isolated network. The DNS TTL was lowered to 5 minutes two days before, so the cutover took 25 minutes. The old server stayed stopped but intact for 14 days, as the rollback path.
 
     <AnimatedDiagram spec="animated/cloud/migration-waves" step={3} path="app>repl>cloudapp" caption="Disk blocks flow nonstop to the replication service, which launches the cloud copy at cutover." />
 
@@ -278,7 +277,7 @@ Rehost buys time and refactor buys change. Doing them in that order keeps every 
   <InterviewQuestion question="A wave cut over cleanly, but a business process stopped two days later. How would you have caught it before the move?" level="Mid" category="Cloud">
     **Short answer.** With a dependency map built from network traffic, not only a list of machines. Recording who connects to whom for at least a month shows nightly and month-end jobs that no inventory lists.
 
-    **Why.** The framing shop's inventory came from the VMware manager, so the ticket PC, a desktop, was invisible. A traffic record would have shown an unknown address calling the order server every night at 02:00. A count of frames cut per day would have caught the gap on Monday at 8:00.
+    **Why.** The framing shop's inventory came from the VMware manager, so the ticket PC, a desktop, was invisible. A traffic record would have shown an unknown address calling the order server every night at 02:00.
 
     <AnimatedDiagram spec="animated/cloud/migration-waves" step={5} highlight={["ticketpc", "depmap", "link", "cloudapp"]} caption="The traffic map shows the 02:00 flow; the PC stays and reads from the cloud app over the VPN." />
 
@@ -304,7 +303,7 @@ Rehost buys time and refactor buys change. Doing them in that order keeps every 
   <InterviewQuestion question="When does moving a VMware estate as it is onto a provider's VMware service make sense, and what does it not fix?" level="Senior" category="Cloud">
     **Short answer.** It makes sense for hundreds of VMs with a hard exit date and a team that knows VMware. It does not fix the machines: every guest OS still needs patches, sizing and backups, and you still run VMware.
 
-    **Why.** Relocate moves VMs with VMware's own tools, often keeping IP addresses, so no machine is rebuilt. It is rented as whole dedicated hosts, so the framing shop's 6 VMs were rehosted instead. After a relocate, pick the next R per application. Count the VMware licence, which may or may not be included.
+    **Why.** Relocate moves VMs with VMware's own tools, often keeping IP addresses, so no machine is rebuilt. It is rented as whole dedicated hosts, so the framing shop's 6 VMs were rehosted instead. Count the VMware licence, which may or may not be included.
 
     **Follow-ups the interviewer may ask.**
     - How do VMs on those hosts reach the provider's native services?

@@ -51,7 +51,7 @@ const spec: DiagramSpec = {
       cloud: {
         aws: { label: "Rekognition, Textract" },
         gcp: { label: "Vision, Speech APIs" },
-        azure: { label: "Azure AI services" },
+        azure: { label: "Foundry Tools" },
       },
     },
 

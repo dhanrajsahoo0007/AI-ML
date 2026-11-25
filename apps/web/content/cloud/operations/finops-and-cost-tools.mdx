@@ -26,7 +26,7 @@ Three words first. <Term id="finops">FinOps</Term>, short for financial operatio
 
 FinOps is a loop, not a tool. **See**: the cloud's own tools show every day where the money goes, by account, team and service. **Decide**: once a month the owners meet, look at what changed, and pick a few actions. **Act**: each owner makes their change that week, such as switching off, shrinking or deleting. Next month's numbers show whether it worked, and the loop starts again.
 
-Brightpost had the tools in October and no loop: the data existed from the cluster's first hour, and nobody looked. What a bill is made of is on [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics); this page is about keeping it honest.
+Brightpost had the tools in October but no loop: the data existed from the cluster's first hour, and nobody looked. What a bill is made of is on [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics).
 
 <PremiumBreak />
 
@@ -77,7 +77,7 @@ Once each line has an owner, the company chooses what owners do with their numbe
   caption="Showback shows each team its cost; chargeback moves that cost into the team's own budget."
 />
 
-Brightpost chooses showback. With one company budget, moving money between teams would add paperwork and change nothing. A team that sees its own line every month starts asking why.
+Brightpost chooses showback. With one company budget, moving money between teams would add paperwork and change nothing.
 
 ### Step 6: A billing export and cost per order
 
@@ -98,7 +98,7 @@ Brightpost already had budget alerts on the whole organisation. It adds a budget
 3. **Forecast over 100%:** the owner finds the cause within a day.
 4. **100% spent:** act now. In a test account, an automated action can stop the machines.
 
-A budget catches slow growth. **Anomaly detection** catches sudden jumps. The provider learns each account's normal daily spend per service, then alerts when a day lands far above it. It needs a few weeks of history, but no budget. The cluster's first day was GPU spend in a test account that had never had any, so the alert would have named both on day 1. Cost alerts go to a named owner, like any other [alert](/cloud/operations/slos-alerting-and-on-call).
+A budget catches slow growth. **Anomaly detection** catches sudden jumps: the provider learns each account's normal daily spend per service and alerts when a day lands far above it. It needs a few weeks of history, but no budget. The cluster's first day was GPU spend in a test account that had never had any, so the alert would have named both on day 1. Cost alerts go to a named owner, like any other [alert](/cloud/operations/slos-alerting-and-on-call).
 
 ### Step 8: Rightsizing and storage reports
 
@@ -134,7 +134,7 @@ The idea is the same on all three clouds: a unit of allocation, tags in the bill
     - **Alerts:** AWS Budgets on actual or forecast spend, with budget actions that can apply a policy or stop instances. Cost Anomaly Detection watches spend by service, account, cost category or tag.
     - **Advice:** AWS Compute Optimizer for EC2, Auto Scaling groups, EBS volumes, Lambda and more. Amazon S3 Storage Lens shows storage use and activity across every account and bucket.
 
-    **The difference that changes a design.** A tag reaches Cost Explorer and the exports only after you activate it as a cost allocation tag, and activation does not reach back in time. A team can tag perfectly for a month and still see an empty column. Activate the agreed keys from the management account on day one.
+    **The difference that changes a design.** A tag reaches Cost Explorer and the exports only after you activate it as a cost allocation tag. A team can tag perfectly for a month and still see an empty column. Activate the agreed keys from the management account on day one.
   </Tab>
   <Tab label="Google Cloud">
     - **Unit of allocation:** the project, under folders. Each project links to a Cloud Billing account that pays for it.
@@ -215,12 +215,12 @@ Accounts give a floor that nobody can forget; tags give detail inside it. Start 
 - **Tags as a request.** A wiki page that asks for tags gets 65% coverage. Make the keys a rule, enforced by a policy.
 - **Finance owns the bill alone.** Finance sees the total but cannot change a machine. Give each line an engineer as owner.
 - **One alert on the company total.** It fires late and names nobody. Add a budget per account, sent to its owner, with a forecast alert and anomaly detection.
-- **Rightsizing on a quiet week.** Advice built on two quiet weeks shrinks a server the sale day needs. Use a month that includes the busiest day, and let autoscaling handle the peak.
+- **Rightsizing on a quiet week.** Advice built on two quiet weeks shrinks a server the sale day needs. Let autoscaling handle the peak.
 - **Committing before cleaning up.** A commitment for capacity that should be off locks in the waste for years. Delete and rightsize first.
 
 ## How to say it in an interview
 
-"I treat cost as a loop: see where the money goes, decide what to change, act, and look again next month. The first job is allocation. Each team and environment gets its own account, a policy requires `team`, `env` and `owner` tags, and I track the untagged share until it is under 5%. I export the billing data daily to a warehouse and divide cost by a business unit, such as orders. Each account has a forecast budget alert and anomaly detection, sent to a named owner. Engineers own their lines, and a monthly review turns rightsizing and storage advice into three actions with names and dates."
+"I treat cost as a loop: see where the money goes, decide what to change, act, and look again next month. Allocation comes first: an account per team and environment, a policy that requires `team`, `env` and `owner` tags, and an untagged share I drive under 5%. I export billing data daily to a warehouse and divide cost by orders. Each account has a forecast budget alert and anomaly detection, sent to a named owner. Engineers own their lines, and a monthly review turns advice into three actions with names and dates."
 
 ## Interview questions
 
@@ -256,7 +256,7 @@ Accounts give a floor that nobody can forget; tags give detail inside it. Start 
   <InterviewQuestion question="Showback or chargeback: which would you start with, and why?" level="Mid" category="Cloud">
     **Short answer.** Showback. Each team sees its own cost every month, and the money stays in one budget. Move to chargeback only when teams own budgets and allocation is clean.
 
-    **Why.** Chargeback bills every unit of spend to a team, so it needs an unallocated line near zero and agreed rules for shared costs. Without them, the meeting is about the rules, not the spend. Showback needs only a report and a review. Brightpost has 2 teams and one company budget, so moving money between them would change nothing.
+    **Why.** Chargeback bills every unit of spend to a team, so it needs an unallocated line near zero and agreed rules for shared costs. Without them, the meeting is about the rules, not the spend. Showback needs only a report and a review, and Brightpost has one company budget.
 
     **Follow-ups the interviewer may ask.**
     - How do you split the support plan and the network hub?
@@ -268,7 +268,7 @@ Accounts give a floor that nobody can forget; tags give detail inside it. Start 
   <InterviewQuestion question="Why track cost per order instead of the total bill?" level="Mid" category="Cloud">
     **Short answer.** The total grows when the business grows, which is fine. Cost per order shows whether the system got more or less efficient.
 
-    **Why.** Brightpost exports every billing row daily to a warehouse and divides cost by about 12,000 orders a month. In October, orders were flat and the bill grew 40%, so cost per order rose 40%: that is waste. On a sale day, orders grow tenfold while the day's bill about doubles, so cost per order falls: that is healthy growth. The total alone would flag the sale day as a problem, and could not tell October's waste from real demand.
+    **Why.** Brightpost exports every billing row daily to a warehouse and divides cost by about 12,000 orders a month. In October, orders were flat and the bill grew 40%, so cost per order rose 40%: that is waste. On a sale day, orders grow tenfold while the day's bill about doubles, so cost per order falls: that is healthy growth. The total alone cannot tell October's waste from real demand.
 
     <AnimatedDiagram spec="animated/cloud/cost-allocation" step={4} path="billing>warehouse>unitcost" caption="The export brings cost into the warehouse, where it meets the order count." />
 

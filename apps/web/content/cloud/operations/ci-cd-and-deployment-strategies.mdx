@@ -14,7 +14,7 @@ updated: 2026-11-13
 
 On a busy Saturday in late November, Brightpost runs 3 app servers. At 12:00 Asha ships version 1.9 of the shop. It renames a column in the orders table from `address` to `delivery_address`. The pipeline runs the database change first, then replaces one server every 4 minutes. The old servers, still on 1.8, write to `address`, which no longer exists. Every checkout that reaches an old server fails. The health checks stay green, because pages still load; only the write fails. It lasts 12 minutes, until the last old server is gone. In that time 27 shoppers try to pay, 18 fail and 7 never come back. Rolling back the code would not have helped: version 1.8 needs the column that was gone.
 
-Nothing in the cloud failed. Two changes that needed different moments shipped as one. Each step below separates one more pair: building from deploying, deploying from releasing, and code from schema.
+Nothing in the cloud failed. Two changes that needed different moments shipped as one. Each step below separates one more pair: build from deploy, deploy from release, code from schema.
 
 ## How it works
 
@@ -94,13 +94,13 @@ A <Term id="canary">canary</Term> release sends a small share of traffic to the 
 
 A **feature flag** is a switch the code reads at run time: "show the new checkout: on or off". A **deploy** puts new code on servers. A **release** shows a change to shoppers. With a flag they become two moments. Version 1.9 can go out on Tuesday with the new checkout off. On Thursday the team turns it on for staff, then for 10% of shoppers, then for all.
 
-Turning a flag off takes seconds and needs no deploy. Each flag doubles a path through the code, so Brightpost deletes a flag within 2 weeks of reaching 100%. A flag cannot protect a schema change: a dropped column is gone for flagged and unflagged code alike.
+Turning a flag off takes seconds and needs no deploy. Each flag doubles a path through the code, so Brightpost deletes it within 2 weeks of reaching 100%. A flag cannot protect a schema change: a dropped column is gone for flagged and unflagged code alike.
 
 ### Step 9: Approvals and change freezes
 
 <AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" step={4} minWidth={620} caption="A rollback redeploys the previous digest. During a freeze the approval gate stays shut." />
 
-An **approval** is a stage that waits for a named person. At Brightpost a second engineer approves each production deploy, and the pipeline records who approved which digest. Approvals catch what tests cannot, such as a release on the morning of a sale.
+An **approval** is a stage that waits for a named person. At Brightpost a second engineer approves each production deploy, and the pipeline records who approved which digest. Approvals catch what tests cannot, such as a release on a sale morning.
 
 A **change freeze** is a period with no production deploys. Brightpost freezes the week of its biggest sale, except for fixes that two people approve. The pipeline enforces it as a closed gate, not a calendar note. The rest of the year, small daily deploys are easier to test and to roll back than a month of work at once.
 
@@ -123,7 +123,7 @@ The idea is the same on all three clouds: one artifact, promoted through environ
     - **Deploy to servers:** Cloud Deploy promotes a release through ordered targets, such as staging then production, on GKE or Cloud Run. A managed instance group rolls VMs to a new template.
     - **Traffic shifting:** Cloud Run splits traffic between revisions by percentage; a tag gives a revision its own test address. Cloud Deploy's canary strategy sets the percentages in phases.
     - **Automatic rollback:** Cloud Deploy can run a verify job after a phase and roll a target back to its previous release. On Cloud Run, rollback is a traffic change.
-    - **Gates and flags:** a Cloud Deploy target can require approval before a rollout. There is no general flag service; teams use an open-source or third-party one.
+    - **Gates and flags:** a Cloud Deploy target can require approval before a rollout. Feature flags usually come from an open-source or third-party flag service.
 
     **The difference that changes a design.** Cloud Run splits traffic itself, per revision, so a canary needs no second fleet. Cloud Deploy fixes a release when it is created, and promotion moves that same release on. "Promote the same digest" is how the tool works, not a rule to remember.
   </Tab>
@@ -134,7 +134,7 @@ The idea is the same on all three clouds: one artifact, promoted through environ
     - **Automatic rollback:** swap back, or move the weight back. An Azure Pipelines check can query Azure Monitor alerts before a stage goes on.
     - **Gates and flags:** Azure Pipelines environments take approvals and checks, such as business hours, which suits a freeze. Feature flags in Azure App Configuration.
 
-    **The difference that changes a design.** A slot is a full second copy of the app on the same plan, so blue/green needs no new servers, only room on the plan. Settings marked as slot settings stay put, so production's database address never moves in a swap.
+    **The difference that changes a design.** A slot is a full second copy of the app on the same plan. Blue/green needs no new servers, only room on the plan. Settings marked as slot settings stay put, so production's database address never moves in a swap.
   </Tab>
 </Tabs>
 
@@ -192,7 +192,7 @@ The idea is the same on all three clouds: one artifact, promoted through environ
   caption="Brightpost's numbers on a busy day with 3 servers. Every column shares one database, so schema changes need expand and contract in all four."
 />
 
-Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm that is right. Blue/green buys the fastest rollback with a second fleet.
+Canary exposes the fewest shoppers for the least money, but needs an alarm that is right. Blue/green buys the fastest rollback with a second fleet.
 
 ## Common pitfalls
 
@@ -204,7 +204,7 @@ Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm 
 
 ## How to say it in an interview
 
-"I build each change once, sign it, and promote the same digest from staging to production, so production runs exactly what was tested. For the rollout I prefer a canary: 5% first, then wider, with an alarm on checkout errors that shifts traffic back automatically. Without a trusted alarm, I use blue/green for a one-flip rollback, or rolling when a second fleet costs too much. Database changes go out separately with expand and contract, so both versions work and rollback stays possible. Feature flags let me deploy code switched off and release it later. Approvals and freezes are gates in the pipeline, not habits."
+"I build each change once, sign it, and promote the same digest from staging to production. For the rollout I prefer a canary: 5% first, then wider, with an alarm on checkout errors that shifts traffic back automatically. Without a trusted alarm, I use blue/green for a one-flip rollback, or rolling when a second fleet costs too much. Database changes go out separately with expand and contract, so rollback stays possible. Feature flags separate deploy from release. Approvals and freezes are gates in the pipeline, not habits."
 
 ## Interview questions
 
@@ -240,7 +240,7 @@ Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm 
   <InterviewQuestion question="A canary shows a 0.5% error increase on 5% of traffic. What do you do, and how does the pipeline do it without you?" level="Mid" category="Cloud">
     **Short answer.** Hold the rollout, compare the canary with the old version, and move its traffic back if the gap is real. The pipeline does this itself. An alarm compares the two error rates, and when it fires the deploy tool sets the canary to 0%.
 
-    **Why.** At 5%, the extra errors touch about 1 request in 4,000, so pausing costs little. Going to 25% would multiply the damage by five. Judge it against the old version over the same minutes: a rise in both means the release is not the cause. Brightpost's alarm fires at 1% over 5 minutes, so a 0.5% rise holds the rollout for a person to decide.
+    **Why.** At 5%, the extra errors touch about 1 request in 4,000, so pausing costs little; 25% would multiply the damage by five. Compare with the old version over the same minutes: a rise in both means the release is not the cause. Brightpost's alarm fires at 1% over 5 minutes, so a 0.5% rise holds the rollout for a person to decide.
 
     <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={6} path="next>alarm>lb" caption="The canary's errors reach the alarm, and the alarm moves its traffic back at the balancer." />
 
@@ -254,7 +254,7 @@ Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm 
   <InterviewQuestion question="What is the difference between deploying and releasing, and how do feature flags help?" level="Mid" category="Cloud">
     **Short answer.** Deploying puts new code on servers. Releasing shows a change to users. A feature flag is a switch the code reads at run time. Code can be deployed switched off, then released to staff, then to a share of users, then to all.
 
-    **Why.** Brightpost deploys 1.9 on Tuesday with the new checkout off. On Thursday it turns the flag on for 10% of shoppers. If something looks wrong, the flag goes off in seconds, with no deploy and no rollback.
+    **Why.** Brightpost deploys 1.9 on Tuesday with the new checkout off, and on Thursday turns the flag on for 10% of shoppers. If something looks wrong, the flag goes off in seconds, with no deploy and no rollback.
 
     <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={7} highlight={["flag", "next"]} caption="The new checkout is inside the deployed code, switched off by the flag service." />
 
@@ -279,10 +279,10 @@ Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm 
     **Watch out for.** Running the migration in the same release as the code that needs it. That is the exact shape of Brightpost's 12 minutes.
   </InterviewQuestion>
 
-  <InterviewQuestion question="Design a release process for a team of 3 engineers with nobody on call at night and one big sale every November." level="Senior" category="Cloud">
+  <InterviewQuestion question="Design a release process for a team of 3 engineers who deploy only in working hours and have one big sale every November." level="Senior" category="Cloud">
     **Short answer.** One pipeline: build, test, scan and sign once, promote the digest to staging, smoke test, one approval, then a canary in production with automatic rollback. Deploy small changes in working hours only, separate schema changes, and freeze the gate in sale week.
 
-    **Why.** With nobody awake at night, the rollback must not need a person, so the canary's alarm on checkout errors does it. Working-hours deploys mean someone is there if the alarm misses something. Small daily changes keep each release easy to judge. The freeze is a closed gate in the pipeline, with a two-person exception for urgent fixes.
+    **Why.** A bad release must not wait for a person, so the canary's alarm on checkout errors rolls it back. Working-hours deploys mean someone is there if the alarm misses something. Small daily changes keep each release easy to judge. The freeze is a closed gate in the pipeline, with a two-person exception for urgent fixes.
 
     <AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" step={4} caption="The rollback redeploys the previous digest; the freeze keeps the approval gate shut in sale week." />
 

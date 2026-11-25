@@ -26,7 +26,7 @@ Four words first. An **alert** is a rule that watches a signal and tells a perso
 
 An alert asks a person to stop what they are doing. So every alert must pass two tests. Is something wrong that users feel, now or soon? Can the person do something about it? An alert that fails either test teaches people to ignore alerts.
 
-Brightpost's 140 rules watched the machines, not the shoppers. A server at 85% processor use during a sale is busy, not broken. Each rule looked sensible alone, yet nearly every alert ended with "no action needed". The fix is to alert on **symptoms**, what a user would notice, and on very little else.
+Brightpost's 140 rules watched the machines, not the shoppers. A server at 85% processor use during a sale is busy, not broken. The fix is to alert on **symptoms**, what a user would notice, and on very little else.
 
 <PremiumBreak />
 
@@ -40,7 +40,7 @@ If 139 alerts out of 140 need nothing, the 140th looks the same as the others. T
   At 10:00 server B starts failing every payment, about 30 checkout requests an hour. It fails fast, so it uses almost no processor time, and the processor alarm stays green. The error alarm fires, but it has fired 20 times a day for months, and the channel is muted. The load balancer's health check asks only "is the server up?", so it keeps sending shoppers there. Nobody looks until a customer email at 13:00.
 </Callout>
 
-The data existed the whole time. What was missing was a signal that meant "shoppers are failing", sent somewhere nobody had muted.
+What was missing was a signal that meant "shoppers are failing", sent somewhere nobody had muted.
 
 ### Step 3: The SLI: count what shoppers feel
 
@@ -78,7 +78,7 @@ One window is never enough. A 5-minute window pages on a short blip; a 24-hour w
 
 Brightpost writes two rules:
 
-- **Page** when the last hour and the last 5 minutes both burn faster than 10, and at least 5 checkout requests failed in that hour. The minimum stops one failure in a quiet night from paging.
+- **Page** when the last hour and the last 5 minutes both burn faster than 10, and at least 5 checkout requests failed in that hour. The minimum keeps one failure at night from paging.
 - **Ticket** when the last 24 hours and the last 2 hours both burn faster than 2.
 
 Replay Sunday. Failures start at 10:00, the fifth arrives about 10:10, and the page fires then, not at 13:00. The runbook fix is done by 10:20, after about 10 failures: 22% of the budget. A slow leak works differently. A deploy that fails 1 request in 250 burns at 4. Nobody needs to wake for it, but a ticket opens within about a day.
@@ -99,7 +99,7 @@ Every alert gets exactly one destination, chosen by urgency.
   caption="Three destinations. An alert that fits none of them gets deleted."
 />
 
-Brightpost deletes 134 of its 140 machine alarms and keeps 6 as tickets. The cloud's job ends at the route: it evaluates the rule and sends the message. A **paging tool**, usually a separate product, holds the rota and calls people. The week drops from 140 alerts to about 2 pages and 4 tickets.
+Brightpost deletes 134 of its 140 machine alarms and keeps 6 as tickets. The cloud evaluates the rule and sends the message. A **paging tool**, usually a separate product, holds the rota and calls people. The week drops from 140 alerts to about 2 pages and 4 tickets.
 
 ### Step 8: On call, the runbook and a game day
 
@@ -117,7 +117,7 @@ An alert nobody has seen fire is a guess. A **game day** is a planned drill. Som
 
 An **incident** is an event that hurts users enough to need a coordinated response. Brightpost names three roles at its start. The **lead** decides and keeps a timeline. The **fixer** works on the system. The **communicator** updates support and the wholesale shops. One person may hold two roles, but the lead is always named.
 
-Within 5 days the team writes a **blameless review**. It records what happened and why each choice made sense at the time, and it blames no one, because blame teaches people to hide mistakes. The Sunday review found three causes: the muted channel, a health check that asked too little, and alerts that needed no action. Each became a fix with an owner.
+Within 5 days the team writes a **blameless review**: what happened and why each choice made sense at the time. It blames no one, because blame teaches people to hide mistakes. The Sunday review found three causes: the muted channel, a health check that asked too little, and alerts that needed no action. Each became a fix with an owner.
 
 ### Step 10: When the budget is spent
 
@@ -129,7 +129,7 @@ The budget is permission to take risk. While some is left, features ship at the 
 2. Ship only fixes and reliability work until the window recovers.
 3. Review what spent the budget, and plan the work that stops it repeating.
 
-The business agrees to the policy before it is needed, so during a freeze the number decides, not a debate.
+The business agrees to the policy in advance, so during a freeze the number decides, not a debate.
 
 ## On AWS, Google Cloud and Azure
 
@@ -156,7 +156,7 @@ The idea is the same on all three clouds: a metric, a rule over a window, a rout
   </Tab>
   <Tab label="Azure">
     - **Signals:** Azure Monitor metrics, and logs in a Log Analytics workspace queried with KQL. Application Insights records each request's result.
-    - **SLOs:** in Brightpost's setup, the SLI and the burn rate are log queries the team writes and keeps.
+    - **SLOs:** Azure Monitor SLIs, set on a service group, track a target, its error budget and the burn rate from metrics. Teams can also write the SLI and burn rate as log queries.
     - **Alert rules:** metric alert rules and log search alert rules. A log search rule runs its query on a schedule, so both windows can live in one query.
     - **Routing:** action groups: email, text messages, voice calls, the mobile app, webhooks and automation.
     - **Quiet times:** alert processing rules suppress notifications during planned maintenance.
@@ -230,7 +230,7 @@ Burn-rate alerts cost a day of setup and about 10 minutes of detection time. In 
 
 ## How to say it in an interview
 
-"I start from what users feel. I pick SLIs that are ratios of good events, such as the share of checkout requests that succeed in under 2 seconds, measured at the load balancer. The SLO is a target over a window, say 99.9% over 30 days, and the gap to 100% is the error budget. I page on the burn rate with two windows, a long one to ignore blips and a short one so the alert clears after a fix. Slow burns become tickets, and everything else is a dashboard or gets deleted. Every page has a runbook, the rota has escalation, and incidents end in a blameless review. When the budget is spent, risky changes freeze until it recovers."
+"I start from what users feel. My SLIs are ratios of good events, such as checkout requests that succeed in under 2 seconds, measured at the load balancer. The SLO is a target over a window, say 99.9% over 30 days, and the gap to 100% is the error budget. I page on the burn rate over a long and a short window. Slow burns become tickets; everything else is a dashboard or gets deleted. Every page has a runbook, and incidents end in a blameless review. When the budget is spent, risky changes freeze."
 
 ## Interview questions
 
@@ -266,7 +266,7 @@ Burn-rate alerts cost a day of setup and about 10 minutes of detection time. In 
   <InterviewQuestion question="Why alert on symptoms users feel instead of on CPU or memory?" level="Mid" category="Cloud">
     **Short answer.** Because users feel symptoms, not causes. High CPU often harms nobody, and many real failures happen at low CPU. A symptom alert fires when users are hurt, whatever the cause, so each page is worth a person's time.
 
-    **Why.** Brightpost's machine alarms sent about 20 alerts a day that needed nothing, so the channel was muted. When one server failed every payment, it failed fast at 9% processor use. A checkout SLI would have paged within about 10 minutes. Machine numbers stay on dashboards, for finding the cause after the page.
+    **Why.** Brightpost's machine alarms sent about 20 alerts a day that needed nothing, so the channel was muted. The server that failed every payment did so at 9% processor use. A checkout SLI would have paged within about 10 minutes. Machine numbers stay on dashboards, for finding the cause.
 
     <AnimatedDiagram spec="animated/cloud/alert-path" step={2} highlight={["alarms", "oncall", "app"]} caption="The machine alarms fire into a muted channel while half of all payments fail." />
 
@@ -280,7 +280,7 @@ Burn-rate alerts cost a day of setup and about 10 minutes of detection time. In 
   <InterviewQuestion question="What should a team do when its error budget is spent?" level="Mid" category="Cloud">
     **Short answer.** Follow a policy agreed in advance: freeze risky changes, ship only fixes and reliability work until the window recovers, and review what spent the budget. The budget is permission to take risk, so with none left, the team stops taking it.
 
-    **Why.** At Brightpost a fast burn and a slow leak in one month empty the 45-failure budget by about day 26. Without a policy, every release becomes a debate between feature builders and the people on call. With one, the number decides. The freeze ends by itself once old failures leave the 30-day window.
+    **Why.** At Brightpost a fast burn and a slow leak in one month empty the 45-failure budget by about day 26. Without a policy, every release becomes a debate between feature builders and the people on call. The freeze ends by itself once old failures leave the 30-day window.
 
     **Follow-ups the interviewer may ask.**
     - What counts as a risky change during a freeze?
@@ -292,7 +292,7 @@ Burn-rate alerts cost a day of setup and about 10 minutes of detection time. In 
   <InterviewQuestion question="Design alerting for a payments service that must not page on noise but must catch a slow leak." level="Senior" category="Cloud">
     **Short answer.** Define an SLI on payment requests measured at the load balancer, set an SLO over 30 days, and write two burn-rate rules. A fast burn over a long and a short window pages the on-call engineer. A slow burn over 24 hours opens a ticket. Every paging rule links a runbook, and each rule is tested in a game day.
 
-    **Why.** A blip never fills the long window, and the short one clears the alert after the fix. A minimum failure count keeps quiet nights quiet. A leak of 1 request in 250 burns at 4. That is too slow to page, but it empties the budget in about a week, so the 24-hour rule catches it. Pages go to a paging tool that escalates after 10 minutes.
+    **Why.** A blip never fills the long window, and the short one clears the alert after the fix. A minimum failure count keeps quiet nights quiet. A leak of 1 request in 250 burns at 4. That is too slow to page, but it empties the budget in about a week, so the 24-hour rule catches it.
 
     <AnimatedDiagram spec="animated/cloud/alert-path" path="sli>burn>route>pager>oncall>runbook" caption="From the SLI to a person and a runbook: the cloud evaluates and routes, the team owns the rota and the steps." />
 

@@ -14,7 +14,8 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // tall). The group for the three levels starts at y 206, 22 units below the interview row so its tab clears it, and
 // its rows sit 34 units lower and 56 apart (y 240, 296, 352).
 // Cell labels fit 94 - 4 = 90 px (the lint's text-width model): "Fundamentals" (about 89 px) is the longest header.
-// The cell numbers and page counts below match the ordered lists on the page.
+// The cell numbers and page counts below match the ordered lists on the page. Every path ends back in Start here
+// with one or more practice pages.
 
 const HUBS = [
   { id: "start", label: "Start here" },
@@ -62,7 +63,15 @@ const ROWS: {
     y: 138,
     tone: "orange",
     step: 2,
-    cells: { start: ["1st, 6th", 6], res: ["2nd", 4], data: ["3rd", 1], net: ["4th", 1], fund: ["5th", 1] },
+    cells: {
+      start: ["1st, 8th", 6],
+      res: ["2nd", 4],
+      comp: ["3rd", 1],
+      ops: ["4th", 1],
+      data: ["5th", 1],
+      net: ["6th", 1],
+      fund: ["7th", 1],
+    },
   },
   {
     id: "found",
@@ -78,7 +87,7 @@ const ROWS: {
     y: 296,
     tone: "violet",
     step: 3,
-    cells: { net: ["1st", 4], comp: ["2nd", 3], data: ["3rd", 4], res: ["4th", 3], ops: ["5th", 1] },
+    cells: { net: ["1st", 4], comp: ["2nd", 3], data: ["3rd", 4], res: ["4th", 3], ops: ["5th", 1], start: ["6th", 1] },
   },
   {
     id: "pro",
@@ -86,7 +95,7 @@ const ROWS: {
     y: 352,
     tone: "violet",
     step: 3,
-    cells: { fund: ["1st", 2], net: ["2nd", 2], res: ["3rd", 2], data: ["4th", 1], ops: ["5th", 3] },
+    cells: { fund: ["1st", 2], net: ["2nd", 2], res: ["3rd", 2], data: ["4th", 1], ops: ["5th", 3], start: ["6th", 2] },
   },
 ];
 

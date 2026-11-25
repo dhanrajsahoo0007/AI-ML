@@ -26,7 +26,7 @@ Four words first. A **backup** is a copy of data as it was at one moment, kept s
 
 A <Term id="read-replica">replica</Term> copies every change within seconds, and that includes a delete. A backup stays frozen at its moment, so it can undo a mistake. [Managed relational databases](/cloud/data/managed-relational) shows that difference for one database, and [block storage](/cloud/data/block-storage) shows how snapshots store only changed blocks.
 
-This page asks a different question: what can reach each copy? The review disk's 34 snapshots live in the shop account, next to the disk, so anyone who may delete the disk may delete them. The orders copy lives in another account, with other admins. Count copies by what could destroy them, not by how many there are.
+This page asks a different question: what can reach each copy? The review disk's 34 snapshots live in the shop account, so anyone who may delete the disk may delete them. The orders copy lives in another account, with other admins. Count copies by what could destroy them, not by how many there are.
 
 <PremiumBreak />
 
@@ -86,11 +86,11 @@ Brightpost uses the strict lock for 35 days. Attackers often wait inside for wee
 
 <AnimatedDiagram spec="animated/cloud/backup-chain" step={5} minWidth={620} caption="Each backup in the vault is copied to a second region, still inside the audit account and locked for the same 35 days." />
 
-The far copy must survive a whole region failing. Each day the backup service copies every backup to a vault in Brightpost's second allowed region. That vault sits in the audit account too, with the same lock.
+The far copy must survive a whole region failing. Each day the backup service copies every backup to a vault in Brightpost's second allowed region. That vault sits in the audit account too, with the same lock. The orders database's change log follows every 15 minutes, so a restore there can replay recent orders.
 
-Two details catch teams out. Backups are encrypted with a key from the key service, the <Term id="kms" />, and a copy in region 2 needs a key that works there. And a copy across regions is billed twice: once to move the data, once to store it.
+Two details catch teams out. Backups are encrypted with a key from the key service, the <Term id="kms" />, and a copy in region 2 needs a key that works there. And a copy across regions is billed to move the data and again to store it.
 
-This copy is also the cheapest recovery plan: restore into region 2. [Disaster recovery](/cloud/resilience/dr-strategies) builds faster tiers on top of it.
+This copy is also the cheapest recovery plan, and [Disaster recovery](/cloud/resilience/dr-strategies) builds faster tiers on top of it.
 
 ### Step 7: Retention and cost
 
@@ -237,7 +237,7 @@ Each column protects against more people and places. Keep the local snapshots fo
   <InterviewQuestion question="Why isn't a replica a backup?" level="Junior" category="Cloud">
     **Short answer.** A replica copies every change within seconds, so a delete or a bad write reaches it too. A backup is frozen at a moment in the past, so you can go back to before the mistake.
 
-    **Why.** A replica protects against a broken machine or a lost zone: if the primary dies, the copy takes over. It cannot undo a mistake, because it already holds the mistake. At Brightpost, a script that deleted the orders table would delete it on the standby within a second. The 03:00 backup in the vault would still hold every order up to 03:00.
+    **Why.** A replica protects against a broken machine or a lost zone, but it cannot undo a mistake, because it already holds the mistake. At Brightpost, a script that deleted the orders table would delete it on the standby within a second. The 03:00 backup in the vault would still hold every order up to 03:00.
 
     <AnimatedDiagram spec="animated/cloud/backup-chain" step={1} highlight={["orders", "vault"]} caption="The orders backup is a frozen copy kept in another account, not a live mirror." />
 
@@ -265,7 +265,7 @@ Each column protects against more people and places. Keep the local snapshots fo
   <InterviewQuestion question="How do you make sure a database created next month is backed up?" level="Mid" category="Cloud">
     **Short answer.** Make the backup policy opt-out. It covers every data store in the account by default, and skipping one needs an explicit tag and an owner. Then check each day that every store has a recent backup.
 
-    **Why.** Brightpost lost its reviews because the backup rule named one database, and the review disk was created later. An opt-in rule fails in the same quiet way every time someone forgets a tag. With opt-out, forgetting means "backed up". A morning check lists any store with no backup in the last 26 hours. The monthly drill compares the full list of stores with what was protected.
+    **Why.** Brightpost lost its reviews because the backup rule named one database, and the review disk was created later. An opt-in rule fails in the same quiet way whenever someone forgets a tag. With opt-out, forgetting means "backed up". A morning check lists any store with no backup in the last 26 hours.
 
     <AnimatedDiagram spec="animated/cloud/backup-chain" step={3} highlight={["policy", "disk", "orders", "vault"]} caption="One policy at the organisation covers both stores, including the one created after it." />
 
@@ -279,7 +279,7 @@ Each column protects against more people and places. Keep the local snapshots fo
   <InterviewQuestion question="What should a restore drill prove, and how often should you run one?" level="Mid" category="Cloud">
     **Short answer.** It should prove that the backup exists, is complete, can be decrypted where you restore it, and comes back within the agreed recovery time. Run it at least monthly, from the far copy, into a separate account.
 
-    **Why.** Many failures show up only during a restore: a key that region 2 cannot use, a missing permission, an empty backup. Brightpost restores the orders database and the review disk on the first Tuesday of each month. A script compares row counts and opens 20 reviews. The orders restore takes 41 minutes against a 1-hour target. A different person runs each drill, so the steps do not live in one head.
+    **Why.** Many failures show up only during a restore: a key that region 2 cannot use, a missing permission, an empty backup. Brightpost restores the orders database and the review disk on the first Tuesday of each month. The orders restore takes 41 minutes against a 1-hour target. A different person runs each drill, so the steps do not live in one head.
 
     <AnimatedDiagram spec="animated/cloud/backup-chain" step={6} path="vault>copy2>drill" caption="The drill restores the far copy, which is the one you would need on the worst day." />
 
@@ -293,7 +293,7 @@ Each column protects against more people and places. Keep the local snapshots fo
   <InterviewQuestion question="Design a backup programme for a small shop that must survive one compromised account and one lost region." level="Senior" category="Cloud">
     **Short answer.** One opt-out backup policy set at the organisation. Backups copied to a locked vault in a separate backup account, then to a second locked vault in another region. A retention ladder in the policy, and a monthly restore drill from the far copy.
 
-    **Why.** Each piece answers one threat. Local snapshots give fast restores after a small mistake. The separate account defeats a stolen admin login in the shop account. The lock, 35 days at Brightpost, defeats a stolen login in the backup account and an attacker who waits. The second region survives a lost region. Retention of 35 daily, 12 monthly and 7 yearly copies keeps the bill tied to how much data changes. The drill proves the rest works.
+    **Why.** Each piece answers one threat. Local snapshots give fast restores after a small mistake. The separate account defeats a stolen admin login in the shop account. The lock, 35 days at Brightpost, defeats a stolen login in the backup account and an attacker who waits. The second region survives a lost region, and the drill proves the rest works.
 
     <AnimatedDiagram spec="animated/cloud/backup-chain" step={5} highlight={["policy", "vault", "lock", "copy2"]} caption="Policy, vault in another account, lock, and a copy in a second region." />
 
