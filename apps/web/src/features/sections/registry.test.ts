@@ -75,6 +75,7 @@ describe("content/sections.yaml", () => {
     assert.deepEqual(states.dsa, { local: "on", preview: "on", staging: "off", production: "off" });
     assert.deepEqual(states.newsletter, { local: "on", preview: "on", staging: "on", production: "off" });
     assert.deepEqual(states["ml-system-design"], { local: "on", preview: "on", staging: "on", production: "off" });
+    assert.deepEqual(states["ai-assisted-coding"], { local: "on", preview: "on", staging: "on", production: "off" });
   });
   it("gives ML System Design its own section and parks no hub", () => {
     assert.equal(entries.find((s) => s.key === "ml-system-design")?.kind, "docs");
@@ -168,7 +169,7 @@ describe("release states per environment", () => {
       assert.deepEqual(hiddenRoutes(), {
         env: "production",
         hidden: ["/cloud"],
-        off: ["/ml-system-design", "/behavioral", "/dsa", "/newsletter"],
+        off: ["/ml-system-design", "/behavioral", "/dsa", "/ai-assisted-coding", "/newsletter"],
       });
       assert.equal(isPathVisible("/cloud/aws/compute"), false);
       assert.equal(isPathVisible("/cloudy"), true);
