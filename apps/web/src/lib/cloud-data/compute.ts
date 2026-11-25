@@ -11,7 +11,7 @@ export const services: CloudService[] = [
     youManage: "OS patching, images (AMIs), runtime, scaling rules, capacity planning and fleet health.",
     scaling: "Auto Scaling groups add and remove instances on metrics, schedules or predictive scaling.",
     pricing:
-      "Per second (Linux). On-Demand, Savings Plans or Reserved Instances (up to about 72% off for 1–3 year commitments), Spot (up to about 90% off, can be reclaimed).",
+      "Per second (Linux). On-Demand at full price; Savings Plans or Reserved Instances lower the rate for a 1- or 3-year commitment; Spot is usually cheapest and can be reclaimed.",
     useWhen: [
       "You need a specific instance type: GPUs, high memory, local NVMe, bare metal.",
       "Legacy or licensed software that expects a whole machine.",

@@ -94,7 +94,7 @@ export const services: CloudService[] = [
     tagline:
       "Managed front door for REST, HTTP and WebSocket APIs: auth, throttling and routing to Lambda or any backend.",
     youManage: "Routes, authorizers, throttling and usage plans, and stages.",
-    scaling: "Fully managed; default account limit is about 10,000 requests per second per Region, adjustable.",
+    scaling: "Fully managed; a default account-level throttle per Region applies and can be raised.",
     pricing:
       "Per million requests (HTTP APIs cost less than REST APIs); WebSocket APIs per message and connection-minute.",
     useWhen: [
@@ -102,7 +102,7 @@ export const services: CloudService[] = [
       "WebSocket APIs for chat or live updates at moderate scale, without running connection servers.",
     ],
     avoidWhen: [
-      "Millions of concurrent WebSocket connections, where per-connection-minute pricing beats running your own gateway on ECS behind an NLB.",
+      "Millions of concurrent WebSocket connections, where running your own gateway on ECS behind an NLB costs less than per-connection-minute pricing.",
       "Internal service-to-service traffic: use an ALB, ECS Service Connect or VPC Lattice.",
     ],
     gotchas: [

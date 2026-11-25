@@ -17,7 +17,7 @@ export const services: CloudService[] = [
     ],
     avoidWhen: ["Writes outgrow the largest single primary: shard, or use DynamoDB or Aurora DSQL."],
     gotchas: [
-      "Multi-AZ keeps a synchronous standby for failover in about a minute; read replicas are asynchronous and lag.",
+      "Multi-AZ keeps a synchronous standby that takes over in one to two minutes; read replicas are asynchronous and lag.",
       "RDS Proxy pools connections, which protects the database from bursts of Lambda functions.",
     ],
     docs: "https://aws.amazon.com/rds/",
@@ -170,8 +170,10 @@ export const services: CloudService[] = [
     scaling: "Vertical, plus read replicas; Enterprise Plus edition adds faster failover and data cache.",
     pricing: "Per vCPU and GB of memory per hour, plus storage.",
     useWhen: ["The default relational database on Google Cloud for business records."],
-    avoidWhen: ["Writes beyond one primary, or global strong consistency: use AlloyDB or Spanner."],
-    gotchas: [],
+    avoidWhen: ["Writes beyond one primary, or global strong consistency: use Spanner."],
+    gotchas: [
+      "The Cloud SQL Auth Proxy secures connections but does not pool them. Enterprise Plus instances can turn on managed connection pooling; otherwise pool in the app or run PgBouncer.",
+    ],
     docs: "https://cloud.google.com/sql",
     concept: "/cloud/data/managed-relational",
     main: "managed-sql",
