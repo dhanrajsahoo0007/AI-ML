@@ -1,11 +1,376 @@
 ---
 title: "Practice: Survive a Region Outage"
-description: "Take a working single-region design and decide, step by step, how it keeps serving users when a whole region goes dark."
-status: outline
+description: "An interview exercise: London goes dark for 6 hours on the sale day. Choose the data loss and downtime you accept, then the recovery design that meets both."
+updated: 2026-11-25
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** an interview-style exercise: a region fails, and you choose how much data the shop may lose and how long it may be down, then pick the recovery design that meets both. It reuses the disaster recovery and multi-region diagrams and ends with senior-level questions.
+<KeyIdea>
+  When a whole region fails, decide first how many orders you may forget and how long checkout may stop, then make the second region able to take over within both.
+</KeyIdea>
 
-**Related reading on this site:** [Availability, reliability and the nines](/system-design/fundamentals/availability) · [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+## The brief
+
+This page is a practice round. An interviewer gives you a prompt, and you design out loud. Here is the prompt, built on the Brightpost you know from the concept pages.
+
+> It is 09:00 on Brightpost's biggest sale day. The <Term id="region">region</Term> near London stops answering, and the provider expects it back in about 6 hours. Keep the shop selling. Tell me what you would have built beforehand, and what happens in the first hour.
+
+What Brightpost runs today, before you change anything:
+
+- **London** holds the whole shop across three zones: 10 app servers from 8:30 on a sale day, and the orders database with a standby in a second zone. London is the only place that may write an order.
+- **Sydney** runs a small stack for Australian shoppers: one app server and a copy of the orders database, about 1 second behind. Pages read the local copy; each order travels to London.
+- **A global front door** gives every shopper one address and moves them to a healthy region in about 30 seconds.
+- **Backups** of the orders database and its change log reach Sydney every 15 minutes, and a locked vault in the audit account holds more.
+- **The written plan** says backup and restore: up to 15 minutes of data lost and 2 hours down. It has never been tried on a sale day.
+
+The stakes, in numbers:
+
+<Numbers
+  items={[
+    { value: "4,000", label: "orders on the sale day", hint: "about 10 times a normal day" },
+    { value: "~330", label: "orders an hour from 09:00 to 15:00", hint: "a normal daytime hour: about 25" },
+    { value: "~2,000", label: "orders inside the 6-hour outage", hint: "half the day's sales" },
+    { value: "~£50,000", label: "of sales at risk", hint: "at about £25 a basket" },
+  ]}
+/>
+
+## How to approach it
+
+Interviewers care more about the order of your thinking than about product names. Four steps keep you on track.
+
+1. **Draw the failure first.** Say what dies with the region and what keeps running. Every later choice depends on it.
+2. **Get two numbers signed.** How much data may be lost, and how long the shop may be down. The business sets them; you price them.
+3. **Pick the cheapest design that meets both.** Then move the traffic and the data, and name the trade-off of each move.
+4. **Prove it.** A plan nobody has run is a guess. End with drills and with the trip home.
+
+The six decisions below follow those steps. Before each one, a box asks you to decide. Try to answer before you read on.
+
+## Decision 1: What fails and what does not
+
+<Callout tone="blue" title="Decide first">
+  London is gone. List what stops working, what keeps working, and what keeps working only in part.
+</Callout>
+
+Sort the parts by **failure domain**: the set of things that fail together when one thing breaks. Three zones protect against one building going dark. They share the region, so a regional outage takes all three at once.
+
+- **Stops:** everything inside London. The 10 app servers, the orders database and its standby, the London secret store, and any scaling in London.
+- **Keeps working:** shoppers' browsers, photos already in the edge cache, the global front door, the identity service, the outside payment provider, and Sydney's stack with its own copy of every secret.
+- **Works in part:** Sydney serves product pages from its local copy. Checkout fails, because every order still travels to the London writer.
+
+The trap is the **hidden dependency**: a part in Sydney that quietly reads something from London. Sydney's server image, its web certificate and its encryption keys must all live in Sydney. Ask one test question: if London vanished now, could Sydney sign people in, read its secrets and start a server?
+
+**The trade-off.** A full list takes time in an interview. Grouping by domain (inside the region, global, outside the cloud) gets you there in a minute.
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={7} highlight={["fd", "identity", "secrets", "sapp", "sdb"]} minWidth={620} caption="What survives London: the front door and identity are global, and Sydney keeps its own app, orders copy and secrets." />
+
+[Availability, SLAs and What Fails Together](/cloud/resilience/availability-math) teaches failure domains, and [Multi-Region](/cloud/resilience/multi-region) shows what must be global and what regional.
+
+<PremiumBreak />
+
+## Decision 2: How much data may we lose (RPO)
+
+<Callout tone="blue" title="Decide first">
+  On the sale day, how many paid orders may the shop forget? Is the answer the same for orders, baskets, photos and logs?
+</Callout>
+
+The <Term id="rpo">RPO</Term>, the recovery point objective, is how much recent data you accept losing, measured in time. Every lost order here was paid for. The card was charged, so each one becomes a refund, an apology and a record rebuilt by hand from payment data.
+
+At 330 orders an hour, the written plan's 15 minutes forgets about 80 orders. Sydney's copy runs about 1 second behind, so promoting it forgets less than one. That copy already exists for speed. The senior move is to count it as the main recovery path, with backups as the fallback.
+
+Different data deserves different numbers:
+
+<Compare
+  columns={["Data", "RPO on the sale day", "Why"]}
+  rows={[
+    ["Orders and payments", "About 1 second", "Each loss is a charged card and a refund"],
+    ["Stock counts", "About 1 second", "They live in the orders database"],
+    ["Baskets", "Minutes", "A shopper can fill a basket again"],
+    ["Product photos", "A day", "Locked copies exist; about 300 new ones a week"],
+    ["Logs", "Hours", "Useful for the review, not for selling"],
+  ]}
+  caption="One RPO per kind of data. A single number for everything either overpays or under-protects."
+/>
+
+**The trade-off.** An RPO of seconds needs a copy that runs all day. It also copies mistakes: a bad delete reaches Sydney within a second. Zero loss would mean confirming each write in both regions, adding a 250 ms trip to every order. Keep the backups, because only a backup can go back in time.
+
+<AnimatedDiagram spec="animated/cloud/rpo-rto-timeline" step={2} minWidth={620} caption="The RPO looks back from the moment London fails to the last copy that survives it." />
+
+[Disaster Recovery](/cloud/resilience/dr-strategies) defines both numbers, and [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication) explains the copy.
+
+## Decision 3: How long may we be down (RTO)
+
+<Callout tone="blue" title="Decide first">
+  How many minutes may checkout stop on the sale day? Should a normal Tuesday get the same answer?
+</Callout>
+
+The <Term id="rto">RTO</Term>, the recovery time objective, is how long you accept being down. Put a price on an hour first. On the sale day it is about 330 orders, about £8,000 of sales. On a normal afternoon it is about 25 orders.
+
+Brightpost keeps an internal <Term id="slo">SLO</Term> of 99.9% a month. That allows about 43 minutes of downtime. The gap is the <Term id="error-budget">error budget</Term>. A 6-hour outage spends more than 8 months of it in one morning.
+
+<NinesCalculator a={99.9} b={99.99} />
+
+A good answer sets two RTOs. On the sale day: 30 minutes, about 165 orders. On any other day: the written 2 hours, about 50 orders. The calendar changes the price of an hour, so it may change the plan.
+
+Why not 5 minutes? Brightpost promotes Sydney by hand, only after London has been down for 15 minutes. That rule guards against two writers after a short network break. Checks, promotion and a test order fill most of the rest.
+
+**The trade-off.** An RTO under 15 minutes means automatic promotion. A flaky health check could then create a second writer, the bug that once sold the last poster twice.
+
+<AnimatedDiagram spec="animated/cloud/rpo-rto-timeline" step={3} minWidth={620} caption="The RTO looks forward from the failure to the moment shoppers can order again." />
+
+[SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call) turns the budget into alerts.
+
+## Decision 4: Pick a DR tier
+
+<Callout tone="blue" title="Decide first">
+  Which of the four tiers meets an RPO of seconds and an RTO of 30 minutes at the lowest cost?
+</Callout>
+
+**Disaster recovery** (DR) is the plan, and the spare parts, for bringing the service back in another region. The four tiers differ in how much already runs there. Brightpost measured or estimated each one on its game days. The orders lost below use 330 an hour and add the 15-minute wait before promotion.
+
+<Compare
+  columns={["Tier", "Orders taken again after", "Orders lost in 6 hours", "Meets both targets"]}
+  rows={[
+    ["No plan: wait for London", "6 hours", "About 2,000", false],
+    ["Backup and restore", "About 2 hours", "About 660, plus 80 forgotten", false],
+    ["Pilot light", "About 55 minutes", "About 300", false],
+    ["Warm standby", "About 25 minutes", "About 140", true],
+    ["Active-active", "About 2.5 minutes", "About 15", true],
+  ]}
+  caption="Brightpost's numbers for a 6-hour London outage from 09:00 on the sale day."
+/>
+
+Look at what Sydney already runs: a load balancer, one app server and an orders copy, behind a front door that checks health. That is a **warm standby** in all but name. Nobody has written it into the DR plan. So the answer is warm standby, and most of its cost is already paid.
+
+What is missing is small and specific:
+
+1. **Capacity.** Sydney runs 1 server and needs 10. Each has 4 cores, so Sydney's <Term id="quota">quota</Term> must allow 40 cores plus headroom. It is still at its default.
+2. **A head start.** On the sale day only, Sydney runs 4 servers from 8:30. That carries about 800 shoppers at once while the scaling rule adds the rest.
+3. **A runbook.** A written list of steps for this incident, with who does each, including the 15-minute rule.
+
+**The trade-off.** Active-active would lose about 125 fewer orders. It would also roughly double the bill and need both regions to write orders, which Decision 5 rules out.
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={5} highlight={["lbB", "appB", "replica"]} minWidth={620} caption="Warm standby: a small working copy of the stack runs in region B, Sydney, and takes test traffic every day." />
+
+[Disaster Recovery: Four Tiers](/cloud/resilience/dr-strategies) compares the tiers on a normal day, and [Quotas, Limits and Retries](/cloud/resilience/quotas-and-retries) covers the second region's limits.
+
+## Decision 5: Route users and replicate data
+
+<Callout tone="blue" title="Decide first">
+  How do shoppers reach Sydney, and which copy of the orders database writes while London is gone?
+</Callout>
+
+**Traffic.** The front door's health checks fail London within about 30 seconds. Every shopper then reaches Sydney on the same address, with no cached DNS answer to wait for. Pages load at once. Checkout shows a clear "back in a few minutes" page, because no writer exists yet.
+
+**Data.** Keep one writer. At 09:15 the on-call engineer moves the writer to Sydney in three steps:
+
+1. **Fence London.** Make sure the old writer cannot accept a single order, even if it wakes up. Remove it from the app's settings and block it at the network.
+2. **Promote the copy.** Sydney's copy becomes the writer, about 1 second of orders short.
+3. **Protect the new writer.** Add a standby in a second Sydney zone, and start backups there. Sydney now carries the whole shop.
+
+Why not let both regions write all the time? Stock has a hard limit. In the Sydney trial, two writers sold the last copy of a poster twice, 0.4 seconds apart.
+
+**The trade-off.** UK shoppers now cross the world. Each round trip takes about 250 ms, so a product page takes about 3 seconds instead of under 1. The edge cache keeps photos fast. Slow pages still sell; a dead shop sells nothing.
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={6} path="uk>fd>sapp" minWidth={620} caption="One address for every shopper: the front door sends UK shoppers to Sydney once London fails its checks." />
+
+[Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) designs the writer, and [Load Balancing](/cloud/networking/load-balancing) covers the global front door.
+
+## Decision 6: Rehearse and fail back
+
+<Callout tone="blue" title="Decide first">
+  How do you know this works before the sale day? And when London returns at 15:00, do you switch back at once?
+</Callout>
+
+**Rehearse.** Brightpost already drills a failover every 3 months, on a Sunday at 06:00 London time. Add one drill two weeks before the sale day, at sale-day size: 10 servers in Sydney. Check the sale-day quotas a week ahead, because some increases take days. Each drill measures both numbers. The RPO is the age of the newest order in Sydney. The RTO is the time until a test order succeeds.
+
+The monthly restore drill stays too. The orders copy repeats a bad delete within a second, so only a restored backup proves you can go back in time.
+
+**Fail back.** **Failback** is the return to London, and it is a second migration. London's old database holds about 1 second of stranded orders and none of Sydney's 6 hours. Never switch it back on as the writer.
+
+1. Rebuild London as a copy of Sydney, and let it catch up.
+2. Stay in Sydney for the rest of the sale day.
+3. Move the writer back in a quiet hour, such as 06:00 on Sunday.
+4. Add the stranded orders by hand, from the payment records.
+
+**The trade-off.** A drill at full size has a cost: 10 servers for an hour, and a nervous Sunday. It is the only way to find the gap before shoppers do.
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={6} minWidth={620} caption="Each month a drill restores the far copy into the test account and checks the data, because a replica cannot undo a delete." />
+
+[Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) runs the restore drill, and [Multi-Region](/cloud/resilience/multi-region) walks failback.
+
+## The finished design
+
+Here is the answer you would summarise at the end of the interview.
+
+1. **Two numbers, signed by the business.** On the sale day: an RPO of about 1 second for orders and an RTO of 30 minutes. On other days: 15 minutes and 2 hours.
+2. **One writer.** London writes every order; Sydney keeps a copy about 1 second behind.
+3. **A warm standby in Sydney.** One server every day, 4 from 8:30 on the sale day, and a quota for 10.
+4. **A global front door.** It moves shoppers within about 30 seconds and needs no DNS change.
+5. **Promotion by a person, after 15 minutes.** Fence London, promote Sydney, add a standby and backups.
+6. **Backups as the floor.** Copies reach Sydney every 15 minutes, locked in another account.
+7. **Drills.** Quarterly failovers, one before the sale day, monthly restores, and a slow, planned failback.
+
+<Numbers
+  items={[
+    { value: "~1 s", label: "orders forgotten", hint: "was up to 15 minutes" },
+    { value: "~25 min", label: "until checkout works again", hint: "was about 2 hours" },
+    { value: "~140", label: "orders lost in the 6 hours", hint: "was about 740" },
+    { value: "~£3,500", label: "of sales lost", hint: "was about £18,500" },
+  ]}
+/>
+
+## On AWS, Google Cloud and Azure
+
+The design is the same on all three clouds: a copy of the orders database in the second region, a way to promote it, a global way in, and drills.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Orders copy in region B:** an RDS for PostgreSQL cross-Region read replica, or an Aurora Global Database secondary Region.
+    - **Promoting it:** promote the RDS replica to a standalone instance by hand; it stops copying for good. Aurora offers a switchover for drills, which loses nothing, and a failover for outages.
+    - **Moving shoppers:** Global Accelerator in front of both Regions' load balancers, or Route 53 failover records with health checks.
+    - **Region B's own parts:** Secrets Manager can replicate secrets to other Regions; KMS offers multi-Region keys. Machine images, certificates and Service Quotas belong to one Region each.
+    - **Drills:** AWS Fault Injection Service runs planned fault experiments; AWS Backup can run restore tests on a schedule.
+
+    **The difference that changes a design.** Regions share almost nothing. Every load balancer, image, key and quota is regional, so region B is built on purpose, piece by piece. Your template must create all of it there.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Orders copy in region B:** a Cloud SQL cross-region read replica.
+    - **Promoting it:** promote the replica by hand; it becomes a standalone primary and stops copying.
+    - **Moving shoppers:** the global external Application Load Balancer, one anycast address with backends in both regions. Cloud DNS routing policies are the DNS-based option.
+    - **Region B's own parts:** the VPC network, machine images and snapshots are global. Secret Manager can replicate each secret automatically. Cloud SQL instances, subnets and quotas are regional.
+    - **Drills:** take London's backends out of the load balancer, and promote a test replica in a separate project, with your own scripts.
+
+    **The difference that changes a design.** Much of region B's skeleton already exists, because the network, images and front door are global. Traffic moves without waiting for DNS caches. The database and the quotas are still yours to copy and raise.
+  </Tab>
+  <Tab label="Azure">
+    - **Orders copy in region B:** a cross-region read replica of Azure Database for PostgreSQL flexible server.
+    - **Promoting it:** promote the replica by hand, so it accepts writes; it stops copying from London.
+    - **Moving shoppers:** Front Door, one global entry point with health probes, or Traffic Manager priority routing, which is DNS-based.
+    - **Region B's own parts:** a Key Vault in each region, images replicated through Azure Compute Gallery, and vCPU quotas per region in each subscription.
+    - **Drills:** Azure Chaos Studio runs fault experiments; Site Recovery runs test failovers in an isolated network.
+
+    **The difference that changes a design.** Many regions have a paired region, and geo-redundant copies go to the pair. London's pair is in the UK, not Sydney. So Brightpost sets up every copy to Sydney itself, or picks the pair as its recovery region.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" stepper minWidth={620} caption="The four tiers on Brightpost's two regions, from the first game day to active-active. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/dr-tiers" lead="aws" />
+
+## Common mistakes in this interview
+
+- **Treating three zones as region protection.** Zones share the region and fail with it. Say the words "failure domain" and draw the region boundary first.
+- **One RPO for everything, or a promise of zero.** Orders need seconds; photos can wait a day. Zero loss puts a 250 ms trip on every order. Set one number per kind of data.
+- **Leaving the read copy out of the plan.** Brightpost's Sydney copy was a warm standby nobody had counted. Count what already runs before you buy more.
+- **Automatic promotion on one health check.** A flaky probe creates two writers and sells stock twice. Promote by a written rule, and fence the old writer first.
+- **A recovery region at default size.** One server and a default quota cannot carry a sale day. Raise the quota a week ahead, and give Sydney a head start.
+- **Switching the old writer back on.** London's database misses 6 hours of Sydney orders. Rebuild it as a copy, then move back in a quiet hour.
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="London fails at 09:00 on the sale day, for about 6 hours. Walk me through the first 30 minutes." level="Senior" category="Cloud">
+    **Short answer.** The front door moves shoppers to Sydney within about 30 seconds, and checkout shows a short pause page. At 09:15, under the written rule, a person fences London and promotes Sydney's orders copy. By about 09:25 a test order succeeds, and the scaling rule grows Sydney from 4 servers toward 10.
+
+    **Why.** Pages need no writer, so they come back first. Orders need exactly one writer, and the 15-minute wait protects against a short network break that would leave two. Fencing comes before promotion so London cannot take one more order. At 330 orders an hour, those 25 minutes cost about 140 orders.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={6} path="syd>fd>sapp" caption="Every shopper reaches the front door, which sends them to the healthy region." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the shopper see between 09:01 and 09:25?
+    - Who decides at 09:15, and what do they check first?
+
+    **Watch out for.** Starting with the database restore. With a live copy in Sydney, nothing needs restoring; the first job is to move traffic and choose one writer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you set the RPO and RTO for a shop whose sale day is worth ten normal days?" level="Senior" category="Cloud">
+    **Short answer.** Price an hour of downtime and a lost order for each kind of day, then set a target per day type and per kind of data. Brightpost uses seconds and 30 minutes on the sale day, and 15 minutes and 2 hours otherwise.
+
+    **Why.** A sale-day hour is about 330 orders; a normal one about 25. One target for the whole year either overpays on 364 days or under-protects on one. Data differs too: a lost order is a charged card and a refund, while a lost basket costs a shopper a minute. The business signs the numbers; the engineer prices them.
+
+    <AnimatedDiagram spec="animated/cloud/rpo-rto-timeline" step={4} caption="Copy more often to shrink the RPO; keep more running to shrink the RTO." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you prove the 30-minute RTO before the sale day?
+    - Which number does the backup schedule set?
+
+    **Watch out for.** Letting engineers pick the numbers alone. The targets are a business decision about money and customers, so someone who owns the revenue must sign them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The second region already serves reads for far-away users. Is that a disaster recovery plan?" level="Senior" category="Cloud">
+    **Short answer.** It is most of one, but not yet a plan. It becomes one with a written promotion rule, a fenced old writer, enough capacity and quota for full load, its own secrets, keys and images, and a drill that proves the numbers.
+
+    **Why.** Brightpost's Sydney stack has a load balancer, one server and an orders copy about 1 second behind. That is a warm standby by shape. But it runs 1 server where the sale day needs 10, its quota is at the default, and nobody has ever promoted the copy. Each of those gaps would surface during the outage.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={5} highlight={["lbB", "appB", "replica"]} caption="A small copy of every tier in region B. Shape alone does not prove it can carry the load." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which hidden dependency on London would you test first?
+    - How long would scaling from 1 server to 10 take, and what could stop it?
+
+    **Watch out for.** Calling it active-active. Only London writes orders, so the read stack is a standby that also serves reads.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why not let both regions accept orders all the time, so a regional failure costs nothing?" level="Senior" category="Cloud">
+    **Short answer.** Because orders change stock, and stock has a hard limit. Two writers about 1 second apart can both sell the last item. Either keep one writer, or pay for a database that confirms each write in both regions.
+
+    **Why.** Brightpost tried two writers between London and Sydney and sold 3 posters it did not have. A database that votes on each write fixes that, but adds at least one 250 ms round trip to every order and roughly doubles the bill. For about 140 orders saved once in a rare outage, one writer plus a fast promotion is the better trade.
+
+    <AnimatedDiagram spec="animated/cloud/write-topologies" step={2} caption="A writer in each region: fast writes everywhere, and copies that can disagree." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which Brightpost data could safely have a writer in each region?
+    - What would a home region per customer change?
+
+    **Watch out for.** Saying "last write wins fixes it". Both sales wrote the same zero, so nothing looked wrong, and two customers paid for one poster.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="During a regional outage, your recovery region may struggle to start new servers. How do you design for that?" level="Senior" category="Cloud">
+    **Short answer.** Keep enough running in the recovery region to carry the first minutes without scaling, raise its quotas ahead of time, and never make recovery depend on creating many resources at once.
+
+    **Why.** Running servers belong to the data plane and keep serving. Starting new ones needs the control plane, which can be slow or refused during a wide incident. Brightpost runs 4 servers in Sydney from 8:30 on the sale day, enough for about 800 shoppers at once. Sydney's quota is raised to 40 cores plus headroom a week ahead, because some increases take days.
+
+    <AnimatedDiagram spec="animated/cloud/failure-domains" step={6} highlight={["health", "pipeline"]} caption="The provider's health feed reports an incident, and the pipeline holds changes until it clears." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you size the head start for a bigger sale?
+    - What else in the runbook needs the control plane?
+
+    **Watch out for.** Trusting autoscaling to save you. A scaling rule is a request to the control plane, and a refused request adds no servers.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="London comes back at 15:00. How do you fail back without losing orders?" level="Senior" category="Cloud">
+    **Short answer.** Do not switch London's old database back on. Rebuild it as a copy of Sydney, let it catch up, stay in Sydney for the rest of the sale day, and move the writer back in a quiet hour. Add the few stranded orders by hand.
+
+    **Why.** London's old copy holds about 1 second of orders that never reached Sydney, and none of Sydney's 6 hours. Turning it on as the writer would erase about 2,000 orders' worth of history. As a fresh copy it catches up safely. A planned move then loses nothing, because both copies match when the writer moves.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={5} highlight={["ldb", "sdb"]} caption="One writer and one copy. Failback swaps their roles back, once the copy has caught up." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find the stranded orders?
+    - Why wait for a quiet hour, not the evening of the sale day?
+
+    **Watch out for.** Treating failback as the easy half. It is a second migration, with the same risk of two writers, and it deserves its own runbook and drill.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Availability, SLAs and What Fails Together](/cloud/resilience/availability-math)
+- [Quotas, Limits and Retries](/cloud/resilience/quotas-and-retries)
+- [Load Balancing](/cloud/networking/load-balancing)
+- [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call)
+- [Practice: A Web App from Zero](/cloud/start-here/practice-web-app-from-zero)
+- [Availability](/system-design/fundamentals/availability)
+- [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication)
+
+## Further reading
+
+- [Disaster recovery of workloads on AWS](https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html): the four strategies on AWS.
+- [Google Cloud disaster recovery planning guide](https://cloud.google.com/architecture/dr-scenarios-planning-guide): targets and building blocks.
+- [Azure reliability documentation](https://learn.microsoft.com/azure/reliability/): regions, pairs and recovery.
+- [Azure Site Recovery overview](https://learn.microsoft.com/azure/site-recovery/site-recovery-overview): replication, failover and test drills.

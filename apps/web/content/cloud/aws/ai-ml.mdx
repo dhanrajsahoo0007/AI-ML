@@ -18,8 +18,6 @@ Clouds sell AI as a ladder, from a finished service you call to a model you trai
 
 <CloudMapping diagram="cloud/ai-platform-building-blocks" lead="aws" />
 
-On AWS the two halves of the picture are two services, each with its own API, quotas and bill. In steps 1 and 2 Asha's tuned model ran on a GPU instance all day. In step 3 the drafter calls Bedrock's Converse API, one request shape for every model in the catalog, paid per token. Step 4 is a Bedrock Knowledge Base: it reads the help articles from S3, splits and embeds them, and stores the vectors in OpenSearch Serverless. In step 6 the calls go through a PrivateLink endpoint in the London Region, and CloudWatch counts tokens and throttled calls. Step 7, the photo style tagger, is the only part that lives in SageMaker AI.
-
 ## TL;DR
 
 - **Bedrock** for LLM features: one API across model providers, data stays in your account, IAM controls access.
@@ -32,6 +30,12 @@ On AWS the two halves of the picture are two services, each with its own API, qu
 
 <CloudGroupTable group="ai-ml" lead="aws" />
 
+## How it fits together on AWS
+
+On AWS the two halves of the picture are two services, each with its own API, quotas and bill. In steps 1 and 2 Asha's tuned model ran on a GPU instance all day. In step 3 the drafter calls Bedrock's Converse API, one request shape for every model in the catalog, paid per token.
+
+Step 4 is a Bedrock Knowledge Base over the help articles in S3; the RAG section below follows it role by role. In step 6 the calls go through a PrivateLink endpoint in the London Region, and CloudWatch counts tokens and throttled calls. Step 7, the photo style tagger, is the only part that lives in SageMaker AI.
+
 ## Four rungs, four AWS answers
 
 <AnimatedDiagram spec="animated/cloud/ai-adoption-ladder" stepper cloud="aws" minWidth={520} caption="The four ways to use AI, with the AWS service on each rung." />
@@ -39,25 +43,15 @@ On AWS the two halves of the picture are two services, each with its own API, qu
 | Rung | On AWS | At Brightpost |
 |---|---|---|
 | A ready-made service | Rekognition (images, video), Textract (documents), Transcribe (speech), Translate, Comprehend (text) | Textract turns about 40 printing-partner invoices a month into rows |
-| A hosted model | Bedrock, paid per token or by Provisioned Throughput | The reply drafter and the support chatbot |
-| Your data, their model | Bedrock Knowledge Bases for retrieval; model customization for tuning | 120 help articles in a Knowledge Base |
+| A hosted model | Bedrock, paid per token or by Provisioned Throughput | The model behind the drafter and the support chatbot |
+| Your data, their model | Bedrock Knowledge Bases for retrieval; model customization for tuning | The drafter's 120 help articles, in a Knowledge Base |
 | Your own model | SageMaker AI on GPU instances or Trainium | The photo style tagger |
 
 The ready-made services have no catalog profiles here: each is one API with one job, paid per image, page or minute. None of them knows Brightpost's own style words, such as "retro", which is why the tagger sits on the bottom rung.
 
-## Beyond the stepper: guardrails and agents
-
-The stepper stops at the model call. The support chatbot adds what happens around it: a filter on both sides, tools that act for one customer, and a person for big refunds.
-
-<AnimatedDiagram spec="animated/cloud/ai-guardrail-path" step={6} cloud="aws" minWidth={620} caption="The support chatbot on AWS: Bedrock Guardrails on the way in and out, tools under an IAM role, and a Step Functions workflow that holds refunds over £30 for the support agent." />
-
-- **Bedrock Guardrails** is its own resource, with versions. It filters prompt attacks, denied topics and personal data, and checks replies against the passages they came from. Its standalone check works on text from any model.
-- **Bedrock Agents** is the older, built-in way to let a model call your APIs. **AgentCore** runs agents written in any framework, with a session per user, memory, a tool gateway and an identity service for acting on a signed-in user's behalf.
-- **Money still moves only through Step Functions.** The refund tool runs under an IAM role scoped to one customer, and refunds over £30 wait for the support agent. A guardrail is a smoke alarm, not a lock.
-
 ## A RAG assistant on AWS
 
-This is the same retrieval-augmented generation (RAG) pipeline as on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with each role played by an AWS service. Switch the Services toggle to compare clouds.
+Rung 3 and step 4 in full. This is the same retrieval-augmented generation (RAG) pipeline as on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with each role played by an AWS service. Switch the Services toggle to compare clouds.
 
 <AnimatedDiagram
   spec="animated/rag/pipeline"
@@ -68,11 +62,21 @@ This is the same retrieval-augmented generation (RAG) pipeline as on [RAG Fundam
 
 **How to read it.** The top lane runs when documents change: files in S3 are synced into a Bedrock Knowledge Base, which parses and chunks them, embeds each chunk with Titan Text Embeddings V2 and writes the vectors to a vector store such as OpenSearch Serverless or S3 Vectors. The bottom lane runs per question: your API (Lambda or ECS) asks the Knowledge Base to retrieve the nearest chunks, builds the prompt and calls a model on Bedrock, with Guardrails checking the input and the output.
 
-**The numbers** (the running example): 1,200 help articles become 3,600 chunks and about 22 MB of raw vectors at 1,536 dimensions; each answer sends a prompt of about 2,200 tokens.
+**The numbers** (the running example from RAG Fundamentals; Brightpost's own index is its 120 help articles): 1,200 help articles become 3,600 chunks and about 22 MB of raw vectors at 1,536 dimensions; each answer sends a prompt of about 2,200 tokens.
 
 <Callout tone="red" title="What breaks">
   The sync is not instant. An article edited in S3 is not in answers until the Knowledge Base's next ingestion job finishes, so schedule or trigger syncs on change and watch the job's failures.
 </Callout>
+
+## Around the model call: guardrails and agents
+
+The RAG pipeline ends at the model call, with Guardrails on both sides. The support chatbot needs more around that call: tools that act for one customer, and a person for big refunds.
+
+<AnimatedDiagram spec="animated/cloud/ai-guardrail-path" step={6} cloud="aws" minWidth={620} caption="The support chatbot on AWS: Bedrock Guardrails on the way in and out, tools under an IAM role, and a Step Functions workflow that holds refunds over £30 for the support agent." />
+
+- **Bedrock Guardrails** is its own resource, with versions. It filters prompt attacks, denied topics and personal data, and checks replies against the passages they came from. Its standalone check works on text from any model.
+- **Bedrock Agents** is the older, built-in way to let a model call your APIs. **AgentCore** runs agents written in any framework, with a session per user, memory, a tool gateway and an identity service for acting on a signed-in user's behalf.
+- **Money still moves only through Step Functions.** The refund tool runs under an IAM role scoped to one customer, and refunds over £30 wait for the support agent. A guardrail is a smoke alarm, not a lock.
 
 ## Services
 

@@ -1,11 +1,298 @@
 ---
 title: "Practice: A Web App from Zero"
 description: "Design a small web app on the cloud step by step, from an empty account to a private, scaled and monitored stack, and defend each choice."
-status: outline
+updated: 2026-11-25
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** an interview-style walk-through that builds a web app on the cloud from an empty account: network, compute, data, scaling and monitoring. It reuses the diagrams from the concept pages and ends with senior-level questions.
+<KeyIdea>
+  Build a cloud design in a fixed order, from who may touch it to how you will know it works, and back every choice with a number.
+</KeyIdea>
 
-**Related reading on this site:** [Choosing Compute](/cloud/start-here/choosing-compute) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+## The brief
+
+You are the candidate in a practice interview. The interviewer says:
+
+> "Design Brightpost's shop on a cloud, starting from an empty account, for 2,000 orders a day."
+
+Brightpost, the poster and card shop, takes about 400 orders a day today, so the brief plans for five times that. Write the numbers down before you draw.
+
+- **Traffic.** 2,000 orders a day, about 200 shoppers online at a normal peak, and 2,000 at 9:00 on a sale morning. One app server handles about 200 shoppers at once.
+- **Availability.** The shop keeps selling if one zone, one building of the region, goes dark. A failover of about 2 minutes is acceptable.
+- **Data.** No paid order may be lost. The database holds the names and home addresses of 90,000 customers, and none of it may ever be public.
+- **Customers.** Most are in the UK, so the shop runs in a region near London. About 30 orders a day come from Australia, where a product page takes about 3 s.
+- **Team.** 3 engineers. Anything the provider can run for them, it should.
+- **Out of scope.** A second region, which [Practice: Survive a Region Outage](/cloud/start-here/practice-survive-a-region-outage) covers.
+
+## How to approach it
+
+A 45-minute design interview has four phases. Name each one as you start it.
+
+1. **Clarify (5 minutes).** Turn the prompt into numbers: orders, peak shoppers, data that must never leak, how long the shop may be down.
+2. **Sketch (10 minutes).** Draw the whole design once, roughly: edge, load balancer, servers, database.
+3. **Deepen (20 minutes).** Take one layer at a time, in the order below. Name the choice, give your answer, say what it costs.
+4. **Defend (10 minutes).** The interviewer breaks something, such as a zone. Walk through what your design does, minute by minute.
+
+The six decisions follow the order of a real build: a server needs a network, and a network needs an account.
+
+## Decision 1: Account and identity
+
+<Callout tone="blue" title="Decide first">
+  The account is empty. Does everything go in one account? And how do people and programs prove who they are?
+</Callout>
+
+**The answer.** Create an <Term id="organization">organisation</Term> first, the tree that holds all of a company's accounts. Under it go three accounts: test, shop and audit, each in its own folder. At the root, two guardrails that no account can override: only 2 regions allowed, and no public buckets.
+
+People sign in once through the company directory, with <Term id="mfa">MFA</Term>, and get roles through groups. Programs get an attached service identity and tokens that last 1 hour, so no long-lived key exists. Build all of it with <Term id="infrastructure-as-code" />, so the test account is a true copy of the shop account.
+
+**The trade-off.** Three accounts cost an afternoon of setup and a cross-account role for logs. In return, a test clean-up script cannot reach the live database. Brightpost learned that one Tuesday at 14:10: 3 hours down, about 180 orders rebuilt by hand.
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={6} minWidth={620} caption="Two accounts under one organisation: the audit account trusts one outside identity, the shop app, and a guardrail sits above both." />
+
+The mechanics are on [Identity and Access](/cloud/fundamentals/identity-and-access), [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance) and [Landing Zones](/cloud/fundamentals/landing-zones).
+
+<PremiumBreak />
+
+## Decision 2: Network
+
+<Callout tone="blue" title="Decide first">
+  Where do the servers and the database live, and which of them can the internet reach?
+</Callout>
+
+**The answer.** One private network, a <Term id="vpc" />, with the range 10.0.0.0/16. It holds three tiers of <Term id="subnet">subnets</Term>: public for the load balancer, app for the servers, data for the database. Each tier repeats in three zones. Only the load balancer has a public address.
+
+A <Term id="route-table" /> decides where a subnet's packets may go. Only the public subnets route to the internet gateway. The app servers must still reach the payment provider. They leave through a <Term id="nat-gateway" />, which lets them open connections outward but lets nothing open one inward. Calls to the cloud's own services can use a <Term id="private-endpoint" /> and skip the internet.
+
+**The trade-off.** NAT is paid by the hour and by the gigabyte, and on some clouds it lives in one zone, so you run one per zone. On Brightpost's first network, one quick fix left the database public for 11 days, and about 3,800 logins were tried from 140 addresses.
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} minWidth={620} caption="Every packet from the internet passes the gateway. Only the public routes lead to it; the app and data subnets keep their traffic inside." />
+
+See [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets), [NAT & Leaving the Network](/cloud/networking/nat-and-egress) and [Firewalls](/cloud/networking/firewalls).
+
+## Decision 3: Compute
+
+<Callout tone="blue" title="Decide first">
+  Virtual machines, containers on a managed platform, or functions? Pick one for the shop app and say why the others lose.
+</Callout>
+
+**The answer.** A group of virtual machines across three zones, behind the <Term id="load-balancer" />. The shop serves shoppers all day, needs nothing special from the operating system, and the team already patches machines. Each server starts from a **golden image**, a saved disk with the shop and its packages installed. A new server is ready in about 3 minutes, not the 11 it took when each one downloaded packages at boot.
+
+The group keeps at least one server per zone, so a zone loss leaves two. The photo-resize worker, short and bursty, stays a function.
+
+**The trade-off.** VMs leave the operating system to you: patches, image builds, disk sizes. A serverless container platform takes that work away; it is a fair answer, and the one to pick if the team had no time to patch. Functions lose for checkout: steady traffic costs more on them, and each copy opens its own database connection.
+
+<AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={5} minWidth={620} caption="New servers boot from the golden image and join the load balancer about 3 minutes later." />
+
+See [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) and the full decision on [Choosing Compute](/cloud/start-here/choosing-compute).
+
+## Decision 4: Data
+
+<Callout tone="blue" title="Decide first">
+  Run PostgreSQL yourself on a VM, or use a managed engine? And does the shop need a read copy on day one?
+</Callout>
+
+**The answer.** Managed PostgreSQL in the data subnets, with a synchronous standby in a second zone. **Synchronous** means a write counts as done only when the standby has it too. The provider takes a backup at 03:00 and logs every change, so the shop can restore to any minute. A delete lock stops any script from removing it.
+
+So the <Term id="rpo" /> is zero inside the region, and the <Term id="rto" /> is about 2 minutes, the time a <Term id="failover" /> takes. Baskets live in the database too; photos go in an <Term id="object-storage" /> bucket.
+
+No <Term id="read-replica" /> yet: at 2,000 orders a day, one primary has room to spare. When a copy is added, pages that show the shopper's own write still read the primary. Brightpost once sent its order page to a copy 40 s behind, and about 130 shoppers paid twice.
+
+**The trade-off.** A managed engine costs more per hour than the same VM. It also removes the full disk at 3:10 a.m. and the untested backup, a good deal for 3 engineers.
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={1} minWidth={620} caption="One managed primary takes every query. A standby in zone B holds every write, and the provider keeps the 03:00 backup and the change log." />
+
+See [Managed Relational Databases](/cloud/data/managed-relational) and [Databases on Each Cloud](/cloud/start-here/databases-per-cloud).
+
+## Decision 5: Edge and scaling
+
+<Callout tone="blue" title="Decide first">
+  How does the design meet 2,000 shoppers at 9:00, keep scrapers out, and serve photos fast in Sydney?
+</Callout>
+
+**At the edge.** A <Term id="cdn" /> sits in front of two origins: the photos bucket and the load balancer. Photos are copied to an <Term id="edge-location" /> near each shopper, so Sydney stops waiting 3 s. A <Term id="waf" /> at the edge blocks an address that asks too fast. An **origin lock** makes the load balancer accept traffic only from the edge, so nobody can walk around those rules.
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={5} minWidth={620} caption="Every request enters through the edge, and the origin lock refuses anything that tries the load balancer directly." />
+
+**For the crowd.** <Term id="autoscaling">Autoscaling</Term> keeps processor use near 60%, between 3 servers and 10. Ten servers serve about 2,000 shoppers. A new server needs a few minutes, so a schedule sets 10 servers from 8:30 on sale days. Scale-in waits, drains each server for 60 s and removes one at a time.
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} minWidth={620} caption="Scale-in waits, drains for 60 s and removes one server at a time, so the next wave still meets six servers." />
+
+**The trade-off.** The schedule pays for 10 servers for an hour before the crowd, far less than a lost sale morning. Check two limits now: the account's server quota must allow 10, and 10 servers must not open more connections than the database allows.
+
+See [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf) and [Autoscaling: The Control Loop](/cloud/compute/autoscaling).
+
+## Decision 6: Observability and cost
+
+<Callout tone="blue" title="Decide first">
+  What do you watch, who gets woken up, and what will the monthly bill look like?
+</Callout>
+
+**Watching.** An agent on every server, the collector, ships three kinds of data to managed stores. **Metrics** are numbers over time, **logs** are event lines in one format, and **traces** follow one request across services by a trace id. One alert watches what shoppers feel: the <Term id="p99" /> time of the Pay button, which 99 of 100 payments beat. It pages the engineer on call. The audit trail goes to the audit account.
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={6} minWidth={620} caption="Metrics, logs and traces reach managed stores, and an alert on slow payments pages the developer on call." />
+
+**Cost.** Say the shape, not the price. The bill has five lines: servers, database, storage, data leaving, logs. Servers and the database are most of it. The steady base, 3 servers and the database, goes on a 1- or 3-year commitment. Nightly resize work runs on spare capacity, and test machines stop outside 8 a.m. to 7 p.m. on weekdays.
+
+**The trade-off.** Logs grow quietly: keep detail for days and only the audit trail for years. Without a trace id, a slow Pay button once took Brightpost 2 days to explain; with one, 5 minutes.
+
+See [Observability on the Cloud](/cloud/operations/observability-on-the-cloud), [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call) and [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics).
+
+## The finished design
+
+This is the picture to leave on the whiteboard. One edge and one public load balancer lead to three app servers in three zones and a managed database with a standby, all in a private network.
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" minWidth={620} caption="The finished network: only the load balancer is public, each tier runs in three zones, and the red marker is the zone loss the design survives." />
+
+<CloudMapping diagram="cloud/vpc-three-tier" lead="aws" />
+
+## On AWS, Google Cloud and Azure
+
+The design is the same on all three clouds; the names and a few details change.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Accounts and sign-in:** AWS Organizations with service control policies; IAM Identity Center for staff; an IAM role on each server.
+    - **Network:** one VPC. Each subnet lives in one Availability Zone, so the plan is nine subnets and a NAT gateway per zone.
+    - **Compute:** an EC2 Auto Scaling group from a launch template and a custom AMI, behind an Application Load Balancer.
+    - **Database:** Amazon RDS for PostgreSQL, Multi-AZ, with automated backups and deletion protection.
+    - **Edge:** Amazon CloudFront in front of S3 and the load balancer, with AWS WAF.
+    - **Watching it:** Amazon CloudWatch for metrics, logs and alarms, AWS X-Ray for traces, AWS CloudTrail to the audit account.
+
+    **The difference that changes a design.** Subnets and NAT gateways are zonal, so the zone is part of the address plan. One NAT per zone keeps a zone loss from cutting off the others.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Accounts and sign-in:** an organisation with folders and projects and organisation policies; Cloud Identity for staff; a service account on each server.
+    - **Network:** one custom-mode VPC network. Subnets are regional and span every zone, so the plan is three subnets, with Cloud NAT for the way out.
+    - **Compute:** a regional managed instance group from an instance template and a custom image, behind the global external Application Load Balancer.
+    - **Database:** Cloud SQL for PostgreSQL with high availability, on a private IP.
+    - **Edge:** Cloud CDN on the load balancer, a Cloud Storage backend bucket, and Cloud Armor.
+    - **Watching it:** Cloud Monitoring, Cloud Logging and Cloud Trace; Cloud Audit Logs sent by a sink to the audit project.
+
+    **The difference that changes a design.** The load balancer runs at Google's edge, so the edge cache and the web firewall are settings on it, not separate services. A VM is public only with an external IP, which an organisation policy can forbid.
+  </Tab>
+  <Tab label="Azure">
+    - **Accounts and sign-in:** management groups, subscriptions and Azure Policy; Microsoft Entra ID for staff; a managed identity on each server.
+    - **Network:** one virtual network. Subnets span the region's zones, so the plan is three subnets, with a NAT gateway for the way out.
+    - **Compute:** a Virtual Machine Scale Set across zones from an Azure Compute Gallery image, behind an Application Gateway.
+    - **Database:** Azure Database for PostgreSQL flexible server with zone-redundant high availability.
+    - **Edge:** Azure Front Door with a Web Application Firewall policy, in front of Blob Storage and the gateway.
+    - **Watching it:** Azure Monitor with Log Analytics, Application Insights for traces, the activity log exported to the audit subscription.
+
+    **The difference that changes a design.** System routes already lead every subnet to the internet, so "private" means no public IP except the gateway's, plus network security group rules.
+  </Tab>
+</Tabs>
+
+## Common mistakes in this interview
+
+- **Starting with the servers.** Account, identity and network come first; they are the hardest to change.
+- **No numbers.** "It scales" is not an answer. "10 servers of 200 shoppers each meet the 2,000 at 9:00" is.
+- **Everything public "to keep it simple".** One public database drew 3,800 login attempts. Only the load balancer gets a public address.
+- **A read replica on day one.** It adds lag and stale reads. Add it when the primary is busy.
+- **Scaling without its limits.** Name the quota, the warm-up time and the database's connection limit.
+- **No human loop.** Say who gets paged, what they look at, and where the audit trail lives.
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="You have 45 minutes and an empty cloud account. What do you build first, and why in that order?" level="Senior" category="Cloud">
+    **Short answer.** Accounts and identity, then the network, then compute and data, then edge, scaling and monitoring. Each layer sits inside the one before it, and the first two are the hardest to change later.
+
+    **Why.** Moving a live database between accounts, or renumbering a network in use, means a rebuild. A server is replaced in 3 minutes from an image. So I start with three accounts under an organisation, guardrails at the root, and single sign-on with MFA. Then comes a 10.0.0.0/16 network with three tiers in three zones.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={6} highlight={["guardrail", "role2", "archive"]} caption="The account walls and the guardrail come before any server: they decide what every later piece may do." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why three accounts and not one?
+    - What do you build by hand?
+
+    **Watch out for.** Opening with the load balancer and servers. The interviewer then has to drag the security answers out of you.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your app servers sit in subnets with no route to the internet. How do they call the payment provider, and what does that add?" level="Senior" category="Cloud">
+    **Short answer.** Through a NAT gateway in each zone. Servers open connections outward, nothing outside opens one inward, and the shop's outbound address stays fixed for the payment provider to allow.
+
+    **Why.** The app route table sends internet-bound packets to the NAT. Only the public subnets route to the internet gateway. NAT adds a charge per hour and per gigabyte, one more part per zone, and one outbound address to log and filter. Calls to the cloud's own services can skip it through private endpoints.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} highlight={["rt-public", "rt-private", "igw"]} caption="Only the public routes lead to the gateway; the private routes keep app and data traffic inside the network." />
+
+    **Follow-ups the interviewer may ask.**
+    - What breaks if the only NAT sits in zone A and zone A goes dark?
+    - How do you stop a compromised server sending data anywhere it likes?
+
+    **Watch out for.** Public addresses on the app servers "only for outbound". A public address is reachable the moment a firewall rule slips.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Zone A goes dark at 9:05 on a sale morning. Walk through the next five minutes in your design." level="Senior" category="Cloud">
+    **Short answer.** In about 30 s, health checks drop zone A's servers and the load balancer uses B and C. In about 2 minutes the standby in zone B becomes the primary. The autoscaler then adds servers in B and C.
+
+    **Why.** Writes were synchronous, so no paid order is lost. Database calls fail for about 2 minutes, so the app must retry with backoff. Losing a third of 10 servers leaves about 7, enough for about 1,400 shoppers until replacements boot in about 3 minutes.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={5} caption="Zone A is lost: the load balancer shares traffic between B and C, and the standby becomes the primary." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which pieces are still tied to one zone?
+    - How do you prove this works before a real sale?
+
+    **Watch out for.** "The cloud handles it." Name each timer: 30 s for health checks, 2 minutes for failover, 3 minutes for a new server.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why virtual machines and not a serverless container platform for this shop? Argue both sides." level="Senior" category="Cloud">
+    **Short answer.** VMs fit a steady, all-day app run by a team that already patches machines, and a golden image makes them ready in 3 minutes. Serverless containers remove patching and are a strong alternative. I would switch when the team's time, not the bill, becomes the limit.
+
+    **Why.** For VMs: the load never drops to zero, so a commitment pays off. Against: the team owns image builds and patches. Serverless containers start in seconds with no OS work, but scale per request and can open many database connections in a spike. Functions lose for checkout: steady traffic costs more, and each copy opens its own connection.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you measure to decide to move?
+    - What stays the same if you move?
+
+    **Watch out for.** Calling one option "best". The interviewer wants the condition that would flip your choice.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="At 9:00, 2,000 shoppers arrive. What runs out first in your design, and how do you find out before the sale?" level="Senior" category="Cloud">
+    **Short answer.** Usually not the servers. The first limits are the database's connections, the account's server quota and warm-up time. A load test at sale-day size in the test account finds them.
+
+    **Why.** Ten servers with a connection pool each, plus the resize function, can exceed what the database allows. A managed connection proxy shares a few connections among all of them. A maximum of 10 above the account's quota fails quietly, and Brightpost's test account allows only 4, so raise the quota in both accounts first. The 8:30 schedule solves warm-up. Run the test a week before and watch p99 Pay time.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={5} highlight={["proxy", "primary"]} caption="A connection proxy shares the database's connections between the app servers and the resize function." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you scale on if processor use stays low but pages are slow?
+    - What if the test shows the database is the limit?
+
+    **Watch out for.** "Add more servers." More servers open more connections and can bring the database down faster.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The finance lead asks what this design costs and how it gets cheaper. What do you say without quoting prices?" level="Senior" category="Cloud">
+    **Short answer.** I describe the shape. Servers and the database are most of the bill and storage the least. The steady base goes on a commitment, batch work on spare capacity, test machines run in working hours, and budget alerts catch surprises.
+
+    **Why.** The base is 3 servers and the database, running every hour, so a commitment fits. Sale-day servers stay on demand, and the resize work, which can restart, uses spare capacity. Test machines from 8 a.m. to 7 p.m. on weekdays run about a third of the week. A forgotten 4-server test copy once doubled Brightpost's bill in 30 days; alerts at 50% would have caught it early.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={6} highlight={["metrics", "alert"]} caption="The metrics that page the engineer also show which servers sit idle." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which line of the bill grows quietly, and how do you cap it?
+    - When is a commitment a mistake?
+
+    **Watch out for.** Quoting a discount percentage. Rates change and differ by cloud; the shape of the bill does not.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Cloud in 10 Minutes](/cloud/start-here/cloud-in-10-minutes)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Practice: Survive a Region Outage](/cloud/start-here/practice-survive-a-region-outage)
+- [Practice: Lock Down a Leaky Account](/cloud/start-here/practice-lock-down-a-leaky-account)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+- [Non-Functional Requirements](/system-design/fundamentals/non-functional-requirements)
+
+## Further reading
+
+- [AWS Well-Architected Framework](https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html): pillars for reviewing a design.
+- [Google Cloud Well-Architected Framework](https://cloud.google.com/architecture/framework): design principles and checks.
+- [Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/): pillars and review guides.
+- [Azure Architecture Center](https://learn.microsoft.com/azure/architecture/): reference designs, web apps included.
