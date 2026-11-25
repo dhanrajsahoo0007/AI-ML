@@ -8,7 +8,7 @@ Interviewers rarely ask for a deployment pipeline, but "how do you roll this out
 
 ## The idea
 
-A delivery pipeline builds each change once and sends that exact build through every check, and a deployment strategy decides how shoppers move from the old version to the new one. <Term id="infrastructure-as-code">Infrastructure as code</Term> does the same for the servers and networks: a reviewed file, a plan, then an apply from the pipeline.
+A delivery pipeline builds each change once and sends that exact build through every check. A deployment strategy decides how shoppers move from the old version to the new one. <Term id="infrastructure-as-code">Infrastructure as code</Term> does the same for the servers and networks: a reviewed file, a plan, then an apply from the pipeline.
 
 <Callout tone="blue" title="Learn the idea">
   The cloud-neutral version, with Brightpost's column rename that failed 18 checkouts in 12 minutes, is in [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies). Templates, plans and state are in [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code); patching and agents are in [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management).
@@ -31,7 +31,7 @@ A delivery pipeline builds each change once and sends that exact build through e
 
 ## How it fits together on AWS
 
-Step 1: a merge starts **CodePipeline**. **CodeBuild** builds the shop's image once and pushes it to Amazon ECR, which gives it a digest. Step 2: **CodeDeploy** runs an in-place deployment one instance at a time. It takes each EC2 instance out of the Application Load Balancer's target group, updates it, and puts it back after its health check.
+Step 1: a merge starts **CodePipeline**. **CodeBuild** builds the shop's image once and pushes it to Amazon ECR, which gives it a digest. Replacing every instance from it at once would take the shop down while they restart. Step 2: **CodeDeploy** runs an in-place deployment one instance at a time. It takes each EC2 instance out of the Application Load Balancer's target group, updates it, and puts it back after its health check.
 
 Steps 3 and 4 are the rename and its fix. On AWS the migration is one more pipeline action, such as a CodeBuild job, so it ships in its own release with only the expand. Step 5: CodeDeploy blue/green copies the Auto Scaling group, moves the load balancer to the copy, and keeps the original instances for a set time. Step 6: a **CloudWatch alarm** on checkout errors is attached to the deployment, and CodeDeploy rolls back when it fires. Step 7: **AWS AppConfig**, part of Systems Manager, serves the feature flag.
 
@@ -155,7 +155,7 @@ Pick it only if your organisation already uses it; new migration projects start 
 
     **Why.** "Replaced" is the word to look for. Some property changes delete a resource and create a new one, and for a database that means a new, empty one. A stack policy that forbids replacing the database stops that from happening by accident. Drift detection shows anything changed by hand since the last update.
 
-    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} cloud="aws" highlight={["repo", "engine", "plan", "api"]} minWidth={620} caption="CloudFormation compares the template with what is live; the change set lists only the difference." />
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} cloud="aws" highlight={["repo", "engine", "plan", "api"]} minWidth={620} caption="CloudFormation compares the new template with the stack it built last time; the change set lists only the difference." />
 
     **Follow-ups the interviewer may ask.**
     - How would you stop a pull request from replacing the orders database?
