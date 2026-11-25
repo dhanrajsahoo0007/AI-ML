@@ -23,6 +23,8 @@ export function parseHubMarkup(mdx: string): NavIndexCategory[] {
         ...(c.icon ? { icon: c.icon } : {}),
         ...(c.description ? { description: c.description } : {}),
         ...(c.status ? { status: c.status as "outline" | "draft" | "published" } : {}),
+        ...(c.tier ? { tier: c.tier as "core" | "advanced" } : {}),
+        ...(c.logo ? { logo: c.logo } : {}),
       };
     });
     return {

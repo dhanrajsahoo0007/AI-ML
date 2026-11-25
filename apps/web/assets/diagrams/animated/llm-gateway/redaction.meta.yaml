@@ -1,0 +1,19 @@
+title: Redaction across turns, and its latency
+alt: >-
+  A layout in four steps. Step 1: an orange new customer message, "I'm Sarah Collins" with an email address, goes to a
+  lime pre-scan of regex and a CPU name scan, then to a violet encrypted dictionary for conversation c_88d1 holding two
+  entries, the name to a person placeholder and the email to an email placeholder; the call leaves for the provider
+  with placeholders only, which are a type plus an HMAC under the conversation key, so the same text gives the same
+  bytes. Step 2: the stream back, per output channel: text the customer reads is restored to "Hi Sarah Collins" and
+  the allow-listed order lookup email argument is restored, both green; inside a URL or link target the placeholder is
+  never restored, red. Step 3: on turn 3 the tenant re-sends its stored reply "Hi Sarah Collins"; a lime dictionary
+  pass, an exact match of about 0.1 milliseconds, turns it back into the placeholder before it leaves; the gate is 0
+  raw values from earlier turns in later calls over 500 conversations of 4 turns. Step 4: a latency waterfall: support
+  loads the case in 30 milliseconds while the pre-scan takes 16.5 at p50, a 1 millisecond hop, 2 of queue and 13.5 of
+  name scan, and 33 at p95, 3 milliseconds past the case load; on the call itself regex and the dictionary add 0.3.
+caption: >-
+  Names leave as placeholders on turn 1 and still leave as placeholders on turn 3, because the dictionary catches the
+  values the gateway itself restored; restoring stops at URLs.
+tags: [genai, llm-gateway, privacy, pii, redaction, case-study]
+source: original
+created: 2026-11-23

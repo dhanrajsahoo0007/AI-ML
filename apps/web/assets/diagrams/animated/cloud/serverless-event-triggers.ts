@@ -152,7 +152,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 390,
       y: 95,
-      w: 182,
+      w: 186,
       cloud: { aws: "aws-sqs", gcp: "gcp-pubsub", azure: "azure-service-bus" },
     },
     {

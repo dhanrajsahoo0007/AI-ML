@@ -1,0 +1,19 @@
+title: Paged KV cache against one contiguous slab per request
+alt: >-
+  A layout figure in three violet-outlined panels about one Brightpost answer of 2,200 prompt tokens and 250 answer
+  tokens, where each token's keys and values take 128 KiB. The top panel, contiguous, draws one slab of 8,192 tokens,
+  1 GiB, reserved when the answer is admitted: an orange part for the 2,200 prompt tokens, a thin green part for the
+  250 answer tokens, and a long red part, reserved but never written, of 5,742 tokens or 717.75 MiB, 70.1 percent of
+  the slab. Only 306.25 MiB, 29.9 percent, is in use when the answer ends. The middle panel, paged, shows a block table
+  that maps the answer's logical blocks 0, 1, 2 and 153 to physical blocks 7, 11, 3 and 19, scattered through a slice
+  of the GPU's block pool among grey blocks of other answers and blank free blocks; the answer holds 154 blocks of 2
+  MiB, 308 MiB. A zoom on block 19, the last one, shows 2 of its 16 slots used in green and 14 empty: 1.75 MiB, 0.57
+  percent. The bottom panel compares what fits in a 40 GiB KV pool of 20,480 blocks: 40 answers as 1 GiB slabs against
+  132 answers with 16-token blocks, 3.3 times as many, with a dashed marker at Brightpost's peak of 18 answers in
+  flight.
+caption: >-
+  A slab sized for the longest answer leaves 70 % of itself unwritten; blocks handed out on demand waste only the
+  last block's empty slots, so the same pool holds 132 answers instead of 40.
+tags: [serving, inference, kv-cache, memory, genai]
+source: original
+created: 2026-11-15

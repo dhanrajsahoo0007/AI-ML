@@ -1,0 +1,470 @@
+---
+title: "Coding Agents"
+description: "How coding agents work: repository context, edit tools, sandboxes, test loops and review, and how they are evaluated."
+icon: code2
+---
+
+A coding agent is the agent loop pointed at a repository: it searches and reads code, edits files, runs commands and tests, and hands back a change for a person to review.
+
+- Interviewers use it to test system thinking: how the agent finds the right 1 % of a large codebase, how it writes an edit that applies cleanly, where its commands run, who checks its work, and what a benchmark score does and does not prove.
+- This page is the product and system view. The harness around the model is on [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering), and the test-driven loop is on [Loop Engineering & Verification Loops](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops).
+
+## Overview
+
+- A coding agent is an agent loop with four kinds of tool: **search, read, edit and run**. The rest of the design is about context, safety and checking.
+- It ships in three shapes: in the **IDE**, where a person watches each step; in the **terminal (CLI)**, on the developer's machine; and in the **background**, in a cloud sandbox that returns a pull request. The less a person watches, the more the sandbox and the tests must carry.
+- The agent **does not load the repository**. It searches, opens a file and reads only what the task needs: for the CSV bug below, about 4,100 of 410,000 tokens (illustrative).
+- Edits come in three formats: **whole file, unified diff and search-and-replace**. The same one-line fix costs about 3,200 output tokens as a whole file and about 40 as a search-and-replace (illustrative).
+- **Tests are the feedback signal.** They run in a sandbox after every edit, and they catch what the model misses.
+- The output is a **pull request**. A person reviews and merges it; the agent never merges its own work.
+- **SWE-bench** grades an agent's patch with tests the agent never saw. As of November 2026 OpenAI no longer reports SWE-bench Verified, citing contamination and flawed tests, and in July 2026 it also withdrew its recommendation of SWE-bench Pro. Your own task suite decides whether an agent is ready.
+
+## Mental model
+
+- Think of a contractor on their first day. They do not read all 240 files of your codebase.
+- They search for the error message, open the one file it points to, change as little as possible, run the tests and send you the change to review.
+- If a test fails, they read the failure and try again.
+
+- A coding agent works the same way. The only choice is where the contractor sits: next to you while you watch (the IDE), in your terminal, or at their own desk overnight, handing you a pull request in the morning (a background agent).
+
+## Core concepts
+
+- Every figure follows the bug-fix agent from [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering#worked-example-fixing-the-csv-bug-step-by-step).
+- The repository is `brightpost-orders`; the issue is "Order import drops the last line of a CSV file"; the bug is a loop bound in `src/parser.ts`.
+
+### The agent loop for code
+
+- The loop is the one on [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures): the model proposes a tool call, the harness runs it, and the result goes back into the next request.
+- Code adds one gift: a precise, cheap check. Tests, the linter and the type checker say whether a step worked, so the loop can end on evidence, not on the model's opinion.
+
+| Tool kind | In the CSV fix                             | Risk                                |
+| --------- | ------------------------------------------ | ----------------------------------- |
+| Search    | `search("last line")`: 2 matches           | None: reads only                    |
+| Read      | `read_file("src/parser.ts")`: 3,200 tokens | None: reads only                    |
+| Edit      | Change the loop bound `< n - 1` to `< n`   | Writes a file in the sandbox's copy |
+| Run       | `run_tests()`: 18 tests                    | Runs code; needs the sandbox        |
+
+- Pushing a branch and opening a pull request are harness actions, not model tools, in most designs.
+- The loop ends when every check passes or a budget runs out.
+- The full nine-step run is the [worked example](#worked-example-from-issue-to-pull-request) below.
+
+### Repository context: search, indexing and file reading
+
+The agent never sees the repository whole. It narrows it in three moves: search, open, read.
+
+<AnimatedDiagram
+  spec="animated/agents/repo-context"
+  stepper
+  minWidth={620}
+  caption="The agent never loads the repository. A search narrows 240 files to two lines, and the model reads one file of 240. Sizes are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A repo too big to load">
+    Read in full, `brightpost-orders` would be about 410,000 tokens. Only the root instruction file, `AGENTS.md` (800
+    tokens), loads at the start. It says how to run the checks and where the tests live.
+  </StepCard>
+  <StepCard n={2} title="Search for the symptom">
+    `search("last line")` returns two lines with their paths: a comment in `src/parser.ts` and the test that covers it.
+    About 100 tokens tell the agent where to look.
+  </StepCard>
+  <StepCard n={3} title="Open one file">
+    The agent reads `src/parser.ts`, 3,200 tokens, and nothing else. The test file can wait until a test fails.
+  </StepCard>
+  <StepCard n={4} title="What the model reads">
+    The context holds what the task needs and little more.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 800 + 100 + 3,200 = **4,100 tokens**, and 4,100 ÷ 410,000 = **1 %** of the repository (all sizes illustrative).
+- Reading every file would not fit in any context window, and each extra file dilutes the model's attention.
+
+Products find code in three ways, often combined:
+
+- **Agentic search.** The agent calls grep, glob and file reads as tools, just in time. Anthropic describes Claude Code as a hybrid: `CLAUDE.md` files load up front, and glob and grep find everything else (September 2025). As of November 2026 Cursor's docs describe a local grep index and an Explore sub-agent, and say Cursor "does not store embeddings of your codebase for search".
+- **A ranked map.** Aider sends a repo map: the files and their key symbols, ranked with a graph of which files reference which, cut to a token budget (1,000 tokens by default).
+- **An embeddings index.** Chunks of code are embedded so a search can match meaning, not words. It finds code when the issue and the code use different terms, but it must be rebuilt as the code changes. See [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) for the pipeline.
+
+- Instruction files are context too. A root `AGENTS.md` loads at the start, and a scoped file such as `src/AGENTS.md` loads when the agent reads a file in that folder.
+- See [Progressive Disclosure & Agent Instructions](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions).
+
+<Callout tone="red" title="What breaks">
+  A search that finds nothing. If the code calls it a "trailing row" and the issue says "last line", grep returns no
+  match, and the agent guesses which file to change. Search the error text, the test names and the stack trace as well
+  as the issue's words; this is where a semantic index earns its upkeep.
+</Callout>
+
+### Edit formats and tools
+
+The model cannot touch files. It writes text that describes an edit, and the harness applies it. The format of that text matters.
+
+<AnimatedDiagram
+  spec="animated/agents/edit-formats"
+  stepper
+  minWidth={620}
+  caption="The same one-line change costs about 3,200 tokens as a whole file and about 40 as a search-and-replace. Each format fails in its own way. Token counts are illustrative."
+/>
+
+**How to read it:**
+
+- Each row is the same fix, the loop bound on line 18 of a 128-line file.
+- Teal cells are the lines that change; grey cells are text the model must also write.
+- The whole-file format (ringed) re-types 127 unchanged lines to change one.
+- The diff and the search-and-replace write only the change, plus enough to say where it goes.
+
+**The numbers:**
+
+- 3,200 ÷ 40 = **80 times** more output for the whole file (illustrative).
+- Output tokens are the slow part of a model call and are priced higher than input tokens, so the format sets both the latency and the cost of every edit.
+
+Each format fails differently:
+
+- **Whole file.** Aider's docs call it "slow and costly"; on long files a model may also drop or elide lines it meant to keep.
+- **Unified diff.** Line numbers and context lines must match the file exactly. They drift after the agent's own earlier edits.
+- **Search-and-replace.** The old text must match the file exactly once. It is the common default: Claude's text editor tool (`str_replace`) and Aider's `diff` format both work this way.
+
+Here is the fix as a call to Claude's built-in text editor tool (`text_editor_20250728`; Claude Messages API shape). The harness page shows the same edit through a custom `edit_file` tool:
+
+```json
+{
+  "type": "tool_use",
+  "id": "toolu_03",
+  "name": "str_replace_based_edit_tool",
+  "input": {
+    "command": "str_replace",
+    "path": "src/parser.ts",
+    "old_str": "for (let i = 0; i < lines.length - 1; i++)",
+    "new_str": "for (let i = 0; i < lines.length; i++)"
+  }
+}
+```
+
+- OpenAI's `apply_patch` tool takes the diff route: the model writes a patch in OpenAI's V4A diff format to create, update or delete a file, and your harness applies it.
+- In every case the harness, not the model, writes the file.
+
+<Callout tone="red" title="What breaks">
+  An edit applied in the wrong place. If `old_str` appears twice, a careless harness replaces the first match. Refuse
+  any edit that does not match exactly once, and return an error the model can act on: "2 matches; include more
+  surrounding lines". OpenAI's docs say the same for patches: return a failed status with a useful message.
+</Callout>
+
+### Sandboxes and running tests
+
+- An agent that runs tests runs code, so the commands run in a sandbox.
+- The [AI-First Environment](/ai-system-design/genai-system-design/ai-first-environment-and-tool-scaffolding#sandboxing-filesystem-network-and-credentials) page builds this figure step by step.
+
+<AnimatedDiagram
+  spec="animated/agents/sandbox-boundaries"
+  stepper
+  minWidth={620}
+  caption="Each fence covers what the others cannot: the file fence keeps secrets unread, the network fence keeps data from leaving, and the credential fence keeps the real token out of reach."
+/>
+
+**How to read it:**
+
+- The agent's commands run in a container on a copy of the repository.
+- Three fences surround it: reads of `~/.ssh` are denied, network traffic goes through an allow-list proxy, and a push goes through a git proxy that holds the real token and only accepts the agent's branch, `fix/csv-last-line`.
+
+- Inside the sandbox, the tests are the agent's eyes.
+- Run the fast checks first (lint and types take seconds), then the tests closest to the change, then the full suite before the pull request.
+- Rewrite failures into short messages before they reach the model; the [error-rewrite figure](/ai-system-design/genai-system-design/ai-first-environment-and-tool-scaffolding#turning-raw-errors-into-actionable-tool-feedback) shrinks a 2,100-token trace to about 90 tokens.
+
+**The numbers:**
+
+- Anthropic reported in October 2025 that sandboxing cut permission prompts in Claude Code by **84 %** in its internal use.
+- The fences carry the safety, so a person approves less and reads what they do approve.
+
+<Callout tone="red" title="What breaks">
+  Tests the agent can edit. A test fails, and the agent "fixes" it by loosening the assertion or deleting the test.
+  Anthropic's long-running harness tells the model it is "unacceptable to remove or edit tests". Back the rule with
+  code: flag any change under the test folders in the pull request, and run the original tests in CI.
+</Callout>
+
+## Architecture
+
+The loop, the tools and the sandbox are the same in every product. What changes is where the agent runs and who watches it.
+
+| Shape            | Where it runs                      | Who watches              | What it returns          | Best for                                 |
+| ---------------- | ---------------------------------- | ------------------------ | ------------------------ | ---------------------------------------- |
+| IDE agent        | Inside the editor, on your machine | You, step by step        | Edits in your open files | Work you want to steer as it happens     |
+| CLI agent        | Your terminal, or a CI job         | You, or a log in CI      | Edits, commits, a branch | Scripted tasks, larger edits, automation |
+| Background agent | A cloud sandbox, one per task      | Nobody until it finishes | A pull request           | Well-specified issues, many in parallel  |
+
+Moving down the table, three things move from the person to the system:
+
+1. **Safety moves into the sandbox.** In the IDE a person can stop a bad command. In the background nobody can, so the network and credential fences must hold on their own.
+2. **Checking moves into tests and CI.** A background agent's work is only as good as the checks it can run. A repository with no tests gets confident, unverified pull requests.
+3. **Review moves to the pull request.** The pull request is the only place a person sees the work, so it must explain itself: what changed, why, and what was tested.
+
+- Every shape shares the same parts: an instruction file (`AGENTS.md` or `CLAUDE.md`), a small tool set, a sandbox, deterministic checks, git integration and a trace of every step.
+- The [harness anatomy](/ai-system-design/genai-system-design/harness-engineering#architecture) draws them as one system.
+
+## Technical mechanics
+
+### Worked example: from issue to pull request
+
+This follows the bug-fix agent from the issue to a pull request, one step per row. It runs as a background agent: nobody watches until the pull request opens.
+
+<AnimatedDiagram
+  spec="animated/agents/coding-agent-trace"
+  stepper
+  minWidth={620}
+  caption="The model proposed six of the nine steps, including both edits; the harness ran, allowed and checked each one, and caught the first fix's gap."
+/>
+
+**How to read it:**
+
+- The left column is the run: teal rows are tool calls, red is a failing test, blue is what came back, lime is a passing check and green is the model's summary.
+- The right column is what the harness did. Each row maps to an idea on this page:
+
+| Step | What happened                              | Idea on this page                                                          |
+| ---- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| 1    | `search("last line")`: 2 matches           | [Repository context](#repository-context-search-indexing-and-file-reading) |
+| 2    | `read_file("src/parser.ts")`: 3,200 tokens | Read only what is needed                                                   |
+| 3    | First edit: the loop bound                 | [Edit formats](#edit-formats-and-tools): one search-and-replace            |
+| 4–5  | 18 tests run; "parses an empty file" fails | [Sandbox and tests](#sandboxes-and-running-tests)                          |
+| 6    | The error goes back to the model           | A short, rewritten failure                                                 |
+| 7    | Second edit: return `[]` for empty input   | Another search-and-replace                                                 |
+| 8    | 18 passed, lint and types clean            | The loop's exit check                                                      |
+| 9    | Summary, push, pull request                | [Review](#review-permissions-and-safe-rollout)                             |
+
+The pull request is the agent's whole report to a person, so the harness asks for a fixed shape:
+
+```text
+Fix: order import drops the last line of a CSV file
+
+Cause: the loop in src/parser.ts stopped at lines.length - 1.
+Change: loop to lines.length; return [] for empty input.
+Tested: 18 tests pass, lint and types clean.
+Note: the first fix broke "parses an empty file"; the second edit fixes it.
+```
+
+Three things to take from it:
+
+- **The tests, not the model, found the second bug.** Without step 4 the first fix would have shipped, and empty files would have crashed the import.
+- **The model read about 1 % of the repository.** Search and one file read were enough; the context grew from 3,800 to 24,000 tokens over nine steps (illustrative).
+- **A person still decides.** The agent pushed a branch and opened a pull request. Merging is a tier-3 action that waits for a reviewer.
+
+### Long tasks: planning, checkpoints and compaction
+
+The CSV fix takes nine steps. A feature or a migration can take hundreds, and three problems appear.
+
+- **The window fills.** By step 9 the context holds 24,000 of an illustrative 32,000 tokens, 75 %. A longer task needs compaction (summarise and continue) or a reset with a handoff note. See [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+- **The agent loses the plan.** Write the plan to a file and tick off steps as they pass. Anthropic's long-running harness keeps a JSON feature list, every feature starting as failing, and a progress log that each new session reads first.
+- **A crash loses the work.** Commit after every passing step. A commit is a free checkpoint: the next session resumes from it, and a bad step is one `git revert` away. See [checkpoint and resume](/ai-system-design/genai-system-design/loop-engineering-and-verification-loops#handling-partial-progress-and-checkpoint-resumption).
+
+Exploration fills the window fastest. A sub-agent can search a large codebase in its own window and return a short summary, so the main agent keeps only the conclusion; Cursor's Explore sub-agent works this way.
+
+### Benchmarks: SWE-bench and its limits
+
+SWE-bench turns real GitHub issues into tasks. Here is the CSV fix as one of them.
+
+<AnimatedDiagram
+  spec="animated/agents/benchmark-flow"
+  stepper
+  minWidth={620}
+  caption="The agent never sees the tests that grade it. A patch that fixes the issue but breaks one old test scores zero for the task."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The task">
+    The agent gets the issue text and the repository at the commit before the real fix. The test that the real fix added
+    is held back.
+  </StepCard>
+  <StepCard n={2} title="The agent returns a patch">
+    Any scaffold, any tools: the benchmark sees only the final diff.
+  </StepCard>
+  <StepCard n={3} title="Hidden tests decide">
+    A grader applies the patch in a fresh container, adds the held-back tests and runs two sets. FAIL_TO_PASS tests
+    failed before the real fix and must now pass. PASS_TO_PASS tests passed before and must still pass.
+  </StepCard>
+  <StepCard n={4} title="First edit only: not resolved">
+    Patch A fixes the last line, so FAIL_TO_PASS passes. But "parses an empty file" now fails, a PASS_TO_PASS test, so
+    the task is not resolved.
+  </StepCard>
+  <StepCard n={5} title="Both edits: resolved">
+    Patch B passes 1 + 17 = 18 tests. The score is the share of tasks resolved.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The original SWE-bench (Jimenez et al., 2023) has 2,294 tasks from 12 Python repositories.
+- **SWE-bench Verified** (OpenAI, August 2024) keeps 500 tasks that people checked by hand.
+- **SWE-bench Pro** (Scale AI, September 2025) has 1,865 tasks from 41 repositories, with a held-out set from 12 of them and a commercial set from 18 private codebases.
+
+The limits matter as much as the score:
+
+- **Contamination.** The tasks and fixes are public, so models may have trained on them. In February 2026 OpenAI said it no longer evaluates on SWE-bench Verified: every frontier model it tested had seen some of the problems and solutions.
+- **Flawed tests.** OpenAI's audit covered 138 of the 500 tasks (27.6 %) and found flawed tests in 59.4 % of those. Epoch AI reads that as a floor of 16.4 % of all tasks, and rated the benchmark "Flawed" in September 2026.
+- **The scaffold counts.** The same model scores differently with a different harness, so a leaderboard compares model-and-harness pairs, not models.
+- **Passing is not merging.** Hidden tests check behaviour, not whether a reviewer would accept the diff: its size, its style, or a test it quietly weakened.
+
+- Build your own suite the same way: take 50 to 100 past issues from your repositories, reset each to the commit before its fix, hold back its tests, and grade with FAIL_TO_PASS and PASS_TO_PASS.
+- See [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) for graders and pass^k.
+
+<Callout tone="red" title="What breaks">
+  Choosing a model from a leaderboard. A model that leads on a public benchmark can fall behind on your codebase, your
+  language and your harness. Run the candidates on your own held-out issues, several times each, before you switch.
+</Callout>
+
+### Review, permissions and safe rollout
+
+A coding agent's actions differ in how easily they can be undone, and its permissions should follow that.
+
+<AnimatedDiagram
+  spec="animated/agents/permission-tiers"
+  minWidth={620}
+  caption="The harder an action is to undo, the more the harness stands between the proposal and the action."
+/>
+
+**How to read it:**
+
+- Reads run at once. Edits and test runs happen in the sandbox's copy and are checked afterwards.
+- Merging, deploying and anything that leaves the sandbox waits for a person.
+
+Review rules for agent pull requests:
+
+- **The agent works on its own branch and never merges.** Branch protection and required reviews apply to it as to any author. GitHub's Copilot cloud agent, for example, works on one branch and opens one pull request per task.
+- **The same CI runs.** Agent pull requests pass the same checks as human ones, with no bypass.
+- **Small diffs.** A reviewer can check 50 lines. Split larger work into several pull requests.
+- **Label agent pull requests** so you can measure them apart.
+
+Roll out in stages, and widen only when the numbers hold:
+
+1. **Read-only.** The agent answers questions about the code.
+2. **Suggest.** It proposes edits in the IDE; a person applies them.
+3. **Pull requests.** Background agents take labelled, well-specified issues.
+4. **Narrow auto-merge.** Only for low-risk classes, such as dependency bumps with full test coverage, and only after a long clean record.
+
+Track the acceptance rate (pull requests merged ÷ opened), the revert rate, review time per pull request, and the cost per merged change.
+
+## Trade-offs
+
+| Decision                         | Option A                   | Option B                                  | Guidance                                                                 |
+| -------------------------------- | -------------------------- | ----------------------------------------- | ------------------------------------------------------------------------ |
+| IDE vs background                | A person steers every step | Many tasks in parallel, nobody waits      | IDE for unclear work; background for well-specified issues with tests    |
+| Agentic search vs index          | Always fresh, no upkeep    | Finds code by meaning                     | Start with search; add an index when the words in issues and code differ |
+| Whole file vs search-and-replace | Simple, nothing to match   | About 80 times less output (illustrative) | Search-and-replace by default; whole file for new or very short files    |
+| Full suite vs targeted tests     | Catches every regression   | Seconds instead of minutes per edit       | Targeted tests in the loop; full suite before the pull request           |
+| Public benchmark vs own suite    | Comparable across vendors  | Measures your code and your harness       | Shortlist with public scores; decide with your own issues                |
+
+## Production systems
+
+As of November 2026:
+
+- **Claude Code** runs in the terminal, in VS Code and JetBrains, in a desktop app and on the web, where long tasks run in the cloud and in parallel. A Slack mention can turn a bug report into a pull request, and GitHub Actions runs it in CI.
+- **OpenAI Codex** runs as a CLI, an IDE extension and in the cloud, where each task has its own workspace and can finish while your computer sleeps.
+- **GitHub Copilot cloud agent** takes a task from an issue, a pull request or chat, runs in GitHub Actions or a cloud sandbox, and opens one pull request per task. A session on Actions is capped at 59 minutes.
+- **Aider** is an open-source terminal agent that picks an edit format per model: whole, diff (search-and-replace), diff-fenced, udiff and editor variants for its architect mode.
+- **OpenAI stopped reporting SWE-bench Verified** in February 2026 and pointed to SWE-bench Pro instead; in July 2026 it withdrew that recommendation too, estimating about 30% of Pro tasks broken, and called for new benchmarks built by experienced developers.
+- **Used in our case studies:** [Code Assistant](/genai-system-design/case-studies/code-assistant)
+
+## Failure modes & pitfalls
+
+- Loading whole directories into the context instead of searching.
+- Letting the model rewrite whole files for one-line changes.
+- Applying an edit that matches more than once.
+- Running agent commands on a developer's machine with full network access and real credentials.
+- Letting the agent edit or delete the tests it is judged by.
+- Treating a passing test suite as a finished review.
+- Choosing a model by its public leaderboard score alone.
+- Giving the agent merge rights before measuring its revert rate.
+
+## Interview framework
+
+1. Draw the loop with four tool kinds: search, read, edit, run. Say that tests are the exit check.
+2. Explain repository context: search and read just in time, an instruction file up front, an index only when needed.
+3. Pick an edit format and justify it; say what the harness does when an edit does not apply.
+4. Put the agent in a sandbox with file, network and credential fences; scale the fences with how little a person watches.
+5. End with a pull request and human review; describe a staged rollout and the metrics you would track.
+6. For evaluation, explain FAIL_TO_PASS and PASS_TO_PASS, the limits of SWE-bench, and your own suite of past issues.
+
+**What interviewers listen for:** the harness and the tests doing the checking, not the model; concrete numbers for context and edits; awareness that benchmarks leak.
+
+**Red flags:** "the agent reads the whole repo", an agent that merges its own pull requests, or a SWE-bench score as the only evidence.
+
+## Further reading
+
+- [Claude Code overview (Anthropic documentation)](https://code.claude.com/docs/en/overview)
+- [Text editor tool (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/text-editor-tool)
+- [Apply patch tool (OpenAI API documentation)](https://developers.openai.com/api/docs/guides/tools-apply-patch)
+- [Codex cloud (OpenAI documentation)](https://learn.chatgpt.com/docs/cloud)
+- [About Copilot cloud agent (GitHub documentation)](https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-coding-agent)
+- [Search in Cursor (Cursor documentation)](https://cursor.com/docs/context/semantic-search)
+- [Edit formats (Aider documentation)](https://aider.chat/docs/more/edit-formats.html)
+- [Repository map (Aider documentation)](https://aider.chat/docs/repomap.html)
+- [Effective context engineering for AI agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- [Effective harnesses for long-running agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [SWE-bench: Can Language Models Resolve Real-World GitHub Issues? (Jimenez et al., 2023)](https://arxiv.org/abs/2310.06770)
+- [Introducing SWE-bench Verified (OpenAI, 2024)](https://openai.com/index/introducing-swe-bench-verified/)
+- [Why we no longer evaluate SWE-bench Verified (OpenAI, 2026)](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)
+- [SWE-bench Verified review (Epoch AI, 2026)](https://epoch.ai/benchmarks/swe-bench-verified/review)
+- [SWE-Bench Pro (Deng et al., Scale AI, 2025)](https://arxiv.org/abs/2509.16941)
+- [Separating signal from noise in coding evaluations (OpenAI, 2026)](https://openai.com/index/separating-signal-from-noise-coding-evaluations/)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What makes a coding agent different from a chat assistant that writes code?"
+    category="Concepts"
+    level="Junior"
+  >
+    - A chat assistant writes code into a reply, and a person copies, runs and checks it.
+    - A coding agent runs a loop with tools: it searches and reads the repository, edits files, runs the tests and reads the results, and repeats until the checks pass or a budget runs out.
+    - The tests give it a precise signal, so it can find and fix its own mistakes.
+    - Its output is a change, usually a pull request, that a person reviews.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How does a coding agent find the right code in a large repository?"
+    category="Architecture"
+    level="Mid"
+  >
+    - It does not load the repository. An instruction file such as AGENTS.md loads at the start; then the agent searches with grep and glob for the error text, test names and the issue's words, and reads only the files the matches point to.
+    - Some tools add a ranked map of files and symbols, or an embeddings index that matches meaning when the issue and the code use different words.
+    - For a one-line bug the model may read about 1 % of the repository.
+    - Sub-agents can explore in their own window and return a summary, so the main context stays small.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Compare whole-file, diff and search-and-replace edit formats. Which would you choose?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - Whole-file is the simplest to apply but re-types every unchanged line, so it is slow, costly and can drop lines on long files.
+    - A unified diff is compact but depends on line numbers and context that drift after earlier edits.
+    - Search-and-replace writes only the old and new text; it fails if the old text is missing or appears twice.
+    - I would default to search-and-replace, use whole-file for new or very short files, and have the harness reject ambiguous matches with an error the model can fix.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Design a background coding agent that turns labelled issues into pull requests."
+    category="Architecture"
+    level="Senior"
+  >
+    - A queue picks up labelled issues and starts one sandbox per task: a container with a fresh clone, no production credentials, an allow-list network proxy and a git proxy that only pushes to the task's branch.
+    - The agent loop gets the issue, the instruction file and four tools (search, read, edit, run), with step, token and time budgets.
+    - Fast checks run after every edit and the full suite before the push.
+    - The output is a pull request in a fixed format, reviewed by a person under the same CI and branch protection as human work.
+    - I would track acceptance rate, revert rate and cost per merged change, and gate harness changes on a suite of past issues.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A model tops SWE-bench Verified. What does that tell you about using it on your codebase?"
+    category="Evaluation"
+    level="Senior"
+  >
+    - Less than it seems. The score is for a model and a scaffold together, on 500 tasks from 12 Python repositories.
+    - The tasks and fixes are public, and in February 2026 OpenAI stopped reporting the benchmark because frontier models had seen some of them; its audit also found flawed tests in a large share of the tasks it checked. In July 2026 it said about 30% of SWE-bench Pro tasks were broken as well.
+    - Hidden tests check behaviour, not whether a reviewer would accept the diff.
+    - I would shortlist with public scores, then run the candidates on my own held-out past issues, several times each, with FAIL_TO_PASS and PASS_TO_PASS grading.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Your agent made a failing test pass by editing the test. How do you stop that?"
+    category="Failure modes"
+    level="Senior"
+  >
+    - Treat the tests as the grader, not as code the agent may change to win.
+    - Tell the model that removing or editing tests is not allowed, and enforce it in the harness: flag or block edits under the test folders unless the task is about tests.
+    - Run the original tests in CI, as SWE-bench does with its held-back tests, so a weakened copy cannot pass.
+    - In review, show test changes first, and count pull requests that touched tests in your agent metrics.
+  </InterviewQuestion>
+</InterviewQuestions>

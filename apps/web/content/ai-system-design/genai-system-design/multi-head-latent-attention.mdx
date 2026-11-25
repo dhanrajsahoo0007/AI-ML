@@ -1,0 +1,247 @@
+---
+title: "Multi-Head Latent Attention (MLA) & KV Compression"
+description: "Compressing key-value caches into low-rank latent vectors with decoupled RoPE to serve long-context models with far less GPU memory."
+icon: minimize
+updated: 2026-11-15
+---
+
+Multi-head latent attention (MLA) is the attention design behind DeepSeek-V2, DeepSeek-V3 and Kimi K2.
+
+- Interviewers ask about it because it attacks the KV cache from a new angle: instead of sharing key and value heads, as GQA does, it caches one small compressed vector per token.
+- A good answer covers what is cached, the matrix-absorption trick, why RoPE needs special handling, and what MLA costs in return.
+
+## Overview
+
+- MLA compresses each token's keys and values into **one latent vector** $c^{KV}$ and caches only that, plus a small **RoPE key**.
+- In DeepSeek-V2 that is **512 + 64 = 576 numbers per token per layer**, against 32,768 for full multi-head attention at the same 128 heads × 128 dims: **about 57× less**.
+- At attention time, up-projections rebuild per-head keys and values, or are **absorbed** into the query and output projections so keys and values are never built at all.
+- RoPE cannot pass through the absorbed matrices, so position rides on a **decoupled 64-number key** shared by all heads.
+- DeepSeek reports **better quality than MHA** in its ablations, and a **93.3% smaller KV cache** than DeepSeek 67B; the price is extra attention arithmetic and custom kernels.
+
+<KeyIdea>MLA caches one small latent vector and one shared RoPE key per token instead of per-head keys and values, and absorbs the up-projections into the query and output so decoding reads only the latents.</KeyIdea>
+
+## Mental model
+
+- Picture a library that keeps a photocopy of every page for each of 128 readers.
+- That is multi-head attention: every head stores its own key and value for every token.
+- Grouped-query attention makes readers share copies.
+- MLA does something different: it stores one short summary card per page, written in a private shorthand, and gives each reader a decoder ring that expands the card into the view that reader needs.
+- The shelf holds only cards. Better still, a reader can learn to read the shorthand directly, so the full pages are never written out at all.
+
+## Core concepts
+
+1. **The KV-cache wall.** During decoding, every layer keeps a key and a value for every past token (see [efficient attention](/ai-system-design/genai-system-design/efficient-attention) for the formula).
+   - With full multi-head attention (MHA), that is $2 n_h d_h$ numbers per token per layer.
+   - At DeepSeek-V2's 128 heads of 128 dims, that is 32,768 numbers per token per layer, about 3.93 MB per token across 60 layers in 16-bit.
+   - GQA and MQA shrink this by sharing key/value heads, but DeepSeek's own 7B ablation found that sharing costs quality: MMLU fell from 45.2 (MHA) to 41.2 (GQA, 8 groups) and 37.9 (MQA).
+
+2. **Low-rank joint compression.** MLA projects the layer input $h_t$ down to one latent vector, $c^{KV}_t = W^{DKV} h_t$, with $d_c = 512$ dims in DeepSeek-V2 (the hidden size is 5,120).
+   - Keys and values for all heads are linear functions of that same vector: $k^C_t = W^{UK} c^{KV}_t$ and $v^C_t = W^{UV} c^{KV}_t$.
+   - "Joint" means keys and values share one latent; "low-rank" means 512 dims stand in for 128 × 128 = 16,384 key dims and as many value dims.
+
+3. **What is cached.** Only $c^{KV}_t$ and the RoPE key $k^R_t$ (concept 6) go into the cache: $(d_c + d^R_h)\,l$ numbers per token, where $l$ is the number of layers. With $d_c = 4 d_h$ and $d^R_h = d_h / 2$, the paper writes this as about $\tfrac{9}{2} d_h l$, the same as GQA with only 2.25 groups.
+
+4. **Up-projection at attention time.** The straightforward way to run attention is to rebuild each head's key and value from the cached latent with $W^{UK}$ and $W^{UV}$, then run ordinary multi-head attention. That works, but rebuilding 128 keys and 128 values for every cached token at every decoding step would waste the time saved on memory.
+
+5. **Weight absorption.** Matrix multiplication is associative.
+   - Head $i$'s score against cached token $j$ is $q_i^\top (W^{UK}_i c_j) = (q_i^\top W^{UK}_i)\, c_j$.
+   - So the model multiplies the query by $W^{UK}_i$ once per new token, giving a 512-number vector $q'_i$, and scores every cached latent directly.
+   - Values work the same way: mix the latents first, then apply $W^{UV}_i$ once, then $W^O$.
+   - DeepSeek-V2 describes this as absorbing $W^{UK}$ into the query projection and $W^{UV}$ into the output projection.
+
+Step through the products to see the regrouping, and why RoPE gets in its way.
+
+<AnimatedDiagram
+  spec="animated/llm/mla-absorption"
+  stepper
+  caption="Associativity lets MLA fold W_UK into the query once per token and score each cached latent directly; a RoPE rotation in the middle would change for every cached token, so position moves to a separate 64-number key."
+/>
+
+6. **Decoupled RoPE.** Rotary embeddings rotate queries and keys by an angle that depends on position (see [positional encodings](/ai-system-design/genai-system-design/positional-encodings)).
+   - If MLA rotated the rebuilt keys, the score would become $q_i^\top R(j - t)\, W^{UK}_i c_j$, with a rotation that depends on the distance between the query at position $t$ and each cached token $j$.
+   - No single $q'_i$ could absorb that, so every key would have to be rebuilt.
+   - DeepSeek-V2 instead adds a small rotary part: per-head queries $q^R_{t,i}$ and one key $k^R_t = \text{RoPE}(W^{KR} h_t)$ of $d^R_h = 64$ dims, shared by all heads and cached.
+   - Each head's query and key are concatenations, $[q^C_i; q^R_i]$ and $[k^C_i; k^R]$, and the score is scaled by $1/\sqrt{d_h + d^R_h} = 1/\sqrt{192}$.
+
+7. **Query compression.** Queries also go through a latent, $c^Q_t$ with $d'_c = 1536$, before being expanded to 128 heads. This does not shrink the KV cache; DeepSeek uses it to cut activation memory during training.
+
+8. **MLA decodes like MQA.** After absorption, all 128 query heads read the same 576-number entry per cached token: 512 from the latent and 64 from the RoPE key. That is the shape of multi-query attention with one wide key/value head, which is why decode kernels such as FlashMLA are written as MQA with head dims 576 (keys) and 512 (values). Each byte read from memory serves 128 heads.
+
+## Architecture
+
+Follow one token through an MLA layer. Step through to see what is made, what is cached, and what is rebuilt.
+
+<AnimatedDiagram
+  spec="animated/llm/mla-data-path"
+  stepper
+  caption="MLA caches only the 512-number latent c_KV and the 64-number RoPE key k_R per token per layer; per-head keys and values are rebuilt from the latent, or absorbed, when attention runs."
+/>
+
+For each token in each MLA layer:
+
+1. The down-projection $W^{DKV}$ turns the 5,120-number hidden state into the 512-number latent $c^{KV}_t$, which is normalized and cached.
+2. A separate projection $W^{KR}$ makes a 64-number key, RoPE rotates it, and it is cached as $k^R_t$, shared by all heads.
+3. When attention runs, $W^{UK}$ and $W^{UV}$ expand the latent to 128 heads of keys and values; every head's key gets the same $k^R$ appended. In decoding these up-projections are absorbed instead.
+4. Queries come from their own latent (1,536 numbers, not cached), with a 128-dim content part and a 64-dim RoPE part per head.
+5. Each head runs softmax attention over 192-dim keys and 128-dim values, and $W^O$ maps the 128 head outputs back to 5,120 numbers.
+
+## Technical mechanics
+
+### Memory footprint math: MHA vs. GQA vs. MLA
+
+DeepSeek-V2's Table 1 gives the cache per token in numbers (elements), whatever the storage precision:
+
+| Design | Cache per token | At 128 heads × 128 dims, per layer |
+| --- | --- | --- |
+| MHA | $2 n_h d_h l$ | 32,768 |
+| GQA, $n_g$ groups | $2 n_g d_h l$ | 2,048 (8 groups) |
+| MQA | $2 d_h l$ | 256 |
+| MLA | $(d_c + d^R_h)\, l$ | 576 |
+
+<AnimatedDiagram
+  spec="animated/llm/mla-cache-per-token"
+  caption="At DeepSeek-V2's 128 heads × 128 dims, MLA caches 576 numbers per token per layer: 57× less than MHA, about 3.6× less than 8-head GQA, and the same as GQA with 2.25 groups."
+/>
+
+- Across DeepSeek-V2's 60 layers in 16-bit, MLA needs 576 × 60 × 2 = 69,120 bytes (about 69 KB) per token, so a full 128K-token (131,072) sequence needs about 9.1 GB.
+- MHA at the same shape would need about 3.93 MB per token and about 515 GB for that sequence.
+- DeepSeek-V3 keeps the same dimensions over 61 layers: about 70 KB per token.
+
+- The headline "93.3% smaller KV cache" compares DeepSeek-V2 as deployed with DeepSeek 67B, a dense GQA model (95 layers, 8 KV heads of 128 dims).
+- DeepSeek-V2 was served with each cache element quantized to about 6 bits on average.
+- Our arithmetic reproduces the figure: 67B caches 194,560 elements per token, about 389 KB if stored in 16-bit; V2 caches 34,560 elements, about 25.9 KB at 6 bits; 1 − 25.9 / 389 ≈ 93.3%.
+- Counting elements alone, the architecture change gives about 82%; quantization does the rest.
+
+- On quality, DeepSeek-V2's Appendix D.2 trained MoE models that differ only in attention, at two scales.
+- MLA scored higher than MHA on 7 of the 8 reported benchmark numbers (MMLU 57.5 → 59.0 at about 250B total parameters) while caching 14% as much at the small scale (15.6K vs 110.6K elements per token) and 4% at the large scale (34.6K vs 860.2K).
+- These are DeepSeek's own experiments, and the MLA models also had slightly fewer active parameters (21.5B vs 25.0B at the large scale).
+
+### Cache sharing and prefill-decode trade-offs
+
+- Two things are shared. Within a token, one latent and one RoPE key serve all 128 heads.
+- Across requests, a smaller cache is cheaper to keep and reuse: in August 2024 DeepSeek's API began caching repeated prompt prefixes on disk and credited MLA's small cache for making that practical (see [prompt caching](/ai-system-design/genai-system-design/prompt-caching)).
+
+- Prefill and decode want different arithmetic.
+- In prefill, many queries meet many keys, so the work is compute-bound and rebuilding full 192-dim keys and 128-dim values is cheaper than 576-dim absorbed dot products.
+- In decode, one query per sequence meets a long cache, the work is memory-bound, and the absorbed MQA-like form wins because it reads only the latents. vLLM's MLA implementation runs exactly this split: the up-projected, MHA-like path for prefill and the absorbed, MQA-like path for decode.
+
+<Callout tone="red" title="What breaks">
+  Tensor parallelism over heads. Splitting heads across GPUs does not split the latent, since every head reads all of it. DeepSeek-V3's decode deployment keeps tensor parallelism for attention small (4-way) and combines it with 80-way data parallelism.
+</Callout>
+
+### Training stability and kernel fusion
+
+- The latent is a narrow bottleneck, and DeepSeek-V2 notes that low-rank compression changes the output scale of a layer.
+- Both V2 and V3 add RMSNorm after the compressed latents and extra scaling factors at those bottlenecks.
+- To save memory, V3 recomputes the MLA up-projections during the backward pass instead of storing their outputs.
+- Context extension also changes: DeepSeek applies YaRN only to the decoupled RoPE key, since it alone carries position.
+
+<Callout tone="red" title="What breaks">
+  Some stabilizers do not transfer. Kimi K2's report notes that QK-Norm cannot be used with MLA, because keys are never fully materialized at inference, so it clips query and key weights per head instead and leaves the shared RoPE key untouched.
+</Callout>
+
+- Kernels matter because the naive path wastes most of MLA's benefit.
+- DeepSeek-V2 trained MLA with an improved FlashAttention-2.
+- In February 2025 DeepSeek released FlashMLA, a decode kernel for Hopper GPUs with BF16 and a paged KV cache in blocks of 64; it reported up to 3,000 GB/s in memory-bound settings and 580 TFLOPS in compute-bound settings on the H800 SXM5.
+- Serving engines such as vLLM ship MLA paths of their own (see [LLM inference engines](/ai-system-design/genai-system-design/llm-inference-engine)).
+
+## Trade-offs
+
+<Compare caption="MHA, GQA, MQA and MLA: cache size against quality and serving cost.">
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| MHA | Best quality of MHA, GQA and MQA in DeepSeek's ablation; standard kernels | Largest cache, $2 n_h d_h$ per layer | Small models, short contexts, training research |
+| GQA | Large cache savings; universal kernel support | Some quality loss in DeepSeek's ablation; cache still grows with KV heads | The default for most open models |
+| MQA | Smallest cache among head-sharing designs | Biggest quality drop | Latency-critical small models |
+| MLA | Cache equal to GQA with 2.25 groups; matched or beat MHA in DeepSeek's tests | More attention arithmetic per cached token; custom kernels; RoPE and QK-Norm need special handling | Large models served at long context and high batch |
+| Converting GQA or MHA to MLA | Reuses a trained checkpoint | Needs fine-tuning and MLA-aware serving; some quality loss | When retraining from scratch is too costly |
+
+</Compare>
+
+- The cost of MLA is arithmetic. In the absorbed form, each head's score is a 576-number dot product instead of 192, and value mixing runs over 512 numbers instead of 128: roughly 3–4× the attention multiply-adds per cached token (our arithmetic from the paper's dimensions), in exchange for reading about 57× less cache than MHA.
+- Kimi K2 cut its heads from 128 to 64 for this reason, reporting that at 128K tokens the extra heads would add 83% to inference FLOPs.
+
+## Production systems
+
+- **DeepSeek-V2** (May 2024): 236B total and 21B active parameters, 128K context, MLA with 128 heads, $d_c = 512$, $d^R_h = 64$. Served with FP8 weights and a 6-bit KV cache, it exceeded 50K generated tokens per second on one 8-GPU H800 node, 5.76× DeepSeek 67B.
+- **DeepSeek-V2-Lite**: 15.7B total and 2.4B active, 16 heads with the same 512-dim latent and 64-dim RoPE key, and no query compression.
+- **DeepSeek-V3**: 671B total and 37B active, the same MLA dimensions over 61 layers; DeepSeek-R1 is trained from DeepSeek-V3-Base, so it inherits MLA (see [mixture of experts](/ai-system-design/genai-system-design/mixture-of-experts) for the MoE side).
+- **Kimi K2** (Moonshot AI): 1.04T total and 32.6B active parameters, MLA following DeepSeek-V3 but with 64 heads instead of 128.
+- **Conversions**: MHA2MLA fine-tunes trained MHA models into MLA with 0.3% to 0.6% of the original training data; with 4-bit cache quantization on top, it reports a 92.19% smaller KV cache for Llama-2-7B. TransMLA converts GQA models so they can use DeepSeek's serving stack.
+
+## Failure modes & pitfalls
+
+- Saying MLA is "GQA with fewer heads". GQA shares heads; MLA keeps 128 distinct heads and compresses what is stored.
+- Forgetting the RoPE key. The cache is $d_c + d^R_h$ per layer, not $d_c$.
+- Quoting 93.3% as MLA alone. It includes 6-bit KV quantization; elements alone fall by about 82% against DeepSeek 67B.
+- Implementing MLA by rebuilding full keys and values at every decode step. Without absorption or an MLA kernel, the memory saved turns into compute wasted.
+- Assuming every trick for standard attention carries over: QK-Norm, RoPE scaling and tensor parallelism over heads all need rethinking.
+- Treating MLA as free. It adds attention arithmetic and depends on kernel support in your serving engine.
+
+## Interview framework
+
+1. Start from the KV-cache formula and show why MHA's $2 n_h d_h$ per layer limits batch size and context.
+2. Explain the compression: one 512-number latent per token, up-projected to per-head keys and values.
+3. Show the absorption with associativity: $(q^\top W^{UK}) c$, so decode reads only latents and behaves like MQA.
+4. Explain decoupled RoPE: a position-dependent rotation would sit between the query and $W^{UK}$, so a 64-dim shared key carries position.
+5. Close with numbers and costs: 576 vs 32,768 per layer, the quality ablation, extra arithmetic and kernel needs.
+
+**What interviewers listen for:** exactly what is cached, why absorption is legal, why RoPE breaks it, and an honest account of the costs.
+
+**Red flags:** describing MLA as a quantization method, claiming it removes the KV cache, or not knowing why the RoPE part is separate.
+
+## Further reading
+
+- [DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model (DeepSeek-AI, 2024)](https://arxiv.org/abs/2405.04434)
+- [DeepSeek-V3 Technical Report (DeepSeek-AI, 2024)](https://arxiv.org/abs/2412.19437)
+- [FlashMLA: efficient MLA decoding kernels (DeepSeek, 2025)](https://github.com/deepseek-ai/FlashMLA)
+- [vLLM MLA attention implementation, prefill and decode paths](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/attention/mla_attention.py)
+- [Kimi K2: Open Agentic Intelligence (Moonshot AI, 2025)](https://arxiv.org/abs/2507.20534)
+- [Enabling DeepSeek's Multi-Head Latent Attention in Any Transformer-based LLMs (Ji et al., 2025)](https://arxiv.org/abs/2502.14837)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What problem does multi-head latent attention solve?" category="Concepts" level="Junior">
+    - It shrinks the KV cache, the stored keys and values of past tokens that every decoding step reads.
+    - With full multi-head attention the cache grows with the number of heads, layers, tokens and requests, and it often limits batch size and context length.
+    - MLA stores one small compressed vector per token per layer instead of a key and a value for every head.
+    - In DeepSeek-V2 that cuts the per-layer cache from 32,768 numbers to 576 at the same head shape.
+  </InterviewQuestion>
+  <InterviewQuestion question="What exactly does MLA cache for each token, and how big is it in DeepSeek-V2?" category="Concepts" level="Mid">
+    - Per layer, it caches the latent vector c_KV, 512 numbers, and the decoupled RoPE key, 64 numbers, for 576 in total.
+    - Keys and values for the 128 heads are not stored; they are rebuilt from the latent or absorbed into other projections.
+    - Across 60 layers in 16-bit that is about 69 KB per token, so a 128K-token sequence needs about 9 GB.
+    - Full MHA at 128 heads of 128 dims would need about 3.93 MB per token.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is weight absorption in MLA and why is it allowed?" category="Architecture" level="Mid">
+    - A head's score is the query times W_UK times the cached latent.
+    - Matrix multiplication is associative, so you can multiply the query by W_UK first, once per new token, and then take a 512-number dot product with each cached latent.
+    - The value side works the same way: mix the latents with the attention weights, then apply W_UV and W_O once.
+    - The result is identical, but keys and values are never built per cached token, so decode only reads latents.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does MLA need a decoupled RoPE key?" category="Architecture" level="Senior">
+    - RoPE rotates queries and keys by position. If the rebuilt keys were rotated, the score would contain a rotation that depends on the distance between the current token and each cached token, sitting between the query and W_UK.
+    - That matrix changes for every cached token, so W_UK can no longer be folded into the query, and every key would have to be rebuilt at every step.
+    - DeepSeek-V2 adds a separate 64-dim rotary part: per-head rotary queries and one shared rotary key that is cached.
+    - Position lives only in that small term, and the 512-dim content part stays absorbable.
+  </InterviewQuestion>
+  <InterviewQuestion question="DeepSeek reports a 93.3% smaller KV cache than DeepSeek 67B. Is that all from MLA?" category="Scaling" level="Senior">
+    - No. DeepSeek 67B is a 95-layer GQA model with 8 KV heads, about 194,560 cached elements per token, while DeepSeek-V2 caches 576 elements in each of 60 layers, 34,560 in total.
+    - That alone is about an 82% cut. DeepSeek-V2 was also deployed with the KV cache quantized to about 6 bits per element, against 16-bit for the comparison, and together those give roughly 93.3%.
+    - In an interview, separate architecture savings from precision savings.
+  </InterviewQuestion>
+  <InterviewQuestion question="You are designing a new 200B-parameter model for long-context serving. Would you pick GQA or MLA?" category="Trade-offs" level="Senior">
+    - MLA is attractive if memory traffic and batch size limit serving, which is usual at long context: its cache is close to GQA with about 2 groups, and DeepSeek's ablations found quality at or above MHA.
+    - The costs are roughly 3 to 4 times more attention arithmetic per cached token in decode, careful handling of RoPE and normalization, and a dependence on MLA kernels in your serving engine.
+    - GQA is simpler and runs everywhere. I would choose MLA when I control the serving stack and long contexts dominate, and GQA when portability across engines and hardware matters more.
+  </InterviewQuestion>
+  <InterviewQuestion question="A team converts a model to MLA but sees slower decoding than before. What might be wrong?" category="Failure modes" level="Mid">
+    - The likely cause is the naive path: rebuilding every cached token's keys and values with the up-projections at every step, which turns the memory saved into compute.
+    - Decode should use the absorbed form, where queries are multiplied by W_UK once and attention runs over the 576-wide cached entries like MQA.
+    - Check that the serving engine has an MLA decode kernel for the hardware, such as FlashMLA on Hopper, and that prefill and decode use the paths suited to each.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do engines run MLA differently in prefill and decode?" category="Scaling" level="Senior">
+    - Prefill processes many query tokens against many keys, so it is compute-bound, and rebuilding full 192-dim keys and 128-dim values is cheaper than running 576-dim absorbed dot products for every pair.
+    - Decode handles one query per sequence against a long cache, so it is memory-bound, and the absorbed form wins because it reads only the latents and lets all heads share each entry. vLLM implements both: an MHA-like path for prefill and an MQA-like path for decode.
+  </InterviewQuestion>
+</InterviewQuestions>

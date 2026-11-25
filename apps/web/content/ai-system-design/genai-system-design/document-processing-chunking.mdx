@@ -1,0 +1,237 @@
+---
+title: Document Processing & Chunking Strategies
+description: Parsing, splitting, and enriching documents so embeddings and retrieval pipelines preserve meaning and stay efficient.
+---
+
+Before a RAG system can retrieve anything, every document must be parsed and cut into chunks with clean text and metadata. Parsing and chunking decide more about answer quality than the choice of model.
+
+## Overview
+
+- **Parsing** turns HTML, PDFs and slides into clean text with structure (title, headings, lists, tables) and metadata (URL, section, date, access scope). Bad parsing poisons everything after it.
+- **Chunking** cuts that text into units an embedding can represent and a retriever can rank. The cut points decide whether a key sentence survives whole.
+- Four common strategies: **fixed size** with overlap, **by structure** (headings, paragraphs), **semantic** (cut where meaning shifts) and **parent and child** (search small, return big).
+- Chunk size trades **precision against context**. Start around 300 to 800 tokens and measure recall on your own questions.
+- **Contextual chunks** (a line of document context before each chunk) cut retrieval misses by about a third in Anthropic's tests.
+
+## Mental model
+
+- **Index cards from a recipe book:** Imagine cutting a recipe book into index cards so a friend can find the right card fast.
+- **Why naive cuts fail:** Cutting every 20 lines starts some cards halfway through a step, cutting one card per recipe makes cards too long to skim, and cutting one card per step loses the ingredient list.
+- **Structure-aware cards:** Good cards follow the book's own structure, keep each step whole, and carry a header naming the recipe they belong to.
+- **Parsing vs. chunking:** Parsing is reading the book cleanly; chunking is deciding where the scissors go.
+
+## Core concepts
+
+The running example is Brightpost's help centre of **1,200 articles** (about 1,100 tokens each) and the question "How do I reset my password if I lost my phone?".
+
+### Parsing: from page to elements
+
+- **HTML:** Benefits from DOM-aware extraction that strips boilerplate and keeps headings as metadata.
+- **Markdown:** Carries explicit hierarchy you can use directly for section-aware splits.
+- **PDFs:** Pose the hardest challenge—multi-column layouts, running headers, and footers need layout-aware parsers or OCR when text is stored as images, and you should preserve page numbers and bounding boxes when citations must point to a page.
+
+Here is one help article going through a parser.
+
+<AnimatedDiagram
+  spec="animated/rag/parse-layout"
+  stepper
+  caption="Parsing decides what the chunker can see; drop the boilerplate and keep lists and tables whole."
+/>
+
+**How to read it:**
+
+- **Step 1 (Raw page):** Shows the page as a browser draws it.
+- **Step 2 (Boilerplate removal):** Drops the menu and footer, which appear on all 1,200 articles and would otherwise be embedded 1,200 times.
+- **Step 3 (Typed elements + metadata):** Turns what remains into typed elements and attaches metadata—the URL and date for citations and freshness, and the section for structure-aware chunking.
+
+<Callout tone="red" title="What breaks">
+  A parser that flattens a table into one line of words ("Option Time Backup code 2 minutes ID check 2 days") produces chunks no question can match. Keep tables as rows with their header, or convert each row to a sentence.
+</Callout>
+
+### Chunking strategies
+
+- **Fixed windows:** Predictable and cheap, but cut lists and sentences anywhere.
+- **Recursive splitting:** Prefers natural boundaries (sections, then paragraphs, then sentences) at the cost of variable sizes.
+- **Semantic chunking:** Measures how similar neighbouring sentences are and cuts where similarity drops, requiring an extra embedding pass.
+- **Parent-and-child chunking:** Searches small child units for precision but hands the model the larger parent unit around them.
+
+The same article, cut four ways:
+
+<AnimatedDiagram
+  spec="animated/rag/chunking-strategies"
+  stepper
+  caption="The cut points decide whether the key sentence survives; structure-aware cuts follow the author's own sections."
+/>
+
+**How to read it:**
+
+- **Step 1 (Fixed size):** Cuts every 400 tokens and splits the key sentence right at token 400.
+- **Step 2 (By structure):** Cuts at the article's headings so the key sentence sits whole inside "Lost your phone".
+- **Step 3 (Semantic):** Cuts where the meaning shifts, achieving a similar boundary by measuring sentence similarity rather than reading headings.
+- **Step 4 (Parent and child):** Keeps the section as a parent and searches four 110-token children so a precise match still returns the whole procedure.
+
+**The numbers:**
+
+- **Parent section:** The "Lost your phone" section spans `620 − 180 = 440 tokens`.
+- **Child splits:** Divided into 4 children of 110 tokens each—search runs over the children while the prompt receives the 440-token parent.
+
+### Overlap
+
+When fixed-size cuts are unavoidable, overlap neighbouring chunks so a sentence that crosses a cut appears whole in one of them.
+
+<AnimatedDiagram
+  spec="animated/rag/chunk-overlap"
+  stepper
+  caption="Watch the sentence at token 385; the overlap is what keeps it whole."
+/>
+
+**How to read it:**
+
+- **Without overlap:** The cut at token 400 splits the key sentence in half.
+- **With 50-token overlap:** A new 400-token chunk starts every 350 tokens, so chunk 2 (tokens 350 to 750) holds the sentence whole (full walk-through on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)).
+
+**The numbers:**
+
+- **Chunk count:** `(1,100 − 50) ÷ 350 = 3 chunks` per article, or `1,200 × 3 =` **3,600 chunks** in total.
+- **Overhead vs. duplication:** Adds about 9% more text to embed than without overlap; too much overlap inflates storage and returns near-duplicate chunks in the same top 5.
+
+### Chunk size
+
+Size trades precision against context.
+
+<AnimatedDiagram
+  spec="animated/rag/chunk-size-tradeoff"
+  caption="Small chunks are precise but thin, whole articles are complete but blurred; pick the size that holds one answer."
+/>
+
+**How to read it:**
+
+- **Small chunks (100 tokens):** Match exact phrases but often miss the step before or after.
+- **Whole articles (1,100 tokens):** Hold everything, but the 30-token instruction is diluted inside a 1,100-token vector representing account help in general.
+- **Middle ground (400 tokens):** Balances specificity and complete procedures for this corpus.
+
+**The numbers:**
+
+- **100-token chunks:** 11 per article, 13,200 in all, 500 tokens in a top-5 prompt.
+- **400-token chunks:** 3 per article, 3,600 in all, 2,000 tokens in a top-5 prompt.
+- **Whole articles:** 1 per article, 1,200 in all, 5,500 tokens in a top-5 prompt.
+
+### Metadata
+
+- **Core fields:** Store at least a document id, a stable chunk id, the section path, the content type, the language, the source URL, and the crawl or update time.
+- **Domain and security fields:** Add page numbers for PDFs, the tenant or product id when several customers share an index, and the access scope so retrieval can filter by permission.
+- **Payoff:** Metadata costs little to store and enables filtering, citations, and freshness tracking downstream.
+
+## Architecture
+
+- Ingestion is a pipeline that runs before any question arrives: fetch, parse, clean, chunk, enrich, embed, index.
+- This page covers parse to enrich; the [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) hero shows the whole path.
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  path="sources>parse>chunk>embed>index"
+  caption="Parsing and chunking are the first two stages of ingestion; everything after them inherits their mistakes."
+/>
+
+**How to read it:**
+
+- **Highlighted path:** Traces the offline lane from the help centre through parse, chunk and embed into the vector index; the online lane below only reads what this lane wrote.
+- **Parse and chunk:** Turn HTML into clean text and cut it into 400-token chunks, so a dropped table or a split sentence here reaches the index unchanged.
+
+**The numbers:** `1,200 articles × 3 chunks = 3,600 chunks`, each embedded as 1,536 numbers and stored as one of the index's 3,600 vectors.
+
+- Give every chunk a stable id derived from the document id and its position or content hash, so re-ingesting an unchanged article updates nothing and a changed one replaces only its own chunks (see [Index Freshness](/ai-system-design/genai-system-design/index-freshness-and-updates)).
+
+## Technical mechanics
+
+### Contextual chunks
+
+- A chunk that says "use one of your backup codes" does not say which product or which account.
+- One fix is to ask an LLM, once per chunk at ingestion, for a short sentence that places the chunk in its document, and to prepend it before embedding and keyword indexing.
+
+<AnimatedDiagram
+  spec="animated/rag/contextual-chunk"
+  stepper
+  caption="A sentence of document context makes a chunk findable on its own; Anthropic measured a third fewer misses from it."
+/>
+
+**How to read it:**
+
+- **Step 1 (Raw chunk):** Shows the isolated chunk alone without document context.
+- **Step 2 (Contextualized chunk):** Prepends an LLM-written context of 50 to 100 tokens to the chunk; the joined text is what gets embedded and indexed.
+- **Step 3 (Miss-rate reduction):** Shows Anthropic's measured failure rate for finding the right chunk in the top 20 as each retrieval enhancement is added.
+
+**The numbers:**
+
+- **Failure-rate drops (Anthropic, 2024):** Top-20 retrieval miss rate falls from `5.7% → 3.7%` with contextual embeddings (35% fewer misses), to `2.9%` adding contextual BM25 (49% fewer), and to `1.9%` adding reranking (67% fewer).
+- **One-off ingestion cost:** Estimated at about \$1.02 per million document tokens with prompt caching, so Brightpost's 1.32 million tokens would cost roughly \$1.35 once (treat as rough since chunk and document sizes differ).
+
+<Callout tone="red" title="What breaks">
+  The context is generated text, so it can be wrong. A context that names the wrong product sends the chunk to the wrong questions. Generate it from the document itself, keep it short, and spot-check a sample.
+</Callout>
+
+### Deduplication and boilerplate
+
+- **Repeated closing blocks:** Help centres repeat themselves—the same "contact support" paragraph often closes hundreds of articles and can fill the top 5 with identical chunks.
+- **Ingestion dedup:** Hash normalised chunk text at ingestion and keep one copy, or strip repeated blocks before chunking.
+
+## Trade-offs
+
+| Decision | Option A | Option B | Guidance |
+| --- | --- | --- | --- |
+| Fixed vs structure-aware chunks | Predictable size, simple | Respects sections and lists | Structure first, fixed size as the fallback |
+| Small vs large chunks | Precise matches | More context per hit | Start at 300 to 800 tokens; measure recall@k |
+| Overlap vs none | Sentences survive cuts | Less storage, fewer duplicates | A common start is 10% to 15% overlap with fixed-size cuts |
+| Semantic vs recursive splitting | Coherent units | No extra model pass | Semantic only if evaluation shows a gain |
+| Contextual chunks vs plain | About a third fewer misses (Anthropic) | No LLM cost at ingestion | Worth it for large corpora of similar documents |
+
+## Production systems
+
+- Documentation search tools split pages by heading and store the heading path with each chunk, so results show "Account › Two-factor › Lost phone".
+- Managed RAG services make chunking a setting: Bedrock Knowledge Bases offer fixed-size, hierarchical and semantic chunking; Vertex AI RAG Engine and the Azure AI Search split skill expose chunk size and overlap.
+- Anthropic's contextual retrieval write-up (2024) reports the failure-rate drops shown above on its own test sets.
+- **Used in our case studies:** [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline)
+
+## Failure modes & pitfalls
+
+- Embedding menus, footers and cookie banners with every page.
+- Cutting tables and numbered steps in half.
+- Choosing a chunk size from a blog post instead of measuring recall on your own questions.
+- Unstable chunk ids, so every re-ingest rewrites the whole index.
+- Dropping metadata, so retrieval cannot filter by permission, product or date.
+
+## Interview framework
+
+1. Ask about formats (HTML, PDF, scans), structure, update rate and permissions.
+2. Describe parsing: boilerplate removal, structure kept, tables and lists whole, metadata attached.
+3. Pick a chunking strategy with a reason: structure-aware first, fixed size with overlap as the fallback, parent and child when answers need surrounding context.
+4. Give a starting size and say how you would tune it: recall@k on a labelled question set.
+5. Mention stable chunk ids, deduplication and contextual chunks as improvements.
+
+**What interviewers listen for:** that you treat chunking as a retrieval-quality lever with a way to measure it.
+
+**Red flags:** "split every 512 characters" with no reason, no metadata, and no evaluation.
+
+## Further reading
+
+- [Introducing Contextual Retrieval (Anthropic, 2024)](https://www.anthropic.com/news/contextual-retrieval)
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
+- [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) and [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why might recursive splitting outperform fixed-size chunking for technical documentation?" category="RAG">
+    - Technical docs contain lists, code fences, and cross-references that fixed windows cut arbitrarily.
+    - Recursive splitting walks a hierarchy of separators so chunks tend to end at paragraph or sentence boundaries, keeping syntactic units intact.
+    - That improves both human readability in citations and embedding quality because the model sees complete instructions rather than half a code block.
+  </InterviewQuestion>
+  <InterviewQuestion question="What metadata would you attach to each chunk before indexing?" category="Implementation">
+    - At minimum store document id, stable chunk id, section title or path, content type, language, creation or crawl time, and source URI.
+    - For PDFs add page number; for APIs add tenant or product id if multi-tenant.
+    - Optional enrichments include token count, quality flags from parsing, ACL scope for authorization at query time, and parent chunk ids for hierarchical retrieval.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose chunk size and overlap for a new domain?" category="Trade-offs">
+    - Start from embedding model context limits and reranker budgets, then run offline experiments with labeled question-chunk relevance pairs or LLM judges on a held-out query set.
+    - Measure nDCG or recall at k across chunk sizes and overlaps, and inspect failure modes such as merged topics or over-split procedures.
+    - Balance index size and cost: larger overlap improves recall at boundaries but multiplies vectors and can add noisy duplicates unless you deduplicate or down-weight them.
+  </InterviewQuestion>
+</InterviewQuestions>

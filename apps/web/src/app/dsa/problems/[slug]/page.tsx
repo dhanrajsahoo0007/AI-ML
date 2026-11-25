@@ -57,7 +57,7 @@ export default async function ProblemPage({ params }: { params: ProblemParams })
   const related = relatedLinks(section, problem);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <JsonLd data={seo.jsonLd} />
       <Breadcrumb
         items={[...hubCrumbs(section), { label: "Problems", href: problemListHref(section) }, { label: fm.title }]}
@@ -135,7 +135,7 @@ async function OutlinePage({
   // (features/dsa/local-view.ts) until Pro delivery exists; every other build shows the Pro placeholder.
   const notes = outline.hasBreak && (await showsPremiumEditorialLocally()) ? await outlineNotes(outline.file) : null;
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <Breadcrumb
         items={[
           ...hubCrumbs(section),

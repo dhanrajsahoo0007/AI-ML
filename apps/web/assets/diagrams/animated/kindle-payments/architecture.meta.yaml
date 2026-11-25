@@ -1,0 +1,19 @@
+title: Digital book payments high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, payments core, application services, async
+  pipeline and storage. Step 1: the reader app buys through the API gateway; the payment service charges the external
+  payment provider and then writes the order, both drawn red because a crash between them loses a payment and a
+  retry charges twice. Step 2: the payment service first writes a payment intent and its idempotency key in one
+  transaction to the payments database, then authorises with the provider using the same key. Step 3: a payment
+  worker retries with the same key. Step 4: a webhook receiver takes the provider's events and hands them to the
+  worker, which also resolves unknown outcomes. Step 5: outbox rows flow by change data capture into an event log, and
+  the entitlements service grants the book from it. Step 6: the ledger service posts double-entry entries from the log
+  into an append-only ledger database. Step 7: refunds take the same path, and a receipts service sends receipts and
+  projects a history view. Step 8: a reconciler matches the ledger entries against the provider's daily settlement
+  file.
+caption: >-
+  Digital book payments: write the intent and its key first, let a worker and webhooks settle the outcome, grant the
+  book through an outbox, and prove the money with a ledger and a daily match.
+tags: [case-studies, kindle-payments, architecture, payments, idempotency]
+source: original
+created: 2026-11-17

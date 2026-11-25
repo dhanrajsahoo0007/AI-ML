@@ -56,3 +56,59 @@ export const layout: LayoutSpec = {
   ],
   steps: [{ title: "Empty table" }, { title: "Insert a key" }],
 };
+
+/** A layout spec that uses every paper-figure option: pastel fills, the layout-only tones, multi-line labels,
+ *  circle symbols, weighted cells, a headless arrow and smooth and straight paths. */
+export const paperLayout: LayoutSpec = {
+  kind: "layout",
+  title: "Encoder block",
+  width: 400,
+  height: 300,
+  groups: [{ id: "block", title: "Block × 6", tone: "neutral", x: 20, y: 30, w: 220, h: 200 }],
+  shapes: [
+    { id: "norm", type: "box", x: 40, y: 50, w: 170, h: 30, label: "Add & Norm", tone: "lime", fill: "pastel" },
+    {
+      id: "mha",
+      type: "box",
+      x: 40,
+      y: 120,
+      w: 170,
+      h: 44,
+      label: "Multi-Head\nAttention",
+      tone: "orange",
+      fill: "pastel",
+      step: 2,
+    },
+    { id: "pe", type: "circle", x: 300, y: 60, w: 30, symbol: "sine", label: "Positional encoding" },
+    { id: "add", type: "circle", x: 300, y: 140, w: 24, symbol: "plus", tone: "pink", fill: "pastel" },
+    { id: "w1", type: "cell", x: 260, y: 200, w: 30, h: 30, label: ".7", tone: "green", weight: 0.7 },
+    { id: "w2", type: "cell", x: 290, y: 200, w: 30, h: 30, label: ".1", tone: "green", weight: 0.1 },
+    { id: "skip", type: "arrow", x: 0, y: 0, from: "mha", to: "norm", head: false, tone: "lime", step: 2 },
+    {
+      id: "arc",
+      type: "path",
+      x: 0,
+      y: 0,
+      points: [
+        [260, 250],
+        [290, 270],
+        [320, 250],
+      ],
+      smooth: true,
+      weight: 0.6,
+    },
+    {
+      id: "brace",
+      type: "path",
+      x: 0,
+      y: 0,
+      points: [
+        [250, 30],
+        [250, 230],
+      ],
+      head: true,
+      tone: "pink",
+    },
+  ],
+  steps: [{ title: "Norm" }, { title: "Attention" }],
+};

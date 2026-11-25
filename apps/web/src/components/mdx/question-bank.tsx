@@ -74,6 +74,7 @@ export function questionItems(
     .map((q) => (
       <InterviewQuestion
         key={q.id}
+        id={q.id}
         question={q.q}
         category={tagOf?.(q)}
         area={areas.get(q.category)}
@@ -110,8 +111,16 @@ export function QuestionList({
 }) {
   if (questions.length === 0) return null;
   const credited = questions.some((q) => q.source === "outcome-school");
+  // Behavioural answers are spoken stories, so those lists offer practice mode (timer, self-rating, follow-ups).
+  const tracks = new Map(getCategories().map((c) => [c.slug, c.track]));
+  const practice = questions.every((q) => tracks.get(q.category) === "leadership");
   return (
-    <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined} icons={questionIcons()}>
+    <InterviewQuestions
+      title={title}
+      footer={credited ? <SourceCredit /> : undefined}
+      icons={questionIcons()}
+      practice={practice}
+    >
       {questionItems(questions, tagOf, locked)}
     </InterviewQuestions>
   );

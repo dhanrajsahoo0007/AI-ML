@@ -1,0 +1,18 @@
+title: Search typeahead high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, suggest serving, application services, async
+  pipeline and storage. Step 1: each keystroke goes through a load balancer to the search service, which runs a LIKE
+  query on a table of past searches, drawn red. Step 2: a trie index in memory, the solid green node, is loaded from
+  the table at start-up; walking the whole subtree of a short prefix is drawn red. Step 3: the trie stores the top
+  five at every node, so the lookup reads one list. Step 4: every search goes to a search log; a daily aggregation job
+  counts 30 days of it and a trie builder writes a snapshot file that the index loads and swaps in. Step 5: a suggest
+  service in front of the index replicas answers every request. Step 6: the browser goes through a CDN that caches
+  shared answers. Step 7: the search log also feeds a trending counter that writes a trending layer, which the suggest
+  service merges in. Step 8: a policy service pushes a blocklist to the suggest service, and the search service keeps
+  each user's recent searches.
+caption: >-
+  Search typeahead: an in-memory trie with the top five at every node, rebuilt daily from the search log, with a
+  trending layer, a blocklist and caches in front.
+tags: [case-studies, typeahead, architecture, trie]
+source: original
+created: 2026-11-17

@@ -1,0 +1,921 @@
+---
+title: "Design an LLM Platform and Gateway"
+description: "Brightpost's internal gateway for every team's model calls: budgets that cannot overspend, safe fallback, cache-aware routing, redaction and cells."
+icon: server
+logo: systems/llm-gateway
+updated: 2026-11-23
+---
+
+Every Brightpost team that calls a model (support, voice, the employee assistant, accounts payable, the catalogue writer, labs) calls it through one gateway the platform team runs.
+About 1.58 million calls a day pass through it, to four model sources.
+The hard parts are holding a team to a budget when a call's cost is known only after the answer, and failing over without breaking caches, schemas, safety, residency or the fallback's quota.
+It must also keep prompt caches warm, redact personal data without adding to a 400 ms first token (in every later turn too), and never become the outage itself.
+
+- Interviewers use this question to see whether you count in tokens and settle after the response, know what a fallback breaks and whether the fallback can carry the load, and treat the gateway as tier-zero infrastructure with a measured SLI.
+- **Running example:** the tenants are the Brightpost systems of the other case studies, with their own numbers. The concept pages' one-call support assistant (2,200 tokens in, 250 out) is a simplified version of the [support agent](/genai-system-design/case-studies/customer-support-agent); this page uses the agent's own call shapes.
+- **Labels:** model prices, limits, cache and retention terms are as of November 2026. Every share, span, duration, pod count, infrastructure price, loaded salary (400,000 USD a year an engineer), headcount and availability input not from a source is illustrative.
+- **Latency convention:** the tenants measure the model's first token at their own service, so the gateway's few milliseconds sit inside their 400 ms; provider A's own share is 394.4 ms. Support's 30 ms stage before the call is its case load.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design the internal LLM platform and gateway that every team at a company uses for model calls, across several model providers and self-hosted models: per-team quotas and budgets, failover, caching, redaction, cost attribution and audit."
+  level="Senior"
+  minutes={45}
+  bankId="design-an-llm-gateway-routing-across-providers-failover-cach"
+  tests={[
+    "Token budgets when the cost is known only after the response",
+    "Fallback: what it breaks, and whether the target can carry the load",
+    "Prompt-cache-aware routing and a deterministic transform",
+    "Redaction across turns, and its latency",
+    "The gateway not becoming the outage: cells, fail open or closed, a measured SLI",
+  ]}
+  clarify={[
+    { q: "Who calls it?", a: "Six workloads from five teams: two customer-facing and latency-critical (support agent, voice agent), one internal (employee assistant), two batch (accounts payable, catalogue), one experimental (labs). Teams ask for an alias such as “support-agent”, never a vendor model id." },
+    { q: "Which models?", a: "A: Anthropic’s API (Sonnet 5.5 class “mid”, Haiku 5.5 class “small”). B: the same models on Amazon Bedrock through the EU cross-Region profile. C: a second model family (an OpenAI-class model before GPT-5.6), for the employee assistant only. S: a 2-GPU self-hosted pool for labs." },
+    { q: "Latency?", a: "Voice budgets 400 ms to the model’s first token at its own service; the gateway’s share must be a few milliseconds; redaction must not add to the first token, and any scan before the call must fit the tenant’s turn target." },
+    { q: "Budgets?", a: "A monthly US-dollar budget per team (organisation → team → app → key) and per-minute quotas in tokens per model class. A runaway script must stop at its budget." },
+    { q: "Data?", a: "Customer messages (names, emails, phone numbers, sometimes card numbers) in support and voice; supplier documents processed in the UK or EU only, bank details masked by accounts payable before any call." },
+    { q: "If constraints conflict?", a: "No data outside its boundary first, then T0 (support and voice) availability, then budgets, then cost, then features." },
+  ]}
+  outOfScope={["The teams’ own prompts, agents and evaluations", "Fine-tuning", "A public API product (see Same design, other systems)", "An MCP tool gateway"]}
+/>
+
+## Overview
+
+- **One API, aliases, workload identity.** Services authenticate with their workload identity (mTLS), people and labs with virtual keys; the gateway holds the provider keys, each alias's fallback chain and the team's policy.
+- **Budgets that cannot overspend.** Money is reserved as an upper bound (input as UTF-8 bytes at the alias's highest input price, plus `max_tokens` of output) and settled from the provider's usage. Overshoot is 0 by construction, against 2.0% to 3.5% of labs' day for gateways that charge after the response.
+- **Fallback only to targets that are tested and can carry the load.** T0 falls back to the same model on Bedrock EU, whose quota is sized for T0 with cold caches (≈ 9.23M mid tokens a minute) and requested; the assistant goes to a second family. Providers change only at a turn boundary, never inside a tool loop.
+- **A deterministic transform keeps caches warm.** The gateway's output is a pure function of (tenant bytes, alias config version, redactor version, conversation key, dictionary version). A non-deterministic change that made every support call write its prefix would cost ≈ 2,920 USD a day, 1.6 × support's whole model bill.
+- **Redaction that holds across turns.** An encrypted per-conversation dictionary turns every value the gateway has seen back into its placeholder on every later call (≈ 0.1 ms); a CPU name scanner reads only unseen text, pre-scanned while support loads the case, so its 13.5 ms is hidden.
+- **The gateway is not the outage.** Three cells (support, voice, the rest) in two Regions; last-known-good configuration; a breaker that trips on slow first tokens, not only errors. T0's target is 99.9%, against a composite of ≈ 19.2 bad minutes a month (99.955%).
+
+<Numbers
+  items={[
+    { value: "1.58M", label: "calls a day", hint: "97.6 a second at the sale-day peak, 96% of it support and voice" },
+    { value: "0", label: "budget overshoot, upper-bound reservation", hint: "2.0–3.5% of labs’ day if charged after the response" },
+    { value: "9.23M", label: "mid tokens a minute B needs for T0 cold", hint: "under Bedrock’s output burndown; 11.1M requested" },
+    { value: "2,920 USD", label: "a day if the prefix stops being stable", hint: "1.6 × support’s whole model bill" },
+  ]}
+/>
+
+<KeyIdea>A gateway earns its place by letting every team share one bill and one set of limits without changing what the model sees. Reserve what a call could cost and settle what it did; fall back only to targets the team has tested and that can carry the load; and make every change to the prompt the same on every replica.</KeyIdea>
+
+- **Terms:** an *alias* is a team-facing model name mapped to a chain of targets; ITPM and OTPM are a provider's input and output tokens a minute; a *cell* is an independent copy of the gateway serving a fixed set of callers; *T0* is the tier of customer-facing tenants (support and voice), T1 the employee assistant, T2 batch (accounts payable, catalogue), T3 labs.
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "One API for every team, over every model source", notes: "OpenAI-compatible and Anthropic-native endpoints; aliases; batch, embeddings and `/v1/scan`" },
+    { id: "F2", requirement: "Identity and policy per caller", notes: "Workload identity for services, virtual keys for people and labs, issued after a use-case review; allow-lists per data class; end-user id signed by the tenant" },
+    { id: "F3", requirement: "Quotas and budgets", notes: "Tokens a minute per model class, counted as providers count them; hierarchical US-dollar budgets; parallel caps; money reserved as an upper bound and settled" },
+    { id: "F4", requirement: "Routing", notes: "Alias → provider, Region, model; stickiness per conversation for the alias's cache lifetime; the self-hosted pool behind an endpoint picker" },
+    { id: "F5", requirement: "Reliability", notes: "Deadlines, one retry before the first byte, an error classifier per provider, circuit breakers, chains with compatibility tags, idempotency keys" },
+    { id: "F6", requirement: "Data protection at the edge", notes: "Regex, dictionary and name redaction with deterministic placeholders; per-channel un-redaction; card numbers blocked; residency and retention per target" },
+    { id: "F7", requirement: "Streaming pass-through and cancellation", notes: "No buffering; upstream abort on disconnect; partial streams settled from counted tokens" },
+    { id: "F8", requirement: "Metering and cost attribution", notes: "One row per call with tokens by class (thinking included) and the price-table version; showback, then chargeback; daily reconciliation per provider workspace" },
+    { id: "F9", requirement: "Audit and retention", notes: "Metadata on every call, bodies only by tenant opt-in, policy decisions recorded, OpenTelemetry GenAI attributes" },
+    { id: "F10", requirement: "Onboarding and change", notes: "A new team in an hour; a new model or fallback target behind the tenant's gold set; canaries per target; production drills on B" },
+  ]}
+/>
+
+- Out of scope: the teams' prompts, agents and evaluations (the gateway runs their gold sets, it does not own them), fine-tuning, a public API, an MCP tool gateway.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Gateway overhead before the provider (latency; targets, to be measured)", target: "Plain path p50 ≤ 8 ms, p95 ≤ 20 ms; with an inline name scan p50 ≤ 30, p95 ≤ 60; ≤ 1 ms p95 between streamed tokens, except a ≤ 62.5 ms hold on a token that opens a placeholder", why: "Voice has 400 ms to the first token; LiteLLM's own benchmark gives 2–12 ms p50 by instance count and 47 ms p99 a pod at 100 RPS (vendor-run)" },
+    { id: "N2", property: "T0 availability", target: "SLI: share of support and voice calls whose first content token reaches the tenant ≤ 800 ms without a 5xx; bad minutes = Σ minutes × the share of bad calls, reported per 5-minute window. Target 99.9% a month (≤ 43.2 bad minutes); 99.95% is a stretch", why: "One provider alone gave ≈ 99.4% in December 2024 (262 of 44,640 minutes, under How real systems do it)" },
+    { id: "N3", property: "Budget accuracy (cost)", target: "Money overshoot 0 for every alias, one stated exception (T0's ledger fails open with a page, ≈ 18.8 USD per 15 minutes); 0 calls settled above their reservation; settled spend visible ≤ 30 s; metered cost within 1% of each provider's daily usage", why: "Charge-after products overshoot by the work in flight" },
+    { id: "N4", property: "Isolation", target: "No team's runaway raises another team's 429 rate; no failure in one cell reaches another; one tenant's provider-side 429 never opens a breaker for others", why: "The labs loop; a shared breaker" },
+    { id: "N5", property: "Cache preservation (quality and cost)", target: "Same input → same output bytes across replicas and versions (0 diffs); cache-read share on replay ≥ direct calls − 1 point", why: "A non-deterministic prefix costs support ≈ 2,920 USD a day" },
+    { id: "N6", property: "Privacy (safety)", target: "Recall lower bound (Wilson, 95%) ≥ 99% on 1,000 structured identifiers (≥ 997 found) and ≥ 95% on 800 names (≥ 773 found); 0 of 1,000 card numbers through; 0 raw values from earlier turns in later calls (500 conversations × 4 turns)", why: "Customer data leaves Brightpost on every call" },
+    { id: "N7", property: "Residency", target: "0 accounts-payable requests processed outside the UK or EU, checked daily from CloudTrail's `inferenceRegion`", why: "Accounts payable's own requirement" },
+    { id: "N8", property: "Change speed", target: "New team ≤ 1 h; new model alias ≤ 1 working day after its gold set passes", why: "The gateway must not be the bottleneck" },
+    { id: "N9", property: "Audit", target: "100% of calls metered; metadata 400 days; opt-in bodies ≤ 30 days", why: "Chargeback disputes, security review" },
+    { id: "N10", property: "Provider safety", target: "Never retry a spend-cap 429; alert at 60% of A's cap, block T3 at 80%, T2 at 90%", why: "One spend cap stops every team" },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- **Sources:** each tenant's volumes come from its own case study's constants; provider A's limits are Anthropic's published Scale tier and B's quota model is Bedrock's (both as of November 2026). Everything else is illustrative.
+
+<EstimateTable
+  rows={[
+    { quantity: "Support agent", assumption: "200,000 messages a day; a message = 1.65 mid agent calls + router + supervisor + bad-actor check (small) + 0.08 hand-off summaries, + 0.25 judges deferred to the night", result: "996,000 calls a day; 1,801 USD a day; peak 12 messages a second = 56.8 on-path calls a second" },
+    { quantity: "Voice agent", assumption: "32,000 call-minutes a day; 7.2 agent calls a minute (30% mid, 2.4 speculative), 4 turn detectors, briefings and hedges; agent call 1,600 uncached + 2,000 cached in, 25 out", result: "497,312 calls a day; 384 USD a day; sale-day peak 36.9 a second, ≈ 7.7 of them speculative" },
+    { quantity: "Employee assistant (weekday)", assumption: "14,430 turns × (1.33 mid + 2.10 small calls)", result: "49,543 calls; 191 USD a weekday; peak 2.60 calls a second" },
+    { quantity: "Accounts payable, catalogue, labs", assumption: "AP 1,625 invoices × 3 + 1,429 receipts × 2, on B in the EU; catalogue 20,000 × (800 in + 400 out) on the Batch API; labs 30M mid tokens a day, ≤ 20 in flight, prompts ≤ 32,000", result: "7,732 calls and 28.5 USD; 20,000 calls and 2.80 USD a night; ≈ 6,000 calls and 84 USD a day" },
+    { quantity: "All traffic", assumption: "Sum over tenants", result: "≈ 1.58M calls a day (178,000 deferred); 97.6 a second at peak (support 56.8, voice 36.9, the rest 3.9); ≈ 2,491 USD a weekday ≈ 73,800 a month" },
+    { quantity: "Spend cap", assumption: "A's share ≈ 72,900 USD a month against the Scale tier's 200,000 cap", result: "36.5%" },
+    { quantity: "Mid quota on A at peak", assumption: "13,000 RPM, 10M ITPM, 2M OTPM; counted ITPM (uncached + writes) per tenant; guaranteed = 1.5 × need, labs at its 200,000 cap", result: "3.07M ITPM (31%), 0.149M OTPM (7%); guaranteed 4.50M (45%, under the 60% rule); burst pool 5.50M" },
+    { quantity: "Small quota on A at peak", assumption: "Support 720 messages a minute × 4,000 + voice 1.78M + assistant 0.18M", result: "4.84M; guaranteed 7.26M = 73% of 10M, over the rule, so request 15M (48%)" },
+    { quantity: "Money reservation", assumption: "Bytes (≈ 4 a token for English text, illustrative; the real byte count is used) × 2.50 USD per million (the alias's top input price) + `max_tokens` × 10.00", result: "A support call holds 0.0571 USD; 28.85 in flight hold 1.65 USD of a ≈ 54,000 USD month" },
+    { quantity: "B's quota for T0 cold", assumption: "Input + cache writes + output × burndown (Sonnet 5.5’s is not published: 10×, as for Opus 5.5 and Sonnet 5, with 5× shown), cache reads free; support, voice and their hand-offs, briefings and hedges", result: "Mid 9.23M TPM (8.65M at 5×), small 7.56M; request 11.1M and 9.1M, and ≈ 4.03B tokens a day (a 4-hour outage)" },
+    { quantity: "Prefix breaks", assumption: "6,085 cached tokens a support message: caching off (× 1.90 per million) or every call writing (× 2.40)", result: "≈ 2,190 or ≈ 2,920 USD a day" },
+    { quantity: "Pods and stores", assumption: "3 cells × 2 Regions, each Region carries its cell alone at 1.5 × peak, 50 RPS a pod (half the 100 RPS at which the vendor's own run kept p99 under 50 ms) + 1 spare", result: "16 gateway pods + 6 scanner pods; ≈ 205 Redis operations a second; 1.58 GB of metering a day, 631 GB over 400 days" },
+    { quantity: "Platform cost a month", assumption: "Infrastructure 8,546 (pods, scanners, two Redis stores, metering, canaries 2,679) + 4 engineers 133,333", result: "≈ 141,900 USD = 0.0030 USD a call against 0.0016 of model cost a call" },
+  ]}
+  note="Support and voice are 96% of peak traffic and 88% of spend, so the design is shaped by T0: their cells, their fallback quota and their 400 ms. The platform costs 1.9 × the model spend it carries; the people are the cost."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| G1 | Quality bar and its metric | The gateway must not change answers; a fallback target must pass the tenant's own gold set | Chains with eval status and feature parity; determinism; canaries per target |
+| G2 | Cost of a wrong answer | A leak (PII, another team's data), an overspent budget or a T0 outage, not a wrong sentence | Upper-bound reservation; dictionary redaction; cells; never retry a spend cap |
+| G3 | Latency target | A few milliseconds of 400 ms on every call; redaction hidden | In-memory hot path; one Redis round trip; pre-scan; name scan only on unseen text |
+| G4 | Cost per request | Model ≈ 0.0016 USD a call; platform ≈ 0.0030; a broken prefix more than doubles support's bill | Determinism outranks gateway efficiency |
+| G5 | Traffic shape | 97.6 calls a second on sale day, 96% of it T0; judges and batch at night | A cell per T0 tenant; deferred aliases off the peak |
+| G6 | Knowledge source and freshness | Not a driver for answers; config and key revocations must reach replicas in seconds and survive the control plane | Signed snapshots, last-known-good, a separate deny-list |
+| G7 | Context size | Prompts up to 32,000 tokens (labs); support averages 8,580 input tokens a message, 71% cached | Byte-based money reservation; scan only unseen text |
+| G8 | Determinism and auditability | "Who spent what, on which model, through which provider and Region, under which policy?" | One metering row per call with versions |
+| G9 | Data sensitivity and tenancy | Customer PII; supplier documents; internal documents | Per-tenant redaction policy; residency and retention tags; bodies off by default |
+| G10 | Autonomy level | Not a driver here: the gateway takes no actions; agent caps live in the apps | Tool loops never switch provider mid-loop |
+| G11 | Modalities and interface | Images in accounts payable (not redactable in the gateway); voice transcripts; English customer text | AP protected by route and its own masking |
+| G12 | Availability and degradation | Tier zero: every team's model calls depend on it | Cells, two Regions, B sized for T0 cold, a sealed bypass |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/chat/completions` (OpenAI-compatible, SSE when `stream: true`) | Every team's service | Every model call; `model` is an alias. Stored state is not offered (`store` forced false) |
+| `POST /v1/messages` (Anthropic-native) | Teams that use cache breakpoints or strict tools | The body is forwarded after the gateway's deterministic transform; `fallbacks`, server tools and stateful features are refused (422) unless the alias declares them |
+| `POST /v1/batches` | Catalogue | The upper bound is held until each result settles, not released at submission |
+| `POST /v1/embeddings` | Assistant indexing | Metered like any call |
+| `POST /v1/scan` | Support (as a message arrives), voice (as each turn is transcribed) | Fills the scan cache and the conversation dictionary; no model call |
+| Control plane: identities, keys, aliases and chains, policies, price table, quotas, deny-list, drill results | Platform team; team leads read their own | Versioned, reviewed, pushed as signed snapshots |
+
+The support agent's first call on a message streams through like this; the extra headers carry attribution, the sticky key and the settled cost.
+
+```http
+POST /v1/messages
+Authorization: <workload identity, mTLS: svc/support-agent>
+Idempotency-Key: m_5521-1
+x-bp-conversation: c_88d1
+x-bp-feature: kettle-returns
+x-bp-end-user: <HMAC signed by the support service>
+{ "model": "support-agent", "max_tokens": 512, "stream": true, "tools": [ … ], "system": [ … ], "messages": [ … ] }
+
+200 OK  (text/event-stream)
+x-bp-provider: A   x-bp-region: global   x-bp-model: sonnet-5.5   x-bp-fallback: none   x-bp-redactions: person=1,email=1
+event: content_block_start   data: {"type": "tool_use", "name": "order_lookup", …}
+event: content_block_delta   data: {"partial_json": "{\"email\": \"sarah.c@…\"}"}
+event: message_delta         data: {"usage": {"cache_read_input_tokens": 2700, "cache_creation_input_tokens": 2300, "output_tokens": 30}}
+event: bp.usage              data: {"settled_usd": 0.00632, "reserved_usd": 0.05512, "price_table": "2026-11", "snapshot": "v412"}
+```
+
+An alias as the control plane stores it (illustrative):
+
+```yaml
+alias: support-agent
+cell: support
+data_class: customer-pii
+residency: any                      # ap-extract: uk-or-eu
+redaction: { regex: [email, phone, iban, uk_postcode], dictionary: on, ner: unseen-text, cards: block,
+             unredact: { text: on, tool_args: [order_lookup.email], urls: never } }
+max_tokens_ceiling: 512
+reservation: upper-bound            # thinking aliases: 4,096-token chunks, extended at 75%
+stateful_features: none             # no Files, containers, MCP connector, stored responses
+deadline_first_token_ms: 2000       # the call may run to 2 s, but
+slow_ms: 800                        # a first token later than 800 ms counts as a breaker failure
+cache_ttl: 5m                       # stickiness lasts as long as the cache
+chain:
+  - { target: A, model: sonnet-5.5, workspace: ws-support, schema: strict-tools, eval: passed-2026-11-14 }
+  - { target: B, model: sonnet-5.5, profile: eu, schema: strict-tools, eval: passed-2026-11-14, warm_share: 0.05 }
+on_exhausted: 503 provider_unavailable   # the support agent then hands the case to a person
+```
+
+| Code | Meaning | What the caller does |
+| --- | --- | --- |
+| 400 `policy_blocked` | A card number or a blocked data class | Entity type shown, never the value; not retried |
+| 400 `prompt_too_large` | Over the alias's prompt cap (labs 32,000 tokens) | Trim in the tenant |
+| 422 `unsupported_on_target` | A feature no target in the chain supports, or an undeclared server tool | Fix the request; the gateway never rewrites a schema silently |
+| 429 `quota_exhausted` + `retry-after` | The team's per-minute bucket is empty | Wait as told |
+| 429 `budget_exhausted`, no `retry-after` | The budget cannot cover the reservation (or a stream's next chunk) | Do not retry; in a stream it arrives as an SSE error event |
+| 503 `provider_unavailable` / 504 `first_token_deadline` | Every target failed, or no first token by the deadline | The tenant's degraded path |
+
+- **Identity from the caller's workload identity or key only.** It maps to team, app, cell, data class and aliases; `x-bp-end-user` counts for per-user limits only when the tenant signs it.
+- **The transform is a pure function** of (tenant bytes, alias config version, redactor version, conversation key, dictionary version). No per-request value enters the prompt; tool JSON is passed through, never re-serialised.
+- **One Region per conversation.** A conversation is pinned to its home Region while it is healthy; a call that sees an older dictionary version than the conversation's last call is held for the full scan (≈ 57 ms), never sent.
+- **Retry and fall back only before the first content byte.** After that a provider error becomes an SSE error event and the call settles; nothing is replayed into a stream the user is reading.
+- **Idempotency.** The same `Idempotency-Key` within 10 minutes attaches to the in-flight stream or returns the settled result; client wrappers set `max_retries=0`, and `x-should-retry: false` goes on every such error, for SDKs that honour it.
+- **A refusal is not an error.** A classifier refusal is HTTP 200 with `stop_reason: "refusal"`; it is recorded and never retried, and C's refusals (a `refusal` field that need not follow the schema) are mapped to the same shape.
+
+## Data model
+
+| Data | Store type | Why (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Configuration: identities, hashed keys, aliases, chains with tags, policies, quotas, price table with `effective_from` | <TechIcon id="oss/postgresql" /> PostgreSQL in the control plane; a signed snapshot pushed to every replica and kept on disk as last-known-good | G6, G12 | none | Snapshot version in every metering row | Replicas that need the config store to serve: a managed AI gateway peaked at 97% errors in 2025 when the store it relies on failed (How real systems do it) |
+| Key deny-list | Signed file in object storage, pulled every 10 s, independent of the control plane; key data older than 24 h → unknown keys refused | G2 | none | ≤ 10 s | Revocations only in snapshots: a dead control plane keeps a leaked key alive |
+| Per-minute buckets (caller × model class × input or output) and parallel counters | <TechIcon id="oss/redis" /> Redis per cell per Region; one Lua script reserves and settles | G3, N4 | caller | A Region takes the whole quota when the other is unhealthy, half otherwise | A database row per request: ≈ 10 ms and contention; local counters only: the limit × replicas |
+| Budget ledger (organisation → team → app → key) | Redis hash per team, all levels in one slot; settled amounts in the metering store as truth; Regions lease spend in blocks of 0.5% of the month | N3 | team | Ahead of settled spend by in-flight reservations only; a failover can lose at most those (support ≈ 1.65 USD), rebuilt from in-flight calls and the metering store | Per-key budgets: a team mints keys to multiply its caps |
+| Conversation dictionary (value → placeholder) | Its own Redis per cell per Region, persistence off, values encrypted per conversation (KMS), replicated encrypted to the other Region with a version per conversation; the conversation pinned to its home Region; TTL idle + 1 h (24 h for support and voice) | N6 | conversation | Strong within a Region; a miss or an older version holds the first call for a 57 ms full scan | "Nothing stored": every restored value goes out raw on turn 2 |
+| Scan cache (content hash → scanned) and prefix registry | Redis, 1 h; the registry in memory, gossiped, for forecasts and alerts only | G3, N5 | hash | Best effort | NER over every call's whole prompt: ≈ 20,000 characters × 1.65 calls a message |
+| Metering and audit rows as OpenTelemetry GenAI attributes | <TechIcon id="oss/clickhouse" /> ClickHouse, 400 days; spooled to a replicated local queue if slow | G8, N9 | day | Eventual (seconds) | Prometheus only: no per-call audit; bodies: the largest store of customer PII in the company |
+| Provider credentials: one A workspace per team, B and C accounts per cell, a break-glass key per T0 alias in the same workspace | Secrets manager with KMS; held in replica memory | G12 | workspace | Rotated monthly | A separate break-glass workspace: its caches are cold |
+
+One metering row per call is the source of truth for spend; the hot counters only gate admission.
+
+```sql
+CREATE TABLE gateway_calls (
+  day Date, ts DateTime64(3), call_id String, team LowCardinality(String), app String, feature String,
+  alias String, provider LowCardinality(String), region String, model String, workspace String,
+  input_uncached UInt32, cache_read UInt32, cache_write UInt32, output UInt32, thinking UInt32,
+  reserved_usd Decimal(12,6), settled_usd Decimal(12,6), price_table String, snapshot String,
+  dict_version UInt32, fallback String, refusal UInt8, cancelled UInt8, redactions Map(String, UInt16),
+  overhead_ms Float32, end_user_hmac String, conversation_id String
+) ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (team, day, alias) TTL day + INTERVAL 400 DAY;
+```
+
+```text
+bucket:{team}:{caller}:{class}:{in|out} -> tokens left this minute (one {team} hash tag, so one Lua script reserves both)
+budget:{team}                           -> hash { org, team, app:{id}, key:{id} : reserved_usd, settled_usd, lease }
+dict:{conversation}                -> AES-GCM blob { value -> [PERSON_7f3a9c] }, KMS data key per conversation
+```
+
+- **Non-user identities:** provider keys never leave the gateway; provider API domains are reachable only from the gateway's egress, so no team can call a provider directly; the control plane's deploy identity can push config but cannot read dictionaries.
+- **Access patterns:** reserve and settle by caller and team (one script); dictionary by conversation id; rows by team and day for showback, by conversation id for an erasure request or "what did conversation c_88d1 send, to whom?".
+
+## Building the architecture, step by step
+
+- We start from one service calling one provider with a key in its config, and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One API, identities and aliases (F1, F2)
+
+The baseline: each team's service sends an alias with its workload identity; one gateway replica looks up the policy, takes the provider key from a vault and calls provider A.
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={1} caption="Step 1: team services send an alias with their workload identity; one gateway replica checks the policy, takes the team’s key from the vault and calls provider A. No team holds a provider key." />
+
+- **Adds:** the team services, the gateway replica, the control plane, the provider key vault, provider A.
+- **Flow:**
+  1. The service sends `model: support-agent` over mTLS with its workload identity.
+  2. The replica maps the identity to team, app, cell, data class and allowed aliases (cached config).
+  3. It resolves the alias to a target, takes A's key for the team's workspace from the vault and forwards the call.
+  4. The stream comes back through the replica.
+- **Why this and not that:** the simplest thing that takes keys out of apps (P1); one choke point where policy is enforced in code (P10). Provider domains are reachable only from the gateway's egress, so nobody can go around it.
+- **The gap:** one team's loop can spend the month and fill the provider's limit for everyone.
+
+<PremiumBreak />
+
+### Step 2: Budgets that cannot overspend (F3, N3, N4)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={2} caption="Step 2: a quota and budget stage reserves each call’s upper-bound cost in the counter store before it leaves and settles it from the provider’s usage, so no team can overspend." />
+
+- **Adds:** quota and budget checks, the counter store.
+- **Flow:**
+  1. The replica counts the request's UTF-8 bytes (≈ 20,000 for support's first call).
+  2. One Redis script reserves money as an upper bound (bytes × 2.50 + 512 × 10.00 per million = 0.05512 USD) at every budget level, and rate tokens by estimate (characters ÷ 4) in the per-minute buckets.
+  3. The call goes out; the provider's cumulative usage settles both, and the difference is refunded.
+- **Why this and not that:** count and cap in tokens (P6); an estimate cannot bound money because no tokenizer is published for current Claude models; bytes can, since a byte-level tokenizer never makes more tokens than bytes (Deep dive 1). That Claude's tokenizer is byte-level is an assumption, so every settlement checks settled input ≤ reserved bytes and pages on the first violation.
+- **The gap:** one provider outage stops every team.
+
+### Step 3: Fallback that is tested and sized (F5, N2)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={3} caption="Step 3: a router with breakers adds provider B, the same model on Bedrock EU, for support and voice, and provider C for the assistant: only tested targets with the quota to carry the load." />
+
+- **Adds:** the router and breakers, provider B (Bedrock EU), provider C (a second family).
+- **Flow:**
+  1. An error classifier sorts each failure: 529, 5xx, timeouts and (for T0) first tokens later than 800 ms count toward A's breaker; a workspace 429 counts only for that tenant.
+  2. When A's breaker opens, support and voice go to the same model on B, whose quota is sized for them with cold caches; the assistant goes to C.
+  3. A move happens only at a turn boundary; with every target down, the tenant's degraded path runs.
+- **Why this and not that:** evaluate continuously and degrade gracefully (P16); every target is tested on the tenant's gold set, and B's quota is requested for T0 cold (Deep dive 2).
+- **The gap:** every move is a cache miss, and a non-deterministic gateway breaks caches with no outage at all.
+
+Before the breaker opens, the first unlucky calls pay for every retry and timeout.
+
+<AnimatedDiagram spec="animated/serving/gateway-fallback" stepper caption="The answer still arrives, but its first token comes at 3.45 s instead of 0.4 s: every retry and timeout is paid for in the user's wait." />
+
+- **How to read it:** A answers 429 with `retry-after: 1`; the gateway waits as told and retries once; A sends no first token within the 2 s deadline; the same request then goes to B in B's format; A is left alone for 30 s.
+
+**The numbers:**
+
+- 50 ms for the 429 + 1,000 ms wait + 2,000 ms deadline + 400 ms on B = 3,450 ms for the first support calls.
+- At 19.8 support agent calls a second, ten failures in twenty open the breaker within about a second, after which a call goes straight to B in 400 + 150 (cold, illustrative) = 550 ms, inside the 800 ms SLI.
+
+### Step 4: A deterministic transform and stickiness (F4, N5)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={4} caption="Step 4: stickiness keeps a conversation on the provider, workspace and Region that hold its cache; the self-hosted pool picks the replica that holds the prefix." />
+
+- **Adds:** cache-aware stickiness, the prefix registry, the self-hosted pool S with an endpoint picker.
+- **Flow:**
+  1. The transform (redaction, stripping) depends only on (tenant bytes, alias config version, redactor version, conversation key, dictionary version), so the same text leaves as the same bytes on every replica.
+  2. The sticky key `support-agent:c_88d1` keeps the conversation on one provider, workspace and Region for the cache's lifetime (5 minutes on A).
+  3. Labs' calls to S go to the replica that holds the prefix, unless it is overloaded.
+- **Why this and not that:** cache at every layer and keep the prefix stable (P7). Least-loaded routing spreads a conversation across machines, and each one is a fresh cache write.
+- **The gap:** customer names leave Brightpost on every call, and come back in every later turn.
+
+On the self-hosted pool the same idea works one level down, on the GPUs' prefix caches.
+
+<AnimatedDiagram spec="animated/serving/lb-prefix-routing" stepper caption="A follow-up carries the whole conversation, so the replica that holds the earlier turns skips almost all of its prefill. The router must still watch load, or a popular prefix makes a hot spot. Milliseconds are illustrative." />
+
+- **How to read it:** a follow-up turn carries the earlier turns as its prefix; the endpoint picker scores replicas by the longest cached prefix and by queue depth, and sends it to the warm one unless that one is overloaded.
+
+**The numbers:**
+
+- S is 2 GPUs in London for labs only, 120 USD a day charged to labs; on the hosted providers the gateway cannot pick a machine, so it keeps the conversation on one provider, workspace and Region and lets the provider's own routing find the cache.
+
+### Step 5: Redaction that holds across turns (F6, N6, N7)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={5} caption="Step 5: a redactor with a conversation dictionary replaces names and identifiers before any call leaves, and keeps doing so on every later turn." />
+
+- **Adds:** the redactor (regex, dictionary, CPU name scanner), the conversation dictionary.
+- **Flow:**
+  1. Support posts each new customer message to `/v1/scan` while it loads the case; regex and the name scanner map values to placeholders such as `[PERSON_7f3a9c]` and store the pairs in the conversation's dictionary.
+  2. On every call, regex blocks card numbers (400) and the dictionary pass turns every known value in all outgoing text back into its placeholder.
+  3. The name scanner reads only text it has not seen; the target's residency and retention tags are checked last.
+- **Why this and not that:** keep sensitive data inside a boundary (P17). Without a dictionary, the gateway restores "Sarah Collins" in the reply, the tenant stores it, and turn 3 sends it raw.
+- **The gap:** placeholders, cancels and buffering can break the streams the apps depend on.
+
+### Step 6: Stream straight through; cancel cleanly (F7, N1)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={6} caption="Step 6: a stream relay passes each event straight through, restores placeholders only where allowed, and aborts the upstream call when the caller leaves." />
+
+- **Adds:** the stream relay.
+- **Flow:**
+  1. Each provider event is flushed as it arrives; a token is held only after `[` plus a placeholder type, for at most 62.5 ms.
+  2. Placeholders are restored per channel: in user-visible text, in allow-listed tool arguments (`order_lookup.email`), never inside a URL.
+  3. If the caller disconnects, the relay aborts the upstream request and settles from its own count of streamed tokens.
+- **Why this and not that:** budget latency per stage (P5); the gateway's share is a few milliseconds of 400. Voice cancels ≈ 7.7 speculative calls a second at peak, so cancel-to-abort is a measured span.
+- **The gap:** nobody can say what support spent yesterday, through which provider.
+
+One buffering hop is enough to undo the first-token budget.
+
+<AnimatedDiagram spec="animated/serving/stream-path" stepper caption="Every hop must pass each event on as it arrives. One proxy that buffers turns a 400 ms first token back into a 1,500 ms wait, and nothing reports an error." />
+
+- **How to read it:** each hop between provider and user either passes each server-sent event on at once or collects them; one collecting hop makes the user wait for the whole answer, and every health check still passes.
+
+**The numbers:**
+
+- A 400 ms first token becomes 1,500 ms behind one buffering proxy.
+- The gateway's relay adds under 1 ms p95 a flushed event; the only hold is the ≤ 5 tokens × 12.5 ms = 62.5 ms after a placeholder opens, and only on aliases with redaction.
+
+### Step 7: Meter every call; reconcile (F8, F9, N9)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={7} caption="Step 7: a meter writes one row per call to the metering and audit store, and reconciliation checks the totals against each provider’s own usage every night." />
+
+- **Adds:** the meter, the metering and audit store, reconciliation.
+- **Flow:**
+  1. After settle, the meter writes one row: team, feature, alias, provider, Region, model, tokens by class (thinking included), cost, price-table and config versions, fallback, redaction counts.
+  2. Every night, metered cost per provider workspace is compared with the provider's own usage; a gap over 1% pages.
+  3. Teams see showback for two months, then chargeback; fallback and canary costs sit on the platform's reliability line.
+- **Why this and not that:** carry provenance (P14); one workspace per team on A makes the provider's own numbers a per-team check.
+- **The gap:** one fleet and one config store, so a bad push or one tenant's surge reaches every tenant.
+
+### Step 8: Cells, last-known-good, gates and drills (N2, N4, F10)
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" step={8} caption="Step 8: a cell router splits support, voice and the rest into separate cells; replicas run on a signed config snapshot and deny-list, and evaluation gates every release." />
+
+- **Adds:** the cell router, the config snapshot and deny-list, evaluation (gold sets, canaries, drills).
+- **Flow:**
+  1. The cell router sends each caller to its cell (support, voice or other), in either Region by health.
+  2. Replicas serve last-known-good routes from a signed snapshot and pull the deny-list every 10 s.
+  3. Every release passes the gates, cell by cell (other → support → voice); canaries run every 10 minutes a target; once a month one T0 alias runs 100% on B for 10 minutes.
+- **Why this and not that:** evaluate continuously and degrade gracefully (P16); a gateway with no cells turns one tenant's problem into everyone's (Deep dive 5).
+- **The gap:** none; the gates and drills decide each release.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/llm-gateway/architecture" stepper caption="Every model call passes one gateway: identity and budgets first, then redaction and a cache-preserving route to a tested target, with every call metered and each tenant group in its own cell." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Team services (support, voice, assistant, accounts payable, catalogue, labs) | Send aliases with their identity; own prompts, agents and degraded paths |
+| **Edge and gateway** | Cell router | Caller → cell; Region by latency and health |
+| **Gateway data plane** | Replica, quota and budget, router and breakers, stickiness, redactor, stream relay, meter | Everything on the request path |
+| **Providers and models** | A (Anthropic API), B (Bedrock EU), C (second family), S (self-hosted) | Answer |
+| **Control plane and offline** | Control plane, reconciliation, evaluation | Change config safely; prove the bill; gate releases; run drills |
+| **Data and state** | Key vault, counter store, dictionary, metering and audit store, config snapshot and deny-list | What a call may use, and what it did |
+
+The sequence follows the support agent's first call on a message at 11:00 on sale day, at p50.
+
+<AnimatedDiagram spec="animated/llm-gateway/request-sequence" stepper caption="The gateway’s work fits in the first 5.6 ms: the name scan already ran during the case load, the reservation is one Redis call, and the 0.0488 USD over-reservation comes back at settle." />
+
+- **How to read it:** step 1 is the pre-scan during the case load, the reservation and the send at 5.6 ms; step 2 the stream, the restored tool argument and the settle; step 3 a caller that leaves, the upstream abort and the settle from counted tokens.
+
+The kettle message ("my kettle from order 4471 arrived cracked, I'm Sarah Collins, sarah.c@…"), p50; the story is invented:
+
+0. **During support's 30 ms case load:** the service posts the new message to `/v1/scan`; regex maps the email to `[EMAIL_51b2e0]`, the CPU name scanner maps "Sarah Collins" to `[PERSON_7f3a9c]` in 13.5 ms, and both pairs go into conversation `c_88d1`'s dictionary.
+1. **0–1 ms:** the service sends `support-agent` with `Idempotency-Key: m_5521-1`; the cell router picks the support cell in London.
+2. **1–2 ms:** the replica checks the workload identity (cached) and the deny-list: team support, data class customer-pii, snapshot v412.
+3. **2–2.3 ms:** parse, count 20,000 bytes, hash the prefix.
+4. **2.3–4.3 ms:** one Redis script reserves 0.05512 USD in the support team's hash (all budget levels in one call), 5,000 ITPM by estimate and 512 OTPM.
+5. **4.3–4.6 ms:** regex and the dictionary pass over all outgoing text; nothing is unseen, so no name scan runs.
+6. **4.6–5.6 ms:** A's breaker is closed; the sticky key keeps A and workspace `ws-support`; the request leaves at 5.6 ms.
+7. **400 ms at the support service (A's own share 394.4):** the first token is flushed at once.
+8. **Stream:** A returns a 30-token `order_lookup` call; `email` is an allow-listed field, so the real address is restored there. Usage settles: 2,700 cache read + 2,300 cache write + 30 out = 0.00632 USD; 0.0488 is refunded.
+9. **After the stream:** one metering row (support, kettle feature, A, Sonnet 5.5, the classes above, price table 2026-11, snapshot v412, 1 name and 1 email from the dictionary, 5.6 ms overhead).
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why, and why the usual alternatives lose. G ids refer to the drivers table; F and N to the requirements.
+
+### Data plane: an open-source LLM proxy, one deployment per cell, four named hooks
+
+- **Choice:** an open-source proxy (LiteLLM class) per cell, with four hooks of our own: upper-bound reservation and hierarchical budgets, the error classifier and chain tags, the deterministic transform with the dictionary, and per-channel un-redaction.
+- **Why:** at ≈ 98 calls a second the hard, changing work is provider translation, streaming and token accounting, which these projects track; a deployment per cell matches the proxy's per-deployment fail-closed flag (G4, G12, F1). The cost is four hooks to carry across upgrades, re-tested by the determinism and budget gates.
+- **Why not our own service:** it adds provider translation to the same four engineers' work.
+- **Why not a managed gateway:** every prompt crosses a third party, most managed limits are request counts or after-the-fact spend, and its configuration store becomes our dependency (G9, G12).
+- **Why not API-gateway plugins or Agent Router:** both charge token usage after the response, so concurrent calls overshoot (N3).
+
+### Quota units: tokens a minute per model class, hierarchical US-dollar budgets, a parallel cap
+
+- **Choice:** per-minute buckets in counted input and output tokens per model class, as providers count them; monthly budgets in US dollars at organisation, team, app and key level; a cap on calls in flight per team.
+- **Why:** a mid token costs 20× a small one, so money needs its own unit; budgets at team level stop a team minting keys to multiply its caps (F3, N4, G4).
+- **Why not requests a minute:** a 32,000-token prompt and a 50-token one cost the same.
+- **Why not one token budget across models:** "30M tokens" is 84 USD on mid and 4.2 USD on small.
+
+### Reservations: money as an upper bound, rate as an estimate
+
+- **Choice:** money = UTF-8 bytes (images from their dimensions, fixed overheads per message and tool) × the alias's highest input price + `max_tokens` × output price; rate = characters ÷ 4 with the cached span included (conservative; the provider settles to uncached input plus writes).
+- **Why:** no call can bill more than it reserved, so overshoot is 0 (N3). "Highest" means the maximum over targets and options: 2.50 for 5-minute writes, 4.00 for 1-hour, × 1.1 for US-only inference, a price-table change during the call.
+- **Why not an estimate for money:** there is no published tokenizer for current Claude models and the counting endpoint is a remote estimate, so any error margin is a guess.
+- **Why not charge after:** overshoot equals the work in flight, 2.0% of labs' day (3.5% with a stale check).
+- **Why not the caller's `max_tokens`:** an unset 4,096 would hold 73% of support's output quota in flight; the alias ceiling of 512 holds 7.7%.
+- **Why not incremental reservation everywhere:** an extra Redis call per chunk where the ceiling is already small; it is used for thinking aliases (16k–64k ceilings) in 4,096-token chunks, extended at 75%.
+
+### Fallback: a chain per alias; T0 to the same model on B, sized for T0 cold
+
+- **Choice:** support and voice: A → B (same weights, Bedrock EU profile, 11.1M mid and 9.1M small TPM requested); assistant: A → C; accounts payable: B only, then queue; labs: A → S; switch only at a turn boundary.
+- **Why:** the same weights keep schemas, refusals and tone (G1); B must carry T0 with no cache, ≈ 9.23M mid TPM under Bedrock's output burndown. Until the grant is recorded, voice goes first and the rest of support hands cases to people (N2).
+- **Why not "any healthy provider":** schema dialects, safety errors, tool-call formats and residency differ (Deep dive 2).
+- **Why not a second same-model cloud as well:** a third set of quotas, keys and parity checks; revisit if B's quota is refused.
+- **Why not paid priority capacity on A:** Anthropic's Priority Tier is no longer sold and does not support Sonnet 5.5 (as of November 2026).
+- **Why not retries at every layer:** three retries in each of five layers is 243× the load.
+
+### Error classifier before the breaker, and a latency trip
+
+- **Choice:** 529, 5xx, timeouts and, for T0, first tokens later than 800 ms count toward A's provider-and-model breaker, which opens on 10 failures in 20 calls or when slow-or-failed calls pass 10% of a rolling minute (≥ 20 calls); probes must also beat 800 ms.
+- **Why:** the SLI and the steering use the same 800 ms line, so a brownout at 800–2,000 ms moves traffic instead of quietly failing every support call (N2, G12).
+- **Why not count every 429:** one tenant's workspace limit would open A for everyone; a workspace 429 falls back that tenant only, a ramp 429 slows its ramp, and a spend-cap 429 stops and pages.
+- **Why not errors only:** a 30-minute peak-hour brownout uncounted would use more than the whole 21.6-minute budget of 99.95%.
+
+### Determinism and stickiness
+
+- **Choice:** the transform is a pure function of its inputs, tested across replicas and versions; a conversation sticks to one provider, workspace and Region for the alias's cache lifetime (5 minutes, or 60 with the 1-hour TTL), and is unstuck when its target's breaker opens or its canaries fail.
+- **Why:** a hit needs the same bytes, workspace, provider, Region and sometimes machine (N5, G4); on C, the assistant sends `prompt_cache_key` over 5 buckets (60.4 calls a minute ÷ 15 a key).
+- **Why not least-loaded routing:** it spreads a conversation across machines, each a fresh write.
+- **Why not pin for 60 minutes everywhere:** A's cache lives 5 minutes, so longer stickiness buys nothing and keeps users on a server that may be bad.
+
+### Redaction: regex, an encrypted conversation dictionary, a CPU name scanner on unseen text
+
+- **Choice:** regex for structured identifiers and cards everywhere; a dictionary pass over all outgoing text (≈ 0.1 ms on 20 KB); a spaCy-class name scanner on CPU, only on text not seen before, pre-scanned by support and voice; deterministic placeholders (type + HMAC under the conversation key).
+- **Why:** restored values come back in later turns, and only a dictionary of what was restored catches them (N6, G9); the CPU scanner's 13.5 ms median (a preprint, hardware not stated) is hidden in support's case load.
+- **Why not GPU BERT NER:** 38 ms average and 86 ms p95 on 317 characters (vendor-run), and 3,600 USD a month of GPUs; kept as the option if CPU recall fails the 800-name gate.
+- **Why not "nothing stored":** names return raw from turn 2.
+- **Why not redaction in each app:** some team forgets; and the gateway would still need the map to un-redact.
+- **Why not redact accounts payable's images:** there is no reliable inline scanner; AP masks bank details itself and stays in the UK or EU.
+
+### Stream relay and per-channel un-redaction
+
+- **Choice:** flush per event; restore placeholders in user-visible text and allow-listed tool arguments only (including ones split across `input_json_delta` chunks), never inside a URL; abort upstream on disconnect and settle from counted tokens.
+- **Why:** an injected instruction could make the model write a placeholder into an outbound link, and a naive un-redactor would fill in the real value (G2, F6, F7).
+- **Why not buffer to un-redact safely:** the first token would wait for the last.
+
+### Metering, cells and smaller parts
+
+- **Choice:** a ClickHouse row per call with OpenTelemetry GenAI attributes and daily reconciliation; three cells (support, voice, the rest) in two Regions with signed config snapshots; no semantic cache; S for labs only; no model in the gateway's hot path.
+- **Why:** a row per call answers chargeback and audit (G8); cells stop support's surge reaching voice (N4); static similarity thresholds give no correctness guarantee, and a shared cache can leak between teams (G2).
+- **Why not the invoice alone:** a month late and not per feature.
+- **Why not two cells by tier:** support and voice would share pods and Redis.
+- **Why not S as the catalogue's fallback:** the catalogue costs 2.80 USD a night on the Batch API and can run the next night; S costs 120 USD a day.
+- **Why not an inline guard model:** hundreds of milliseconds on every call (illustrative); output checks stay with the tenants, who know their context.
+
+## Model, prompt and context design
+
+The gateway writes no prompt; this is the support agent's first call as the gateway sees it, in the order the Anthropic API caches it (tools → system → messages).
+
+| Block | Tokens | Stable or changing | Gateway action |
+| --- | --- | --- | --- |
+| Tool definitions | 1,000 | Stable | Passed through, never re-serialised |
+| Instructions | 1,200 | Stable | Untouched |
+| Procedure | 500 | Stable | Untouched; **cache breakpoint** at 2,700 tokens (above the 512 minimum) |
+| Case state | 400 | Changing | Regex + dictionary, free-text notes included |
+| Evidence (help-centre passages, half of calls) | 1,000 average | Changing | Regex + dictionary (public text; nothing matches) |
+| Recent turns | 600 | Changing | Dictionary: the earlier reply "Hi Sarah Collins" leaves as "Hi [PERSON_7f3a9c]" |
+| Tool results (order API JSON) | 250 | Changing | Dictionary + field rules (`name`, `email`, `phone`, `address`) |
+| New customer message | 50 (≈ 200 characters) | Changing | Pre-scanned (regex + name scanner) during the case load |
+| **Total** | **5,000 average (6,000 with evidence)** | **2,700 stable** | The name scanner reads ≈ 200 of ≈ 20,000 characters |
+
+<AnimatedDiagram spec="animated/llm-gateway/request-layout" stepper caption="The gateway never touches the 2,700 cached tokens; it redacts only the changing blocks, and the name scanner reads one 50-token message out of 5,000." />
+
+- **How to read it:** step 1 draws the blocks to scale with the breakpoint after the procedure; step 2 marks what the gateway touches: nothing in the cached prefix, regex and the dictionary on the changing blocks, the name scanner on the 50-token message only.
+
+**The numbers:**
+
+- Stable 1,000 + 1,200 + 500 = 2,700 tokens, read from the cache at 0.10 USD per million instead of 2.00; changing 400 + 1,000 + 600 + 250 + 50 = 2,300 on average.
+- Over a whole message (1.65 agent calls) support counts 2,495 tokens uncached or written and 6,085 cached, 71% of 8,580: that cached share is what a non-deterministic transform would destroy.
+
+<Callout tone="red" title="What breaks">
+  Re-serialise the tool JSON on some replicas and not others, and the first block differs between calls. A changed tool definition invalidates the tools, system and messages caches together, so every call pays the write price on all 2,700 tokens.
+</Callout>
+
+| Stage | Model | Why |
+| --- | --- | --- |
+| Name scanner | spaCy-class NER on CPU scanner pods, 3 a Region (12 cores), autoscaling to 6 | 13.5 ms median on 523 characters (preprint); recall gated on 800 names |
+| Everything else | None: no model runs in the gateway | An inline model adds hundreds of milliseconds (illustrative); guard and judge models belong to the tenants |
+
+- **Placeholders are deterministic:** the same value redacts to the same bytes on every call of a conversation, which keeps a tool loop's turn bytes stable and matters most to tenants whose cached prefix grows with each turn.
+
+## Latency and cost budget
+
+The waterfall puts the gateway's own spans on a millisecond scale, then the fallback paths against the 800 ms SLI line.
+
+<AnimatedDiagram spec="animated/llm-gateway/overhead" stepper caption="The gateway’s own spans add 5.6 ms at p50; an inline name scan would more than triple that, and a fallback costs far more than either until the breaker opens." />
+
+- **How to read it:** step 1 is the plain path, step 2 adds the inline name scan for callers without a pre-scan (labs), step 3 the fallback paths; ticks mark p95, and every span is a target to be measured, not a measurement.
+
+**The numbers (ms, targets):**
+
+| Span | p50 | Spread (p95 − p50) | Plain path | Inline-scan path |
+| --- | --- | --- | --- | --- |
+| Hop to the cell router; cell router to replica | 0.5 + 0.5 | 1 + 1 | 0 → 1 | 0 → 1 |
+| Workload identity (cached) | 1 | 1 | 1 → 2 | 1 → 2 |
+| Parse, count bytes, hash (≈ 20 KB) | 0.3 | 0.5 | 2 → 2.3 | 2 → 2.3 |
+| Reserve (one Redis script, all budget levels) | 2 | 3 | 2.3 → 4.3 | 2.3 → 4.3 |
+| Regex and dictionary | 0.3 | 0.3 | 4.3 → 4.6 | 4.3 → 4.6 |
+| Name scan (CPU NER) | 13.5 | 16.5 | | 4.6 → 18.1 |
+| Route and translate | 1 | 1 | 4.6 → 5.6 | 18.1 → 19.1 |
+| **Leaves for the provider** | | | **5.6** | **19.1** |
+
+- **p95 = p50 + root-sum-square of spreads:** plain 5.6 + √13.34 = 9.3 ms (stage sum 13.4); inline scan 19.1 + √285.59 = 36.0 ms (stage sum 43.4). Both meet N1 by either rule; LiteLLM's own runs give 2–12 ms p50 by instance count (vendor-run), so the load-test gate decides.
+- **Pre-scan:** `/v1/scan` hop 1 + queue 2 + scan 13.5 p50 or 30 p95 (assumed) = 16.5 or 33 ms inside support's 30 ms case load, so hidden at p50 and ≤ 3 ms exposed at p95. Voice pays it: each partial transcript's new words are scanned on its speak path, 1,113.5 ms p50 (≤ 1,200) and 1,524 ms p95 by stage sum (≤ 1,600).
+- **Fallback paths:** first unlucky call 3,450 ms; breaker open, straight to B 400 + 150 cold = 550 ms; voice on a 429 or 529, 50 + 400 + 150 = 600 ms; a silent A, 800 + 400 + 150 = 1,350 ms (bad by the SLI until the breaker opens).
+
+<Callout tone="red" title="What breaks">
+  Run the proxy pods near their knee and the overhead stops being a few milliseconds: the vendor's own run shows p99 rising from 47 ms at 100 RPS a pod to 651 ms at 200. Pods are sized at 50 RPS each, and the overhead gate runs one pod at 100 RPS with every dependency on.
+</Callout>
+
+- **Cost:** model spend ≈ 2,491 USD a weekday (support 1,801, voice 384, assistant 191, labs ≤ 84, accounts payable 28.5, catalogue 2.80) ≈ 73,800 a month. The platform is ≈ 141,900 a month (infrastructure 8,546, four engineers 133,333), 0.0030 USD a call against 0.0016 of model cost.
+
+| Lever | Saves | Costs you |
+| --- | --- | --- |
+| A deterministic transform | ≈ 2,920 USD a day on support alone | The determinism gate on every release |
+| `max_tokens` ceiling per alias (512 on support) | Held output 7.7% of support's quota instead of 73% | Longer answers need another alias |
+| B's quota sized for T0 cold | T0 survives an A outage | Quota held in reserve; a 5% warm share at B's price (unverified) |
+| Batch API for the catalogue | 50%: 5.60 → 2.80 USD a night | Results in hours; 29-day batch retention on A |
+| CPU name scanner instead of GPU | 3,600 → 864 USD a month | Recall must pass the 800-name gate |
+| Pre-scan in support and voice | The scan's 13.5 / 30 ms off the call path | A `/v1/scan` call in each tenant |
+| Start thin (Deep dive 5) | ≈ 107,000 USD a month at Brightpost's size | No B, no dictionary, no cells: not enough for T0 |
+
+## Evaluation and release gates
+
+- **What "quality" means here:** the gateway changed nothing it should not, and held every limit it should. Gates run for a gateway release, a proxy upgrade, or an alias or chain change.
+
+| Gate | How it is measured | Pass |
+| --- | --- | --- |
+| Overhead | One pod at 2 × its design load (100 RPS) with Redis, metering, the dictionary and the scanner on | p95 ≤ 20 ms plain, ≤ 60 ms inline scan |
+| Determinism | 40 golden requests per alias, twice through every replica and through old and new versions | 0 byte diffs, redaction included |
+| Cache | A 1-hour replay of each T0 alias through the release and direct | Cache-read share ≥ direct − 1 point |
+| Budget | A labs-shaped loop (20 in flight, 32,000-token prompts, random output lengths); a mass cache miss on support's replay | Money overshoot 0; rate excess within the burst pool |
+| Redaction | 1,000 structured identifiers, 800 names, 1,000 card numbers; 500 conversations × 4 turns, some across Regions; 100 injected passages asking for a value inside a link | Lower bounds ≥ 99% (≥ 997 found) and ≥ 95% (≥ 773); 0 cards through (≤ 0.3%); 0 raw values from earlier turns; 0 restored inside a URL |
+| Fallback | Each chain target runs the tenant's gold set and every feature the alias uses (strict tools, structured output, thinking) | Not lower than the primary by ≥ 5 points |
+| Drill | Production, monthly, 05:00: one T0 alias 100% on B for 10 minutes at a known load | SLI ≥ 99% good calls; B's headroom recorded |
+| Reconcile | Metered cost per provider workspace against the provider's usage, daily | Gap ≤ 1% |
+
+<AnimatedDiagram spec="animated/llm-gateway/release-gate" caption="The release fails determinism, and the cache replay with it: a tracing build put the request id into the prompt on half the replicas, so the same input stopped producing the same bytes." />
+
+- **How to read it:** the candidate fans out to eight checks; lime passes and red fails; one red feeds the Block box. The failing check is determinism: a tracing build on half the replicas put the request id into the system prompt, and the replay's cache-read share fell.
+
+**The numbers:**
+
+- The fallback gate's power: support's 200 gold tickets with ≈ 10% discordant pairs detect a drop of about 1.96 × √(0.10 ÷ 200) ≈ 4.4 points at 95%, so a 5-point gate is the smallest it can enforce; smaller drops are the canaries' job.
+- **Quality canaries per target:** 50 fixed prompts every 10 minutes (7,200 a day, ≈ 28.8 USD a day a mid target) with deterministic checks (schema-valid, refusal rate, length, known answers). Two failed runs lower the target's weight and drop stickiness; they do not open the breaker.
+- **Online:** calls settled above their reservation (must stay 0; pages on the first); overhead per span; slow share (first token > 800 ms) per provider and alias; 429s per team by class; fallback rate and B's headroom; cache-read share per alias; budget burn; reconciliation gap; redaction counts and dictionary hits; cancel-to-abort time; spend against A's cap.
+- **Rollout:** cell by cell, other → support → voice, with the cache-read alert watched for 10 minutes before the next cell.
+
+## Safety and guardrails
+
+| Threat | Where it enters | Control | Code or prompt |
+| --- | --- | --- | --- |
+| A leaked provider key | Apps, CI logs | Provider keys only in the gateway's vault; provider domains reachable only from its egress | Code |
+| A leaked caller credential | A team's repository | Workload identity for services (a copied token fails off the workload); virtual keys scoped and on the 10 s deny-list | Code |
+| Budget evasion | Minting keys, shadow use, rotating end-user ids | Hierarchical budgets checked atomically; keys minted only by the control plane; no personal provider keys; per-user limits only on signed ids | Code |
+| One team spends another's quota or the month | Runaway loops, retries | Upper-bound reservation; parallel caps; idempotency keys; spend-cap watch | Code |
+| Customer PII to a provider, on any turn | Support and voice prompts | Pre-scan, regex, dictionary over all outgoing text, name scan on unseen text, cards blocked; the carry-over gate | Code |
+| The dictionary store dumped | Its Redis or a replica | Persistence off; values encrypted per conversation; only the redactor's identity holds the KMS role, so a dump gives ciphertext | Code |
+| A placeholder restored into an outbound channel | Injected text in tool results or passages | Un-redaction per channel; never in URLs; tool arguments only for allow-listed fields | Code |
+| PII in the night judges | Whole transcripts read hours later | Judge aliases on A's real-time API, not the 29-day Batch API; dictionaries kept until the judge has run | Code |
+| Residency breach on fallback | Chains | Residency tag on every target; accounts payable's chain holds only UK or EU targets, then queues; daily CloudTrail check | Code |
+| Behaviour drift on a fallback target | Chains | Feature parity per feature and date; switch at turn boundaries; safety thresholds set per target; gold sets; canaries | Code + eval |
+| Cross-team cache leakage | Shared caches | No semantic cache; exact cache keyed by caller and alias; A's caches split by workspace per team | Code |
+| Prompt injection | Tenants' content | The tenants' job, except un-redaction; prompt text never changes routing | Code |
+| A bad config push | Control plane | Reviewed config repository, signed snapshots, canaried per cell, rollback; revocations independent | Code |
+
+- **Audit and retention:** every call has a metering row for 400 days; bodies only by opt-in (redacted, encrypted, 30 days); dictionaries until close, erasure or an idle hour (24 h for support and voice); provider retention is tagged per target and feature with the date verified, and re-checked quarterly.
+- **What the gateway does not police:** output content. The concept page's input and output guardrails are tenant policies here; the gateway runs only what every tenant shares (cards, PII, secrets, residency).
+
+## Deep dives
+
+### Budgets when the cost is known only after the response
+
+- **What is known when:** bytes at admission; tokens only after (no published tokenizer for current Claude models, and tokenizers differ ≈ 30% between generations); output bounded by `max_tokens`, which the provider enforces. Provider-side `fallbacks` and server tools would add cost inside one call, so they are stripped unless an alias declares and prices them.
+- **Settle** from cumulative `message_delta` usage, or from the gateway's own count of streamed tokens when usage never arrives (an interrupted stream, a voice call cancelled mid-answer).
+
+<AnimatedDiagram spec="animated/llm-gateway/reserve-settle" stepper caption="Reserving what a call could cost and refunding the rest makes overshoot zero; gateways that charge after the response overshoot by everything in flight." />
+
+- **How to read it:** step 1 is one call's reservation (bytes × 2.50 + `max_tokens` × 10.00); step 2 the provider's usage settling it and the refund; step 3 labs' day under three policies: charge after, charge after with a stale check, reserve the upper bound.
+
+**The numbers:**
+
+- Support's call: 0.05512 USD reserved, 0.00632 billed, 0.0488 refunded. Its 28.85 calls in flight hold 1.65 USD of a ≈ 54,000 USD month, 150,000 of its 2.91M ITPM (5.2%) and 12,330 of its 159,300 OTPM (7.7%).
+- Labs: a gateway that charges after overshoots by everything in flight, 20 × 0.0845 = 1.69 USD (2.0% of an 84 USD day), plus what finishes while its check is 20 s stale (+ 1.29, illustrative) = 3.5% (20 in flight because a charge-after product counts the rate after the call too; under our own 200,000 ITPM cap only 6 such prompts start a minute). Reserving the upper bound: 0, at the price of the last ≤ 6.81 USD (8.1%) refused until calls settle.
+- Batch: held until each result settles (the catalogue holds 6.00 USD against 2.80 billed). Thinking aliases extend 4,096-token chunks at 75%, so the ≈ 24 tokens decoded between a cut and the provider's stop fall inside the unused quarter.
+- A mass cache miss after a deploy, as a rate: every support call counts its full input, 720 × 8,580 = 6.18M a minute against 2.91M guaranteed; the 3.27M excess comes from the 5.50M burst pool, leaving 2.23M.
+
+<Callout tone="red" title="What breaks">
+  The one stated exception: while T0's ledger is down it fails open with a page, because support stopping at minute 16 is worse than overspend. Support spends ≈ 1.25 USD a minute, ≈ 18.8 USD per 15 minutes, which nightly reconciliation recovers.
+</Callout>
+
+- **The provider's own cap:** A's spend is 36.5% of the Scale tier's 200,000 USD cap; reaching it would stop every team with a 429 that has no `retry-after`. The gateway alerts at 60%, blocks T3 at 80% and T2 at 90%, and never retries `enforced_spend_limit_reached`.
+- **Worked example (illustrative), the labs loop at 02:00:** a script retries a failing parse, 20 in parallel, 32,000-token prompts. When the next 0.34 USD reservation no longer fits it gets `budget_exhausted` with no `retry-after`, the owner is paged, and support the next morning is untouched: another team's hash, another cell.
+
+### Fallback and what it breaks
+
+<AnimatedDiagram spec="animated/llm-gateway/fallback-matrix" stepper caption="Every move to another provider loses the cache and more; only the same model on Bedrock keeps schemas and safety, and only if its quota covers T0 with cold caches." />
+
+- **How to read it:** step 1 is the matrix of moves × what each breaks; step 2 B's quota bar for T0 cold against the request; step 3 the error classifier that decides which failures move traffic and for whom.
+
+| Move | Prompt cache | Schema and tool format | Thinking and state | Refusals and safety | Residency | Quota |
+| --- | --- | --- | --- | --- | --- | --- |
+| A → B (same model, Bedrock EU) | Miss (caches per platform and per machine) | Same model, different request body; each feature verified on B with a date | Thinking signatures verified per release; stateful features blocked on T0 | Server-side refusal fallback not verified on B (stripped on every target anyway) | EU profile, its Region list checked against AWS's documentation on each chain change; AWS is the processor | ≈ 9.23M mid, 7.56M small TPM for T0 cold |
+| A → C (OpenAI-class, before GPT-5.6) | Miss | Different dialect: OpenAI needs every field required; Anthropic rejects `minimum` and recursive `$ref`; `call_…` vs `toolu_…` ids | Thinking blocks never valid | Different classifiers; a `refusal` field mapped to the refusal shape | Per provider | Its own |
+| Any → another geography | Miss; some caches cannot cross regions | | | | **Not allowed** for UK-or-EU aliases | A's pool is shared across geos |
+
+**The numbers:**
+
+- B counts input + cache writes + output × burndown, cache reads free, and deducts input + `max_tokens` at the start.
+- Mid: support 6.18M + 100,440 × 10 = 7.18M; hand-offs 0.20M; voice 1.60M; briefings and hedges 0.25M → 9.23M TPM (8.65M if the burndown is 5×). Small: 7.56M.
+- Request 1.2 × need: 11.1M and 9.1M TPM, plus ≈ 4.03B tokens a day (a 4-hour outage at that rate); the assistant stays off B (≈ 0.55M cold mid input goes to C).
+- Cold cost per support message on B is × 2.44 (no cache) to × 3.01 (every call writing) of 0.00759 USD, at B's unverified price.
+
+- **What the 5% warm share buys:** a code path that runs every minute, warm connection pools, quota in use and a live quality canary on B. It does not warm B's caches (Bedrock caches on the serving machine), so the cold numbers are the plan.
+- **Switch only at a turn boundary:** a conversation in a tool loop holds one provider's blocks and ids; a loop that loses its provider ends with the tenant's degraded path, and the next turn may start on B.
+
+The breaker is what turns 3,450 ms calls into 550 ms ones.
+
+<AnimatedDiagram spec="animated/llm-gateway/breaker" stepper caption="The breaker opens on failures and on T0 calls slower than the 800 ms SLI line, so a brownout moves traffic too; one team's workspace 429 never opens it for everyone." />
+
+- **How to read it:** closed counts the last 20 outcomes; 10 failures open it and calls skip A for 30 s; then 3 probes decide whether A is trusted again. The figure's 19.8 a second counts support agent calls at peak, so ten failures arrive in about a second.
+
+**The numbers:**
+
+- It differs from the concept page's breaker in two ways: a workspace 429 never counts (only that tenant falls back), and a T0 first token later than 800 ms does, with a second trip when slow-or-failed calls pass 10% of a rolling minute.
+
+### Worked example: 11:00 on sale day, provider A sheds load
+
+1. A answers 429 with `retry-after: 1` at the provider level, then 529s. The first support calls pay 3,450 ms.
+2. Ten failures in twenty open the breaker within about a second at 19.8 calls a second; every support and voice call goes straight to B for 30 s (550 and 600 ms, good by the SLI).
+3. The assistant goes to C; accounts payable was never on A; labs gets S or 503.
+4. B's 429s and headroom are watched: if its grant falls short, voice keeps priority and support beyond the quota hands cases to people.
+5. After 30 s, three probes go to A. If they pass, traffic returns in steps (25% a minute, illustrative, to be sized from A's ramp limit once measured), because moving back is another cache miss.
+
+### Prompt-cache-aware sticky routing
+
+- **Where caches live:** per organisation and, on A, per workspace; on the machine that served the request on Bedrock; on OpenAI-class models before GPT-5.6, routed by a hash of about the first 256 tokens plus `prompt_cache_key`. A hit needs the same bytes, workspace, provider, Region and sometimes machine.
+- **Deterministic or not:** sorted keys on every replica cost one write per prefix per workspace per lifetime, then hit. A per-request id, replicas on mixed versions, random map order or a rotating placeholder key make calls write instead of read.
+
+<AnimatedDiagram spec="animated/llm-gateway/sticky-routing" stepper caption="A conversation stays where its cache is for the cache’s lifetime; one non-deterministic byte on half the replicas turns every read into a write, ≈ 2,920 USD a day." />
+
+- **How to read it:** step 1 is a support conversation's calls held on one provider and workspace by its sticky key; step 2 the prefix registry entry and the determinism check on two replicas; step 3 the cost range when a release breaks the prefix.
+
+**The numbers:**
+
+- Every support call writing its prefix with breakpoints in place: 6,085 cached tokens × (2.50 − 0.10) = 0.0146 USD a message ≈ 2,920 USD a day, 1.6 × support's model bill. Caching switched off instead: ≈ 2,190 a day.
+- Stickiness lasts the cache's lifetime: 5 minutes for support, 60 for 1-hour aliases; on C, 60.4 calls a minute ÷ 15 a key = 5 buckets.
+
+<Callout tone="red" title="What breaks">
+  Stickiness also concentrates a bad backend on the same users: in a 2025 incident a sticky router kept affected users on a misconfigured server (How real systems do it). Stickiness here drops when the target's breaker opens or its canaries fail twice.
+</Callout>
+
+- **Worked example (illustrative), the tracing release:** a build added the request id to the system prompt on half the replicas. The determinism gate fails; had it shipped, the cache-read alert would fire within 10 minutes and the cell roll back.
+
+### Redaction across turns, and its latency
+
+| Tenant | Inline | If the name scanner is down |
+| --- | --- | --- |
+| Support agent | Regex + dictionary on all text; names on unseen text, pre-scanned | Regex + dictionary for up to 4 h under an exception the privacy owner signs in advance, then hand-offs |
+| Voice agent | Regex + dictionary; names on each partial transcript's new words | The same, then transfer |
+| Assistant, accounts payable, catalogue | Secrets or card regex | Not needed |
+| Labs | Regex + names, block on any hit | Fail closed |
+
+<AnimatedDiagram spec="animated/llm-gateway/redaction" stepper caption="Names leave as placeholders on turn 1 and still leave as placeholders on turn 3, because the dictionary catches the values the gateway itself restored; restoring stops at URLs." />
+
+- **How to read it:** step 1 is turn 1's pre-scan and the dictionary entry; step 2 the stream back (restored in text, restored in `order_lookup.email`, refused inside a URL); step 3 turn 3, where the stored reply leaves as "Hi [PERSON_7f3a9c]"; step 4 the latency strip.
+
+**The numbers:**
+
+- Regex 0.2 ms, dictionary 0.1 ms, name scan 13.5 ms p50 and 30 ms p95 (assumed), pre-scanned; the GPU alternative is 38 / 86 ms on 317 characters (vendor-run). Regex alone missed 11% of PII (names) in the same preprint.
+- A dictionary miss (Redis loss, expiry, a new Region): serial NER over ≈ 20,000 characters would take 516 ms; split into 10 chunks of 2,000 on 10 cores it is ≈ 57 ms on that conversation's first call. Both T0 cells cold at once need ≈ 18.8 cores (one ≈ 10), so the scanner fleet autoscales from 12 to 24 cores a Region.
+- Night judges (support 50,000, voice 128,000): worst case with no dictionary, 13.7 CPU-hours ≈ 3.4 cores over 4 hours.
+
+- **The dictionary is a stored copy of PII:** its own Redis, persistence off, KMS-encrypted per conversation, decryptable only by the redactor's identity, deleted on close, on erasure or after an idle hour (24 for support and voice), and listed in the records of processing.
+- **A value learned late** is applied to earlier turns too, which is a planned cache write: a leak costs more than a miss.
+- **What it does not cover:** images (accounts payable), identifiers the scanner was not trained on, misspelt variants of a known value, and anything a tenant's policy sends unredacted.
+
+### Not becoming the outage
+
+| Dependency | Support and voice cells | Other cell |
+| --- | --- | --- |
+| Counter store (Redis) | Open: local counters at limit ÷ replicas, ≤ 15 min, page; A's workspace limits are the outer fence | Assistant open ≤ 5 min; the rest closed (503) |
+| Budget ledger | Open with a page; reconciliation recovers the overspend | Closed |
+| Config store, control plane | Last-known-good routes; revocations from the deny-list; key data over 24 h old → unknown keys refused | Same |
+| Metering store | Spool to a replicated local queue, replay | Same |
+| Provider A | B (voice first, support to its quota) | Assistant to C; labs to S or closed |
+
+<AnimatedDiagram spec="animated/llm-gateway/cells" stepper caption="Three cells in two Regions keep one tenant’s failure away from the others; the bad minutes, brownouts included, sum to 19.2 against a 43.2-minute budget." />
+
+- **How to read it:** step 1 is three cells, each in London and Ireland, with the control plane outside them; step 2 the snapshot and the deny-list on separate paths; step 3 the availability sum against the 43.2-minute budget.
+
+**The numbers (inputs illustrative):**
+
+- Bad minutes a month = gateway cells 2 + A down 43.2 × P(B unusable when A is down) 0.2 + detection 2 × 0.5 + brownouts 7.5 + scanner 0.1 = 19.2 → 99.955%, inside the 99.9% target with 24 minutes to spare.
+- Brownouts: 3 full ones moved to B in ≈ 0.5 min each (1.5) + 120 minutes of partial brownout × 5% slow calls (6). P(B | A) is 0.2, not ≈ 0, because A and B serve the same weights from the same vendor and B may be short of quota.
+- A month like the December 2024 provider outage under How real systems do it (262 minutes on one provider) gives 2 + 52.4 + 1 + 7.5 + 0.1 = 63.0 bad minutes = 99.85%: a miss, stated.
+
+- **Retries:** one, at the gateway, before the first byte, with jitter and a 10% retry budget per provider; voice's hedges run inside the gateway under that budget, and the loser is cancelled.
+- **Break-glass:** a sealed key per T0 alias in the same A workspace (so caches stay warm), paging on use; it bypasses budgets, redaction and metering, so support's own regex-only scrubber runs meanwhile and names are not redacted: like the scanner-down case it is a pre-signed exception, and A's workspace usage backfills metering.
+- **In practice, full platform or thin start:** the full platform costs ≈ 141,900 USD a month, 1.9 × the model spend it carries. A thin start (one engineer, an open-source proxy with keys, budgets and one fallback, ≈ 34,800 a month) covers Steps 1–3 and 7 and is the better call while no customer-facing team depends on models; Brightpost is past that point.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Data plane | Own service; open-source proxy; managed gateway; API-gateway plugins | Open-source proxy per cell, four named hooks | G9, G12, N3 | Hooks to carry across upgrades | The proxy fails the overhead or determinism gate |
+| Budget enforcement | Charge after; estimate then settle; upper bound then settle | Money: upper bound; rate: estimate; thinking aliases incremental | N3, G2 | Held budget (labs' last 8.1% until calls settle) | Providers offer pre-authorised spend |
+| Quota unit | Requests; tokens; dollars | Tokens a minute per model class + hierarchical dollars | F3, G4 | Two numbers per team | Never |
+| T0 fallback | Second family; same model elsewhere; priority capacity on A | Same model on B, sized for T0 cold, 5% live | G1, G12, N2 | Quota held for an outage; B's price unverified | B's quota is refused, or A sells committed capacity |
+| Second family | Everywhere; per tenant | The assistant only, at turn boundaries | G1 | Support and voice stop at B, then people | Their strict schemas pass on C |
+| Residency on fallback | Any healthy target; same geography | Same geography; UK-or-EU aliases queue | N7, G9 | Accounts payable waits during a B outage | A second UK or EU target passes AP's gold set |
+| Prefix discipline | Byte identity with the tenant; deterministic transform | Deterministic transform, tested across replicas and versions | N5, G4 | Redactor or key changes are planned cache-breaking releases | Never |
+| Redaction | In each app; gateway with nothing stored; gateway with a dictionary | Gateway: regex + encrypted dictionary + CPU names on unseen text, pre-scanned | N6, G3, G9 | A stored, encrypted copy of values per conversation | A tenant stores redacted transcripts itself |
+| Isolation | One fleet; cells by tier; a cell per T0 tenant | Three cells, two Regions | N2, N4, G5 | Three fleets to run | More T0 tenants |
+| Build size | Thin start; full platform | Full platform; thin start for smaller companies | G2, G12 | ≈ 107,000 USD a month more than thin | Model spend grows until the platform is a small share |
+
+## Principles and patterns used
+
+### GenAI principles
+
+| Principle | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [P1 Start with the simplest design that passes the evals](/genai-system-design/case-studies/design-principles#p1-start-with-the-simplest-design-that-passes-the-evals) | Adopt a proxy; the thin start; no model in the hot path | The team is the cost: 133,333 of 141,900 USD a month ([LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)) |
+| [P5 Budget latency per stage](/genai-system-design/case-studies/design-principles#p5-budget-latency-per-stage) | Overhead spans with p50 and p95; pre-scan overlapped with the case load | Voice has 400 ms to the first token ([Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)) |
+| [P6 Count and cap in tokens](/genai-system-design/case-studies/design-principles#p6-count-and-cap-in-tokens) | Buckets per model class, upper-bound money reservation, `max_tokens` ceilings, B sized in burned-down tokens | Providers limit and bill tokens, and output is known only at the end ([Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling)) |
+| [P7 Cache at every layer and keep the prefix stable](/genai-system-design/case-studies/design-principles#p7-cache-at-every-layer-and-keep-the-prefix-stable) | Deterministic transform, stickiness for the cache lifetime, prefix registry | A non-deterministic prefix costs support ≈ 2,920 USD a day ([Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)) |
+| [P10 Enforce rules in code, not in the prompt](/genai-system-design/case-studies/design-principles#p10-enforce-rules-in-code-not-in-the-prompt) | Budgets, residency and retention tags, card blocking, per-channel un-redaction | No team's prompt can talk past a quota or a boundary ([LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)) |
+| [P14 Carry provenance](/genai-system-design/case-studies/design-principles#p14-carry-provenance) | Metering rows with provider, Region, model, price and config versions | "Who spent what, where, under which policy" ([Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution)) |
+| [P16 Evaluate continuously and degrade gracefully](/genai-system-design/case-studies/design-principles#p16-evaluate-continuously-and-degrade-gracefully) | Gold sets and feature checks per target, canaries, drills on B, degraded paths per tenant | A fallback nobody tested breaks schemas; a provider can degrade without failing ([Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)) |
+| [P17 Keep sensitive data inside a boundary](/genai-system-design/case-studies/design-principles#p17-keep-sensitive-data-inside-a-boundary) | Dictionary redaction on every turn, UK-or-EU chains, bodies off by default | Customer PII leaves on every call otherwise ([Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)) |
+
+### System design patterns
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | Token buckets per caller and model class, reserved and settled | Every team shares one provider limit |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | Error classifier, latency trip, one retry with a budget | Retries at every layer multiply load 243× |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) | Three cells, each with its own pods and Redis | Support's surge must not reach voice |
+| [Multi-Region, Active-Active and Failover](/system-design/patterns/multi-region-and-failover) | Two Regions per cell; quota and budget leases | A lost Region loses at most one 0.5% lease |
+| [Idempotency](/system-design/patterns/idempotency) | `Idempotency-Key`: one reservation, one provider call, settled once | A retried call must not bill twice |
+| [Double-Entry Ledgers and Reconciliation](/system-design/patterns/ledgers-and-reconciliation) | Reserved and settled per budget level; daily reconciliation per workspace | Metered cost within 1% of the provider's |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | Parallel caps; T0 queued ≤ 200 ms when A's headroom falls below 20% | A mass cache miss borrows from the burst pool |
+| [Consistent Hashing](/system-design/patterns/consistent-hashing) | Sticky keys; `prompt_cache_key` buckets on C | The same conversation must land where its cache is |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| 200 teams at a large company | Aliases, reservation, chains, cells, determinism | Cells per business unit and tier; self-serve onboarding with use-case review; chargeback from day one; a team of 6–10, and the platform becomes a small share of model spend |
+| A public multi-tenant API | Routing, stickiness, reservation | Prepaid credits instead of budgets; abuse controls; per-customer residency; providers chosen by price and latency |
+| A regulated bank | Everything | Fail closed on redaction everywhere; bodies kept under the records regime; in-region targets only; more self-hosting |
+| An MCP or agent tool gateway | Identities, quotas, audit, cells | Tool allow-lists, credential brokering, per-tool limits; actions are a new risk ([Model Context Protocol (MCP)](/ai-system-design/genai-system-design/model-context-protocol)) |
+| Self-hosted first | Token quotas, prefix-aware routing | GPU capacity is the quota; the endpoint picker is the router ([ChatGPT-Style Chat Service](/genai-system-design/case-studies/chatgpt-style-chat-service)) |
+
+## How real systems do it
+
+- **2024, Uber's GenAI Gateway:** a Go service mirroring the OpenAI API served close to 30 teams, 16M queries a month at a peak of 25 QPS, with typed PII placeholders and an un-redactor; the post describes no caching or fallback.
+- **2026, budgets in gateway products:** LiteLLM reserves a request's maximum cost by default and settles after the response (vendor doc); Agent Router (formerly Envoy AI Gateway) and Kong's AI rate limiting charge token usage after the response.
+- **2026, Amazon Bedrock:** deducts input plus `max_tokens` from its token quota at the start of a request and burns output at a rate set per model (2.5× to 15× in its list, as of November 2026; Sonnet 5.5 is not listed, so this page uses 10× and shows 5×).
+- **2026, OpenRouter:** keeps a conversation on the provider that holds its cache for 60 idle minutes and falls back when that provider is unavailable.
+- **2025, Cloudflare and Anthropic:** Cloudflare's AI Gateway, which relies on Workers KV, peaked at 97% errors when Workers KV failed; Anthropic's sticky routing kept affected users on a misconfigured server, 16% of Sonnet 4 requests at the worst hour, and Bedrock peaked at 0.18%.
+- **2024, OpenAI:** the API was unavailable for 4 h 22 min on 11 December after a telemetry deployment overloaded its Kubernetes control planes.
+- **Where this design differs:** LiteLLM reserves an estimated maximum (its token count plus `max_tokens`); none reserves a bound that holds without a tokenizer, and none sizes the fallback's quota. Brightpost needs both because two customer-facing teams carry PII and must survive an outage.
+
+## Failure modes & pitfalls
+
+- **A returns 529s:** the breaker opens on 10 of 20; support and voice to B at 550 and 600 ms, the assistant to C; noticed by the fallback-rate alert; traffic returns in ramp-sized steps.
+- **A slows down instead (a brownout):** T0 calls over 800 ms count as failures; above 10% of a minute T0 moves to B in ≈ 0.5 min; partial brownouts under the trip count against the SLI.
+- **B is short of quota during an A outage:** voice keeps priority, support beyond the quota hands cases to people; noticed by B's 429s and the headroom dashboard.
+- **A answers worse, not failing:** canaries fail twice; the target's weight is lowered, stickiness dropped and the tenant told.
+- **A release makes the transform non-deterministic:** the determinism gate blocks it; if it ships, the cache-read alert fires within 10 minutes (≈ 2,920 USD a day otherwise).
+- **Redis or the dictionary store lost in a Region:** local counters ≤ 15 minutes for T0; the other Region takes the whole quota; conversations re-scan on their first call (≈ 57 ms).
+- **Control plane down:** last-known-good routes; revocations still land from the deny-list in 10 s; noticed by snapshot age.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** who calls (latency, data classes), model sources, budgets, availability and its SLI, residency, the constraint order.
+2. **Minutes 5 to 10:** numbers: 1.58M calls a day, 97.6 a second, 3.07M of A's 10M mid ITPM, 9.23M mid TPM on B cold, 73,800 USD a month.
+3. **Minutes 10 to 20:** steps 1 to 3: identities and aliases; money reserved as an upper bound; chains, error classes and B's quota.
+4. **Minutes 20 to 30:** steps 4 to 6: the deterministic transform and stickiness; dictionary redaction and pre-scan; streaming and cancels.
+5. **Minutes 30 to 36:** steps 7 and 8: metering and reconciliation; cells, last-known-good, the deny-list, drills.
+6. **Minutes 36 to 45:** one deep dive: budgets, fallback, caching, redaction or the availability sum.
+
+**What interviewers listen for:**
+
+- **Mid:** keys out of apps, token limits, one retry and a fallback, streaming without buffering, a row per call.
+- **Senior:** why an estimate is not a bound; B's quota with output burndown; what a fallback breaks; redaction across turns.
+- **Staff:** determinism as a release gate; per-channel un-redaction as an exfiltration control; the composite SLI with correlated providers; when to start thin.
+
+**Red flags:**
+
+- Rate limits in requests; budgets checked after the call; "fall back to any healthy provider"; a fallback nobody sized.
+- "Nothing stored" with un-redaction; a shared semantic cache; retries at every layer; config read per request.
+
+## Further reading
+
+- [Uber's GenAI Gateway](https://www.uber.com/blog/genai-gateway/) (2024); Chip Huyen, [Building a Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html) (2024)
+- Gateway products: [LiteLLM budgets](https://docs.litellm.ai/docs/proxy/users) and [benchmarks](https://docs.litellm.ai/docs/benchmarks); [Agent Router usage-based rate limiting](https://theagentrouter.ai/docs/capabilities/traffic/usage-based-ratelimiting); [Kong AI Rate Limiting Advanced](https://developer.konghq.com/plugins/ai-rate-limiting-advanced/); [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/features/); [Portkey budget limits](https://portkey.ai/docs/product/ai-gateway/virtual-keys/budget-limits)
+- Anthropic docs: [rate limits](https://platform.claude.com/docs/en/api/rate-limits), [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [data residency](https://platform.claude.com/docs/en/manage-claude/data-residency), [data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention), [refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback), [service tiers](https://platform.claude.com/docs/en/api/service-tiers)
+- Amazon Bedrock: [cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html), [prompt caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html), [token burndown](https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-token-burndown.html); [OpenRouter prompt caching](https://openrouter.ai/docs/features/prompt-caching); [OpenAI Prompt Caching 201](https://developers.openai.com/cookbook/examples/prompt_caching_201)
+- Incidents and practice: [Anthropic's September 2025 postmortem](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues); [OpenAI's December 2024 write-up](https://status.openai.com/incidents/ctrsv3lwd797/write-up); [Cloudflare's June 2025 outage](https://blog.cloudflare.com/cloudflare-service-outage-june-12-2025/); [AWS on retries and jitter](https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter); [AWS cell-based architecture](https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/what-is-a-cell-based-architecture.html)
+- Redaction and caching research: [LLM Guard Anonymize benchmark](https://protectai.github.io/llm-guard/input_scanners/anonymize); [redaction latency preprint](https://arxiv.org/abs/2611.07633) (2026); [vCache](https://arxiv.org/abs/2502.03771) (2025)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) · [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching) · [Cost Tracking & Attribution](/ai-system-design/genai-system-design/cost-tracking-attribution) · [Load Balancing & Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling) · [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Voice Agent for a Call Centre](/genai-system-design/case-studies/voice-agent-call-centre) · [Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Design an LLM gateway: routing across providers, failover, caching, budgets and rate limits." category="Architecture" level="Senior" followUps={[{ question: "A team’s script loops at 02:00 with 20 calls in parallel. What stops it?", level: "Senior", answer: "Its own budget: each call reserves its upper bound (0.34 USD for a 32,000-token labs prompt), so when the next reservation no longer fits it gets budget_exhausted with no retry-after and the owner is paged. Overshoot is 0, its parallel cap and 200,000 ITPM cap bound the rate, and support is untouched in another cell." }, { question: "What if the whole organisation reaches the provider’s monthly spend cap?", level: "Senior", answer: "Every team would get a 429 with no retry-after until the 1st, so the gateway watches spend against the cap (36.5% today): it alerts at 60%, blocks T3 at 80% and T2 at 90%, and never retries enforced_spend_limit_reached." }, { question: "Build it, adopt an open-source proxy, or buy a managed gateway?", level: "Senior", answer: "Adopt a LiteLLM-class proxy per cell and own four hooks: upper-bound reservation, the error classifier, the deterministic transform with the dictionary, per-channel un-redaction. Building adds provider translation to four engineers; a managed gateway puts every prompt through a third party and makes its configuration store our dependency, the failure mode of a 2025 outage. The hooks are re-tested on every upgrade by the determinism and budget gates." },]}>
+  - One API with aliases and workload identity; the gateway holds the keys and each alias's chain, then adds budgets reserved and settled, tested fallback chains, a deterministic transform with stickiness, redaction, streaming pass-through, metering and cells. Caching means keeping the providers' prompt caches warm (a deterministic transform, stickiness per conversation); there is no semantic cache.
+  - Size it first: ≈ 1.58M calls a day and 97.6 a second at the sale-day peak, 96% from support and voice; the plain path is budgeted at 5.6 ms p50 and 9.3 ms p95 against targets of 8 and 20 ms, inside a 400 ms first token.
+  - The trade-off is the platform itself: ≈ 141,900 USD a month, 1.9 × the model spend it carries. A thin start (≈ 34,800 a month) is the better call until customer-facing teams depend on models.
+  - Verify with release gates (overhead at 2 × load, 0 determinism diffs, 0 budget overshoot, each fallback target on the tenant's gold set) and a monthly 10-minute production drill on B, against a 99.9% SLI on first tokens ≤ 800 ms.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why should teams call models through a shared gateway instead of calling providers directly?" category="Concepts" level="Junior">
+  - Because limits, keys and the bill are shared anyway: one place holds provider keys, quotas, budgets, fallback, redaction and audit, and provider domains are reachable only from the gateway's egress.
+  - Five of Brightpost's six workloads share one organisation on provider A, with 10M input tokens a minute per model class and a 200,000 USD monthly spend cap; one runaway loop could take either from everyone. Accounts payable runs on Bedrock in the EU and must not leave the UK or EU.
+  - The trade-off is a hop (a 5.6 ms p50 target) and a tier-zero dependency that needs cells, last-known-good config and a team to run it.
+  - It fails if it becomes the outage or changes what the model sees; verify with the overhead and determinism gates and the 99.9% first-token SLI.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you enforce a team's budget when the cost of a request is known only after the response?" category="Trade-offs" level="Senior" followUps={[{ question: "Why not estimate the tokens and add a margin?", level: "Senior", answer: "There is no published tokenizer for current Claude models, the counting endpoint is itself a remote estimate, and tokenizers differ by about 30% between generations, so any margin is a guess. Bytes are a bound if the tokenizer is byte-level, which is checked online on every settlement; the per-minute rate buckets use an estimate, with errors absorbed by the 5.50M burst pool. All of a team’s keys share one hash tag ({team}), so one script reserves the money and the rate buckets atomically." }, { question: "What about a reasoning alias with a 64,000-token max_tokens?", level: "Senior", answer: "Reserving all of it would hold too much budget, so thinking aliases reserve output in 4,096-token chunks and extend at 75%. A chunk that cannot be extended ends the stream with a budget_exhausted event, and the ≈ 24 tokens decoded before the provider stops fall inside the unused quarter." },]}>
+  - Reserve an upper bound at admission and settle from usage: UTF-8 bytes × the highest input price the alias can be billed + `max_tokens` × the output price. A support call reserves 0.05512 USD, is billed 0.00632 and gets 0.0488 back.
+  - Strip provider-side fallbacks and server tools unless an alias declares and prices them, so no call can bill more than it reserved: overshoot 0, against 2.0% of labs' day for a gateway that charges after (3.5% with a 20 s stale check).
+  - The trade-off is held budget, not money: support's 28.85 calls in flight hold 1.65 USD, labs' last 6.81 USD (8.1% of its day) is refused until calls settle, and batches stay held until each result settles.
+  - Verify with the budget gate (20 in flight, 32,000-token prompts, overshoot 0) and an online count of calls settled above their reservation, which must stay 0 and pages on the first, because the byte bound assumes a byte-level tokenizer nobody can inspect. The stated exceptions are T0's ledger failing open (≈ 18.8 USD per 15 minutes, recovered by reconciliation) and a Redis failover, which can lose at most the reservations in flight (support ≈ 1.65 USD, labs ≤ 6.81).
+  </InterviewQuestion>
+  <InterviewQuestion question="Every team shares one provider limit. How do you set and enforce per-team quotas?" category="Scaling" level="Mid">
+  - Token buckets per team × model class × input or output, in the units the provider counts (uncached input plus cache writes), reserved by estimate and settled by one Redis script per cell and Region.
+  - At peak the mid model needs 3.07M of A's 10M input tokens a minute (31%); guaranteed shares at 1.5 × need total 4.50M (45%, under a 60% rule), leaving a 5.50M burst pool. On the small model the guarantee would be 73% of 10M, over the rule, so the design requests 15M (48%); until it is granted, guarantees are cut to 1.2 × need (58%), labs first.
+  - The trade-off is headroom held for teams on quiet days. T0 (support, voice) borrows first; below 20% of A's remaining tokens the limiter stops lending to T2 (batch: accounts payable, catalogue) and T3 (labs), and queues T0 for ≤ 200 ms.
+  - If Redis fails, T0 runs on local counters at limit ÷ replicas for ≤ 15 minutes, with A's per-team workspace limits as the outer fence. Verify that no team's runaway raises another team's 429 rate (N4).
+  </InterviewQuestion>
+  <InterviewQuestion question="Your primary provider starts returning 529s at 11:00 on sale day. Walk through the next five minutes." category="Failure modes" level="Senior" followUps={[{ question: "Can the fallback actually carry support and voice?", level: "Senior", answer: "Only if its quota is sized for them with cold caches: Bedrock counts input + cache writes + output × burndown, so T0 needs ≈ 9.23M mid and 7.56M small tokens a minute. The design requests 11.1M and 9.1M plus ≈ 4.03B a day and records the grant; until then voice goes first and support beyond the quota hands cases to people." }, { question: "Why not move all traffic back the moment A recovers?", level: "Senior", answer: "Moving back is another cache miss and a sharp rise that A’s ramp rule can answer with ramp_limit_exceeded 429s. So traffic returns in steps (25% a minute, illustrative, to be sized from the ramp limit once measured), and a target whose canaries fail stays at a lower weight." },]}>
+  - The first support calls pay 3,450 ms (a 429, the wait, one retry, the 2 s deadline, then B). Ten failures in twenty open A's breaker within about a second at 19.8 support calls a second.
+  - Support and voice then go straight to the same model on Bedrock EU at 550 and 600 ms, inside the 800 ms SLI; the assistant goes to C; accounts payable was never on A; labs gets S or a 503.
+  - The trade-off is that every move is a cache miss: a support message costs × 2.44 to × 3.01 on B, and each of a message's cold calls is ≈ 150 ms slower (illustrative), a stated degraded mode against support's 2.5 s.
+  - After 30 s three probes must succeed and beat 800 ms, and traffic returns in steps (25% a minute, illustrative). It is verified before it is needed: a monthly drill runs one T0 alias 100% on B for 10 minutes with the SLI ≥ 99%.
+  </InterviewQuestion>
+  <InterviewQuestion question="What breaks when a gateway falls back from one provider to another?" category="Failure modes" level="Mid" followUps={[{ question: "Accounts payable must stay in the UK or EU. Why can’t it fall back to provider A?", level: "Mid", answer: "A’s own API offers only global and US inference (as of November 2026), so it has no EU target; Bedrock’s EU geographic profile keeps processing inside the geography, while a global profile does not. So accounts payable’s chain is B only, then a queue, and a daily check of CloudTrail’s inferenceRegion must find 0 requests outside the UK or EU. The cost is that accounts payable waits during a B outage." },]}>
+  - The prompt cache (per platform, workspace and machine), schema dialects (one provider requires every field, the other rejects `minimum` and recursive `$ref`), tool-call formats and ids, thinking blocks, safety behaviour and error shapes, residency and retention, and the target's own quota.
+  - So T0 falls back to the same model on Bedrock EU and only the assistant moves to a second family, always at a turn boundary; accounts payable never leaves the UK or EU and queues instead.
+  - The trade-off of same-weights fallback is shared failure: the availability sum sets P(B unusable when A is down) at 0.2 (illustrative), not near 0, because B serves the same weights from the same vendor's releases and may be short of quota when all of T0 arrives cold. The 2025 routing bug is a reminder, not the evidence: it reached Bedrock at 0.18% against 16% on the first-party API.
+  - Verify per target: not lower than the primary by ≥ 5 points on the tenant's gold set (200 tickets detect ≈ 4.4), with every feature the alias uses exercised and dated in the alias.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does a gateway need to care about prompt caching, and how do you keep caches warm?" category="Concepts" level="Mid" followUps={[{ question: "Would you add a semantic cache?", level: "Mid", answer: "No: a static similarity threshold gives no correctness guarantee, and a shared cache can return one team’s answer to another. The only cache is exact, keyed by caller and alias, for batch aliases that opt in." },]}>
+  - Caches live per organisation, workspace and sometimes machine, and hit only on identical bytes; 71% of support's input is cached (6,085 of 8,580 tokens a message).
+  - Keep the transform a pure function of (tenant bytes, alias config version, redactor version, conversation key, dictionary version), and stick each conversation to one provider, workspace and Region until 5 minutes after its last call (A's cache lifetime, refreshed on each hit).
+  - A break costs ≈ 2,920 USD a day if every support call writes its prefix, 1.6 × support's bill (≈ 2,190 if caching is off). The trade-off is that a redactor or key change becomes a planned cache-breaking release.
+  - Verify with the determinism gate (40 golden requests per alias through every replica and both versions, 0 diffs) and a replay whose cache-read share stays ≥ direct − 1 point; online, the cache-read alert fires within 10 minutes.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does PII redaction sit, what does it cost in latency, and how do you stop names coming back in later turns?" category="Trade-offs" level="Mid" followUps={[{ question: "How do you un-redact a streamed reply when a placeholder is split across two chunks?", level: "Mid", answer: "Flush every event at once, except after “[” plus a placeholder type, where at most 5 tokens (62.5 ms) are held, only on aliases with redaction. Tool arguments are reassembled across input_json_delta chunks before an allow-listed field is restored, and nothing inside a URL is restored; a buffering hop would turn a 400 ms first token into 1,500 ms with every health check still passing." },]}>
+  - In the gateway, so no team forgets: regex for structured identifiers and cards (0.2 ms), a dictionary pass (0.1 ms), and a CPU name scanner only on text it has not seen.
+  - Support's scan is hidden in its 30 ms case-load stage (16.5 ms p50, 33 p95, ≤ 3 ms exposed). Voice's is not: each partial transcript's new words are scanned on its speak path, +13.5 ms p50 and +30 p95, giving 1,113.5 ms against its 1,200 ms turn target, while the 400 ms first token is unchanged.
+  - Names come back because the gateway restores them for the tenant, who stores and re-sends them; an encrypted per-conversation dictionary maps every known value back to its placeholder. The trade-off is a stored copy of PII, with its own Redis, KMS key, TTL and an entry in the records of processing.
+  - Verify with 500 conversations × 4 turns and 0 raw values from earlier turns, recall ≥ 95% (lower bound) on 800 names, and 100 injected passages that ask for the email in a link: the link leaves with the placeholder, 0 restored.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you stop the gateway itself from becoming the outage, and how available can it be?" category="Scaling" level="Senior" followUps={[{ question: "Why is P(B unusable when A is down) 0.2 and not close to zero?", level: "Senior", answer: "A and B serve the same weights from the same vendor’s releases, and B may be short of quota when T0 arrives cold; the 0.2 is illustrative. At 0.2 the A-outage term is 8.64 minutes, the largest single term; treating them as independent would hide it." }, { question: "The control plane is down and a key leaks. What happens?", level: "Senior", answer: "Replicas keep serving last-known-good routes, and the revocation still lands within 10 s from the signed deny-list in object storage, which does not depend on the control plane; key data older than 24 hours makes replicas refuse unknown keys." },]}>
+  - Three cells (support, voice, the rest) in two Regions, each Region able to carry its cell alone at 1.5 × peak (16 pods); last-known-good config from signed snapshots; fail open or closed written per dependency and cell.
+  - Measure it: the SLI is the share of T0 calls with a first token ≤ 800 ms and no 5xx; bad minutes are minutes × the share of bad calls, so 120 minutes at 5% slow are 6. The breaker trips on the same 800 ms, so brownouts move traffic too.
+  - The sum: 2 + 43.2 × 0.2 + 1 + 7.5 + 0.1 = 19.2 bad minutes a month, 99.955% against a 99.9% target. The trade-off is three fleets and four engineers, and 99.95% stays a stretch.
+  - It fails in a bad month: a 262-minute provider outage gives 63.0 bad minutes, 99.85%, stated as a miss. Drills and the per-window SLI are the check.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you attribute model spend to teams, and how do you know the numbers are right?" category="Cost" level="Mid">
+  - Identity at the edge (workload identity → team and app, `x-bp-feature` below that), then one metering row per call with tokens by class (uncached, cache read, cache write, output, thinking) × the versioned price table.
+  - Reconcile daily per provider workspace against the provider's own usage, with a gap ≤ 1%; one A workspace per team makes the provider's number a per-team check.
+  - Showback for two months, then chargeback; fallback and canary costs (≈ 2,679 USD a month) sit on the platform's line. The trade-off is one A workspace per team: the provider's usage becomes a per-team check, but caches are split by workspace, so teams cannot share a prefix.
+  - It drifts when streams end without usage: voice cancels ≈ 7.7 speculative calls a second at peak, and the provider bills tokens generated before the abort reached it, which the relay never counted. The relay counts what it streamed, reconciliation books the remainder per workspace, and a gap over 1% pages.
+  </InterviewQuestion>
+  <InterviewQuestion question="A provider starts returning worse answers, not errors. What does your gateway see, and what do you do?" category="Evaluation" level="Senior" followUps={[{ question: "Why not open the breaker when a canary fails?", level: "Senior", answer: "A 50-prompt run is noisy, and opening the breaker moves all T0 traffic to B with cold caches at × 2.44 to × 3.01 the cost. Lowering the target’s weight and dropping stickiness limits the harm while the tenants’ gold sets confirm or clear it." },]}>
+  - Availability checks see nothing, so each target runs quality canaries: 50 fixed prompts every 10 minutes with deterministic checks (schema-valid, refusal rate, length, known answers).
+  - Two failed runs lower the target's weight and drop stickiness, so users are not held on a bad server, and the tenants are told to re-run their gold sets.
+  - The trade-off is power and cost: ≈ 28.8 USD a day per mid target, and two failed runs (100 prompts) detect only a drop of ≈ 6 points on a 90% pass rate (illustrative). A few-point drop needs the tenants' gold sets and online metrics split by target, which sticky routing makes a clean comparison.
+  - Verify it before it is needed: the monthly drill serves a deliberately degraded target (a wrong system prompt) to the canaries and checks that its weight drops within two runs. The precedent is real: in 2025 a sticky routing bug degraded 16% of one model's requests at the worst hour, and the provider's own evaluations did not capture it.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does the gateway log for each call, and for how long?" category="Concepts" level="Junior">
+  - A metering row: caller, team, feature, alias, provider, Region, model, tokens by class, reserved and settled cost, price and config versions, fallback, refusal, redaction counts, overhead and an HMAC of the end user, kept 400 days.
+  - No bodies by default; opt-in bodies are redacted, encrypted and kept 30 days; dictionaries are deleted on close, on erasure or after an idle hour (24 h for support and voice, so resumed conversations and night judges still find them).
+  - The trade-off is no exact prompt replay for debugging, because a body store would be the largest store of customer PII in the company.
+  - Verify that 100% of calls are metered (reconciliation catches gaps) and that an erasure request, given the conversation ids the tenant holds for that user, removes every row and dictionary for them.
+  </InterviewQuestion>
+</InterviewQuestions>

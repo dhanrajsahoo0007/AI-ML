@@ -1,0 +1,244 @@
+---
+title: Hallucination & Safety Detection
+description: Detection methods, safety classifiers, grounding, and confidence signals for unreliable LLM outputs.
+updated: 2026-11-15
+---
+
+Prevention lowers the hallucination rate; it never reaches zero. Interviewers ask about detection to see whether you can catch the answers that slip through, at run time, and report a number for how often it happens.
+
+## Overview
+
+- **Detection** checks an answer after it is written: split it into **claims**, test each claim, and act on the result. Prevention (grounding, prompts, abstention) is on [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation).
+- **Faithfulness** is the number to report: **supported claims ÷ total claims**. One Brightpost answer with 3 supported claims out of 5 scores **0.60**.
+- **Three methods:** a **grounding check** (an NLI model tests each claim against retrieved passages), **self-consistency** (SelfCheckGPT: sample again, see what changes) and **token-level uncertainty** (low-probability tokens). Each is blind somewhere else, so combine two.
+- The result drives an **action ladder**: **cite, flag, abstain, hand off**. Anything that moves money or sets policy goes to a person, whatever the score.
+- **Measure** it two ways: faithfulness on a labelled set before release, and a sampled rate on live traffic after it. Check the detector against human labels, because it makes errors too.
+
+## Mental model
+
+- A bank teller checks every cheque against the account before paying it out.
+- Some cheques are obviously fine, some look odd, and a few go to the manager.
+- The teller does not try to stop forged cheques being written; the job is to catch them at the counter.
+- Detection is the counter: the model writes the cheque, and a checker compares each line with the account (the retrieved passages) before the customer is paid.
+- The bank also counts how many cheques bounce each week. That count is the faithfulness number.
+
+## Core concepts
+
+The running case is Brightpost's support assistant, which answers from a help centre of 1,200 articles. The question is a cracked kettle, order 4471, a £42 refund. Refunds over £30 need approval.
+
+1. **Claim.** One checkable statement inside an answer, such as "Returns are accepted within 30 days". Detection works on claims, not on whole answers, because one wrong claim hides inside four right ones.
+2. **Faithfulness vs factuality.** Faithfulness asks whether the claims are supported by the context the model was given. Factuality asks whether they are true in the world. Run-time detection in a RAG system measures faithfulness, because the passages are the only evidence you hold.
+3. **Entailment (NLI).** A natural-language-inference model reads a passage and a claim and labels it **entailed**, **neutral** (the passage does not say) or **contradicted**. Neutral is the hallucination case: the claim is unsupported.
+4. **Self-consistency.** Sample the same question several times at a non-zero temperature. Facts the model knows come back in every sample; invented details change. SelfCheckGPT (Manakul et al., 2023) scores each sentence by how much the samples disagree with it, with no external source and only text output from the model.
+5. **Token uncertainty.** Some APIs and engines return token probabilities. A number or a name generated with low probability is more likely a guess. It is nearly free, but models can be confidently wrong.
+6. **The action ladder.** A score has to lead somewhere: cite, flag, abstain or hand off.
+7. **Detector error.** The checker is a model too. It has its own false positives and misses, so it needs a labelled test set like any other classifier.
+
+## Architecture
+
+The detection step sits after generation and before the reader. It receives the answer and the passages the model saw, and returns a verdict per claim and a score.
+
+<AnimatedDiagram
+  spec="animated/safety/halluc-claim-check"
+  stepper
+  caption="One answer, five claims, three supported: faithfulness is 3 ÷ 5 = 0.60. The passages are illustrative help-centre sentences."
+/>
+
+1. **Split** the answer into claims (a model call, or sentence splitting for simple answers).
+2. **Gather** the retrieved passages the model used.
+3. **Check** each claim against the passages: entailed, no passage says so, or contradicted.
+4. **Score:** faithfulness = supported ÷ total. This is the RAGAS definition of faithfulness, which divides the claims in the answer that the retrieved context supports by all the claims in the answer. FActScore (Min et al., 2023) uses the same shape for long-form text: the share of atomic facts that a reliable knowledge source supports.
+
+The result for one answer is a small verdict object, which the next step reads.
+
+```json
+{
+  "answer_id": "t-4471-a1",
+  "claims": [
+    { "text": "Returns accepted within 30 days", "verdict": "supported" },
+    { "text": "Refunds arrive within 2 days", "verdict": "unsupported" },
+    { "text": "Refund £42, no approval", "verdict": "contradicted",
+      "evidence": "Refunds over £30 need approval" }
+  ],
+  "supported": 3, "total": 5, "faithfulness": 0.60
+}
+```
+
+This follows the `halluc-claim-check` figure (two of the five claims are cut to fit). Store it with the trace so a bad answer can be audited.
+
+## Technical mechanics
+
+### Three detection methods
+
+<AnimatedDiagram
+  spec="animated/safety/halluc-detect-methods"
+  stepper
+  caption="Three methods compared on what they need, what they cost and what they cannot see. The four extra samples are an illustrative choice."
+/>
+
+**Grounding check:**
+
+- Needs the passages and a small NLI model or an LLM judge.
+- It is precise on claims the passages cover, and blind when the retriever returned the wrong passage: the answer is faithful and wrong.
+- Pair it with retrieval metrics (see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+
+**Self-consistency:**
+
+- Needs nothing but the model. The cost is the samples: with 4 extra samples of the 250-token answer, you generate 5 × 250 = **1,250 output tokens** instead of 250, five times the output.
+- Its blind spot is a mistake the model makes every time, such as a wrong belief from training: all samples agree and all are wrong.
+
+**Token uncertainty:**
+
+- Needs probabilities from the serving stack, which not every API exposes.
+- It costs almost nothing, because the numbers come from the same decoding pass.
+- It flags guesses but not confident errors, and probabilities are often poorly calibrated.
+
+The consistency check on Brightpost's closed-book question shows the second method in action: a phone number the model invents changes in every sample, while the steps it knows come back each time.
+
+<AnimatedDiagram
+  spec="animated/rag/halluc-consistency-check"
+  stepper
+  caption="A fact the model knows comes back in every sample; a detail it invents changes each time."
+/>
+
+- Safety classifiers follow the same pattern for policy violations such as hate, self-harm instructions or leaked personal data: a fast model on every response, a heavier one for escalation, and asynchronous review to catch slow patterns such as coordinated probing (see [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation) for where they sit in the response path).
+- Real-time checks trade latency for coverage; a grounded answer can still be unsafe, so run a policy pass even when every claim is supported.
+
+### From score to action
+
+A score on its own changes nothing. Decide in advance what each range does, and let the stakes override the score.
+
+<AnimatedDiagram
+  spec="animated/safety/halluc-action-ladder"
+  stepper
+  caption="Cite, flag, abstain, hand off. The 1.00, 0.99 and 0.80 thresholds are illustrative; set yours on labelled data."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Cite">
+    Every claim is supported. Send the answer with a link to its source.
+  </StepCard>
+  <StepCard n={2} title="Flag">
+    Some claims are weak and nothing is at stake. Send the answer marked as unverified and log it for review.
+  </StepCard>
+  <StepCard n={3} title="Abstain">
+    The score is low or no passage was found. Say the assistant cannot confirm, and link the help page.
+  </StepCard>
+  <StepCard n={4} title="Hand off">
+    The answer would move money or set policy. Stop, and pass the ticket and the evidence to a person, whatever the score.
+  </StepCard>
+</StepCards>
+
+### Measuring it
+
+- Two measurements answer two questions. **Before release:** run the detector on the 200-ticket golden set, compare its verdicts with human labels, and report precision and recall of "unsupported" (see [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) and [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
+- **After release:** score a sample of live traffic (a few per cent; the share is a cost choice) and chart faithfulness and the hand-off rate by segment.
+- Watch for a drop after a prompt, model or retriever change, and read the lowest-scoring answers each week.
+
+### Worked example: the assistant invents a refund policy
+
+- A customer asks about the cracked kettle. The assistant answers with five claims (the figure above).
+- Three come from the help centre. It also says refunds arrive within 2 days, which no passage says, and that a cracked kettle gets a £42 refund with no approval, which contradicts the passage that refunds over £30 need approval.
+
+1. **Claim check:** 3 supported out of 5, so faithfulness is 3 ÷ 5 = **0.60**.
+2. **Rung:** the score is under 0.80, so abstain would apply, but the answer also promises £42, so the stakes override and the rung is **hand off**.
+3. **Result:** the customer sees "I have passed this to a colleague who can approve your refund", the ticket goes to the approval queue with the contradicting passage attached, and the trace stores the verdict object.
+4. **Learning:** the answer is added to the regression set, and the team checks why the model invented a policy (a missing passage, or a prompt that rewards confident replies).
+
+<Callout tone="red" title="What breaks">
+  The team scores faithfulness with a judge that has never been compared with human labels. The judge marks "refunds arrive within 2 days" as supported because the phrase sounds plausible. The dashboard reads 0.95 and invented policies reach customers. Fix: label 100 answers by hand, measure the judge's recall on unsupported claims, and keep a person in the loop for money.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Grounding check (NLI or judge) | Precise against the sources; per-claim | Needs passages; wrong passage fools it | RAG answers with retrieved context |
+| Self-consistency | No external source; works on any model | 5× the output with 4 samples; consistent errors pass | Closed-book answers, offline audits |
+| Token uncertainty | Nearly free; real-time | Needs probabilities; poor calibration | A cheap first filter on numbers and names |
+| Check every answer | Highest coverage | Cost and latency on each request | High-stakes flows |
+| Sample live traffic | Cheap, tracks trends | Misses individual bad answers | Monitoring and release gates |
+| Abstain often | Few wrong answers | Frustrates users, hides the hard cases | Regulated or money-moving flows |
+
+## Production systems
+
+- **SelfCheckGPT** (Manakul, Liusie and Gales, 2023) detects hallucinations from samples alone, with no external database, and works with black-box models.
+- **FActScore** (Min et al., 2023, EMNLP) breaks a long generation into atomic facts and reports the share a reliable knowledge source supports.
+- **RAGAS** (Es et al., 2023) defines faithfulness as the claims in the answer supported by the retrieved context divided by all claims in the answer; its documentation gives 1/2 = 0.5 for an answer with one supported claim of two.
+- **Brightpost** reports faithfulness on its 200-ticket golden set before each release and on a sample of live traffic after, and hands off any answer that moves money.
+
+## Failure modes & pitfalls
+
+- **Scoring whole answers.** One wrong claim hides in four right ones; split into claims.
+- **An unvalidated detector.** A judge or NLI model with no human comparison measures its own habits.
+- **Faithful, so right.** A faithful answer built on the wrong passage is confidently wrong.
+- **Self-consistency on creative tasks.** Many valid answers look like disagreement.
+- **The score decides everything.** A 0.95 answer that promises £42 still goes to a person.
+- **Reporting an average.** Faithfulness by segment and by week shows the drop an average hides.
+
+## Interview framework
+
+1. Say detection is the second line: prevention lowers the rate, detection catches the rest.
+2. Define a claim and faithfulness (supported ÷ total) and compute one example.
+3. Name three methods, what each needs and what each cannot see.
+4. Give the action ladder and say that stakes override the score.
+5. Say how you would measure the detector against human labels, before release and on live samples.
+
+**What interviewers listen for:** claim-level checking, faithfulness versus factuality, the cost of self-consistency, awareness that the detector can be wrong, and a hand-off path for high-stakes answers.
+
+**Red flags:** "ask the model if it is sure", one confidence score for everything, no human labels, or blocking every uncertain answer.
+
+## Further reading
+
+- [SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection (Manakul et al., 2023)](https://arxiv.org/abs/2303.08896)
+- [FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation (Min et al., 2023)](https://arxiv.org/abs/2305.14251)
+- [RAGAS documentation: Faithfulness](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/faithfulness/)
+- [RAGAS: Automated Evaluation of Retrieval Augmented Generation (Es et al., 2023)](https://arxiv.org/abs/2309.15217)
+- Related pages: [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation) · [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation) · [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Describe how you would combine retrieval grounding with an NLI-based entailment check for factual QA." category="Architecture" level="Mid">
+    - Retrieve the top passages with scores, generate an answer conditioned on them, then split the answer into claims and run an NLI model for each claim against the passages.
+    - Flag or remove claims that are neutral or contradicted.
+    - Report faithfulness as supported claims over total claims.
+    - Add a policy pass for unsafe content even when every claim is supported, because grounded harmful instructions are still unacceptable.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the limitations of self-consistency for hallucination detection?" category="Failure modes" level="Mid">
+    - It assumes that samples cluster around the truth, which fails when the model has a systematic wrong belief or when bad retrieval gives every sample the same false premise.
+    - It multiplies cost: four extra samples of a 250-token answer give five times the output.
+    - It also struggles on subjective or creative tasks where several answers are valid, so it fits factual questions better than brainstorming.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should safety and hallucination checks live in a microservices architecture for LLMs?" category="Architecture" level="Mid">
+    - Put fast input filters at the gateway to drop obvious abuse, run generation in a model service, then apply output classifiers and grounding verifiers in a policy service that can be updated on its own.
+    - Stream only after checks that work on prefixes, or buffer when a check needs the full answer.
+    - Keep audit logs and thresholds in one place so enforcement is consistent across clients.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is faithfulness, and how is it computed?" category="Concepts" level="Junior">
+    - Faithfulness asks whether the claims in an answer are supported by the context the model was given.
+    - Split the answer into claims, check each against the retrieved passages, and divide the supported claims by all claims.
+    - An answer with five claims, three supported, scores 3 ÷ 5 = 0.60.
+    - It does not say whether the context was right: a faithful answer built on the wrong passage is still wrong.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between factuality and faithfulness?" category="Concepts" level="Junior">
+    - Factuality asks whether a statement is true in the world.
+    - Faithfulness asks whether it is supported by the supplied context.
+    - In a RAG system you can measure faithfulness at run time because you hold the passages, and you cannot easily measure factuality without an outside source.
+    - A claim can be faithful and false when the passage is out of date.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you decide what to do with a low faithfulness score?" category="Trade-offs" level="Mid">
+    - Use an action ladder agreed in advance: cite when every claim is supported, flag when claims are weak and nothing is at stake, abstain when the score is low or no passage is found, and hand off when the answer moves money or sets policy.
+    - Set thresholds on labelled data, and let the stakes override the score.
+    - Review the abstain and hand-off rates, because a high rate means retrieval or the prompt needs work.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you validate a hallucination detector before trusting its dashboard?" category="Failure modes" level="Senior">
+    - Treat it as a classifier. Have people label a set of answers claim by claim, then compare the detector's verdicts: report precision and recall of "unsupported", with the confusion counts.
+    - A detector with high precision and low recall gives a flattering dashboard that misses invented claims.
+    - Re-check after every judge or model change, split results by segment, and keep reading samples of top scores by hand.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your faithfulness score is 0.95 but customers report invented policies. What do you investigate?" category="Failure modes" level="Senior">
+    - Suspect the detector or the average. Check the detector against human labels for recall on unsupported claims, since a judge may accept plausible-sounding claims.
+    - Look at faithfulness by segment, because an average hides a failing intent.
+    - Check whether the retrieved passages were wrong, which faithfulness cannot see, and whether claims are split too coarsely.
+    - Then add the missed cases to the regression set and route money and policy answers to a person.
+  </InterviewQuestion>
+</InterviewQuestions>

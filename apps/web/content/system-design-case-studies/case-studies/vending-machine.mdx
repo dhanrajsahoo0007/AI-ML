@@ -1,0 +1,678 @@
+---
+title: "Design a Vending Machine"
+description: "A vending machine as a state machine with safe refunds, then a backend for 100,000 connected machines that are often offline."
+logo: systems/vending-machine
+updated: 2026-11-17
+---
+
+Design a vending machine: a buyer picks an item, pays with cash or a card, and gets the item and any change. Then the follow-up: 100,000 of them are connected; design the backend.
+The hard parts are a state machine that never keeps money for an item it did not drop, and a card payment on a flaky mobile link.
+Then a fleet whose machines are offline for hours must still never lose or double-count a sale.
+
+- Interviewers use this question to see whether you model states and classes cleanly, find every failure path that touches money, and then scale the same object into a fleet without breaking it.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a vending machine. Then: now there are 100,000 of them, connected. Design the backend."
+  level="Mid"
+  minutes={45}
+  tests={[
+    "A state machine with explicit states, not nested conditionals",
+    "Every failure path that touches money: stuck item, no change, cancel, power cut",
+    "A card payment held first, then captured or released after the vend",
+    "Offline-first telemetry for a fleet: a local queue, sequence numbers and dedup",
+  ]}
+  clarify={[
+    { q: "One machine or a fleet?", a: "Part A: one machine as an object design. Part B: 100,000 machines run by one operator." },
+    { q: "How do buyers pay?", a: "Coins, notes and contactless cards; cards go to an external card processor." },
+    { q: "What does a machine sell?", a: "40 slots, one product per slot, a price per slot; about 40 sales a day." },
+    { q: "How is a machine connected?", a: "A mobile data modem; links drop for minutes to days, so cash sales must never need the network." },
+    { q: "What must the backend do?", a: "Sales and stock per machine, restocking lists, alerts and remote price changes." },
+    { q: "Can a card sale happen offline?", a: "Yes, below a small limit per sale and per machine; the operator carries the decline risk." },
+    { q: "What does the operator never accept?", a: "A buyer charged for an item that did not drop, and a sale counted twice in the books." },
+  ]}
+  outOfScope={["The motor and sensor electronics", "Cash collection and banking", "Dynamic pricing models", "Loyalty and mobile wallets beyond contactless cards"]}
+/>
+
+## Overview
+
+- Each machine runs a **state machine** on its own **controller**: Idle, Has credit, Authorising, Dispensing, Settling and Refunding; every path that takes money ends in Settling or Refunding.
+- The controller writes every vend, refund and cash count to a **local log** (SQLite) before it acts, with a **per-machine sequence number** on each event.
+- A card sale **authorises first, captures after the item drops**, and releases the hold if it does not; the capture or release carries the same idempotency key, so a replay is safe.
+- Machines publish events through an **MQTT broker** into an **event log** (Kafka) keyed by machine; a **stream processor** applies each `(machine, seq)` once and keeps **stock per slot** in a relational fleet DB.
+- **Prices and settings** travel as a **desired version** per machine; the machine reports the version it runs, and the config service resends only the difference.
+- Stock is **eventual** (minutes late is fine); a card authorisation is **strong** and online, or refused above the offline limit.
+
+<Numbers
+  items={[
+    { value: "≈ 380/s", label: "events, whole fleet, average", hint: "33 million a day; ≈ 1,300/s after a regional outage" },
+    { value: "≈ 167/s", label: "sales at the lunch peak", hint: "15% of 4 million a day in one hour" },
+    { value: "2 MB", label: "one machine's log for 30 days offline", hint: "330 events × 200 bytes × 30" },
+    { value: "0", label: "buyers charged for a failed vend" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Choose, pay, dispense", notes: "Pick a slot, pay by coins or notes, get the item and change; cancel returns the credit." },
+    { id: "F2", requirement: "Failure paths", notes: "A stuck item refunds; a sold-out slot asks for another choice; no change means exact change only." },
+    { id: "F3", requirement: "Sales, stock and restocking", notes: "Sales and stock per slot per machine; pick lists for drivers; alerts for faults." },
+    { id: "F4", requirement: "Remote prices and settings", notes: "Change prices for one machine or 20,000; a machine offline gets them when it returns." },
+    { id: "F5", requirement: "Card payments", notes: "Contactless cards: charge only for an item that dropped." },
+  ]}
+/>
+
+- Out of scope: the electronics, cash collection, dynamic pricing, loyalty schemes.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Money correctness", target: "0 buyers charged for a failed vend; 0 items given away by a lost state", why: "Every mistake is a refund claim or lost stock." },
+    { id: "N2", property: "Offline operation", target: "Cash sales 100% offline; card sales offline up to 5 dollars a sale and 50 a machine; 30 days of log", why: "Machines sit in basements, stations and trains." },
+    { id: "N3", property: "Card latency", target: "Authorisation answered within 3 s, p99", why: "The buyer is standing at the machine." },
+    { id: "N4", property: "No lost or double sales", target: "Every event applied exactly once in effect", why: "The books and the stock view come from these events." },
+    { id: "N5", property: "Stock freshness", target: "Under 10 minutes behind the machine while it is online", why: "Drivers plan routes from it the night before and in the morning." },
+    { id: "N6", property: "Price rollout", target: "99% of online machines within 15 minutes; others on reconnect", why: "A wrong price is lost margin on every sale." },
+    { id: "N7", property: "Backend availability", target: "99.9% for payments; 99.5% for reporting", why: "Cash sales never depend on it; card sales fall back to the offline limit." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Sales", assumption: "100,000 machines × 40 a day ÷ 86,400 s", result: "4,000,000 a day ≈ 46/s" },
+    { quantity: "Lunch peak", assumption: "15% of sales in one hour ÷ 3,600 s", result: "600,000 ≈ 167/s" },
+    { quantity: "Card sales", assumption: "60% of sales; authorise and capture or release", result: "2,400,000 a day; ≈ 100 authorisations/s at peak" },
+    { quantity: "Heartbeats", assumption: "One every 5 minutes: 288 a day × 100,000", result: "28,800,000 a day ≈ 333/s" },
+    { quantity: "All events", assumption: "Sales + heartbeats ≈ 330 per machine a day", result: "≈ 33,000,000 a day ≈ 380/s" },
+    { quantity: "Event bytes", assumption: "200 bytes × 33,000,000", result: "6.6 GB a day; 13 months ≈ 2.6 TB raw" },
+    { quantity: "Sales rows", assumption: "300 bytes × 4,000,000 a day", result: "1.2 GB a day; 13 months ≈ 470 GB; 7 years ≈ 3 TB" },
+    { quantity: "Stock rows", assumption: "100,000 machines × 40 slots × 100 bytes", result: "4,000,000 rows ≈ 400 MB" },
+    { quantity: "Reconnect burst", assumption: "10,000 machines back after 2 hours × 28 events, spread over 5 minutes", result: "280,000 events ≈ 930/s on top of 380/s" },
+    { quantity: "Failed vends", assumption: "1% of card sales", result: "24,000 releases a day" },
+    { quantity: "One machine offline", assumption: "330 events × 200 bytes × 30 days", result: "≈ 2 MB on the controller" },
+  ]}
+  note="The backend is modest; the machines' links and the money paths are the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | ≈ 380 event writes/s against a few reads/s (drivers, operators, reports): write-heavy | An append-only log and a time-series store; no cache |
+| D2 | Peak against average | Lunch peak 3.6 × the average for sales; a regional reconnect adds ≈ 930/s for 5 minutes | A log that absorbs bursts; random waits before reconnecting |
+| D3 | Consistency per operation | Card authorisation and capture strong; stock per slot eventual (minutes); prices eventual with a version | Payments in their own ACID store; stock built from events |
+| D4 | Latency target | Card answer within 3 s (N3); everything else in minutes | Only the card path is synchronous; telemetry is batched |
+| D5 | Durability | No sale or refund lost once the machine acted (N4) | `fsync` to the local log before the motor turns; keep until acknowledged |
+| D6 | Ordering | Per machine: a refill before the sales that follow it; nothing global | Sequence numbers per machine; the log partitioned by machine id |
+| D7 | Duplicates | A sale reported twice corrupts the books and the stock; a capture sent twice charges twice | `(machine_id, seq)` applied once; an idempotency key per card sale |
+| D8 | Data size and growth | 6.6 GB of events and 1.2 GB of sales a day | Time-series store for telemetry; old sales to object storage |
+| D9 | Fan-out shape | One event feeds three consumers (sales, stock, alerts); one price change goes to up to 20,000 machines | A log with consumer groups; a desired version, not a push per change |
+| D10 | Contention | Not a driver here: each machine writes only its own rows | No locks; per-machine partitions never compete |
+| D11 | Geography | One country; machines in every region on mobile networks | One backend region; brokers near the mobile carriers |
+| D12 | Availability and degradation | Machines are often offline: the defining driver | Every sale decided on the machine; the cloud is optional for cash and limited for cards |
+
+## API design
+
+| Call or topic | Who | When |
+| --- | --- | --- |
+| `POST /v1/card-sales` | Controller | Buyer taps: authorise, with `Idempotency-Key: m42-v1907` |
+| `POST /v1/card-sales/{key}/capture` | Controller | The item dropped |
+| `POST /v1/card-sales/{key}/release` | Controller | No item dropped, or the buyer cancelled |
+| MQTT `fleet/m42/events` (publish, QoS 1) | Controller | Every sale, refund, refill and fault, plus a heartbeat every 5 minutes |
+| MQTT `fleet/m42/config` (subscribe) | Controller | The desired config version and its changes |
+| `PUT /v1/machines/{id}/prices` and `POST /v1/price-changes` | Operator | One machine, or a rule over thousands |
+| `GET /v1/routes/{driver}/pick-list?date=…` | Driver app | Before the shift: what to load for each machine |
+
+A sale event, as the controller publishes it:
+
+```http
+PUBLISH fleet/m42/events   (QoS 1; the client certificate names machine m42)
+{ "machine": "m42", "seq": 5120, "kind": "sale", "slot": "B4", "price_cents": 175,
+  "paid": "card", "card_key": "m42-v1907", "at": "2026-11-17T12:04:11Z",
+  "config_version": 12 }
+
+PUBACK 5120
+```
+
+- **Idempotency:** each event is applied once per `(machine, seq)`; each card sale has one key for its authorise, capture and release, so a retried call returns the first result.
+- **Errors:** `402` the card was declined; `409` capture after a release (or the reverse) for the same key; `410` the hold has expired.
+- **Pagination:** sales reports and pick lists by cursor; config is incremental by version.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Card sales (authorise, capture, release) | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL), its own payments DB | One row moves through states under a unique key (D3, D7) | `card_key` | Strong | The fleet DB: payments would share failures and backups with 380 writes/s of telemetry |
+| Events in flight | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka), 7 days | Absorbs bursts; three consumers read it (D2, D9) | `machine_id` | Ordered per machine | A queue per consumer: three copies of every event, no replay |
+| Sales ledger, applied event ids | Relational database (PostgreSQL), the fleet DB, one table per month | A sale and its stock change commit together, once (D7) | `machine_id` | Strong per write | A wide-column store: no transaction across the sale and the stock row |
+| Stock per slot, desired and reported config | Same fleet DB | 4,000,000 small rows updated in place (D3) | `machine_id` | Eventual against the machine | A cache (<TechIcon id="oss/redis" /> Redis): one more copy for a few reads a second |
+| Heartbeats and health readings | Time-series store (TimescaleDB) | 28,800,000 points a day, read by time range (D1, D8) | `machine_id`, day | Eventual | Rows in the fleet DB: 2.6 TB a year of points slows every backup |
+| Sales older than 13 months | Object storage, files per month | 3 TB over 7 years, read for audits (D8) | Month | Eventual | Keeping them in the fleet DB: cold rows slow backups and index rebuilds |
+| Events on the machine | Embedded database (SQLite) on the controller | Survives a power cut; works offline (D5, D12) | One per machine | Strong locally | Memory only: a reboot forgets an unsent sale |
+
+```sql
+CREATE TABLE card_sales (                 -- payments DB
+  card_key    text PRIMARY KEY,           -- 'm42-v1907': machine + vend number, made on the machine
+  machine_id  text, slot text, amount_cents int,
+  state       text,                       -- 'authorised' | 'captured' | 'released' | 'expired'
+  processor_ref text, authorised_at timestamptz, settled_at timestamptz
+);
+CREATE TABLE applied_events (             -- fleet DB
+  machine_id text, seq bigint,            -- the machine's own counter
+  kind text, body jsonb, received_at timestamptz,
+  PRIMARY KEY (machine_id, seq)           -- a replayed event inserts nothing
+);
+CREATE TABLE slot_stock (
+  machine_id text, slot text,             -- 'm42', 'B4'
+  product_sku text, price_cents int, count int, last_seq bigint,
+  PRIMARY KEY (machine_id, slot)
+);
+CREATE TABLE machine_config (
+  machine_id text PRIMARY KEY,
+  desired_version int, reported_version int, desired jsonb
+);
+```
+
+- **Card sale:** insert the key with `authorised`; capture or release only moves a row out of `authorised` (`UPDATE … WHERE state = 'authorised'`).
+- **Apply an event:** insert into `applied_events ON CONFLICT DO NOTHING`; only a new row changes `slot_stock`, in the same transaction.
+- **Pick list:** slots below 30% for the machines on a driver's route, read from a replica.
+- **Config:** machines where `reported_version < desired_version` get the difference.
+
+The machine itself is a state machine, and every path that takes money ends in one of two states.
+
+<AnimatedDiagram spec="animated/vending-machine/states" stepper caption="A vending machine is six states: every path that takes money ends either in Settling, which keeps it, or in Refunding, which gives it back." />
+
+<StepCards>
+  <StepCard n={1} title="Cash: pay, vend, change">
+    Coins or notes move Idle to Has credit. A choice whose price is covered starts the motor; when the item drops, Settling pays the change and the machine returns to Idle.
+  </StepCard>
+  <StepCard n={2} title="Card: authorise first">
+    The buyer chooses, then taps. Authorising places a hold for the price; approved goes to Dispensing, declined back to Idle. Settling captures the hold instead of paying change.
+  </StepCard>
+  <StepCard n={3} title="Failure paths: refund">
+    Cancel, 60 seconds with no choice, or no item at the drop sensor after one retry all go to Refunding: cash comes back or the hold is released.
+  </StepCard>
+</StepCards>
+
+**The numbers:** a 1.75-dollar item paid with 2 dollars leaves 25 cents of change; if the coin tubes cannot make 25 cents, the machine says "exact change only" before it takes the money.
+
+## Building the architecture, step by step
+
+- We start with one machine and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One machine, a state machine (F1)
+
+The smallest design: the payment devices and the keypad talk to one controller, which runs the states.
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={1} caption="Step 1: the payment devices send credit and choices to the controller, which runs the state machine and drives the motors." />
+
+- **Adds:** the **pay devices** (coin changer, note reader, card reader, keypad) and the **controller**, the machine's small computer, holding one state object at a time.
+- **Flow:**
+  1. The buyer inserts 2 dollars; the controller moves from Idle to Has credit with 200 cents.
+  2. The buyer picks B4 at 175 cents; Has credit checks the price and stock, then moves to Dispensing.
+  3. The motor turns; Settling pays 25 cents of change and returns to Idle.
+- **Why this and not that:** each state is a class that answers every button (Deep dive 1), so "cancel while dispensing" has one obvious owner. Nested `if` blocks on flags spread that rule over every handler.
+- **The gap:** a stuck item keeps the money, and a power cut mid-vend forgets the credit.
+
+<PremiumBreak />
+
+### Step 2: Failure paths and a local log (F2, N1)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={2} caption="Step 2: the controller writes every vend and refund to a local log on the machine before it acts." />
+
+- **Adds:** the **local log** (SQLite on the controller), the drop sensor check and the Refunding state.
+- **Flow:**
+  1. Before the motor turns, the controller appends `vend 1907 started, credit 200, slot B4` and calls `fsync`.
+  2. The drop sensor must see the item within 2 s; if not, the motor turns once more.
+  3. The controller appends `vend 1907 ok` and pays change, or appends `vend 1907 failed` and refunds 200 cents.
+  4. After a power cut, the controller reads the log: a vend with a start and no outcome is checked against the sensor count, and refunded if no item dropped.
+- **Why this and not that:** writing the intent before acting is a write-ahead log for money; the machine can always finish or undo the last step (N1, D5).
+- **The gap:** cash only, and nobody outside the machine knows what it sold.
+
+### Step 3: Card payment: authorise, vend, capture (F5, N1)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={3} caption="Step 3: the controller authorises a card through the payment API; the payment service holds the money, then captures or releases it." />
+
+- **Adds:** the **payment API**, the **payment service**, the external **card processor** and the **payments DB**.
+- **Flow:**
+  1. The buyer picks B4, then taps; the controller sends `authorise 175, key m42-v1907` and waits up to 3 s.
+  2. The payment service records the key, asks the processor to hold 175 cents and answers `approved`.
+  3. After the drop sensor sees the item, the controller calls `capture` with the same key; after a failed vend it calls `release`.
+- **Why this and not that:** charging at once turns every stuck item into a refund, which takes days and a fee; a hold that is never captured costs the buyer nothing (Deep dive 2).
+- **The gap:** the operator still learns about sales only when a driver opens the machine.
+
+### Step 4: Connected: store and forward (F3, N2, N4)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={4} caption="Step 4: the local log uploads events with per-machine sequence numbers through an MQTT broker into an event log keyed by machine." />
+
+- **Adds:** the **MQTT broker** and the **event log** (Kafka); every event gets the machine's next sequence number.
+- **Flow:**
+  1. The controller appends `seq 5120: sale B4` to the local log, then publishes it at QoS 1 (at least once).
+  2. The broker answers `PUBACK 5120`; only then does the controller mark 5120 as sent.
+  3. Offline, events stay in the log; on reconnect the controller waits a random 0 to 5 minutes, then sends everything unsent in order.
+  4. The broker's rule writes each event to the event log, keyed by machine id.
+- **Why this and not that:** a call per sale fails whenever the link does, and the sale is then lost or retried blind (D12). A local queue with sequence numbers never loses an event and lets the backend drop copies (D7).
+- **The gap:** events sit in a log; nobody has a stock view yet.
+
+### Step 5: Sales and stock per machine (F3, N5)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={5} caption="Step 5: the stream processor applies each sale once and keeps stock per slot in the fleet DB; telemetry goes to a time-series DB." />
+
+- **Adds:** the **stream processor**, the **fleet DB** (sales, applied event ids, stock per slot) and the **telemetry DB**.
+- **Flow:**
+  1. The stream processor reads machine m42's partition in order.
+  2. For a sale it inserts `(m42, 5120)` into `applied_events`; only if that row is new does it take 1 off `slot_stock` for B4, in the same transaction.
+  3. Heartbeats (temperature, door, coin levels) go to the telemetry DB.
+- **Why this and not that:** stock is eventual by design: the machine is the truth and the backend is a view minutes behind (D3). One transaction per event makes a duplicate harmless (D7).
+- **The gap:** prices are fixed in each machine; changing them means a visit.
+
+### Step 6: Prices: desired against reported (F4, N6)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={6} caption="Step 6: the operator sets prices; the config service records the desired version and sends the difference down through the broker." />
+
+- **Adds:** the **operator console**, the **API gateway** and the **config service**; the machine link becomes two-way.
+- **Flow:**
+  1. The operator raises B4 to 195 cents on 20,000 machines; the config service sets `desired_version = 13` for each.
+  2. It publishes the change on each machine's config topic; a connected machine gets it in seconds, an offline one when its session resumes.
+  3. The machine applies the new prices only in Idle, never during a sale, and reports `reported_version = 13`.
+  4. After 15 minutes the config service resends to machines still behind.
+- **Why this and not that:** a fire-and-forget push is lost while a machine is offline; comparing desired with reported versions always converges (D12, N6). Every sale carries `config_version`, so the books use the price the machine charged.
+- **The gap:** nobody acts on low stock or a broken fridge.
+
+### Step 7: Alerts and restocking (F3)
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" step={7} caption="Step 7: the restock planner reads stock and alerts and sends pick lists to the driver app; old sales move to the archive store." />
+
+- **Adds:** the **restock planner**, the **driver app** and the **archive store**; alert rules run in the stream processor.
+- **Flow:**
+  1. Windowed rules raise alerts: no sale for 6 daytime hours at a busy machine, above 8 °C for 15 minutes, a slot under 30%.
+  2. At 05:00 the planner builds each route's pick list from `slot_stock` and the alerts.
+  3. The driver loads exactly that, refills, and the machine logs a `refill` event with its next sequence number.
+  4. Each month, sales older than 13 months move to the archive store.
+- **Why this and not that:** pick lists from live stock mean one visit per machine with the right products; alerts in the stream catch a fault within minutes, not at the next visit.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/vending-machine/architecture" stepper caption="A vending machine fleet: each machine decides on its own and logs first, cards are held and then captured or released, and events flow up through a broker into a log that builds the stock view." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Machines and people** | Pay devices, controller, local log; driver app, operator console | Run every sale on the machine; restock; set prices |
+| **Edge** | Payment API, MQTT broker, API gateway | Card calls from machines; one long-lived session per machine; people's requests |
+| **Payments core** | Payment service, card processor (external) | Hold, capture, release, sweep; the only strongly consistent path |
+| **Application services** | Config service, restock planner | Desired against reported config; pick lists and routes |
+| **Async pipeline** | Event log, stream processor | Absorb bursts; apply each event once; stock and alerts |
+| **Storage** | Payments DB, fleet DB, telemetry DB, archive store | Card sales; sales, stock and config; health readings; 7 years of history |
+
+A card sale at machine m42 while its link drops, step by step:
+
+1. At 12:04 the buyer picks B4 and taps; `authorise 175, key m42-v1907` is approved in 1.2 s.
+2. The controller logs `vend 1907 started`, the item drops, it logs `vend 1907 ok` and `seq 5120: sale B4`.
+3. The capture call times out: the train has entered a tunnel. The capture stays in the local log as due.
+4. At 12:24 the link returns; after a random wait the controller replays the capture (same key: captured once) and publishes events 5120 to 5126.
+5. The stream processor applies each `(m42, seq)` once; B4's stock goes from 7 to 6, and the pick list for tomorrow adds B4.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: MQTT for machines, HTTPS for card calls, REST for people
+
+- **Choice:** MQTT over TLS for machine events and config; HTTPS request and response for authorise, capture and release; REST over HTTPS for the operator and driver apps.
+- **Why:** 100,000 machines on mobile data keep one long-lived session each, with small headers and a way to push config down (D9, D12). A card call needs a status code and a hard 3 s timeout (N3).
+- **Why not HTTPS batches for events:** fine at 1,000 sites (the [parking garage](/system-design-case-studies/case-studies/parking-garage) does it); here every price change would wait for each machine's next poll, and 100,000 polls a minute cost more than idle sessions.
+- **Why not MQTT for card calls:** request and response over topics needs reply topics and correlation ids, and still no status code; the card path is the one place a plain HTTP call is simpler.
+- **Why not WebSockets:** a custom protocol on top, with no delivery levels and no session that survives a reconnect.
+
+### MQTT broker: a clustered broker with one certificate per machine
+
+- **Choice:** a clustered MQTT broker (managed or self-run, such as EMQX or a cloud IoT service) with mutual TLS: each controller's certificate names its machine, and it may publish only to `fleet/<own id>/…`.
+- **Why:** 100,000 concurrent sessions; persistent sessions keep config changes for a machine that is offline (D12); QoS 1 gives at-least-once delivery, and dedup handles the rest (D7).
+- **Why not Kafka clients on the machines:** Kafka clients expect stable networks and broker metadata; 100,000 flaky mobile clients and per-device auth are what a broker is for.
+- **Why not one HTTP endpoint behind a load balancer:** it cannot push a price change to a machine.
+
+### Load balancer and API gateway
+
+- **Choice:** a layer-4 network load balancer (TCP with TLS passthrough) in front of the broker cluster; a layer-7 load balancer and API gateway for the payment API and the people's apps.
+- **Why:** MQTT sessions live for hours, so the broker tier balances connections, not requests; the gateway authenticates operators and drivers and limits requests per account.
+- **Why not layer 7 for MQTT:** an HTTP balancer does not speak MQTT, and terminating TLS there would hide the client certificate from the broker.
+- **Algorithm:** least connections for the broker; the controllers' random wait before reconnecting spreads a regional reconnect of 10,000 machines over 5 minutes (D2).
+
+### Payment service and payments DB: relational (PostgreSQL)
+
+- **Choice:** a stateless payment service over its own <TechIcon id="oss/postgresql" /> PostgreSQL database, one row per card sale keyed by `card_key`; a sweep every 10 minutes.
+- **Why:** a card sale moves authorised → captured or released exactly once, which a guarded `UPDATE` on one row enforces (D3, D7); ≈ 100 authorisations/s at peak fit one primary.
+- **Why not the fleet DB:** payments would share failover, backups and load with ≈ 380 event writes/s; a slow stock report must never slow a card at the machine.
+- **Why not charge at once:** a stuck item becomes a refund instead of a released hold (Deep dive 2).
+- **Why not a key-value store:** the operator reconciles captures against the processor's settlement file with SQL every night.
+
+### Event log: Kafka partitioned by machine
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, 48 partitions keyed by `machine_id`, kept 7 days.
+- **Why:** a regional reconnect adds ≈ 930/s for 5 minutes, and the log absorbs it (D2); three consumers read each event (D9); order per machine holds within one partition (D6).
+- **Why not a queue (RabbitMQ, SQS):** each consumer would need its own copy, and nothing can be replayed after a bug in the stock logic.
+- **Why not straight from the broker into the database:** a burst would land on the database, and a new consumer, such as a fraud check, could not read the history.
+
+### Stream processor: dedup, stock and alerts
+
+- **Choice:** a stream job (<TechIcon id="oss/apache-flink" /> Apache Flink) keyed by machine: it writes each sale and its stock change in one database transaction and runs the alert windows.
+- **Why:** alerts are windows per machine ("above 8 °C for 15 minutes"), which keyed state does well; stock is under 10 minutes behind (N5).
+- **Why not an hourly batch:** stock would be an hour late, and a broken fridge spoils an hour of stock first.
+- **Why not a function per event:** 33,000,000 calls a day, and no state for windows.
+- **Dedup lives in the database:** the job may replay after a restart, so `applied_events` decides, not the job's memory.
+
+### Fleet DB: relational (PostgreSQL), sales partitioned by month
+
+- **Choice:** PostgreSQL primary with a read replica: `applied_events` and sales partitioned by month, `slot_stock`, `machine_config`, alerts.
+- **Why:** an event and its stock change commit together, once (D7); 46 sales/s and 4,000,000 stock rows fit one primary (D1, D8); drivers and reports read the replica.
+- **Why not Cassandra:** no transaction across the event id and the stock row, so a crash between them double-counts or loses a sale.
+- **Why not DynamoDB:** conditional writes and transactions would cover it; we keep SQL because operators slice sales by machine, site, product and day in ad hoc reports.
+- **Why not sharding:** 46 sales/s is far below one primary's limit; shard by `machine_id` only when the fleet grows tenfold.
+
+### Telemetry DB: a time-series store
+
+- **Choice:** a time-series store (TimescaleDB, a PostgreSQL extension) for heartbeats and health readings, compressed after 7 days, kept 13 months.
+- **Why:** 28,800,000 points a day, always read by machine and time range (D1, D8).
+- **Why not the fleet DB:** 2.6 TB a year of points would slow every backup of the sales data.
+- **Why not ClickHouse:** <TechIcon id="oss/clickhouse" /> ClickHouse suits fleet-wide analytics over billions of rows; revisit when analysts query the whole fleet, not one machine.
+- **Why not Prometheus:** <TechIcon id="oss/prometheus" /> Prometheus pulls metrics from servers it can reach; machines behind mobile networks cannot be scraped, and it is built for monitoring our own services.
+
+### Cache and CDN
+
+- **Choice:** no cache; a CDN only for the apps' static files and for firmware images.
+- **Why:** reads are a few per second (D1), and the replica answers them; a 50 MB firmware image to 100,000 machines is 5 TB per rollout, which the CDN serves near each carrier.
+- **Why not a cache for stock:** it changes with every sale and is read rarely; a second copy only adds staleness.
+
+### Local log on the machine: SQLite
+
+- **Choice:** an embedded database (SQLite) in write-ahead-log mode holding events, unsent captures, cash counts and the current config.
+- **Why:** each event is on flash before the motor turns, so a power cut never loses a sale or a refund (D5); 30 days offline is 2 MB.
+- **Why not flat files:** no transactions, so a crash mid-write leaves a half event.
+- **Why not memory:** a reboot forgets an unsent sale and the credit in the machine.
+
+### Ids: a sequence per machine, a key per card sale
+
+- **Choice:** `seq` counts every event on one machine; `card_key` is the machine id plus its vend counter (`m42-v1907`), both made on the machine.
+- **Why:** made before the network is involved, so a retry or a replay carries the same id (D7); a sequence also shows a gap (5148 then 5150) that a random id would hide.
+- **Why not UUIDs:** they dedup as well, but give no order and no way to spot a missing event.
+- **Why not ids from the backend:** an offline machine could not get one, and a lost answer would make the retry look new.
+
+### Archive store: object storage
+
+- **Choice:** a monthly job writes sales older than 13 months to object storage as files per month and drops the partition.
+- **Why:** 3 TB over 7 years, read only for audits and tax (D8).
+- **Why not keep them in PostgreSQL:** cold partitions slow backups and restores.
+
+## Deep dives
+
+### The state machine and its failure paths
+
+- **What interviewers want first:** the states, the events (coin, note, select, tap, cancel, drop sensor, timeout) and what each state does with each event, before any class names.
+- **One object per state:** `IdleState`, `HasCreditState`, `AuthorisingState`, `DispensingState`, `SettlingState` and `RefundingState` each implement `State`; the machine forwards every event to its current state.
+- **Illegal events have an owner:** `select` while Dispensing is ignored by `DispensingState`; a coin while Dispensing goes straight back out of the return chute.
+- **Money is conserved:** every path that adds credit or a hold ends in Settling (keep it) or Refunding (give it back); a test walks every state and event and checks that rule.
+- **No change:** `ChangeMaker.makeChange(25)` is asked before Has credit accepts a note; if the coin tubes cannot make the change, the display says "exact change only".
+- **Sold out:** Has credit keeps the credit and asks for another choice; it never takes the money for an empty slot.
+- **Power cut:** the local log holds the last step, so the machine restarts into the right state (Step 2).
+- **Payments are a strategy:** `CashPayment` and `CardPayment` implement `PaymentMethod.authorise` and `settle`; a mobile wallet is a new class, not new branches in every state.
+
+<AnimatedDiagram spec="animated/vending-machine/classes" stepper caption="The machine owns its inventory, change, dispenser and event log, and hands every button press to its current state and every payment to a payment method." />
+
+<StepCards>
+  <StepCard n={1} title="The machine and its parts">
+    The machine owns an inventory of slots, each holding a product with a count and a price; a change maker with coin tubes; a dispenser with a motor and a drop sensor; and an event log.
+  </StepCard>
+  <StepCard n={2} title="State and payment as seams">
+    Every button, coin and sensor event goes to the current `State` object, and every payment goes through a `PaymentMethod`. A new state or a new way to pay is a new class.
+  </StepCard>
+</StepCards>
+
+The dispensing state, as an interviewer would want to see it:
+
+```ts
+class DispensingState implements State {
+  constructor(private m: VendingMachine, private slot: Slot, private pay: PaymentMethod) {}
+  async onEnter() {
+    this.m.log.append({ kind: "vend_started", slot: this.slot.code });   // fsync before the motor
+    const dropped = (await this.m.dispenser.turn(this.slot)) || (await this.m.dispenser.turn(this.slot));
+    if (dropped) { this.slot.count--; this.m.setState(new SettlingState(this.m, this.slot, this.pay)); }
+    else this.m.setState(new RefundingState(this.m, this.pay));          // cash back or hold released
+  }
+  select() {}                                                             // ignored while the motor runs
+  insertCoin(c: Coin) { this.m.change.eject(c); }
+  cancel() {}                                                             // too late: the vend decides
+}
+```
+
+**The numbers:** 6 states × 7 events = 42 cells to test; with nested conditionals the same rules are spread over 7 handlers.
+
+<Callout tone="red" title="What breaks">
+  A `switch` on a status string inside every handler works for the happy path. The first "cancel during dispensing" or "card declined after the coin went in" bug is fixed in one handler and missed in another; with state classes each cell has one owner.
+</Callout>
+
+### Authorise, then capture, on a flaky link
+
+- **Select, then tap:** the price is known before the card is read, so the hold is for the exact amount, 175 cents, not a guess.
+- **One key per sale:** `m42-v1907` is made on the machine and sent with authorise, capture and release; a retry returns the first answer.
+- **Capture only after the drop:** the drop sensor decides; a stuck item means `release`, and the buyer sees the hold disappear instead of waiting days for a refund.
+- **Authorise times out:** the controller does not vend, and sends `release` with the same key; if a hold was placed, it goes away; if not, the call is a no-op.
+- **Capture lost:** the capture stays in the local log as due and is replayed when the link returns; a guarded `UPDATE … WHERE state = 'authorised'` makes the second one harmless.
+- **The sweep:** this page assumes a hold lasts 48 hours (real windows are under "How real systems do it"); every 10 minutes the payment service releases holds older than 36 hours with no capture. The operator loses at most that one sale, and never charges for a failed vend.
+- **Offline cards:** below 5 dollars a sale and 50 dollars a machine, the reader stores the encrypted card and the controller vends; the payment service authorises and captures in one call when the sale is forwarded. Above the limit the machine asks for cash.
+
+<AnimatedDiagram spec="animated/vending-machine/auth-vend-capture" stepper caption="A card sale holds the money first; the controller captures only after the item drops, releases after a stuck vend, and replays a lost capture with the same key." />
+
+<StepCards>
+  <StepCard n={1} title="Good vend: capture">
+    The buyer picks B4 and taps. The payment service holds 175 cents with key m42-v1907 and answers approved; the item drops, the controller logs it, then captures with the same key.
+  </StepCard>
+  <StepCard n={2} title="Stuck item: release">
+    The next buyer picks C2. The hold is approved, but nothing drops after a retry; the controller logs the failure and releases the hold, so the buyer is never charged.
+  </StepCard>
+  <StepCard n={3} title="Link drops: replay the capture">
+    After a good vend the capture call gets no answer. The capture waits in the local log; 20 minutes later the controller replays it with the same key and the service captures once.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 2,400,000 card sales a day: about 2,376,000 captures and 24,000 releases (1% failed vends).
+- Peak load on the payment service: ≈ 100 authorisations/s plus ≈ 100 captures or releases/s, about 200 small transactions/s on one primary.
+
+<Callout tone="red" title="What breaks">
+  Charging the full price at the tap and refunding after a stuck item looks simpler. Every refund costs a fee and takes days, and a refund lost on a flaky link leaves a buyer charged for nothing.
+</Callout>
+
+### Offline-first telemetry: a local queue, sequence numbers, dedup
+
+- **The machine is the source of truth:** the backend never decides a sale; it learns about it.
+- **Log first:** every event gets the next `seq` and is written with `fsync` before it is sent; it is deleted only after a `PUBACK` and 7 days.
+- **At least once, then dedup:** QoS 1 may deliver an event twice (a lost `PUBACK`); `applied_events` with key `(machine_id, seq)` makes the second copy a no-op.
+- **Order and gaps:** the event log keeps one machine's events in order; the stream job notes the highest `seq` per machine, and a gap (5148 then 5150) raises a "resend from 5149" request on the config topic.
+- **Reconnect storms:** a region's machines wait a random 0 to 5 minutes before sending their backlog, oldest first, so 10,000 machines do not reconnect in the same second.
+- **A full log:** after 30 days offline the controller keeps every sale and refund, and folds heartbeats into one summary per hour.
+- **Clocks:** each event carries the machine's time and the broker's receive time; sales are ordered by `seq`, and reports use the receive time when the device clock is more than 5 minutes off.
+
+<AnimatedDiagram spec="animated/vending-machine/store-forward" stepper caption="Every event is on the machine's disk before it is sent; the broker may deliver it twice, and the stream job applies each machine and sequence number once." />
+
+<StepCards>
+  <StepCard n={1} title="Online: log, publish, apply once">
+    The controller logs event 5120 to disk, publishes it at QoS 1 and gets an acknowledgement. The stream job inserts (m42, 5120) only if it is new, and takes one off slot B4 in the same transaction.
+  </StepCard>
+  <StepCard n={2} title="Two hours offline: replay safely">
+    Events 5121 to 5148 pile up on disk while the publish gets no answer. After the link returns and a random wait, the controller replays them; the acknowledgement for 5148 is lost, so it sends 5148 again, and the stream job applies it once.
+  </StepCard>
+</StepCards>
+
+**The numbers:** one machine makes ≈ 330 events a day; two hours offline is ≈ 28 events, one batch of about 5.6 KB.
+
+<Callout tone="red" title="What breaks">
+  Deleting an event as soon as it is published, or giving it a random id made at send time, turns a lost acknowledgement into a lost sale or a double sale. The id must be made when the event is logged, and the event kept until it is acknowledged.
+</Callout>
+
+### Worked example: a two-hour outage at lunchtime
+
+1. **12:00:** a mobile carrier's outage cuts 10,000 machines in one region off until 14:00.
+2. **12:00 to 14:00:** each machine sells about 10 items (25% of its day): 100,000 sales, 60,000 of them by card. Cash sales are unaffected.
+3. **Cards offline:** 6 card sales × 1.75 dollars = 10.50 dollars per machine, under the 50-dollar limit, so every card sale goes ahead: 105,000 dollars stored on the readers.
+4. **Events:** 10 sales + 24 heartbeats = 34 per machine; 340,000 events in the local logs, about 6.8 KB each machine.
+5. **14:00 to 14:05:** machines reconnect after a random wait; 340,000 events over 300 s ≈ 1,130/s on top of ≈ 380/s, well within the event log and the stream job.
+6. **14:05:** forwarded card sales are authorised and captured in one call each; if 2% are declined (an assumption), 1,200 × 1.75 = 2,100 dollars is lost against 105,000 kept.
+7. **14:10:** stock for the region is current again; the 05:00 pick lists are right the next morning.
+
+**The numbers:** the backlog drains in 5 minutes; refusing cards offline would have cost the 105,000 dollars of sales to save 2,100.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| How states are coded | Nested conditionals, a status enum with a `switch`, one class per state | One class per state | F1, F2, N1 | Six small classes instead of one function | Never: every new failure path proves it |
+| How a card is charged | Charge at the tap, authorise then capture | Authorise, vend, then capture or release | F5, N1, D3 | A hold can expire if a capture is lost for 36 hours | The processor charges per call more than a refund costs |
+| How sales reach the backend | A call per sale, store and forward with sequence numbers | Store and forward | D12, D7, N4 | The backend sees a sale seconds to hours late | Never while links drop |
+| Machine protocol | HTTPS polling, MQTT sessions | MQTT with persistent sessions, QoS 1 | D9, D12, F4 | A broker cluster to run | The fleet shrinks to a few thousand sites |
+| Stock consistency | Check the backend before each vend, eventual view | Eventual, built from events | D3, D12, N5 | The view lags the machine by minutes | Buyers reserve items in an app, which needs a hold per slot |
+| Where dedup happens | In the stream job's memory, a unique key in the database | `(machine_id, seq)` primary key | D7, N4 | One extra insert per event | Never |
+| Payments store | The fleet DB, its own database | Its own PostgreSQL | D3, N7 | A second database to run | Never: card money and telemetry must fail separately |
+| Telemetry store | Rows in the fleet DB, a time-series store, a column store | Time-series store | D1, D8 | One more engine | Analysts query the whole fleet: add a column store |
+| Offline cards | Refuse, no limit, a limit per sale and machine | 5 dollars a sale, 50 a machine | D12, N2 | Some declines show up hours later | Declines cost more than the sales they keep |
+| Config changes | A push per change, desired against reported versions | Desired against reported | F4, N6, D12 | Machines run old prices until they report | Never |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Idempotency](/system-design/patterns/idempotency) | `card_key` on authorise, capture and release; `(machine_id, seq)` on every event | A retry or a replay must change nothing |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | MQTT topics per machine; the event log with three consumer groups | 100,000 publishers, three readers, bursts after outages |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | The local log on the machine is an outbox: write first, send later | The sale and its record must never disagree |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | Stock per slot, alert windows such as 15 minutes above 8 °C | Minutes-fresh views from a stream of events |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | `slot_stock` built from sale and refill events | Drivers read a view, never the raw events |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | The hold sweep, the 05:00 pick lists, the monthly archive | Work that must happen later, even after a crash |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | A 3 s timeout on authorise; random waits before reconnecting | A slow processor must not freeze the machine; a region must not reconnect in step |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Electric-vehicle chargers | Authorise, deliver, capture the final amount; store and forward; desired config | The amount is unknown until the end, so the hold is an estimate and the capture is partial |
+| Parking meters | Offline-first events, per-device sequence numbers, remote tariffs | No stock; the product is time, so the state machine tracks a paid-until time |
+| Laundrettes | A state per machine, card holds, a fault path that refunds | A cycle lasts 40 minutes, so the hold covers the cycle and a fault mid-cycle refunds part |
+| Any fleet of small devices | Local log, `(device, seq)` dedup, a broker, desired against reported | The payload: no money, so no payments core |
+
+## How real systems do it
+
+- **Cantaloupe (read 2026):** its G11 telemeter is installed inside a vending machine and sends sales and machine-health data over the air on 4G cellular networks; the data is used to generate pre-pick orders so machines are filled with exactly what they need.
+- **NAMA (2019):** the trade association released version 4.3 of the Multi-Drop Bus (MDB) standard; the release revised only Section 7, Cashless Devices, and the other sections were unchanged from version 4.2, which had gone eight years without revision.
+- **AWS IoT Device Shadow documentation (read 2026):** a shadow keeps a `desired` state written by apps, a `reported` state written by the device, and a `delta` between them; a device that reconnects gets the current state, and can discard a message with an older version than the one it holds.
+- **Stripe documentation on holds (read 2026):** a payment can be authorised and captured later; an in-person card hold is valid for 2 days on Mastercard, American Express and Discover; a partial capture releases the rest, and an uncaptured hold expires and is cancelled.
+- **Stripe Terminal documentation (read 2026):** offline, a reader stores payments and forwards them when the connection returns; authorisation is attempted only then, the business carries the decline risk, and the docs suggest refusing offline payments above an amount.
+- **Stripe (2017):** a client sends a unique idempotency key with each operation; a retry with the same key returns the stored result, and clients back off exponentially with jitter.
+- **Where this design differs:** vending operators and telemetry vendors do not publish their backends, so this design rests on documented building blocks: a telemeter that reports over mobile data, a device shadow, card holds and offline card readers. The sizes on this page are chosen, not measured.
+
+## Failure modes & pitfalls
+
+- **Charging before the drop:** a stuck item becomes a refund claim; watch refunds per machine; authorise, vend, then capture.
+- **Vending on an authorise timeout:** the buyer may never have been held; watch captures that fail with "no such hold"; never vend without an answer, and release on timeout.
+- **Ids made at send time:** a lost acknowledgement becomes a double sale; watch duplicates skipped against applied; make `seq` when the event is logged.
+- **Reconnect storm:** a region's machines retry in step after an outage; watch broker connection rate; a random wait of 0 to 5 minutes.
+- **Lost captures:** holds expire and sales go unpaid; watch the oldest `authorised` row; replay captures from the local log and run the sweep.
+- **A price change mid-sale:** the buyer is charged a price the display did not show; apply config only in Idle; tag every sale with `config_version`.
+- **A full local log:** a machine offline for a month drops events; watch days since last contact; keep sales, fold heartbeats, send a driver.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify one machine or a fleet, payment types, connectivity and what must never happen; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 20:** the state machine and the classes: states, events, failure paths, State and PaymentMethod as seams; walk a stuck item.
+3. **Minutes 20 to 25:** card payment: authorise, vend, capture or release, one key per sale.
+4. **Minutes 25 to 30:** estimates for 100,000 machines: ≈ 380 events/s, 6.6 GB a day; say the backend is modest.
+5. **Minutes 30 to 45:** Steps 4 to 7 and one deep dive: store and forward with sequence numbers, or desired against reported config; answer the "why not" for a call per sale and a cache.
+
+**What interviewers listen for:**
+
+- **Mid:** explicit states with every event handled, a refund on every failure path, change-making checked before taking money.
+- **Senior:** authorise then capture, idempotency keys made on the machine, store and forward with dedup, eventual stock stated as a choice.
+- **Staff:** the machine as the source of truth, the offline card limit as a business decision, reconnect storms, how the same design serves chargers or laundrettes.
+
+**Red flags:** a `switch` on a status string in every method; charging at the tap; a backend call before every vend; random ids made at send time; "add a cache" for a write-heavy fleet.
+
+## Further reading
+
+- [Telemetry](https://www.cantaloupe.com/telemetry/) (Cantaloupe, product page, read 2026)
+- [NAMA releases MDB version 4.3](https://www.vendingmarketwatch.com/management/associations/national-associations/news/21094045/nama-releases-mdb-version-43) (Vending Market Watch, 2019)
+- [AWS IoT Device Shadow service](https://docs.aws.amazon.com/iot/latest/developerguide/iot-device-shadows.html) (AWS IoT Core developer guide)
+- [Place a hold on a payment method](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method) (Stripe documentation)
+- [Collect card payments while offline](https://docs.stripe.com/terminal/features/operate-offline/collect-card-payments) (Stripe Terminal documentation)
+- [Designing robust and predictable APIs with idempotency](https://stripe.com/blog/idempotency) (Stripe, 2017)
+- Related pages: [Design a Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Idempotency](/system-design/patterns/idempotency) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which questions would you ask before designing a vending machine?" category="Concepts" level="Mid">
+  - One machine or a connected fleet: it decides whether this is an object design or a backend too.
+  - Which payments: coins, notes, cards; and whether a card sale may happen offline.
+  - What happens on a stuck item, a sold-out slot or no change.
+  - What must never happen: charging for an item that did not drop, counting a sale twice.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk me through the states of a vending machine." category="Concepts" level="Mid">
+  - Idle, Has credit, Authorising (card), Dispensing, Settling and Refunding.
+  - Coins move Idle to Has credit; a covered choice moves to Dispensing; a drop moves to Settling, which pays change or captures.
+  - Cancel, a 60-second timeout or no drop all go to Refunding.
+  - Every path that takes money ends in Settling or Refunding.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use a class per state instead of if statements?" category="Trade-offs" level="Mid">
+  - Each state answers every event, so "cancel while dispensing" has exactly one owner.
+  - A new state, such as Authorising for cards, is a new class; the others do not change.
+  - Nested conditionals spread each rule over every handler, and a fix in one is missed in another.
+  - The cost is six small classes, which is cheap for code that handles money.
+  </InterviewQuestion>
+  <InterviewQuestion question="The item gets stuck after the buyer pays by card. What happens?" category="Failure modes" level="Mid">
+  - The machine only authorised a hold; it captures after the drop sensor sees the item.
+  - No drop after one retry: the controller logs the failure and calls release with the same key.
+  - The hold disappears; the buyer is never charged, and no refund is needed.
+  - If the release call is lost, the sweep releases holds with no capture after 36 hours.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure a sale is never counted twice when machines retry uploads?" category="Concepts" level="Senior">
+  - Each event gets the machine's next sequence number when it is written to the local log.
+  - The broker delivers at least once; a lost acknowledgement means a resend.
+  - The stream job inserts `(machine_id, seq)` with a primary key and changes stock only if the insert is new, in one transaction.
+  - A gap in the sequence shows a lost event, which a random id would hide.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should the machine ask the backend whether an item is in stock before each sale?" category="Trade-offs" level="Senior">
+  - No: the machine knows its own slots, and the backend is often unreachable (D12).
+  - The backend's stock view is built from events and is minutes behind by design.
+  - A call per sale would stop sales whenever the link drops.
+  - Revisit only if buyers reserve items from an app, which needs a hold per slot.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you change prices on 20,000 machines when many are offline?" category="Architecture" level="Senior">
+  - Store a desired config version per machine; the machine reports the version it runs.
+  - Send the difference on the machine's config topic; persistent sessions hold it for offline machines.
+  - The machine applies prices only in Idle, and every sale carries `config_version`.
+  - Resend to machines still behind after 15 minutes; the versions always converge.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why MQTT for the machines and not HTTPS?" category="Architecture" level="Senior">
+  - 100,000 machines on mobile data keep one small session each, and config can be pushed down.
+  - QoS 1 and persistent sessions match machines that drop off for hours.
+  - HTTPS polling would delay every price change to the next poll and cost more requests.
+  - Card calls stay on HTTPS: they need a status code and a hard timeout.
+  </InterviewQuestion>
+  <InterviewQuestion question="A whole region loses mobile data for two hours at lunch. Walk through what happens." category="Failure modes" level="Senior">
+  - Cash sales carry on; card sales under the offline limit are stored on the reader.
+  - Events stay in each machine's local log with their sequence numbers.
+  - On reconnect, machines wait a random 0 to 5 minutes and replay; about 1,130 events/s for 5 minutes is easy for the log.
+  - Forwarded card sales are authorised and captured; declines are the operator's loss, a few per cent.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you put a cache in front of the fleet database?" category="Scaling" level="Mid">
+  - No: the workload is about 380 writes/s and a few reads/s.
+  - Stock changes with every sale and is read by drivers a few times a day.
+  - A read replica serves reports and pick lists.
+  - The CDN serves firmware images instead, where 5 TB per rollout does matter.
+  </InterviewQuestion>
+</InterviewQuestions>

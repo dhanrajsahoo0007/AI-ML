@@ -3,9 +3,12 @@ title: Mixture of Experts (MoE)
 description: How sparse MoE layers route tokens to a few experts, why that buys capacity without matching compute, and the load-balancing and serving problems that follow.
 ---
 
-Mixture of experts is how many frontier and open models grow their parameter count without growing per-token compute at the same rate. Interviewers ask about routing, load balancing, and the difference between total and active parameters.
+Mixture of experts is how many frontier and open models grow their parameter count without growing per-token compute at the same rate.
 
-## TL;DR
+- Interviewers ask about routing, load balancing, and the difference between total and active parameters.
+- Two running examples, with illustrative router scores: one token routed to 2 of 8 experts (Mixtral-style), and a batch of 8 tokens routed to 1 of 4 experts (Switch-style), used for balancing and capacity.
+
+## Overview
 
 - An MoE layer replaces one feed-forward network with **many expert networks** plus a small **router**.
 - For each token, the router picks the **top-k experts** (often 1 or 2), so only a fraction of parameters run per token.
@@ -13,21 +16,26 @@ Mixture of experts is how many frontier and open models grow their parameter cou
 - Without care, the router sends most tokens to a few experts, so training adds a **load-balancing loss** and **capacity limits**.
 - Serving is harder: all experts must be in memory, and **expert parallelism** spreads them across GPUs.
 
-## The idea in plain English
+<KeyIdea>An MoE layer stores many feed-forward networks but runs only the k a router picks for each token, so parameters grow with the number of experts while compute grows with k; the price is keeping the router balanced and every expert in memory.</KeyIdea>
 
-A hospital does not send every patient to every doctor. A triage nurse (the router) looks at each patient (token) and sends them to the one or two most suitable specialists (experts). The hospital can employ many specialists, so it has a lot of knowledge, but each patient only takes the time of two of them. The hard part is stopping the nurse from sending everyone to the same popular doctor.
+## Mental model
+
+- A hospital does not send every patient to every doctor.
+- A triage nurse (the router) looks at each patient (token) and sends them to the one or two most suitable specialists (experts).
+- The hospital can employ many specialists, so it has a lot of knowledge, but each patient only takes the time of two of them.
+- The hard part is stopping the nurse from sending everyone to the same popular doctor.
 
 ## Core concepts
 
 1. **Expert.** Usually a standard feed-forward network. A layer might have 8, 64 or more of them.
 
-2. **Router (gating network).** A small linear layer that scores every expert for each token. A softmax over the top-k scores gives mixing weights.
+2. **Router (gating network).** A small linear layer that scores every expert for each token. A softmax over the top-k scores gives mixing weights. For model width d and N experts it holds d × N weights, a tiny share of the layer.
 
 3. **Top-k routing.** Switch Transformer uses k = 1; Mixtral uses k = 2. Larger k gives smoother mixing at more compute.
 
 4. **Sparse activation.** Only the chosen experts run. A model can have many times more parameters than it uses per token.
 
-5. **Load balancing.** An auxiliary loss pushes the router to spread tokens evenly. Without it, a few experts get most tokens, train more, get chosen more, and the rest wither.
+5. **Load balancing.** An auxiliary loss pushes the router to spread tokens evenly. Without it, a few experts get most tokens, train more, get chosen more, and the rest wither ([the loss, step by step](#load-balancing-step-by-step)).
 
 6. **Capacity factor.** Each expert accepts at most a fixed number of tokens per batch. Overflow tokens are dropped from that layer (passed through by the residual) or sent to another expert.
 
@@ -37,18 +45,30 @@ A hospital does not send every patient to every doctor. A triage nurse (the rout
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    T["Token vector after attention"] --> R["Router: score every expert"]:::accent
-    R --> TOP["Pick top-2 experts"]
-    TOP --> E2["Expert 2 (FFN)"]
-    TOP --> E5["Expert 5 (FFN)"]
-    E1["Expert 1"] -.->|"not used for this token"| X1[" "]
-    E2 --> MIX["Weighted sum by router scores"]
-    E5 --> MIX
-    MIX --> ADD["Add residual, continue to next block"]
-    style X1 fill:none,stroke:none
-```
+Follow one token through an MoE layer. Step through to see the router score every expert and the token visit only two of them.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-routing"
+  stepper
+  caption="The router scores all 8 experts, but only the top 2 run for this token; their outputs are mixed by a softmax over the two winning scores and added to the residual stream."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Score every expert">
+    The router, one Linear layer, turns x into 8 logits: 0.6, 2.1, 0.3, 1.1, 1.6, 0.4, 0.2, 0.8. Gap: scores are not weights.
+  </StepCard>
+  <StepCard n={2} title="Keep the top 2, softmax them">
+    Experts 2 (2.1) and 5 (1.6) win. A softmax over those two logits gives 0.62 and 0.38; the other six get 0. Gap: no expert has run yet.
+  </StepCard>
+  <StepCard n={3} title="Run only the winners">
+    x goes to experts 2 and 5 only. The other six do not run: that is the compute saving.
+  </StepCard>
+  <StepCard n={4} title="Mix and add to the residual">
+    The weighted outputs are summed, added to x and passed to the next block.
+  </StepCard>
+</StepCards>
+
+**The numbers:** $e^{2.1} = 8.166$ and $e^{1.6} = 4.953$ sum to 13.119, so the weights are $8.166 / 13.119 = 0.62$ and 0.38, and the output is $x + 0.62 \cdot E_2(x) + 0.38 \cdot E_5(x)$.
 
 For each token in an MoE block:
 
@@ -57,28 +77,115 @@ For each token in an MoE block:
 3. The token is sent to those experts, possibly on other GPUs.
 4. Their outputs are combined with the router weights and added to the residual stream.
 
-## Deep dive
+GShard made every other feed-forward layer an MoE layer, ST-MoE every fourth, Mixtral all of them, and DeepSeek-V3 all but the first three.
 
-### Training loop concerns
+## Technical mechanics
 
-```mermaid
-flowchart LR
-    B["Batch of tokens"] --> RT["Router assignments"]
-    RT --> CAP{"Expert over capacity?"}
-    CAP -->|"No"| RUN["Run expert"]
-    CAP -->|"Yes"| DROP["Drop or reroute token"]
-    RUN --> LOSS["Task loss + load-balancing loss"]:::accent
-    DROP --> LOSS
-    LOSS --> UPD["Update experts and router"]
-```
+### Routing, step by step
+
+The router computes logits $h(x) = W_r x$, one per expert. Designs differ in where the softmax goes.
+
+- **Softmax over all, then pick** (Switch, GShard). Switch keeps the top 1 and scales its output by $p_i(x)$, so the router gets a gradient. GShard keeps the top 2 and renormalizes their gates to sum to 1.
+- **Pick, then softmax the winners** (Mixtral): $G(x) = \text{Softmax}(\text{TopK}(x \cdot W_g))$.
+- **Noisy top-k** (Shazeer et al., 2017): tunable Gaussian noise on the logits before the top k, which helps balance.
+- **Sigmoid scores** (DeepSeek-V3): an independent score per expert; the top 8 of 256 are normalized among themselves.
+
+The first two give the same weights. On the running token the full softmax gives experts 2 and 5 0.337 and 0.204; renormalized, $0.337 / 0.541 = 0.62$, as before. In a Switch layer this token would run expert 2 alone, scaled by 0.337.
+
+Shazeer et al. conjectured that k > 1 was needed for the router to learn; Switch showed k = 1 keeps quality, runs one expert per token and at least halves each expert's capacity.
+
+### Load balancing, step by step
+
+Nothing in the task loss asks the router to share work: an expert that wins a few more tokens early improves faster and wins even more (Shazeer et al., 2017). Here is Switch Transformer's fix on the batch of 8 tokens.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-balance-loss"
+  caption="The loss multiplies each expert's share of tokens by its mean router probability: this batch's 3, 2, 2, 1 split scores 1.06 against a floor of 1.00, and the gradient lands hardest on the busiest expert. Router logits are illustrative."
+/>
+
+**How to read it:** Each row is one token's softmax over 4 experts; the blue column is its pick. $P_i$ averages a column, $f_i$ counts picks, and their products sum to the loss. The bars place this batch between an even one and a collapsed one.
+
+**The numbers:** $f = (0.375, 0.250, 0.250, 0.125)$ and $P = (0.300, 0.260, 0.252, 0.189)$ give products 0.112, 0.065, 0.063 and 0.024, which sum to 0.264; $4 \times 0.264 = 1.06$, and with α = 0.01 the router pays 0.0106 on top of the task loss.
+
+The formula is $\text{loss} = \alpha \cdot N \cdot \sum_i f_i \cdot P_i$. Three details make it work:
+
+- **Why two vectors.** $f_i$ is a count with no gradient; $P_i$ is a mean of softmax outputs, which has one. The count decides where to push: the gradient on $P_i$ is $N \cdot f_i$ = 1.5, 1.0, 1.0, 0.5, three times stronger on E1 than on E4.
+- **Why multiply by N.** Even routing gives $\sum f_i P_i = 1/N$; scaling by N makes the floor 1.00 for any expert count.
+- **Why α is small.** Switch swept $10^{-1}$ to $10^{-5}$ and chose $10^{-2}$: it balances quickly without fighting the task loss.
+
+Token t5 picked E1 at 0.40 over E4 at 0.30; a small push flips it to E4, which has spare room. Shazeer et al. used the squared coefficient of variation of each expert's summed gates instead, and GShard the mean gate times the routed share.
+
+<Callout tone="red" title="What breaks">
+  Router collapse. With no balancing term, or α too low, one expert's share climbs toward all tokens: the loss heads for 4, the other experts stop training, and their GPUs idle. Fix: the auxiliary loss (or DeepSeek-V3's bias method below), early routing noise, and per-expert token counts as a training metric.
+</Callout>
+
+### Router z-loss
+
+Large router logits make the softmax brittle in bfloat16, which has up to 65,536 times worse roundoff than float32. Switch computes the router in float32; ST-MoE added the router z-loss $L_z = \frac{1}{B} \sum (\log \sum_j e^{x_j})^2$, weighted by $c_z = 0.001$, which penalizes large logits directly. On the running batch $z = 4.79$, a penalty of 0.0048; the same logits times 10 give 251, about 52 times larger.
+
+### Capacity and dropped tokens
+
+Here 8 tokens are routed to 4 experts that take 2 tokens each.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-capacity"
+  caption="Each expert takes at most 2 tokens here, so the third token routed to Expert 1 is dropped from the layer and kept only by the residual; the load-balancing loss pushes the router toward an even split."
+/>
+
+**How to read it:** Tokens fill each expert's slots in batch order. Expert 1 is full when t5 arrives, so t5 reaches the output through the residual only, while Expert 4 has an empty slot the batch still pays for.
+
+**The numbers:** capacity = (8 tokens ÷ 4 experts) × capacity factor 1.0 = 2 slots; tokens per expert 3, 2, 2, 1, so 7 are processed and 1 is dropped.
+
+Capacity exists because accelerators want fixed tensor shapes, decided before routing. The capacity factor trades dropped tokens against wasted compute:
+
+| Capacity factor | Slots per expert | Processed | Dropped | Empty slots |
+| --- | --- | --- | --- | --- |
+| 0.5 | 1 | 4 | 4 (t3, t5, t7, t8) | 0 of 4 |
+| 1.0 | 2 | 7 | 1 (t5) | 1 of 8 |
+| 1.5 | 3 | 8 | 0 | 4 of 12 |
+| 2.0 | 4 | 8 | 0 | 8 of 16 |
+
+At 1.5 a third of expert compute is padding; at 2.0, half. With the balancing loss, Switch dropped typically under 1% of tokens and did best at factors 1.0 and 1.25; ST-MoE trains at 1.25 and evaluates at 2.0.
+
+<Callout tone="red" title="What breaks">
+  Dropped tokens at low capacity. At factor 0.5, half of this batch skips the layer; ST-MoE measured 10.6% dropped at 0.75 against 0.3% at 1.25. Fixes: a factor of 1.25 or more, a working balancing loss, or a dropless design (MegaBlocks kernels take any number of tokens per expert; DeepSeek-V3 drops none).
+</Callout>
 
 Common instabilities include router collapse (one expert dominates) and large router logits; fixes include the balancing loss, a router z-loss that keeps logits small, and noise in routing early in training.
 
+### Balancing without an auxiliary loss
+
+An auxiliary loss competes with the task loss. DeepSeek-V3 adds a bias $b_i$ to each expert's score only when choosing the top k; the mixing weight uses the raw score. After each step an overloaded expert's bias drops by γ and an underloaded one's rises by γ (0.001). A tiny sequence-wise loss, α = 0.0001, guards against extreme imbalance.
+
 ### Total vs active parameters
 
-Mixtral 8x7B has about 47 billion total parameters, since attention layers are shared and only feed-forward layers are duplicated, but only about 13 billion are active per token. It needs memory for 47 billion parameters while costing compute closer to a 13-billion-parameter dense model.
+- Mixtral 8x7B has about 47 billion total parameters, since attention layers are shared and only feed-forward layers are duplicated, but only about 13 billion are active per token.
+- It needs memory for 47 billion parameters while costing compute closer to a 13-billion-parameter dense model.
+
+Two bars on one scale show where Mixtral's parameters sit and how few of them one token touches.
+
+<AnimatedDiagram
+  spec="animated/transformer/moe-total-vs-active"
+  caption="Mixtral 8x7B stores about 47B parameters but runs about 13B per token: the shared parts plus 2 of the 8 experts."
+/>
+
+**How to read it:** The grey part (attention, embeddings, routers, norms) serves every token; each blue cell is one expert slot across all 32 layers. "8x7B" suggests 56B, but only the feed-forward networks are copied.
+
+**The numbers:** shared 1.6B + 8 × 5.6B experts = 46.7B stored; 1.6B + 2 × 5.6B = 12.9B active, about 3.6 times fewer. At 16 bits per parameter the weights alone take 93.4 GB.
+
+<Callout tone="red" title="What breaks">
+  All experts in memory despite few active. Mixtral computes like a 13B model, but its 93.4 GB of 16-bit weights do not fit one 80 GB GPU, and any token may pick any expert. Fixes: expert parallelism, quantization, or a dense model when memory is the limit.
+</Callout>
+
+### Expert parallelism and serving
+
+With expert parallelism each GPU holds a few experts, and every MoE layer does two all-to-all exchanges: tokens out to their experts, outputs back. One busy expert stalls the layer. DeepSeek-V3 spreads each layer's routed experts over 64 GPUs on 8 nodes and sends each token to at most 4 nodes. Each expert sees about $k \cdot b / n$ of a batch of b tokens (2 of 8 here), so MoE needs large batches to keep each expert's matrix multiply efficient.
 
 ## Trade-offs
+
+MoE buys quality per FLOP with memory, communication and engineering.
+
+<Compare caption="Dense and MoE models: what each costs per token, in memory and in engineering.">
 
 | Aspect | Dense model | MoE model |
 | --- | --- | --- |
@@ -89,27 +196,37 @@ Mixtral 8x7B has about 47 billion total parameters, since attention layers are s
 | Serving | Simple batching | Expert parallelism, all-to-all traffic, uneven load |
 | Fine-tuning | Straightforward | Can overfit; experts may need special handling |
 
-## Real-world examples
+</Compare>
 
-- Shazeer et al. (2017) introduced sparsely gated MoE layers with thousands of experts in LSTM models.
+Within MoE, the knobs trade against each other too: higher k smooths routing but adds compute and traffic; a higher capacity factor drops fewer tokens but pads more; a larger α balances faster but costs quality.
+
+## Production systems
+
+- Shazeer et al. (2017) introduced sparsely gated MoE layers with thousands of experts in LSTM models. The largest had 131,072 experts and 137 billion parameters.
 - GShard and Switch Transformer scaled MoE in transformers; Switch uses top-1 routing.
-- Mixtral 8x7B uses 8 experts per layer with top-2 routing.
-- DeepSeek's MoE models use many fine-grained experts plus shared experts.
+- GShard (2020): top-2 gating, 600B parameters with 2,048 experts per layer, translating 100 languages to English.
+- Switch Transformer (2021): 7 times faster pre-training than T5-Base at equal compute; Switch-C has 1.6 trillion parameters and 2,048 experts.
+- ST-MoE (2022): 269B parameters at the compute of a 32B dense encoder-decoder, made stable by the router z-loss.
+- Mixtral 8x7B uses 8 experts per layer with top-2 routing. Its paper (January 2024) reports it matching or beating Llama 2 70B with 13B active parameters.
+- DeepSeek's MoE models use many fine-grained experts plus shared experts. DeepSeekMoE 16B (January 2024) matched LLaMA2 7B with about 40% of its compute. DeepSeek-V3 (December 2024) has 1 shared and 256 routed experts per layer, 8 routed active, for 671B total and 37B active parameters.
+- **Used in our case studies:** [ChatGPT-Style Chat Service](/genai-system-design/case-studies/chatgpt-style-chat-service)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Quoting total parameters as if they set compute cost.
 - Forgetting the memory cost: every expert must be loaded even if most are idle per token.
 - Ignoring load balance, which wastes hardware and harms quality.
-- Assuming experts specialize by human topic. Analyses often find routing patterns based on syntax or token types rather than clean subjects.
+- Assuming experts specialize by human topic. Analyses often find routing patterns based on syntax or token types rather than clean subjects. Mixtral showed no obvious split by domain between ArXiv, biology and philosophy text; ST-MoE's encoder experts specialized in punctuation, verbs or proper names, its decoder experts did not.
+- Tuning the capacity factor without measuring the drop rate per layer.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define MoE as replacing the feed-forward layer with routed experts.
 2. Explain top-k routing and sparse activation.
 3. Contrast total and active parameters with an example.
 4. Explain load balancing and capacity limits.
 5. Discuss serving costs: memory, expert parallelism and communication.
+6. On a whiteboard, work one batch: 8 tokens, 4 experts, picks 3, 2, 2, 1. Show capacity 2 drops one token, and $4 \times 0.264 = 1.06$ against a floor of 1.00.
 
 **What interviewers listen for:** clarity on what is shared and what is duplicated, balancing mechanisms, and system-level costs.
 
@@ -117,29 +234,46 @@ Mixtral 8x7B has about 47 billion total parameters, since attention layers are s
 
 ## Further reading
 
-- [Outrageously Large Neural Networks: Sparsely-Gated MoE (Shazeer et al., 2017)](https://arxiv.org/abs/1701.06538)
-- [GShard (Lepikhin et al., 2020)](https://arxiv.org/abs/2006.16668)
-- [Switch Transformers (Fedus et al., 2021)](https://arxiv.org/abs/2101.03961)
-- [Mixtral of Experts (Jiang et al., 2024)](https://arxiv.org/abs/2401.04088)
+- [Outrageously Large Neural Networks: Sparsely-Gated MoE (Shazeer et al., 2017)](https://arxiv.org/abs/1701.06538): §2.1 noisy top-k gating, §3.1 the shrinking batch, §4 and Appendix A balancing losses.
+- [GShard (Lepikhin et al., 2020)](https://arxiv.org/abs/2006.16668): §2.2 expert capacity, local groups, auxiliary loss and random routing; Algorithm 1.
+- [Switch Transformers (Fedus et al., 2021)](https://arxiv.org/abs/2101.03961): §2.1 top-1 routing, §2.2 equations 3 to 6 (capacity and balancing loss), Table 1, §2.4 selective precision.
+- [ST-MoE: Designing Stable and Transferable Sparse Expert Models (Zoph et al., 2022)](https://arxiv.org/abs/2202.08906): §3.3 router z-loss (eq. 5), Table 5 dropped tokens, §7 expert specialization.
+- [Mixtral of Experts (Jiang et al., 2024)](https://arxiv.org/abs/2401.04088): §2.1 gating and expert parallelism, §5 routing analysis.
 - [DeepSeekMoE (Dai et al., 2024)](https://arxiv.org/abs/2401.06066)
+- [DeepSeek-V3 Technical Report (DeepSeek-AI, 2024)](https://arxiv.org/abs/2412.19437): §2.1.2 auxiliary-loss-free balancing, §4.2 MoE configuration.
+- Related pages: [Transformer architecture](/ai-system-design/genai-system-design/transformer-architecture), [Multi-head latent attention](/ai-system-design/genai-system-design/multi-head-latent-attention), [Scaling laws and training](/ai-system-design/genai-system-design/scaling-laws-and-training).
 
 <InterviewQuestions>
   <InterviewQuestion question="What is a mixture-of-experts layer?" category="Concepts" level="Junior">
-    It replaces a transformer block's single feed-forward network with several expert networks and a router. For each token, the router picks a few experts, usually one or two, runs only those, and combines their outputs with the router's weights. The model gains capacity without running every parameter for every token.
+    - It replaces a transformer block's single feed-forward network with several expert networks and a router.
+    - For each token, the router picks a few experts, usually one or two, runs only those, and combines their outputs with the router's weights.
+    - The model gains capacity without running every parameter for every token.
   </InterviewQuestion>
   <InterviewQuestion question="What is the difference between total and active parameters?" category="Concepts" level="Junior">
-    Total parameters are everything stored in the model, including every expert, and they determine memory needs. Active parameters are those used for one token: shared layers plus the selected experts, and they determine compute per token. An MoE model can have a few times more total than active parameters.
+    - Total parameters are everything stored in the model, including every expert, and they determine memory needs.
+    - Active parameters are those used for one token: shared layers plus the selected experts, and they determine compute per token.
+    - An MoE model can have a few times more total than active parameters.
   </InterviewQuestion>
   <InterviewQuestion question="Why do MoE models need a load-balancing loss?" category="Failure modes" level="Mid">
-    The router learns from the same gradients as the experts, so an expert that gets slightly more tokens early improves faster and gets chosen even more. Left alone, routing collapses onto a few experts, wasting capacity and hardware. An auxiliary loss that rewards even token distribution keeps all experts trained and the load spread across devices.
+    - The router learns from the same gradients as the experts, so an expert that gets slightly more tokens early improves faster and gets chosen even more.
+    - Left alone, routing collapses onto a few experts, wasting capacity and hardware.
+    - An auxiliary loss that rewards even token distribution keeps all experts trained and the load spread across devices.
   </InterviewQuestion>
   <InterviewQuestion question="What is the capacity factor and what happens when an expert overflows?" category="Architecture" level="Mid">
-    The capacity factor sets how many tokens each expert can accept per batch, relative to an even share. It keeps compute predictable and lets tensors have fixed shapes. When an expert is full, extra tokens are dropped from that layer, meaning they pass through on the residual connection only, or rerouted, depending on the implementation. Too low a factor drops many tokens; too high wastes compute on padding.
+    - The capacity factor sets how many tokens each expert can accept per batch, relative to an even share.
+    - It keeps compute predictable and lets tensors have fixed shapes.
+    - When an expert is full, extra tokens are dropped from that layer, meaning they pass through on the residual connection only, or rerouted, depending on the implementation.
+    - Too low a factor drops many tokens; too high wastes compute on padding.
   </InterviewQuestion>
   <InterviewQuestion question="What makes serving MoE models harder than dense models?" category="Scaling" level="Senior">
-    All experts must be in memory even though each token uses a few, so memory needs follow total parameters. Experts are usually spread across GPUs, and tokens travel to them with all-to-all communication every MoE layer, which adds latency. Load is uneven from batch to batch, so some GPUs idle while others are busy. Batching strategy and expert placement matter a lot for throughput.
+    - All experts must be in memory even though each token uses a few, so memory needs follow total parameters.
+    - Experts are usually spread across GPUs, and tokens travel to them with all-to-all communication every MoE layer, which adds latency.
+    - Load is uneven from batch to batch, so some GPUs idle while others are busy.
+    - Batching strategy and expert placement matter a lot for throughput.
   </InterviewQuestion>
   <InterviewQuestion question="Would you choose a dense or an MoE model for an on-device assistant?" category="Trade-offs" level="Senior">
-    Usually a dense model. On-device, memory is the hardest limit, and MoE requires storing every expert while only saving compute. A small dense model, possibly quantized, uses memory more efficiently. MoE shines in data centers where memory is plentiful across many GPUs and the goal is better quality per unit of compute.
+    - Usually a dense model. On-device, memory is the hardest limit, and MoE requires storing every expert while only saving compute.
+    - A small dense model, possibly quantized, uses memory more efficiently.
+    - MoE shines in data centers where memory is plentiful across many GPUs and the goal is better quality per unit of compute.
   </InterviewQuestion>
 </InterviewQuestions>

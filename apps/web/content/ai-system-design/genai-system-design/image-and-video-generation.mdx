@@ -1,0 +1,288 @@
+---
+title: "Image & Video Generation"
+description: "How diffusion and flow models generate images and video, how they are conditioned on text, and how to serve them."
+icon: sparkles
+updated: 2026-11-15
+---
+
+Brightpost wants a clean product image for every new listing without a photo shoot.
+
+- Interviewers ask about image and video generation because a good answer connects four things: how noise becomes a picture, why the work happens in a small latent space, what guidance does, and why video costs so much more.
+
+## Overview
+
+- A **diffusion model** learns to **predict the noise** in a picture that was mixed with noise. To generate, it starts from pure noise and removes a little at each step.
+- **Latent diffusion** runs that loop on a compressed latent, not on pixels: **512 × 512 × 3 = 786,432 values become 64 × 64 × 4 = 16,384**, 48 times fewer. A VAE decoder turns the final latent into pixels.
+- The text prompt steers the denoiser through **cross-attention**. **Classifier-free guidance** runs the denoiser with and without the prompt and extrapolates: **ε = ε_uncond + w (ε_cond − ε_uncond)**.
+- A step costs two denoiser passes with guidance, and a picture needs many steps. **Fewer steps** come from better samplers and **distillation** (some models need 1 to 4).
+- **Video** adds time. A video latent cut into spacetime patches gives **tens of thousands of tokens**; attention cost grows with their square.
+- Generated media needs **safety checks and provenance**, not only quality.
+
+## Mental model
+
+- Picture a sculptor who starts with a rough block, not a blank canvas.
+- Each pass with the chisel removes a little stone, guided by a note that says "kettle on a shelf".
+- After a few dozen passes the block is a kettle.
+- Training works the other way round: take a finished sculpture, add random stone back in measured amounts, and teach the sculptor to tell which part is the added stone.
+- A sculptor who can do that at every stage of roughness can start from a plain block and finish a new kettle.
+
+- This page covers images and video. For diffusion applied to text, which uses masking instead of noise, see [Diffusion LLMs & Non-Autoregressive Generation](/ai-system-design/genai-system-design/diffusion-llms-and-non-autoregressive-generation).
+
+## Core concepts
+
+### Diffusion and flow matching in plain terms
+
+- The **forward process** mixes a picture with noise over T steps.
+- In DDPM (Ho et al., 2020) T = 1000 and the noise level rises on a fixed schedule, so after step t the picture is `x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε`, a blend of the clean picture and standard noise ε.
+- A network is trained to **predict ε** from `x_t` and t.
+- To generate, a **sampler** starts at pure noise and repeats: predict the noise, remove some.
+- **Flow matching** (Lipman et al., 2022) and rectified flow trains a network to predict the velocity along a path from noise to data, often a straight line, and generates by solving an ordinary differential equation.
+- Diffusion paths are a special case, and the paper reports more stable training.
+- Stable Diffusion 3 (Esser et al., 2024) uses rectified flow with a transformer.
+
+### Latent diffusion and the VAE
+
+- Denoising pixels is expensive. A **variational autoencoder (VAE)** learns to compress an image into a small **latent** and decode it back.
+- Latent diffusion (Rombach et al., 2022) runs the loop on the latent.
+- Stable Diffusion v1 uses a downsampling factor of 8 with 4 latent channels.
+- The encoder is needed in training only; at generation time you start from latent noise and run the decoder once at the end.
+
+### Text conditioning and classifier-free guidance
+
+- A **text encoder** turns the prompt into one vector per token.
+- The denoiser reads them through **cross-attention**: queries come from the image features and keys and values come from the text (see [Self-Attention Explained](/ai-system-design/genai-system-design/self-attention-explained) for the mechanism).
+- **Classifier-free guidance** (Ho and Salimans, 2022) trains one network both with and without the prompt, by replacing the prompt with a null token a fraction of the time (0.1 and 0.2 worked about equally well in the paper).
+- At sampling it runs both and extrapolates. A **guidance scale** w above 1 buys closer prompt matching at the cost of variety.
+
+### U-Nets versus diffusion transformers
+
+- Early latent diffusion used a **U-Net**, a convolutional network with attention layers.
+- The **diffusion transformer (DiT)** (Peebles and Xie, 2022) swaps it for a transformer on latent patches.
+- In DiT a 256 × 256 × 3 image becomes a 32 × 32 × 4 latent; with patch size 2 that is (32 ÷ 2)² = 256 tokens.
+- Halving the patch size quadruples the tokens.
+- DiT-XL/2 reached an FID of 2.27 on class-conditional ImageNet at 256 × 256, and the same design carries over to video.
+
+## Architecture
+
+What are the parts of a text-to-image system?
+
+<AnimatedDiagram
+  spec="animated/multimodal/latent-diffusion-stack"
+  stepper
+  caption="Three models and one loop: a text encoder, a denoiser that loops in latent space, and a VAE decoder that runs once. 512 × 512 × 3 becomes 64 × 64 × 4."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Encode the prompt">
+    The text encoder returns one vector per token. It runs once per request.
+  </StepCard>
+  <StepCard n={2} title="Start from noise in latent space">
+    A random 64 × 64 × 4 latent is the starting point. The text embeddings reach the denoiser by cross-attention.
+  </StepCard>
+  <StepCard n={3} title="Loop">
+    At each step the denoiser predicts the noise and the sampler removes some. The loop runs for the chosen number of steps.
+  </StepCard>
+  <StepCard n={4} title="Decode">
+    The VAE decoder turns the clean latent into a 512 × 512 × 3 image.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 512 × 512 × 3 = 786,432 values. With f = 8 and 4 channels the latent is 64 × 64 × 4 = 16,384 values.
+- 786,432 ÷ 16,384 = 48, so each step handles 48 times fewer values.
+
+## Technical mechanics
+
+### What a step does
+
+<AnimatedDiagram
+  spec="animated/multimodal/diffusion-denoise-steps"
+  stepper
+  caption="A toy 8 × 8 picture mixed with the same noise at five points of the DDPM schedule. Generation walks from the noisy panel to the clean one."
+/>
+
+**How to read it:**
+
+- Each panel is `x_t` from the formula above, computed for a kettle-shaped toy picture and one fixed noise sample.
+- Signal is √ᾱ and noise is √(1 − ᾱ). At t = 1000 the signal share is 0.01, so the panel is noise.
+- At t = 300 it is 0.63 and the shape shows. At t = 0 the picture is clean.
+- Real samplers take far fewer than 1,000 steps and jump between noise levels; the panels are snapshots.
+
+### Guidance, computed
+
+<AnimatedDiagram
+  spec="animated/multimodal/guidance-scale"
+  stepper
+  caption="Four latent cells with illustrative numbers. The guided prediction starts at the unconditional value and moves w times the prompt's pull."
+/>
+
+**The numbers:**
+
+- The first cell has ε_uncond = 0.10 and ε_cond = 0.30, so the difference is 0.20.
+- At w = 1 the result is 0.30. At w = 7.5 it is 0.10 + 7.5 × 0.20 = 1.60.
+- The paper writes the same rule as (1 + w′) ε_cond − w′ ε_uncond, so w = 1 + w′.
+- Each step needs two denoiser passes, one without and one with the prompt, so guidance roughly doubles the compute of a step unless the passes are batched on spare GPU capacity or the model is distilled to skip it.
+- A request has the shape below (illustrative, not one vendor's API).
+
+```json
+{
+  "prompt": "stainless steel kettle on a white shelf, soft daylight",
+  "negative_prompt": "text, watermark, cracks",
+  "width": 512,
+  "height": 512,
+  "steps": 30,
+  "guidance_scale": 7.5,
+  "seed": 4471
+}
+```
+
+### Faster sampling: distillation and fewer steps
+
+- Quality needs many small steps, and every step is a full denoiser pass.
+- Two routes cut the count. Better **samplers** solve the same equation in fewer, larger steps.
+- **Distillation** trains a student to reach in a few steps what the teacher reaches in many; adversarial diffusion distillation, for example, generates in 1 to 4 steps by combining score distillation with an adversarial loss.
+- The price is some variety and fine detail, and some distilled models give up the guidance scale, so test quality again after distilling.
+- Measure by prompt sets and human review, as on [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics).
+
+### Video: temporal consistency and cost
+
+<AnimatedDiagram
+  spec="animated/multimodal/video-spacetime-patches"
+  stepper
+  caption="A video VAE compresses time and space; patches that span time become tokens. The clip size is illustrative; the compression rules are from the Wan 2.1 report."
+/>
+
+**How to read it:**
+
+- Video models extend the latent idea. OpenAI's Sora report (February 2024) describes a transformer over **spacetime patches** of a compressed video.
+- The Wan 2.1 report gives the arithmetic: its video VAE compresses time, height and width by 4 × 8 × 8 into 16 channels, and its transformer cuts 1 × 2 × 2 patches.
+- An illustrative clip of 81 frames of 832 × 480 gives 1 + 80 ÷ 4 = 21 latent frames of 60 × 104, then 21 × 30 × 52 = 32,760 tokens.
+
+**The numbers:**
+
+- One 256 × 256 image in DiT is 256 tokens. The clip has 32,760 ÷ 256 = 128 times as many tokens, and attention compares every pair, so about 128² ≈ 16,000 times as many pairs.
+- That is why video models compress hard, attend over limited windows or use efficient attention, and cost far more per second of output than per image.
+
+**Temporal consistency:**
+
+- Frames must agree with each other: the kettle must keep its shape and the shelf must not drift.
+- Attending across frames helps, but flicker, object changes and impossible motion remain common failures.
+- OpenAI's report itself says its model does not accurately model the physics of many basic interactions.
+
+### Safety, provenance and watermarking
+
+- Generated images need the same care as generated text.
+- Screen prompts and outputs for disallowed content (see [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety)).
+- Add **provenance**: signed metadata such as C2PA Content Credentials records where a file came from and how it changed, and an invisible watermark can survive some edits that strip metadata.
+- Neither is proof on its own; metadata can be removed and watermarks can be damaged.
+- For a shop, the rule is simple: label generated product images, and never present a generated image as a photo of the real item.
+
+### Worked example: a listing image for the kettle
+
+Brightpost generates images for new listings: a stainless steel kettle on a white shelf, 512 × 512. The request above asks for 30 steps with guidance 7.5 (both illustrative).
+
+- The denoiser works on a 64 × 64 × 4 latent. With guidance each step is two passes, so one image costs 30 × 2 = 60 denoiser passes and one decoder pass.
+- If a pass takes an illustrative 20 ms, one image takes 60 × 20 = 1,200 ms. A batch of 2,000 listing images a day is 2,000 × 1.2 s = 2,400 GPU-seconds, 40 minutes of one GPU, so the work fits a small queue and a nightly job, not a real-time path.
+- A distilled model at 4 steps with no guidance pass would need 4 passes, 80 ms.
+
+- Quality control matters more than speed. Brightpost fixes the seed in the log so a bad image can be reproduced, blocks prompts that name brands it does not sell, and compares each image with the listing text for a wrong colour or an extra spout.
+- Generated images are labelled, and the customer's own cracked-kettle photo from the [vision-language page](/ai-system-design/genai-system-design/vision-language-models) is never altered or replaced.
+- The two directions are separate: a VLM reads a customer photo, and a diffusion model writes a catalogue image.
+- See [Multimodal & Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai) for both in one picture and [Multimodal RAG](/ai-system-design/genai-system-design/multimodal-rag) for retrieving images.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Pixel-space diffusion | No decoder error | Far more values per step; slow | Small images and research |
+| Latent diffusion | 48 times fewer values at 512 px; fast enough to serve | VAE limits fine detail such as small text | Default for images and video |
+| U-Net denoiser | Mature tooling; efficient at modest sizes | Harder to scale; convolution-based | Existing pipelines |
+| Diffusion transformer | Scales with size and tokens; reuses LLM tools | Token count grows with resolution | New large models and video |
+| High guidance scale | Closer prompt match | Less variety; over-saturated results | Product shots that must match the prompt |
+| Distilled few-step model | 1 to 4 steps; low latency | Less variety; some lose the guidance scale | Interactive tools, high volume |
+
+## Production systems
+
+- **DDPM (2020).** Reported an Inception score of 9.46 and an FID of 3.17 on unconditional CIFAR-10, with T = 1000 steps.
+- **Latent diffusion and Stable Diffusion (2022).** Rombach et al. found downsampling factors of 4 to 8 gave the best balance; Stable Diffusion v1 uses f = 8 and 4 channels, so 512 px becomes 64 × 64 × 4.
+- **DiT (2022).** A transformer on latent patches; DiT-XL/2 reported an FID of 2.27 on ImageNet at 256 × 256.
+- **Sora (February 2024) and Wan 2.1 (2025).** Video transformers on spacetime patches; Wan 2.1 is an open model in 1.3 B and 14 B parameter sizes with a 4 × 8 × 8 video VAE.
+- **Adversarial diffusion distillation.** Generates images in 1 to 4 steps from a diffusion teacher.
+
+## Failure modes & pitfalls
+
+- Describing diffusion as "drawing from a prompt". It denoises; the prompt only steers.
+- Forgetting that guidance doubles the passes per step.
+- Quoting a step count or pass time as a fact. Both depend on the model, the sampler and the GPU; label them illustrative.
+- Treating a distilled model as free. Re-check variety, detail and prompt match.
+- Ignoring video token counts. Compression and patching, not the frame count alone, set the cost.
+- Shipping generated images without labels, logs or a way to reproduce a bad one.
+
+## Interview framework
+
+1. Say what training does: add noise on a schedule, train a network to predict it. Generation reverses it step by step.
+2. Draw the stack: text encoder, denoiser in latent space, VAE decoder, with the size arithmetic (786,432 to 16,384 values).
+3. Explain guidance with the formula and its cost: two passes per step, w trades variety for prompt match.
+4. Name the cost levers: fewer steps (samplers, distillation), smaller latents, batching, and for video the token count.
+5. Close with safety and provenance: filtering, logging seeds, labelling, content credentials.
+
+**What interviewers listen for:** the noise-prediction idea, why latent space is cheaper, the guidance formula and its compute cost, and the token arithmetic for video.
+
+**Red flags:** "the model paints the image from the prompt", no mention of steps or cost, and treating watermarks as proof.
+
+## Further reading
+
+- [Denoising Diffusion Probabilistic Models (Ho et al., 2020)](https://arxiv.org/abs/2006.11239)
+- [High-Resolution Image Synthesis with Latent Diffusion Models (Rombach et al., 2022)](https://arxiv.org/abs/2112.10752)
+- [Classifier-Free Diffusion Guidance (Ho and Salimans, 2022)](https://arxiv.org/abs/2207.12598)
+- [Scalable Diffusion Models with Transformers (DiT; Peebles and Xie, 2022)](https://arxiv.org/abs/2212.09748)
+- [Flow Matching for Generative Modeling (Lipman et al., 2022)](https://arxiv.org/abs/2210.02747) · [Scaling Rectified Flow Transformers (Esser et al., 2024)](https://arxiv.org/abs/2403.03206)
+- [Video generation models as world simulators (OpenAI, February 2024)](https://openai.com/index/video-generation-models-as-world-simulators/) · [Wan: Open and Advanced Large-Scale Video Generative Models (2025)](https://arxiv.org/abs/2503.20314)
+- Related pages: [Diffusion LLMs](/ai-system-design/genai-system-design/diffusion-llms-and-non-autoregressive-generation) · [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models) · [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a diffusion model learn, and how does it generate an image?" category="Concepts" level="Junior">
+    - Training takes real pictures, mixes in noise at a random level on a fixed schedule, and teaches a network to predict that noise.
+    - Generation starts from pure noise and repeats: the network predicts the noise in the current picture and a sampler removes some of it.
+    - After enough steps a picture is left. The prompt does not draw anything; it steers each prediction.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do image models run diffusion in latent space?" category="Concepts" level="Junior">
+    - Pixels hold a lot of detail that people barely notice, and the denoiser pays for every value at every step.
+    - A VAE compresses the image first; with a downsampling factor of 8 and 4 channels, 512 × 512 × 3 = 786,432 values become 64 × 64 × 4 = 16,384.
+    - Each step handles 48 times fewer values. The decoder runs once at the end, and the VAE limits the finest detail, such as small text.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain classifier-free guidance and what the guidance scale does." category="Architecture" level="Mid">
+    - The model is trained with and without the prompt, by dropping the prompt a fraction of the time.
+    - At each step it predicts the noise both ways, and the guided prediction is ε_uncond + w (ε_cond − ε_uncond).
+    - With w = 1 you get the conditional prediction; larger w moves further along the direction the prompt adds.
+    - That gives closer prompt matching and less variety, and too much gives distorted images. It needs two passes per step.
+  </InterviewQuestion>
+  <InterviewQuestion question="A product-image service must cut latency. What levers do you have?" category="Scaling" level="Mid">
+    - Fewer steps through a better sampler or a distilled model, which can reach 1 to 4 steps at some cost to variety.
+    - Skip or batch the guidance pass, since it doubles the passes per step.
+    - Use a smaller latent or resolution, and generate then upscale.
+    - Batch requests on one GPU, cache the text embeddings of repeated prompts, and move non-urgent images to a nightly queue.
+    - After each change, re-check quality on a fixed prompt set, because speed gains often show up as lost detail.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do diffusion transformers differ from U-Nets, and why does that matter for video?" category="Architecture" level="Senior">
+    - A U-Net is a convolutional network with attention at some scales.
+    - A diffusion transformer cuts the latent into patches and treats each as a token, so it scales like a language model and reuses its tools.
+    - In DiT a 32 × 32 × 4 latent with patch size 2 gives 256 tokens.
+    - For video the patches span time too: an illustrative 81-frame clip becomes 21 × 30 × 52 = 32,760 tokens with the Wan 2.1 rules, 128 times an image, and attention cost grows with the square, about 16,000 times the pairs.
+    - Token count, not frame count alone, sets video cost.
+  </InterviewQuestion>
+  <InterviewQuestion question="How is flow matching different from DDPM-style diffusion?" category="Concepts" level="Senior">
+    - DDPM adds noise on a schedule and trains the network to predict the noise.
+    - Flow matching trains the network to predict a velocity along a chosen path from noise to data, often a straight line in rectified flow, and generates by solving an ordinary differential equation.
+    - Diffusion paths are a special case of the framework.
+    - The papers report more stable training and efficient sampling, and Stable Diffusion 3 uses rectified flow with a transformer.
+    - The serving stack looks similar: a loop of denoiser calls.
+  </InterviewQuestion>
+  <InterviewQuestion question="What would you put around a service that generates product images, besides the model?" category="Failure modes" level="Senior">
+    - Input and output filters for disallowed or off-brand content, and a log of prompt, seed, model version and settings so a bad image can be reproduced.
+    - Provenance: label generated images, and attach signed metadata such as Content Credentials, knowing it can be stripped.
+    - A review step where the image is checked against the listing for wrong colour or extra parts, with people on the unclear cases.
+    - A policy that generated images never stand in for a photo of the real item, and that customer photos are never altered.
+  </InterviewQuestion>
+</InterviewQuestions>

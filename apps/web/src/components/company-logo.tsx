@@ -6,8 +6,8 @@ export interface CompanyTag {
   name: string;
 }
 
-// Monogram colours for companies without a logo; each reads on both light and dark backgrounds.
-const MONOGRAM_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#0d9488", "#4f46e5", "#16a34a", "#c026d3"];
+// Monogram colours for companies without a logo; each provides >= 4.5:1 contrast with white text.
+const MONOGRAM_COLORS = ["#1d4ed8", "#6d28d9", "#be185d", "#c2410c", "#0f766e", "#4338ca", "#15803d", "#a21caf"];
 
 function monogram(name: string) {
   const words = name
@@ -30,7 +30,7 @@ export function CompanyLogo({ company, className }: { company: CompanyTag; class
       <span
         aria-hidden
         className={cn(
-          "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[7px] leading-none font-bold text-white",
+          "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[9px] leading-none font-semibold tracking-tight text-white",
           className
         )}
         style={{ backgroundColor: colorFor(company.slug) }}
@@ -76,7 +76,11 @@ export function CompanyChip({
         <CompanyLogo company={company} className="size-3.5" />
       </span>
       {company.name}
-      {count !== undefined && <span className="opacity-60">{count}</span>}
+      {count !== undefined && (
+        <span data-company-count className={active ? "text-paper/80" : "text-muted-foreground"}>
+          {count}
+        </span>
+      )}
     </>
   );
   if (onClick) {

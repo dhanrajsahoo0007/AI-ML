@@ -33,7 +33,7 @@ const spec: DiagramSpec = {
     { id: "feed", title: "Match feed", tone: "orange", x: 700, y: 40, w: 220, h: 310 },
   ],
   nodes: [
-    { id: "fans", label: "Fans' browsers", sub: "50,000 EventSource", icon: "browser", x: 110, y: 150, w: 140, h: 64 },
+    { id: "fans", label: "Fans' browsers", sub: "50,000 EventSource", icon: "browser", x: 110, y: 150, w: 168, h: 64 },
     {
       id: "proxy",
       label: "Edge proxy",
@@ -54,7 +54,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 560,
       y: 150,
-      w: 140,
+      w: 162,
       h: 64,
     },
     {
@@ -77,7 +77,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 810,
       y: 290,
-      w: 140,
+      w: 150,
       h: 64,
       step: 2,
     },
@@ -89,7 +89,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 560,
       y: 290,
-      w: 140,
+      w: 148,
       h: 64,
       step: 3,
     },

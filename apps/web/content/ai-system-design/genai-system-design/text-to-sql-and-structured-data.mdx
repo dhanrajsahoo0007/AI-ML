@@ -1,0 +1,212 @@
+---
+title: "Text-to-SQL & Structured Data"
+description: "Answering questions over databases and tables: schema linking, SQL generation, validation and safe execution."
+icon: table
+---
+
+Questions about counts, sums, and date filters ("How many orders were refunded last week?") cannot be answered by vector search over chunks—they must be computed by a database.
+
+- Text-to-SQL lets an LLM propose a read-only query, validates the AST before execution, runs it safely on a read replica, and returns the exact number alongside the SQL.
+
+## Overview
+
+- **Database computes, LLM translates:** Use Text-to-SQL for aggregations, joins, rankings, and exact filters over structured records where vector search fails.
+- **Schema linking dominates accuracy:** Retrieve only the relevant tables and columns (with column descriptions, example values, and foreign keys) rather than dumping a 40-table schema into the prompt.
+- **AST validation before execution:** Parse the generated SQL into an abstract syntax tree to enforce a single `SELECT`, allow-listed tables, a `LIMIT`, tenant row scoping, and an `EXPLAIN` dry-run before touching data.
+- **Semantic layer for business metrics:** Define canonical metrics ("refunded orders") once in a semantic layer so the model references an approved formula instead of inventing `COUNT(*)` vs `COUNT(DISTINCT order_id)`.
+- **Defense-in-depth execution:** Execute only on a **read replica** under a **read-only database role** with **row-level security (RLS)** and a strict statement timeout (e.g., 5 s), and display the executed SQL in the UI.
+
+## Mental model
+
+- **How a human analyst works:** When asked "How many orders were refunded last week?", a data analyst does not grep help articles—they check which tables store refunds, write a `SELECT`, verify it won't lock production, run it on a read replica, and share both the number and the query.
+- **Model proposes, guards dispose:** Treat generated SQL as untrusted user input; the model drafts the query, while deterministic parsers and database permissions decide whether it runs.
+
+## Core concepts
+
+The running example uses Brightpost's orders database (**40 tables**, illustrative) and the operations team's question: *"How many orders were refunded last week?"*
+
+### Schema linking and context selection
+
+- **Retrieve relevant tables only:** Embed descriptions of every table and column in a schema catalog, retrieve the top matches for the user's question, and include only those tables in the prompt.
+- **Rich column metadata:** Include data types, one-line business descriptions, sample enum values (so the model writes `status = 'refunded'` instead of `'REFUND'`), and foreign-key join paths.
+- **Few-shot SQL demonstrations:** Attach 2–3 verified question-to-SQL examples from the same domain to anchor dialect rules and date-truncation idioms.
+- **The numbers (illustrative):** All 40 tables $\times 12$ columns $\times 25\text{ tokens} = \mathbf{12,000\text{ tokens}}$; linking only `refunds` and `orders` shrinks schema context to **~600 tokens** (20× smaller).
+
+### Generating and validating SQL
+
+The prompt specifies the SQL dialect (e.g., PostgreSQL), provides the linked schema and few-shot examples, and requests a single read-only query:
+
+```sql
+SELECT COUNT(DISTINCT r.order_id) AS refunded_orders
+FROM refunds r
+WHERE r.created_at >= date_trunc('week', now()) - interval '1 week'
+  AND r.created_at <  date_trunc('week', now());
+```
+
+- **AST parsing (not regex):** Parse the candidate SQL into a syntax tree (e.g., `sqlglot` or `pg_query`) and verify that it contains a single `SELECT` statement referencing only allow-listed tables and columns.
+- **Mandatory bounds and scoping:** Inject or verify a row `LIMIT` and tenant/user predicates.
+- **`EXPLAIN` dry-run + error repair:** Run `EXPLAIN` against the database to catch hallucinated column names or invalid joins in milliseconds; on failure, feed the database error back to the model for at most 1–2 repair attempts.
+
+### Semantic layers and metric definitions
+
+- **Valid SQL can still return wrong business numbers:** `SELECT COUNT(*) FROM refunds` executes cleanly but double-counts orders refunded in two partial installments, returning **341** instead of **312** distinct orders (illustrative).
+- **Canonical metric definitions:** A semantic layer (such as Snowflake Cortex Analyst semantic models, Cube, or dbt MetricFlow) defines metrics (`refunded_orders = COUNT(DISTINCT order_id)`), dimensions, and verified joins in YAML so the model selects a governed metric rather than writing ad-hoc aggregations.
+- **Coverage trade-off:** Semantic layers guarantee consistency on core KPIs, while ad-hoc exploration outside defined metrics still falls back to guarded SQL generation.
+
+### Safe execution: read-only roles, limits and sandboxes
+
+- Treat generated SQL as untrusted input—both because models hallucinate joins and because untrusted text can attempt [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks):
+
+- **Read replica isolation:** Route all assistant queries to a dedicated read replica so a heavy join never starves transactional writes on the primary database.
+- **Least-privilege DB role:** Connect with a read-only database user granted `SELECT` only on curated views that mask PII columns (emails, card numbers).
+- **Row-level security (RLS):** Enforce tenant and user row filters inside PostgreSQL RLS policies (`SET LOCAL app.current_user_id = ...`) so even a crafted query cannot read another customer's rows.
+- **Hard resource caps:** Enforce a `statement_timeout` (e.g., **5 seconds**) and maximum row count (`LIMIT 1000`).
+
+## Architecture
+
+The end-to-end flow follows one rule: the model proposes a query, and deterministic guards decide whether it runs.
+
+<AnimatedDiagram
+  spec="animated/rag/text-to-sql-flow"
+  stepper
+  caption="The model only proposes SQL; a validator decides whether it runs, and the answer shows the query so a person can check it."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Find the tables the question needs">
+    Schema lookup matches the question against the 40-table catalog and returns `refunds` and `orders` with column descriptions, sample values, and join keys (~600 tokens).
+  </StepCard>
+  <StepCard n={2} title="The LLM writes one SELECT">
+    Given the question, linked schema, and few-shot examples, the LLM generates one PostgreSQL `SELECT` counting `DISTINCT r.order_id`.
+  </StepCard>
+  <StepCard n={3} title="A validator checks the SQL before it runs">
+    The AST validator verifies read-only `SELECT`, allow-listed tables, row `LIMIT`, and tenant scoping, then runs `EXPLAIN` in under 50 ms.
+  </StepCard>
+  <StepCard n={4} title="Wrong or unsafe SQL is rejected">
+    Queries with mutations, disallowed tables, or unknown columns fail validation; the error returns to the LLM for 1 retry before failing safely.
+  </StepCard>
+  <StepCard n={5} title="Approved SQL runs on a read replica">
+    The validated query executes on a read replica under a read-only role with RLS and a 5-second timeout.
+  </StepCard>
+  <StepCard n={6} title="The answer shows the SQL it ran">
+    The assistant reports **312 refunded orders** and displays the exact SQL and date-window assumptions so the analyst can verify the logic.
+  </StepCard>
+</StepCards>
+
+**The numbers (illustrative):**
+
+- **Stage latencies:** Schema lookup $\approx 30\text{ ms}$, SQL generation $\approx 1,000\text{ ms}$, AST validation + `EXPLAIN` $< 50\text{ ms}$, read-replica execution $< 5,000\text{ ms}$ (bounded by timeout).
+- **Retry cap:** One repair turn adds another ~1,000 ms; cap retries at 1–2.
+
+<Callout tone="red" title="What breaks">
+  Regex keyword blacklists (`/(DROP|DELETE|UPDATE)/i`) reject valid queries on columns like `is_deleted` or `updated_at` while missing side effects hidden inside SQL functions or CTEs. Fix: parse into an AST to whitelist statement types, and enforce read-only permissions and RLS in the database engine itself.
+</Callout>
+
+## Technical mechanics
+
+### Handling ambiguous questions
+
+- **Default definitions in the semantic layer:** Map ambiguous phrases ("last week" = prior Monday–Sunday calendar week; "refunded" = any completed refund) to explicit defaults in the semantic model.
+- **Surface assumptions in the UI:** Always state the resolved definition ("Calendar week Mon–Sun; distinct orders with at least one refund") alongside the SQL block.
+- **Targeted clarification:** Ask a single clarifying question only when multiple interpretations produce materially different numbers and no default policy exists (see [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting)).
+
+### Evaluating text-to-SQL
+
+- **Execution accuracy over string match:** Two differently written SQL queries can return the exact same result set; grade by running both the generated SQL and reference SQL against a frozen database snapshot and comparing the returned rows.
+- **Public benchmark baselines:**
+  - **Spider (Yu et al., 2018):** 10,181 questions and 5,693 unique queries across 200 databases (138 domains) with zero database overlap between train and test splits.
+  - **BIRD (Li et al., 2023):** 12,751 question-SQL pairs across 95 large databases (33.4 GB, 37 domains) featuring messy values and external domain rules; at release, the best model achieved **40.08%** execution accuracy vs **92.96%** for human analysts.
+- **Production evaluation suite:** Track execution accuracy per table/metric, AST rejection rate, `EXPLAIN` retry rate, timeout rate, and p95 latency on a golden set of real user questions (see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+
+### Combining structured and unstructured retrieval
+
+Most enterprise assistants must answer both policy questions (documents) and quantitative questions (database records) via a query router:
+
+<AnimatedDiagram
+  spec="animated/rag/structured-vs-unstructured-router"
+  stepper
+  caption="Documents explain, databases count; the router decides which one a question needs, and a mixed question needs both."
+/>
+
+**How to read it:**
+
+- **Step 1 — Document route:** *"What does error E1234 mean?"* routes to hybrid RAG search over help articles.
+- **Step 2 — Structured SQL route:** *"How many orders were refunded last week?"* routes to the guarded Text-to-SQL pipeline.
+- **Step 3 — Parallel hybrid route ("both"):** *"How many customers hit error E1234 last week, and how do they fix it?"* dispatches SQL to count affected customers and RAG to retrieve the troubleshooting steps in parallel, merging both into one cited response.
+
+<Callout tone="red" title="What breaks">
+  Forcing a single-choice router on compound questions yields half an answer (either the count without the fix, or the fix without the count). Give the router a `"both"` route that executes SQL and document retrieval in parallel and evaluate compound questions as a dedicated slice.
+</Callout>
+
+## Trade-offs
+
+| Approach | Strength | Cost / Limitation | Best Use Case |
+| --- | --- | --- | --- |
+| Free-form Text-to-SQL | Answers ad-hoc questions across any table combination | Risk of subtle aggregation bugs; requires strict AST & DB guards | Internal data analysts who can inspect the returned SQL |
+| Semantic layer (Cortex Analyst / Cube) | Guaranteed metric consistency (`refunded_orders`) | Limited to pre-modeled metrics and dimensions | Executive dashboards, finance KPIs, business self-serve |
+| Parameterized tool calls (`get_refund_count(start, end)`) | Deterministic SQL, fastest, zero injection surface | Requires engineering a tool per question pattern | Customer-facing chat with a fixed set of account queries |
+| Indexing table rows as vector chunks | No separate SQL pipeline | Cannot compute `COUNT`, `SUM`, `AVG`, or date-range filters | Small static lookup tables only |
+
+## Production systems
+
+- **Snowflake Cortex Analyst:** Generates governed SQL over customer warehouse tables using YAML semantic models that define verified metrics, joins, and synonyms, returning both the result and the query.
+- **Spider Benchmark (Yu et al., 2018):** Established cross-database generalization (unseen test schemas) as the standard evaluation protocol for Text-to-SQL.
+- **BIRD Benchmark (Li et al., 2023):** Evaluates Text-to-SQL on 33.4 GB of noisy, real-world-style databases requiring domain knowledge and query efficiency.
+- **Used in our case studies:** [Yield Root-Cause Assistant on a Fab Knowledge Graph](/genai-system-design/case-studies/kg-semiconductor-case-study)
+
+## Failure modes & pitfalls
+
+- **Dumping the entire database schema into the prompt:** Wastes thousands of tokens and causes the model to join similarly named columns from the wrong tables.
+- **Omitting sample column values:** Without knowing whether country is `'UK'`, `'GB'`, or `'United Kingdom'`, the model guesses `WHERE` literals that return 0 rows.
+- **Executing on the primary database or under a write-capable role:** One unindexed cross-join or injected mutation can degrade production traffic.
+- **String-matching SQL safety checks:** Regex filters both block valid column names (`deleted_at`) and miss side effects inside functions; always use an AST parser + DB permissions.
+- **Hiding the generated SQL from the user:** Returning a bare number ("341") makes silent metric-definition bugs (`COUNT(*)` vs `COUNT(DISTINCT)`) impossible to spot.
+
+## Interview framework
+
+1. **Route by intent:** Separate document lookups (RAG), structured aggregations (SQL), and compound queries (parallel RAG + SQL).
+2. **Design schema linking:** Maintain a rich schema catalog (column descriptions, sample enum values, foreign keys) and retrieve only relevant tables + few-shot SQL pairs.
+3. **Layer AST validation:** Parse into a syntax tree, enforce single `SELECT`, allow-listed tables, `LIMIT`, tenant predicates, and an `EXPLAIN` check with 1 error-fed retry.
+4. **Enforce database-level sandboxing:** Read replica, read-only role on PII-masked views, PostgreSQL Row-Level Security (RLS), and a 5-second statement timeout.
+5. **Add a semantic layer & execution evals:** Govern core business metrics in a semantic layer, display the SQL in the UI, and grade against a golden set using **execution accuracy**.
+
+**What interviewers listen for:** Treating LLM-generated SQL as untrusted input, distinguishing syntax errors from metric-definition errors via a semantic layer, and enforcing permissions inside the database (RLS + read-only replica).
+
+**Red flags:** Executing raw model-generated SQL on a production primary database, relying on regex string filters for security, or evaluating SQL quality with BLEU/exact string match instead of execution accuracy.
+
+## Further reading
+
+- [Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task (Yu et al., 2018)](https://arxiv.org/abs/1809.08887)
+- [Can LLM Already Serve as A Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs — BIRD (Li et al., 2023)](https://arxiv.org/abs/2305.03111)
+- [Cortex Analyst (Snowflake documentation)](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst)
+- [Row Security Policies (PostgreSQL documentation)](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+- Related pages: [Query Understanding & Rewriting](/ai-system-design/genai-system-design/query-understanding-and-rewriting) · [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you let business users ask questions of a company database in plain English?" category="Architecture" level="Senior">
+    - **Schema linking + semantic layer:** Index table/column descriptions, sample enum values, and verified metric definitions; retrieve only the relevant tables (e.g., 2 of 40 tables) and 2–3 similar verified SQL queries into the prompt.
+    - **AST validation + `EXPLAIN` repair loop:** Parse the generated SQL into an AST to enforce a single `SELECT` on allow-listed tables with a `LIMIT`, run `EXPLAIN` to catch invalid columns, and allow 1 error-fed retry.
+    - **Database-level sandboxing:** Execute on a read replica under a read-only role with PostgreSQL Row-Level Security (RLS) and a 5-second statement timeout.
+    - **Transparent UI & evaluation:** Display the executed SQL and metric assumptions alongside the answer, and gate changes on execution accuracy against a golden test set.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is schema linking, and why does it matter for large databases?" category="Concepts" level="Mid">
+    - **Selective schema retrieval:** Schema linking maps phrases in the user's question to the specific tables, columns, and join paths needed, excluding the rest of the database from the prompt.
+    - **Token cost and distraction reduction:** A 40-table schema takes ~12,000 tokens and confuses the model with similarly named columns (`user_id`, `account_id`, `customer_id`), whereas linking the 2 relevant tables takes ~600 tokens.
+    - **Essential metadata:** Include column descriptions, foreign-key relationships, and sample categorical values so the model writes accurate `JOIN` and `WHERE` clauses.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make LLM-generated SQL safe to execute?" category="Safety" level="Mid">
+    - **Application-layer AST parser:** Parse the query into a syntax tree (`sqlglot` / `pg_query`) to allow only a single `SELECT` statement against allow-listed tables/views with a mandatory `LIMIT`.
+    - **Database-layer enforcement:** Connect as a read-only role on a read replica, mask PII behind views, enforce tenant isolation via Row-Level Security (RLS), and set a strict `statement_timeout` (e.g., 5 s).
+    - **Never rely on regex filters:** Keyword blacklists (`DELETE`, `DROP`) falsely block valid column names like `deleted_at` while missing unsafe function calls.
+  </InterviewQuestion>
+  <InterviewQuestion question="A text-to-SQL assistant returns a confident but wrong number. How do you find the cause and prevent it?" category="Failure modes" level="Senior">
+    - **Inspect the logged SQL:** Because the query executed without syntax errors, the bug is a semantic mismatch—such as `COUNT(*)` over refund installments instead of `COUNT(DISTINCT order_id)`, a 7-day rolling window instead of a calendar week, or a fan-out join.
+    - **Move metrics to a semantic layer:** Define core business metrics ("refunded orders", "net revenue") and canonical joins once in a semantic layer so the model selects governed definitions instead of writing raw aggregations.
+    - **Enforce golden-set regression tests:** Add the failing question and its verified result to the execution-accuracy benchmark and surface resolved assumptions in the UI.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you evaluate a text-to-SQL system?" category="Evaluation" level="Mid">
+    - **Execution accuracy (EX):** Run both the generated query and the ground-truth query against a frozen database snapshot and compare the returned result tables, since distinct SQL queries can be semantically equivalent.
+    - **Operational & safety metrics:** Track AST validation rejection rate, `EXPLAIN` retry rate, timeout rate, abstention rate on unanswerable queries, and p95 end-to-end latency.
+    - **Slice by complexity and unseen schemas:** Following Spider and BIRD practices, evaluate across multi-table joins, dirty string literals, and held-out tables whenever prompts, schemas, or models change.
+  </InterviewQuestion>
+</InterviewQuestions>

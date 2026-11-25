@@ -1,0 +1,15 @@
+title: A fetcher dies holding a lease
+alt: >-
+  A sequence diagram with five lanes: a green frontier shard, teal fetchers A and B, orange websites and a violet page
+  store. Step 1: fetcher A leases 50 URLs, one per host, for 60 seconds; a note says b.org is marked busy while the
+  lease is live. A fetches a.com/x in 0.4 seconds and reports it done, so a.com returns to the heap 4 seconds later.
+  A fetches b.org/y and writes it to the page store under the key of its URL hash, then crashes; a red timeout arrow
+  shows that no heartbeat arrives and the lease ends at 60 seconds. Step 2: fetcher B leases URLs and receives b.org/y
+  among 49 others, fetches it again, writes it under the same key, which overwrites the first copy, and reports it
+  done. A note says the crash cost one extra fetch and no duplicate pages.
+caption: >-
+  A dead fetcher's lease runs out and another fetcher redoes its work; a write keyed by URL hash makes the redo
+  harmless.
+tags: [case-studies, web-crawler, leases, idempotency, failure]
+source: original
+created: 2026-11-17

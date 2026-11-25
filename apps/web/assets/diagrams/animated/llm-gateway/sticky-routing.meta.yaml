@@ -1,0 +1,19 @@
+title: Cache-aware stickiness and the determinism check
+alt: >-
+  A layout in three steps. Step 1: a lime sticky key, support-agent colon c_88d1, made of team, alias and conversation,
+  points to green provider A in workspace ws-support, same Region, for the cache's 5 minutes; a dashed arrow leads to
+  a grey box that drops the key when the breaker opens or canaries fail. Beneath, four calls: call 1 writes 2,300
+  tokens in violet, call 2 reads 5,000 and turn 2 reads 2,700 or more in blue, and after 5 idle minutes the key lapses
+  in grey. Notes say the prefix registry forecasts and alerts but never admits, and that the assistant's calls on C
+  spread over 5 prompt-cache-key buckets. Step 2: the determinism check: the same 40 golden requests through replica 1
+  and replica 2 on version 412 give the same bytes and cache reads, in lime; replica 2 on the tracing version 413 gives
+  different bytes, in red, because the request id is in the prompt, so it writes. Step 3: what a broken prefix costs
+  support a day: its whole model bill of 1,801 US dollars in grey, about 2,190 if caching were switched off and about
+  2,920 if every call writes its prefix, 1.6 times the bill, both in red; 6,085 cached tokens a message times 2.40
+  dollars per million over 200,000 messages.
+caption: >-
+  A conversation stays where its cache is for the cache’s lifetime; one non-deterministic byte on half the replicas
+  turns every read into a write, ≈ 2,920 USD a day.
+tags: [genai, llm-gateway, prompt-caching, routing, determinism, case-study]
+source: original
+created: 2026-11-23

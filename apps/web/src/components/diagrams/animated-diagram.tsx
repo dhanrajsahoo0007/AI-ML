@@ -11,8 +11,8 @@ import {
   type Emphasis,
   type Phase,
 } from "./build-view";
+import { DIAGRAM_ICONS } from "./diagram-icons";
 import {
-  DIAGRAM_ICONS,
   Defs,
   DiagramFigure,
   HighlightRing,
@@ -22,9 +22,10 @@ import {
   Zone,
   usePlayback,
 } from "./diagram-shared.client";
-import { markerUrl, phaseOpacity, soft, stroke } from "./diagram-style";
+import { LAYOUT_ONLY_TONES, TONES, markerUrl, pastel, phaseOpacity, soft, stroke, toneText } from "./diagram-style";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBounds, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
+import { architectureTags, type TagSpot } from "./new-tags";
 import { getIconComponent } from "@/lib/icons";
 import {
   isCloudProvider,
@@ -33,12 +34,12 @@ import {
   type DiagramEdge,
   type DiagramNode,
   type DiagramSpec,
-  type Tone,
+  type LayoutTone,
 } from "./types";
 
 // Cloud toggle: "generic" shows the role names; a provider shows the managed service that plays each role.
 type CloudView = "generic" | CloudProvider;
-const CLOUD_VIEWS: { id: CloudView; label: string; tone?: Tone }[] = [
+const CLOUD_VIEWS: { id: CloudView; label: string; tone?: LayoutTone }[] = [
   { id: "generic", label: "Generic" },
   { id: "aws", label: "AWS", tone: "orange" },
   { id: "gcp", label: "Google Cloud", tone: "green" },
@@ -107,6 +108,9 @@ export function AnimatedDiagram({
     return ref ? { ...n, label: cloudLabel(ref, cloudNames), sub: n.label } : n;
   };
   const shownNodes = view.nodes.map((v) => v.node);
+  const tags = architectureTags(view, spec.width, spec.height, display);
+  // Arrow markers for the diagram-only tones, added only when an edge uses them so other diagrams keep their defs.
+  const extra = LAYOUT_ONLY_TONES.filter((t) => spec.edges.some((e) => e.tone === t));
 
   return (
     <DiagramFigure
@@ -122,7 +126,7 @@ export function AnimatedDiagram({
       minWidth={minWidth}
       toolbar={showCloud ? <CloudToggle cloud={cloud} setCloud={setCloud} /> : undefined}
     >
-      <Defs uid={uid} />
+      <Defs uid={uid} tones={extra.length ? [...TONES, ...extra] : undefined} />
       {view.zones.map(({ zone, phase }) => (
         <Zone key={zone.id} zone={zone} phase={phase} dim={!zoneEmphasised(emphasis, zone, shownNodes)} />
       ))}
@@ -132,7 +136,7 @@ export function AnimatedDiagram({
         ))}
       </g>
       {view.nodes.map(({ node, phase }) => (
-        <Node key={node.id} node={display(node)} phase={phase} emphasis={emphasis} />
+        <Node key={node.id} node={display(node)} phase={phase} emphasis={emphasis} tag={tags.get(node.id)} />
       ))}
     </DiagramFigure>
   );
@@ -156,7 +160,7 @@ function CloudToggle({ cloud, setCloud }: { cloud: CloudView; setCloud: (c: Clou
                 ? "border-transparent text-paper"
                 : "border-hairline text-muted-foreground hover:border-ink hover:text-ink"
             )}
-            style={on ? { background: v.tone ? stroke(v.tone) : "var(--ink)" } : undefined}
+            style={on ? { background: v.tone ? toneText(v.tone) : "var(--ink)" } : undefined}
           >
             {v.label}
           </button>
@@ -166,7 +170,17 @@ function CloudToggle({ cloud, setCloud }: { cloud: CloudView; setCloud: (c: Clou
   );
 }
 
-function Node({ node, phase, emphasis }: { node: DiagramNode; phase: Phase; emphasis: Emphasis | undefined }) {
+function Node({
+  node,
+  phase,
+  emphasis,
+  tag,
+}: {
+  node: DiagramNode;
+  phase: Phase;
+  emphasis: Emphasis | undefined;
+  tag: TagSpot | undefined;
+}) {
   const bright = nodeEmphasised(emphasis, node.id);
   const ringed = !!emphasis && bright;
   return (
@@ -178,7 +192,7 @@ function Node({ node, phase, emphasis }: { node: DiagramNode; phase: Phase; emph
       data-hl={ringed ? "true" : undefined}
     >
       {ringed && <HighlightRing bounds={nodeBounds(node)} tone={node.tone ?? "neutral"} />}
-      {phase === "new" && <NewRing bounds={nodeBounds(node)} />}
+      {phase === "new" && <NewRing bounds={nodeBounds(node)} tag={tag} />}
       {node.variant === "glyph" ? <GlyphNode node={node} /> : <CardNode node={node} />}
     </g>
   );
@@ -214,6 +228,17 @@ function CardNode({ node }: { node: DiagramNode }) {
   const textX = hasIcon ? x + 52 : node.x;
   const anchor = hasIcon ? "start" : "middle";
   const ink = node.accent ? "var(--paper)" : "var(--ink)";
+  const fill = node.fill ?? "paper";
+  // An accent node carries paper text, so its solid fill is the AA-safe text tone, not the stroke.
+  const background = node.accent
+    ? toneText(tone)
+    : fill === "pastel"
+      ? pastel(tone)
+      : fill === "soft"
+        ? soft(tone)
+        : "var(--paper)";
+  // Muted text is below 4.5:1 on several pastel fills, so the sub line uses ink there.
+  const subInk = node.accent ? "var(--paper)" : fill === "pastel" ? "var(--ink)" : "var(--muted-foreground)";
 
   return (
     <g>
@@ -223,8 +248,9 @@ function CardNode({ node }: { node: DiagramNode }) {
         width={w}
         height={h}
         rx={10}
-        style={{ fill: node.accent ? stroke(tone) : "var(--paper)", stroke: stroke(tone) }}
+        style={{ fill: background, stroke: stroke(tone) }}
         strokeWidth={1.5}
+        data-fill={node.accent || fill === "paper" ? undefined : fill}
       />
       {(node.accent || Icon) && (
         <rect
@@ -249,13 +275,7 @@ function CardNode({ node }: { node: DiagramNode }) {
         {node.label}
       </text>
       {node.sub && (
-        <text
-          x={textX}
-          y={node.y + 13}
-          textAnchor={anchor}
-          fontSize={11.5}
-          style={{ fill: node.accent ? "var(--paper)" : "var(--muted-foreground)" }}
-        >
+        <text x={textX} y={node.y + 13} textAnchor={anchor} fontSize={11.5} style={{ fill: subInk }}>
           {node.sub}
         </text>
       )}

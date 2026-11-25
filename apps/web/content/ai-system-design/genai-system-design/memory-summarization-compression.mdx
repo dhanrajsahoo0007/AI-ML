@@ -1,0 +1,348 @@
+---
+title: Memory Summarization & Compression
+description: Compress dialogue and documents into hierarchical summaries and structured facts so agents keep useful state within tight context limits with little loss.
+---
+
+As sessions lengthen, verbatim history stops scaling.
+
+- Every turn is sent again with every model call, so a long chat costs more, answers more slowly and buries the facts that matter.
+- Summarisation pipelines condense older content into shorter narratives or structured facts while keeping the details later turns depend on.
+- Interviewers use this topic to test one thing above all: can you say **what a summary must keep, and how you would know it kept it**.
+- This page covers rolling summaries, structured summaries, summaries of summaries, and how to evaluate a summary for lost facts.
+- For when to compact a whole agent window, see [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+
+## Overview
+
+- A **rolling summary** keeps the newest turns word for word and folds older blocks into a running summary. Updating it every n turns spreads the cost and keeps latency predictable.
+- Every pass is lossy, and the loss compounds: a later pass only sees the earlier summary, never the turns behind it.
+- Keep critical facts in **structured slots** (ids, amounts, dates, constraints, open goals), each with the turn it came from. Let prose carry only the story.
+- **Hierarchical memory** keeps several timescales: recent turns raw, a session summary, and a durable user profile.
+- For very long histories, a **summary tree** summarises in levels. Each block passes through log₂(n) summaries instead of n, and every level can be read on demand.
+- Keep the raw log. A summary is an index into history, not a replacement for it.
+- **Evaluate summaries** with probe questions whose answers sit in the raw turns, and replay real threads offline before changing the summariser.
+
+## Mental model
+
+- Think of the minutes of a long meeting. Nobody reads the full recording before the next meeting.
+- They read the minutes: who decided what, which numbers were agreed, what is still open.
+- Good minutes record decisions and figures exactly and the discussion loosely.
+- Bad minutes are vague about the one figure someone needs next month.
+- And if each month's minutes are written only from last month's minutes, small slips pile up.
+
+- A summary for an agent works the same way. The summary prompt decides what the minutes record. Anything it does not ask for will fade.
+
+## Core concepts
+
+- Every figure on this page follows one Brightpost support thread with customer 1847.
+- On 12 November they report a cracked kettle, order 4471, and a £42 refund is approved at 10:20.
+- On 19 November they return to the same thread.
+- By then it is 40 turns long; a turn is one message from the customer or the support agent.
+- Token counts are illustrative, at 120 tokens per turn.
+
+### Rolling summaries
+
+- A rolling summary (also called progressive summarisation) updates a running summary as the conversation grows, instead of summarising the full history again each time.
+- Here the rule is: when the raw turns reach 25, fold the oldest 15 into the summary and keep the newest 10.
+
+<AnimatedDiagram
+  spec="animated/agents/rolling-summary"
+  stepper
+  minWidth={620}
+  caption="Each pass folds the oldest block of turns, and the previous summary, into a new summary. At turn 40 the model reads 1,550 tokens of history instead of 4,800. Token counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Turn 25: the rule fires">
+    The history holds 25 raw turns, 3,000 tokens. Up to here every model call sent every turn word for word.
+  </StepCard>
+  <StepCard n={2} title="Pass 1: turns 1–15 become S1">
+    A summariser reads turns 1–15 (1,800 tokens) and writes S1, 300 tokens. Turns 16–25 stay word for word, so the model
+    still sees recent tone and any question left unanswered.
+  </StepCard>
+  <StepCard n={3} title="Turn 40: the rule fires again">
+    Fifteen more turns arrive. The history is S1 plus 25 raw turns, 3,300 tokens.
+  </StepCard>
+  <StepCard n={4} title="Pass 2: S1 and turns 16–30 become S2">
+    The summariser reads S1 and turns 16–30 (2,100 tokens) and writes S2, 350 tokens. It never sees turns 1–15 again:
+    whatever S1 dropped is gone from S2 too.
+  </StepCard>
+  <StepCard n={5} title="Against no summary">
+    Without a summary, turn 40 sends all 40 turns, 4,800 tokens.
+  </StepCard>
+</StepCards>
+
+**The numbers (illustrative):**
+
+- After pass 2 the history is 350 + 10 × 120 = **1,550 tokens**, against 40 × 120 = 4,800.
+- That is 3,250 fewer, **68 % less** on every call from turn 40.
+- The two passes cost one extra model call each: they read 1,800 + 2,100 = 3,900 tokens and write 300 + 350 = 650.
+- Summarising every 15 turns instead of every turn keeps that cost rare and each call's latency steady.
+
+- [Conversation & Short-Term Memory](/ai-system-design/genai-system-design/conversation-short-term-memory) compares a summary plus recent turns against a plain sliding window that drops old turns; this page is about what goes into the summary.
+
+### Structured summaries: facts in slots, story in prose
+
+Stronger compression goes beyond prose. Three structures hold what a narrative summary tends to blur:
+
+- **Entity extraction** builds a typed graph of people, accounts, orders and preferences.
+- **Fact tables** store constraints the user stated explicitly, such as "text me, not email" or "no deliveries on Fridays".
+- **Task state machines** record open goals and their status, such as a refund that is approved but not yet paid.
+
+Here is S2 written as a structured summary. Each fact carries the turn it came from, so the agent can open the raw turn when a question needs more. The schema is this page's own, not an API format:
+
+```json
+{
+  "customer_id": "1847",
+  "covers_turns": [1, 30],
+  "orders": [{ "order_id": "4471", "item": "kettle", "price_gbp": 42.0, "turn": 1 }],
+  "refunds": [{ "refund_id": "R-2291", "amount_gbp": 42.0, "approved_at": "10:20", "turn": 14 }],
+  "evidence": [{ "kind": "photo", "shows": "crack from spout to base", "sent_at": "09:42", "turn": 3 }],
+  "preferences": [{ "contact": "text", "replaces": "email", "turn": 26 }],
+  "open": [{ "goal": "courier collects the kettle", "due": "14 Nov", "turn": 22 }],
+  "story": "Kettle arrived cracked; refund approved; customer now wants texts."
+}
+```
+
+Code validates the slots: ids match their formats, amounts are numbers, enums are known values. The model writes the summary; the schema decides whether it is accepted.
+
+### Hierarchical memory at several timescales
+
+One summary cannot serve every question. Hierarchical memory stores summaries at several timescales so the model reads the right grain for the task in hand:
+
+1. **Recent turns, raw.** The last few exchanges word for word: tone, pending questions, exact wording.
+2. **A session summary.** The rolling summary above: decisions, open tickets, what was tried.
+3. **A user profile.** Stable facts that outlive the session, such as "prefers text", checked against tools before use. See [Agent Memory](/ai-system-design/genai-system-design/agent-memory) for how such facts are written and recalled.
+
+### Recursive summaries and summary trees
+
+- A rolling summary is already recursive: each pass summarises the previous summary plus new turns.
+- MemGPT (Packer et al., 2023) does exactly this.
+- When the prompt reaches a flush threshold, it evicts a share of the oldest messages and writes "a new recursive summary using the existing recursive summary and evicted messages".
+- The evicted messages stay in recall storage, searchable by a function call.
+- Letta, the project MemGPT became, notes that older messages have progressively less influence on the summary as a conversation grows.
+
+For a very long history, a chain becomes a long game of telephone. A **summary tree** summarises in levels instead.
+
+<AnimatedDiagram
+  spec="animated/agents/summary-tree"
+  stepper
+  minWidth={620}
+  caption="Each block of turns passes through three summaries, not one per pass, and every level stays on disk, so the agent can read the root by default and climb down to the raw turns when a question needs a detail. Token counts are illustrative."
+/>
+
+**How to read it:**
+
+- Build it from the bottom. Steps 1–4: eight raw blocks of 50 turns are summarised in pairs, then the pairs in pairs, up to one root.
+- The prompt carries the root by default. Step 5: a question about the photo from turn 3 cannot be answered from the root, so the agent follows the tree down, root → turns 1–200 → turns 1–100 → turns 1–50, and reads the raw block.
+
+**The numbers (illustrative):**
+
+- The raw history is 400 × 120 = 48,000 tokens; the root is 400.
+- A rolling chain that folds one block per pass would put block 1's facts through 8 summaries by the end.
+- The tree puts every block through log₂ 8 = **3**.
+- Each level-1 summary reads 2 × 6,000 = 12,000 tokens; each node above reads 2 × 400 = 800.
+
+- The idea is old. Wu et al. (2021) summarised whole books by summarising small sections, then summarising those summaries.
+- Wang et al. (2023) applied recursive summaries to long dialogues and reported more consistent replies.
+- RAPTOR (Sarthi et al., 2024) builds a tree of summaries over clustered chunks and retrieves from any level, which is the drill-down in step 5.
+
+## Architecture
+
+A summarisation pipeline sits beside the agent loop, not inside it:
+
+1. **Trigger.** A turn count or token count in the history crosses its threshold. Summarise in the background where possible, so no customer waits for it.
+2. **Summariser.** A model call with a prompt written for the domain. A smaller, cheaper model than the main reasoning model is usually enough, because summarising is easier than deciding.
+3. **Validator.** Code checks the schema, and checks that every protected slot from the previous summary is still present.
+4. **Store.** Each summary is saved with a version, the turn range it covers and its inputs. The raw turns stay in a log, as MemGPT's recall storage does.
+5. **Context builder.** Each model call gets the profile, the latest summary and the recent raw turns, plus a search tool over the raw log.
+
+- Versioning each layer lets you trace what the model saw on any call.
+- [Context Compaction](/ai-system-design/genai-system-design/context-compaction-resets-and-state#compaction-and-sliding-window-summarization) shows the same swap for a whole agent window, with its own figure.
+
+## Technical mechanics
+
+### Worked example: a 40-turn thread in two passes
+
+This follows the [rolling summary](#rolling-summaries) through the Brightpost thread. Both passes use one summary prompt: "Keep the decisions and the ids."
+
+| Turns  | When          | What happens                                                                                               | History sent     |
+| ------ | ------------- | ---------------------------------------------------------------------------------------------------------- | ---------------- |
+| 1–15   | 12 Nov        | Order 4471 reported; photo at 09:42 shows a crack from spout to base; £42 refund approved at 10:20, R-2291 | grows to 1,800   |
+| 16–25  | 12 Nov        | Courier collection of the broken kettle booked for 14 Nov                                                  | 3,000 at turn 25 |
+| Pass 1 | after turn 25 | Reads turns 1–15 (1,800 tokens), writes S1 (300)                                                           | 1,500            |
+| 26–30  | 19 Nov        | "Has my kettle refund gone through? Text me from now on, not email."                                       |                  |
+| 31–40  | 19 Nov        | Questions about a new kettle and gift wrap                                                                 | 3,300 at turn 40 |
+| Pass 2 | after turn 40 | Reads S1 and turns 16–30 (2,100 tokens), writes S2 (350)                                                   | 1,550            |
+| 41     | 19 Nov        | "The courier's claim needs the photo: what did I send, and when?"                                          | S2 cannot answer |
+
+Here are five facts from the thread and how each pass words them:
+
+<AnimatedDiagram
+  spec="animated/agents/what-gets-lost"
+  stepper
+  minWidth={620}
+  caption="The prompt asked for decisions and ids, so ids and decisions survive and details fade one pass at a time. Turn 41 asks for exactly the two facts the summary dropped."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Five facts, as the thread states them">
+    Two ids, one decision, one detail and one timestamp. The prompt asks for decisions and ids only.
+  </StepCard>
+  <StepCard n={2} title="Pass 1 drops the photo's time">
+    S1 keeps the order, the refund and "cracked from spout", because the refund rested on the damage. The time 09:42 is
+    neither a decision nor an id, so it goes.
+  </StepCard>
+  <StepCard n={3} title="Pass 2 flattens the damage">
+    The refund is decided, so the damage no longer looks like it matters. S2 says "arrived damaged" (ringed). "Prefers
+    text", a decision from turn 26, is kept.
+  </StepCard>
+  <StepCard n={4} title="Turn 41 needs the lost facts">
+    The courier's claim needs what the photo showed and when it was sent. Neither is in S2.
+  </StepCard>
+</StepCards>
+
+Three things to take from it:
+
+- **Loss follows the prompt.** Nothing was lost at random. The summariser kept what it was asked for, and a detail survived pass 1 only while a decision depended on it.
+- **Loss compounds.** Pass 2 never saw turn 3. It could only shorten S1's words further.
+- **The fix is structural.** With the `evidence` slot from the structured summary, S2 keeps "crack from spout to base, 09:42, turn 3", and validation rejects a pass that drops a filled slot. Without it, the agent can still recover through the turn id: search the raw log for turn 3.
+
+<Callout tone="red" title="What breaks">
+  The agent answers turn 41 anyway. With "arrived damaged" and no time in its summary, a model asked "what did I send,
+  and when?" may invent a plausible description and a plausible time. A missing fact becomes a wrong fact. Tell the
+  model to fetch the raw turn, or say it does not know, when a summary lacks the detail asked for.
+</Callout>
+
+### What must never be summarised away
+
+- Information loss is the central trade-off. Summaries can hallucinate, and they can merge constraints that do not fit together.
+- Maynez et al. (2020) found substantial unsupported content in the output of every abstractive summariser they studied.
+- Aggressive compression improves token counts but can remove the small words that change meaning:
+
+- **Negation.** "Do not refund to the old card" becomes "refund to card".
+- **Numbers and units.** Amounts, quantities, dosage numbers, dates and times.
+- **Ids.** Order, account and refund numbers, which a model may round off or mix up.
+- **Qualifiers.** "Only if returned within 30 days", or a legal condition on an offer.
+- **Who said it.** A suggestion from the agent recorded as the customer's request.
+
+Product and safety reviews should name the fields that must never be summarised, and keep them in structured slots rather than in narrative text.
+
+### Evaluating a summary for lost facts
+
+Measure a summariser before you trust it:
+
+1. **Probe questions.** For a set of real threads, write questions whose answers sit in the raw turns: "What was the order number?", "When was the photo sent?" Answer each from the raw thread and from the summary. **Fact recall** is the share answered the same.
+2. **Slot checks.** In code, compare the slots before and after each pass. A filled slot that disappears fails the pass.
+3. **Consistency checks.** Compare extracted facts against the latest user messages. When the customer says "text me", the profile's "prefers email" must be replaced, not kept alongside it.
+4. **Offline replay.** Before changing the summariser or its prompt, replay logged threads with raw history and with summaries, and compare task success. Log a diff of what each summary dropped, so regressions are visible.
+
+- On the worked example, probe questions about the five facts score 3 of 5 against S2.
+- Ids and decisions pass; the damage and the time fail.
+- Entailment checks, whether the source supports each summary sentence, catch invented content; Maynez et al. found they track faithfulness better than word-overlap scores such as ROUGE.
+
+## Trade-offs
+
+| Decision                     | Option A                            | Option B                                  | Guidance                                                           |
+| ---------------------------- | ----------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| Raw history vs summary       | Nothing lost                        | Fewer tokens, steady latency              | Summarise older turns; keep the newest word for word               |
+| Every turn vs every n turns  | Freshest summary                    | One summary call per n turns              | Every n turns, in the background                                   |
+| Prose vs structured slots    | Keeps the story and nuance          | Exact ids, numbers and constraints        | Both: slots for facts, a short story for flow                      |
+| Rolling chain vs tree        | Simple, one summary to keep         | Fewer passes per fact, any level readable | A tree once histories run to hundreds of turns                     |
+| Same model vs smaller model  | Better judgement about what matters | Cheaper, faster                           | Smaller model plus schema validation; test fact recall on both     |
+| Delete raw turns vs keep log | Less storage, simpler privacy story | Recoverable details, auditable summaries  | Keep the log with retention rules; summaries point into it by turn |
+
+## Production systems
+
+- **MemGPT** (Packer et al., 2023) warns the model under memory pressure (for example at 70 % of the window) so it can save important facts, then at the flush point evicts messages into a recursive summary and keeps them in searchable recall storage. Letta, the project it became, advised in July 2025 evicting only part of the messages, for example 70 %, to keep continuity.
+- **The Claude API** offers server-side compaction, in beta as of November 2026, on demand or at a token threshold. It can keep recent turns word for word, and your own summarisation prompt replaces the default one. Details are on [Context Compaction](/ai-system-design/genai-system-design/context-compaction-resets-and-state#compaction-and-sliding-window-summarization).
+- **Book summarisation** (Wu et al., 2021) summarised sections, then summaries of summaries, up to a whole book, and matched human-written summaries on about 5 % of books.
+- **RAPTOR** (Sarthi et al., 2024) clusters and summarises chunks recursively into a tree and retrieves at any level. With GPT-4 it raised the best reported accuracy on the QuALITY benchmark by 20 points.
+
+## Failure modes & pitfalls
+
+- A generic summary prompt that never names the facts this domain needs.
+- Summarising every turn, which adds a model call to every reply.
+- Deleting the raw turns once they are summarised.
+- Ids, amounts and dates kept only in prose.
+- Appending new facts next to old ones that contradict them.
+- No turn ids, so nobody can check where a summarised fact came from.
+- Judging a summariser on token savings alone, without fact recall.
+
+## Interview framework
+
+1. Say why: history grows with every turn, so cost, latency and distraction grow too.
+2. Describe the layers: recent turns raw, a rolling session summary, a durable profile.
+3. Name what must survive, and put it in structured slots with turn ids.
+4. For long histories, mention recursive summaries and their compounding loss, and a summary tree as the fix.
+5. Explain how you would measure loss: probe questions, slot checks, offline replay.
+
+**What interviewers listen for:** a summary prompt written for the domain, protected fields, and a way to recover a detail from the raw log.
+
+**Red flags:** "summarise the conversation" with no word on what the summary keeps, or deleting history once it is summarised.
+
+## Further reading
+
+- [MemGPT: Towards LLMs as Operating Systems (Packer et al., 2023)](https://arxiv.org/abs/2310.08560)
+- [Agent memory (Letta, 2025)](https://www.letta.com/blog/agent-memory)
+- [Recursively Summarizing Books with Human Feedback (Wu et al., 2021)](https://arxiv.org/abs/2109.10862)
+- [Recursively Summarizing Enables Long-Term Dialogue Memory in Large Language Models (Wang et al., 2023)](https://arxiv.org/abs/2308.15022)
+- [RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval (Sarthi et al., 2024)](https://arxiv.org/abs/2401.18059)
+- [On Faithfulness and Factuality in Abstractive Summarization (Maynez et al., 2020)](https://arxiv.org/abs/2005.00661)
+- [Compaction overview (Claude API docs)](https://platform.claude.com/docs/en/build-with-claude/compaction)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How would you design hierarchical memory for a long-running support agent?"
+    category="Architecture"
+    level="Mid"
+  >
+    - Keep the last few exchanges verbatim for tone and pending questions, maintain a rolling session summary with open tickets and decisions, and persist a durable user profile of stable preferences and account facts validated against tools.
+    - Route retrieval so the model sees the session summary plus relevant profile slices rather than an undifferentiated blob.
+    - Version each layer so debugging can trace what the model saw.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What are the main risks of recursive summarisation chains?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    - Each hop can drop details, blur temporal order, or introduce confident-sounding inaccuracies.
+    - Errors compound because later stages only see compressed text.
+    - Mitigate with structured extraction for critical facts, caps on recursion depth, occasional full-context refresh for high-stakes threads, and human escalation paths when confidence is low.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you implement fact compression alongside narrative summaries?"
+    category="Implementation"
+    level="Senior"
+  >
+    - Run a structured extraction pass that outputs JSON facts with provenance turn ids, merge into a canonical store with conflict resolution rules, and inject a concise fact list into the system context while the narrative summary handles story flow.
+    - Validate types and enums in code, and reconcile updates when new messages contradict old facts rather than appending duplicates blindly.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Why keep the most recent turns word for word instead of summarising everything?"
+    category="Concepts"
+    level="Junior"
+  >
+    - The latest turns hold what the next reply depends on most: the open question, the exact wording and the tone.
+    - Summarising them would cost a model call on every turn and risk losing a detail the model needs right now.
+    - Older turns change rarely and matter less word for word, so they are the ones worth folding into a summary every n turns.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you test that a summariser keeps the facts that matter?"
+    category="Evaluation"
+    level="Senior"
+  >
+    - Build a set of real threads with probe questions whose answers sit in the raw turns, such as order numbers, amounts, dates and stated constraints.
+    - Answer each from the raw thread and from the summary, and report fact recall per field.
+    - Add code checks that no filled slot disappears between passes, entailment checks for invented content, and an offline replay that compares task success with raw history against summaries before any prompt or model change ships.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="When would you use a summary tree rather than a rolling summary?"
+    category="Trade-offs"
+    level="Senior"
+  >
+    - When a history runs to hundreds of turns or many sessions.
+    - In a rolling chain the oldest facts pass through every later summary, so loss compounds with each pass; in a tree they pass through about log₂ of the number of blocks.
+    - Every level of the tree stays readable, so the agent reads the root by default and drills down to a lower summary or the raw turns when a question needs a detail.
+    - The cost is more summaries to store, version and rebuild when a fact is corrected.
+  </InterviewQuestion>
+</InterviewQuestions>

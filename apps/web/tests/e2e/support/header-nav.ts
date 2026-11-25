@@ -11,7 +11,8 @@ export interface HeaderEntry {
 }
 
 export async function desktopHeaderEntries(page: Page): Promise<HeaderEntry[]> {
-  await page.setViewportSize({ width: 1280, height: 900 });
+  // Desktop bar is visible from 1280px+ even with 8+ sections (BAR_SIZES in site-header.tsx).
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const bar = page.locator("header nav[aria-label='Main'] > div").nth(0);
   const items = bar.locator(":scope > [aria-haspopup='true'], :scope > span[title], :scope > a[href]");

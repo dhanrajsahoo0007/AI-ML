@@ -1,0 +1,17 @@
+title: Inside one inference engine
+alt: >-
+  An architecture diagram built in six steps, inside a teal zone labelled "One engine process". On the left, outside
+  the zone, Brightpost's chat service, in orange, sends 12 requests a second at peak. Step 1: a prompt is tokenised and
+  waits in the request queue. Step 2: the scheduler, drawn as the solid
+  accent, admits waiting requests into this iteration's batch. Step 3: the scheduler asks the KV block manager, in
+  violet, to allocate blocks for each request and to free them when a request ends. Step 4: the scheduler sends the
+  batch to the teal forward pass on the GPU, which reads and writes keys and values in the managed blocks. Step 5: the
+  forward pass sends one row of logits per request to the green sampler, which picks one token per request. Step 6:
+  the token ids go to the detokeniser, which streams text back to the chat service, while a dashed loop carries the
+  new tokens back to the scheduler for the next iteration.
+caption: >-
+  Every iteration runs the same loop: the scheduler picks a batch, the block manager finds memory for it, one forward
+  pass and one sampling step add a token to every request.
+tags: [serving, inference, kv-cache, batching, genai]
+source: original
+created: 2026-11-15

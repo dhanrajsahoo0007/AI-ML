@@ -1,0 +1,17 @@
+title: The gateway's circuit breaker
+alt: >-
+  A state diagram in four steps with three blocks. Step 1: a grey Closed block, calls go to provider A, with a note
+  that it counts the last 20 outcomes per provider and model, that a failure is a 529, a 5xx, a timeout or a T0 first
+  token later than 800 milliseconds, and that a 429 from one team's workspace limit never counts. Step 2: an arrow
+  labelled "10 of 20 fail, or more than 10 percent slow a minute" leads to a red Open block where T0 goes straight to
+  B, with a note that for 30 seconds the first token is 550 milliseconds for support and 600 for voice, good by the
+  SLI. Step 3: after 30 seconds an arrow leads down to an orange Half-open block, 3 probes that must each beat 800
+  milliseconds, sent one at a time while the rest still go to B. Step 4: an arrow labelled "probes pass: back in
+  steps" returns to Closed, and a red dashed arrow labelled "a probe fails or is slow" returns to Open; a footer says
+  ten failures arrive in about a second at 19.8 support calls a second and that moving back is another cache miss.
+caption: >-
+  The breaker opens on failures and on T0 calls slower than the 800 ms SLI line, so a brownout moves traffic too; one
+  team's workspace 429 never opens it for everyone.
+tags: [genai, llm-gateway, circuit-breaker, fallback, reliability, case-study]
+source: original
+created: 2026-11-23

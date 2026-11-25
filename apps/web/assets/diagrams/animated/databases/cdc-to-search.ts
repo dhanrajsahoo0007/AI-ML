@@ -3,6 +3,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Keeping a derived store (here a search index) in sync with the source of truth by change data capture:
 // the app writes only to Postgres, a connector tails the WAL into Kafka, and an indexer upserts into
 // Elasticsearch. Searches read the index, which trails the database by about a second.
+// The indexer card is 200 wide (x 725..925, 10 inside the Change stream zone) so its sub line fits with room; the
+// index sits on the same centre (x 825) so the upsert edge stays vertical.
 const spec: DiagramSpec = {
   title: "Change data capture from Postgres into a search index",
   width: 960,
@@ -72,9 +74,9 @@ const spec: DiagramSpec = {
       icon: "workers",
       tone: "orange",
       step: 3,
-      x: 830,
+      x: 825,
       y: 380,
-      w: 170,
+      w: 200,
       h: 64,
     },
     {
@@ -85,7 +87,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       step: 3,
-      x: 830,
+      x: 825,
       y: 140,
     },
     {

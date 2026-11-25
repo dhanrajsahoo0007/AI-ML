@@ -1,0 +1,26 @@
+title: Capacity on tokens and KV-cache memory
+alt: >-
+  A layout of bars, built in four steps. Step 1: a violet bar shows latent attention's KV cache of 35,136 bytes a token
+  in FP8, so turn 50 holds about 0.51 gigabytes, against a pale red bar for a dense 70-billion-parameter model with 8
+  KV heads at 163,840 bytes, 4.7 times more and about 2.39 gigabytes; below, one fast decode step at batch 62 and 60
+  tokens a second takes 22.7 of its 28.3 milliseconds: grey weights 5.6, green parameter compute 8.5, teal attention
+  7.7 and blue expert traffic 0.9. A note says attention binds, and that FP8 KV storage and FP8 attention math are gated
+  assumptions: BF16 KV needs 14,592 GPUs and BF16 math 16,896, not 14,520. Step 2: a log time axis from 10 seconds to a day marks the
+  median gap between a user's turns at 60 seconds and the 90th percentile at 20 minutes, against the home prefill
+  unit's residency of about 18 minutes and the KV store's of about 5.7 hours; two bars split all turns: modelled,
+  16.7 percent first turns, 68.0 home-unit hits, 9.5 store hits, 3.7 pre-filled folds and 2.2 misses, so 99.4 percent
+  of follow-ups find their prefix; reserved for 90 percent, the store hits fall to 2.7 and misses rise to 8.4. Step 3:
+  prompt tokens computed a turn: 1,188 on a first turn, 488 on a hit, 7,817 on an average miss, 9,283 for a fold in the
+  background, a modelled mean of 1,056, or 1,299 counting attention, and a reserved mean of 1,583, or 1,922. Step 4:
+  stacked teal prefill and green decode bars of the fleet: 11,640 GPUs at the modelled hit rate, 12,984 at 95
+  percent, 14,520 reserved at 90 percent with a pale extension to 16,896 if decode attention runs in BF16, 16,080 at
+  85, 17,664 at 80 and 28,704 at DeepSeek's measured 56.3 percent token hit share; and what each layer buys at the
+  modelled rate: 15,696 with no KV store, 12,480 with no affinity, 43,080 with neither, and 13,368 without multi-token
+  prediction.
+caption: >-
+  The fleet is sized on tokens computed and KV bytes, not GPU utilisation: the prefix hit rate moves prefill, and the
+  precision of decode attention moves decode, so the plan is 14,520 GPUs with FP8 and 16,896 with BF16. Throughputs
+  and hit rates are illustrative.
+tags: [genai, chat-service, capacity-planning, kv-cache, prompt-caching, case-study]
+source: original
+created: 2026-11-23

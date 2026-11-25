@@ -34,7 +34,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 350,
       y: 180,
-      w: 160,
+      w: 166,
       h: 64,
     },
     {

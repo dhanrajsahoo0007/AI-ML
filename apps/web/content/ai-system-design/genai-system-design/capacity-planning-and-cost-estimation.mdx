@@ -1,0 +1,298 @@
+---
+title: "Capacity Planning & Cost Estimation"
+description: "Back-of-the-envelope maths for LLM systems: tokens, requests, GPUs, throughput and monthly cost."
+icon: bar-chart
+updated: 2026-11-15
+---
+
+Capacity planning chains Brightpost's users to tokens, GPUs, and dollars, ending at [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) sizing.
+
+## Overview
+
+- Work in a fixed order: **users → requests a day → peak requests/s → tokens/s in and out → GPUs → dollars a month**. Size the fleet from the **peak**, and price an API from the **average**.
+- Brightpost: 200,000 requests a day is **2.3 requests/s on average and 12 at the peak**, which is **26,400 prompt tokens/s and 3,000 output tokens/s**. That needs **2 replicas plus 1 spare**.
+- Tokens are priced separately: output costs more than input, and **cached input** costs a fraction of normal input. Cost per request = input tokens × input price + output tokens × output price.
+- A self-hosted fleet is a **fixed bill that steps up in whole GPUs**; an API bill is a **line through zero**. At illustrative prices the lines cross at **about 21,000 requests a day** against a mid-size model, and **never** against a model a tenth of the price.
+- Utilisation near 100 % makes queues explode. Plan for about **60 %** at the peak, and spend the headroom on bursts and failures.
+- Every number here is **illustrative** until a load test replaces it. Say so in the interview.
+
+## Mental model
+
+- **Sizing the kitchen:** Planning a restaurant means counting diners a night, finding the Saturday rush, working out how many plates leave the kitchen a minute, and deciding how many cooks to hire.
+- **Peak vs. average:** Hiring for the average Tuesday leaves the Saturday rush waiting an hour; hiring for the busiest night of the year leaves cooks idle all winter.
+- **Renting vs. owning:** Renting a table at someone else's restaurant (an API) costs per plate and nothing on quiet nights; hiring your own cooks (a GPU fleet) costs the same every night and wins only when the room is full often enough.
+
+## Core concepts
+
+### From users to tokens per second
+
+Four multiplications take you from the product to the hardware:
+
+1. **Users to requests:** Daily users × requests per user. Brightpost assumes 50,000 customers a day with 4 requests each: 200,000 requests a day.
+2. **Requests to a rate:** Divide by 86,400 seconds: 200,000 ÷ 86,400 = 2.3 requests/s.
+3. **Average to peak:** Multiply by a peak factor, the busiest hour against the day's mean. Brightpost uses 5 (a sale), giving 11.6, written 12. The factor is a measurement from your own traffic, not a constant.
+4. **Requests to tokens:** Multiply the rate by tokens per request. A request has two sizes: 2,200 input tokens (instructions, five retrieved passages, the question) and 250 output tokens. At 12 requests/s that is 26,400 input and 3,000 output tokens a second.
+
+The calculator below covers steps 1 to 3 (ignore its general storage and bandwidth cells; the token step is in the next section):
+
+<EstimateCalculator title="Brightpost: from users to a peak rate" dau={50000} actionsPerUser={4} peakFactor={5} payloadBytes={10000} retentionDays={30} readWriteRatio={0} />
+
+- **General bottlenecks:** For CPU, memory, and connection bottlenecks, see [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning).
+- **LLM unit shift:** You count **tokens**, not requests, because a request with a 20,000-token prompt costs ten times the compute of a 2,000-token one.
+
+### API pricing: input, output and cached tokens
+
+A provider charges per million tokens, with separate prices for three kinds:
+
+- **Input and output tokens:** **Input tokens** are the prompt; **output tokens** are the answer and cost several times more per token because each one needs its own pass through the model.
+- **Cached input tokens:** A prompt prefix the provider has seen recently. As of November 2026, Anthropic bills a cache read at 0.1× the base input price on most models (0.05× on some newer ones) and a cache write at 1.25× for a 5-minute entry or 2× for a one-hour entry. OpenAI bills cached reads at 0.1× on its newer models, with a 30-minute default lifetime and a 1,024-token minimum prefix.
+- **Batch requests:** Runs completed within 24 hours cost 50 % of list at the three large providers (see [Batch vs Real-time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference)).
+- **Cost formula:** Cost per request = input tokens × input price ÷ 1,000,000 + output tokens × output price ÷ 1,000,000.
+- **Illustrative routed mix:** The figure below applies the formula to a smaller workload (50,000 requests a day, 2,000 tokens in, 400 out, at illustrative prices of \$5 and \$20 per million) to compare single-tier and routed costs side by side.
+
+<AnimatedDiagram spec="animated/llm/choose-monthly-cost" caption="Cost per month is requests a day × 30 × cost per request. The input and output parts are drawn to the same scale, and a router that sends 20% of traffic to the large tier costs 28% of large-only (illustrative prices, a different workload from Brightpost's)." />
+
+- **Minimum prefix threshold:** Brightpost's 200-token instruction block is below OpenAI's 1,024-token minimum, so it earns nothing from caching today.
+- **Prefix caching savings:** If the stable prefix grew to 1,100 tokens (instructions plus tool definitions), cache reads at 0.1× would cut one request from \$0.0069 to \$0.0049 (29 % off); see [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) for hit rates and what breaks a prefix.
+
+### GPU throughput and how many GPUs you need
+
+An LLM request hits two hardware limits in turn:
+
+- **Prefill vs. decode:** **Prefill** reads the whole prompt in one pass and is limited by arithmetic; **decode** makes one token at a time and is limited by memory bandwidth (see [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms)).
+- **Sizing bottleneck and memory:** Brightpost's prompts are 90 % of its tokens, so prefill sets the fleet size, while memory is the second check (weights plus the KV cache of every answer in flight must fit).
+- **Three sizing inputs:** Compute per prompt, sustained GPU speed, and the utilisation share you allow yourself to use turn tokens into GPUs.
+- **Measure, do not trust datasheets:** A datasheet gives peak FLOP/s while real engines sustain a fraction of it; measure tokens a second at your real prompt lengths, latency target, and engine.
+
+## Architecture
+
+The estimate is a chain where each link has one input and one output.
+
+<AnimatedDiagram
+  spec="animated/serving/capacity-funnel"
+  stepper
+  caption="Each step multiplies the one before: users become requests, requests become a peak rate, the peak becomes tokens a second, and tokens become GPUs. The user count, the 5× peak and the 400 TFLOP/s sustained rate are illustrative."
+/>
+
+**How to read it:**
+
+- **Colour coding:** Orange boxes are traffic, blue is data (tokens), and teal is compute.
+- **Measured links:** Only two links are not plain multiplication: the peak factor (which you measure) and the GPU step (which uses the compute per prompt).
+
+<StepCards>
+  <StepCard n={1} title="Start with users">
+    50,000 customers open the chat on a busy day. This is a product number, not an engineering one, so write down where it came from.
+  </StepCard>
+  <StepCard n={2} title="Users become requests a day">
+    50,000 × 4 = 200,000 requests, and 200,000 ÷ 86,400 = 2.3 requests/s on average.
+  </StepCard>
+  <StepCard n={3} title="The peak, not the average">
+    2.3 × 5 = 11.6, written 12 requests/s. A fleet must survive the peak.
+  </StepCard>
+  <StepCard n={4} title="Requests become tokens">
+    12 × 2,200 = 26,400 input tokens/s and 12 × 250 = 3,000 output tokens/s. Prompt tokens are 2,200 ÷ 2,450 = 90 % of the total.
+  </StepCard>
+  <StepCard n={5} title="Tokens become GPUs">
+    A prompt costs about 35.2 TFLOP, so at an illustrative 400 TFLOP/s sustained it takes 88 ms of GPU time. 12 × 0.088 = 1.06 GPU-seconds each second, and 1.06 ÷ 0.6 = 1.76 rounds up to 2 replicas, plus 1 spare: 3.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### API versus self-hosting break-even
+
+An API bill grows with every token while a fleet's bill is fixed until traffic needs another GPU, crossing where the fixed bill stops being more expensive.
+
+<AnimatedDiagram
+  spec="animated/serving/capacity-break-even"
+  stepper
+  caption="The API bill is a straight line; the fleet is a staircase, one step per replica. Against a mid-size API model they cross at about 20,870 requests a day. Against a model a tenth of the price they do not cross at all. All prices are illustrative."
+/>
+
+**How to read it:**
+
+- **Cost curves:** Green lines are API bills; the teal staircase is the self-hosted fleet.
+- **Minimum fleet floor:** The fleet starts at 2 replicas so one failure does not stop the service, making its smallest bill 2 × 720 hours × \$3 = \$4,320 a month.
+- **Step threshold:** It steps to 3 replicas at 117,818 requests a day using the sizing rule from the funnel (peak 5×, 60 % target, one spare).
+
+**The numbers:**
+
+- **Assumptions:** Illustrative prices of \$2 in and \$10 out per million tokens for the mid-size model, a tenth of that for the small one, and \$3 per GPU-hour.
+- **Mid-size API:** 2,200 × \$2 ÷ 1,000,000 + 250 × \$10 ÷ 1,000,000 = \$0.0069 a request, so 200,000 × 30 × \$0.0069 = **\$41,400** a month.
+- **Small API:** A tenth, \$0.00069 a request, **\$4,140** a month.
+- **Fleet:** 3 replicas × 720 h × \$3 = **\$6,480** a month.
+- **Break-even against the mid-size API:** \$4,320 ÷ (\$0.0069 × 30) = **20,870 requests a day**, about a tenth of Brightpost's volume.
+- **Mid-size quality caveat:** Against a mid-size model, self-hosting wins easily only if the 8B model you host answers as well on a golden-set run.
+- **Small-model comparison:** Against a small API model of similar quality, the fleet **does not win at this size** because the API bill follows the average (2.3 requests/s) while the fleet is sized for the peak (12).
+- **Hidden fleet costs:** Self-hosting adds an engineer on call, monitoring, idle spares, cold starts, and weights storage; past break-even, the case is usually control (data in your network, a fine-tuned model, latency guarantees)—see [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model) and [Cost & Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization).
+- **Market GPU rates:** In November 2026, GPU prices ranged from about \$2 to \$4 an hour on specialist clouds to well above \$6 on large clouds; replace the \$3 round number with your quote.
+
+### Peak load, headroom and queues
+
+Size from the busiest hour, not the day. The same traffic feeds two bills.
+
+<AnimatedDiagram
+  spec="animated/serving/capacity-peak-vs-average"
+  stepper
+  caption="The API bill follows the average of 2.3 requests/s; the fleet is sized for the peak of 12. A fleet built for the peak is idle most of the time (illustrative prices)."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The peak is five times the average">
+    200,000 ÷ 86,400 = 2.3 requests/s on average. Brightpost's busy hour after a sale runs at about 5 × that, 12.
+  </StepCard>
+  <StepCard n={2} title="The average sets one bill, the peak the other">
+    A pay-per-token API charges for what you send, so the bill follows the average: 200,000 × 30 × \$0.0069 = \$41,400 a month. A fleet is paid for every hour of the month at the size the peak needs: 3 × 720 × \$3 = \$6,480.
+  </StepCard>
+  <StepCard n={3} title="A fleet sized for the peak is idle most of the day">
+    On average the fleet carries 2.3 ÷ 12 = 19 % of the rate it is built for, the same 19 % as on the batch page. Decode keeps GPUs busy too, so a utilisation graph will read differently, but the shape holds.
+  </StepCard>
+</StepCards>
+
+- **Why 60 % and not 95 %:** Queues grow faster than load; for the simplest queue (random arrivals, one server), average wait is ρ ÷ (1 − ρ) service times, where ρ is utilisation:
+
+| Utilisation ρ | Average wait, in service times |
+| --- | --- |
+| 50 % | 1 |
+| 60 % | 1.5 |
+| 80 % | 4 |
+| 90 % | 9 |
+| 95 % | 19 |
+
+- **Queue explosion:** Going from 60 % to 90 % busy multiplies the wait by six, which is why sizing keeps prefill under 60 % and adds a spare.
+- **Little's law memory check:** Answers in flight = arrival rate × time in system, here 12 × 1.5 s = 18, which sets the KV-cache memory.
+- **Sub-linear fleet growth:** Doubling peak traffic to 24 requests/s gives 1.76 × 2 = 3.52 → 4 replicas plus 1 spare = 5 replicas (not 6), because the spare is a fixed cost.
+- **Planning and autoscaling:** Plan a quarter ahead and let [autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling) cover unpredictable spikes, remembering that a new replica takes minutes to load its weights.
+
+<Callout tone="red" title="What breaks">
+  Sizing from the average. At 2.3 requests/s one replica looks enough, and on the first sale day the queue grows past the 80 ms budget, then past the 400 ms first-token target, then clients time out and retry, which adds load. Sizing from the peak without a cap on prompt length fails the same way: one customer pasting a 30,000-token email costs the compute of 14 normal requests.
+</Callout>
+
+### A worked estimate
+
+Put the chain together for Brightpost, following the funnel above to a monthly bill:
+
+1. **Requests:** 50,000 users × 4 = 200,000 a day; 2.3 requests/s average; × 5 = 12 at the peak.
+2. **Tokens:** 12 × 2,200 = 26,400 input tokens/s and 12 × 250 = 3,000 output tokens/s. Per day: 440 M input and 50 M output. Per 30-day month: 13.2 B input and 1.5 B output.
+3. **GPUs:** 35.2 TFLOP per prompt ÷ 400 TFLOP/s = 88 ms; 12 × 0.088 = 1.06; ÷ 0.6 = 1.76, so 2; plus 1 spare = 3 replicas. Memory check: 18 answers in flight need about 5.4 GiB of KV cache beside 16 GB of weights, which fits an 80 GB GPU.
+4. **API bill:** 13,200 M × \$2 = \$26,400 for input, plus 1,500 M × \$10 = \$15,000 for output: **\$41,400** a month.
+5. **Fleet bill:** 3 × 720 × \$3 = **\$6,480** a month, or about \$1.08 per 1,000 requests (\$6,480 ÷ 6,000 thousand requests).
+6. **Decision:** If the 8B model passes the golden set, self-hosting costs 16 % of the mid-size API. If a small hosted model also passes, its \$4,140 beats the fleet at this size and at every volume on the plot; write down which comparison you are making.
+
+The whole estimate fits in a few lines using Brightpost's illustrative constants:
+
+```python
+import math
+users, per_user = 50_000, 4
+req_day = users * per_user                      # 200,000
+peak = req_day / 86_400 * 5                     # 11.6 requests/s
+gpu_s = 2 * 8e9 * 2_200 / 1e12 / 400            # 0.088 s of prefill
+need = peak * gpu_s / 0.6                       # 1.70 replicas
+replicas = max(2, math.ceil(need) + 1)          # 3
+fleet = replicas * 720 * 3                      # $6,480 a month
+api = req_day * 30 * (2200*2 + 250*10) / 1e6    # $41,400 a month
+```
+
+Every throughput, price, and peak figure is an assumption to replace with a load test at real prompt lengths, on the real engine, at the latency target.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Pay-per-token API | No idle cost, no ops, scales with the average, newest models | Bill grows with volume; rate limits; data leaves your network | Low or spiky volume; early product; quality needs the best models |
+| Self-hosted fleet, fixed size | Fixed, predictable bill; control of data, model and latency | Idle at the average; needs ops and a spare; steps up in whole GPUs | High, steady volume; data cannot leave; a fine-tuned model |
+| Self-hosted with autoscaling | Pays closer to the average | Cold starts take minutes; spikes still need warm capacity | Daily cycles with a clear low |
+| Reserved or committed GPUs | Lower hourly rate than on-demand | A commitment, paid whether used or not | A baseline you are sure of |
+| Hybrid: fleet for base load, API for spikes | Fleet stays busy; the API absorbs the peak | Two paths to test, route and monitor | Steady base with a sharp peak |
+| Batch API for offline work | Half the list price | Results within hours, not seconds | Nightly jobs, evaluations, re-indexing |
+
+## Production systems
+
+All as of November 2026, from each provider's own documentation:
+
+- **Anthropic prompt caching**: cache reads cost 0.1× the base input price on most models (0.05× on some), writes 1.25× for 5 minutes or 2× for one hour, and the default lifetime is 5 minutes, refreshed on every hit.
+- **OpenAI prompt caching**: on, by default, for supported models; reads at 0.1× on its newer models, a 30-minute default lifetime and a 1,024-token minimum prefix.
+- **Message batches at the large providers**: Anthropic, OpenAI and Google each price their batch API at 50 % of standard, with a 24-hour window.
+- **NVIDIA H100 SXM**: 989 dense BF16 TFLOP/s and 3.35 TB/s of memory bandwidth on the datasheet; real engines sustain a fraction of the peak, and this page assumes 40 %.
+- **vLLM**: its paper reports 2 to 4 times the throughput of earlier systems at the same latency, which is why a capacity plan quotes measured tokens a second for your engine, not the hardware's peak.
+- **Used in our case studies:** [Code Assistant](/genai-system-design/case-studies/code-assistant)
+
+## Failure modes & pitfalls
+
+- Sizing from the average request rate, so the first busy hour exposes the queue.
+- Counting requests, not tokens: one long prompt costs as much compute as many short ones.
+- Forgetting that output tokens cost several times more than input tokens, and that retries and tool loops multiply both.
+- Comparing a self-hosted 8B model with an API model of a different quality, and calling the gap a saving.
+- Leaving out the fixed costs of self-hosting: spares, on-call time, monitoring, idle nights and cold starts.
+- Quoting a datasheet speed as throughput, and trusting a price or a peak factor that nobody measured.
+
+## Interview framework
+
+1. Ask for the inputs: users or requests a day, tokens per request (input and output), the peak factor, the latency target and any data constraint. State the ones you assume.
+2. Walk the chain out loud: requests a day, average and peak requests/s, tokens/s in and out, GPUs, dollars a month. Show the arithmetic at each step.
+3. Size from the peak and the prompt (prefill), cap utilisation near 60 %, add a spare, and check memory for the answers in flight.
+4. Compare the API line with the fleet staircase, say where they cross and what quality assumption that needs, and name the costs the staircase leaves out.
+5. Finish with how you would check it: a load test at real prompt lengths, the golden set on the cheaper model, and an alert on queue depth.
+
+- **What interviewers listen for:** Tokens not requests, peak not average, a spare in the count, a break-even with its quality caveat, and "I would measure that".
+- **Red flags:** A single GPU count with no working, an average used to size a fleet, a datasheet figure presented as throughput, or "self-hosting is cheaper" with no volume.
+
+## Further reading
+
+- [Prompt caching (Anthropic docs)](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) · [Prompt caching (OpenAI docs)](https://developers.openai.com/api/docs/guides/prompt-caching)
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., 2023)](https://arxiv.org/abs/2309.06180)
+- [Scaling Laws for Neural Language Models (Kaplan et al., 2020)](https://arxiv.org/abs/2001.08361): the 2 FLOPs per parameter per token rule
+- [NVIDIA H100 Tensor Core GPU datasheet](https://www.nvidia.com/en-us/data-center/h100/)
+- [Little, "A Proof for the Queuing Formula: L = λW" (1961)](https://pubsonline.informs.org/doi/10.1287/opre.9.3.383) · [M/M/1 queue (Wikipedia)](https://en.wikipedia.org/wiki/M/M/1_queue)
+- Related pages: [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) · [Cost & Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization) · [Batch vs Real-time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference) · [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model) · [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Walk me through estimating the GPUs for a chat assistant with 200,000 requests a day." category="Scaling" level="Junior">
+    - **Request rate:** 200,000 ÷ 86,400 is 2.3 requests/s on average, and a peak factor of about 5 gives 12 requests/s.
+    - **Token rate:** Multiply by tokens per request (for example 2,200 in and 250 out) to get 26,400 input and 3,000 output tokens/s.
+    - **GPU time:** Each prompt needs about 2 × parameters × tokens FLOPs divided by sustained GPU speed (about 88 ms for an 8B model at 400 TFLOP/s), so 12 requests/s need 1.06 GPU-seconds per second.
+    - **Headroom and spare:** Divide by a 60 % utilisation target (1.76 → 2), add 1 spare for 3 GPUs, and state that every throughput figure must be load tested.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do you size a fleet from peak traffic but price an API from average traffic?" category="Concepts" level="Junior">
+    - **Fixed hourly fleet:** A fleet is paid by the hour whether or not requests arrive, so it must be sized for the busiest hour or users queue.
+    - **Per-token API:** An API charges per token, so quiet hours cost almost nothing and the monthly bill follows the average rate.
+    - **Capacity gap:** For Brightpost, the average is 2.3 requests/s and the peak is 12, so a peak-sized fleet carries only about 19 % of its capacity on average.
+    - **Workload fit:** That idle gap is the cost of owning capacity, which is why steady, high volume favours a fleet and spiky volume favours an API.
+  </InterviewQuestion>
+  <InterviewQuestion question="Output tokens cost more than input tokens. How does that change your estimate?" category="Trade-offs" level="Mid">
+    - **Two-term formula:** Cost per request separates input and output terms, and the output term is often larger even when outputs are shorter.
+    - **Brightpost's split:** At illustrative prices of \$2 in and \$10 out per million, 2,200 input tokens cost \$0.0044 and 250 output tokens cost \$0.0025; input still dominates because the prompt is nearly nine times longer.
+    - **When output dominates:** Chats with long answers or multi-step tool loops flip the ratio toward output cost.
+    - **Mitigation:** Estimate input and output separately, ask for the output length distribution, and cap output tokens to bound both cost and total latency.
+  </InterviewQuestion>
+  <InterviewQuestion question="When does self-hosting beat an API on cost?" category="Trade-offs" level="Mid">
+    - **Break-even condition:** Self-hosting wins when the fixed fleet bill is lower than the API bill for the same answer quality, which depends on volume and GPU utilisation.
+    - **Mid-size vs. small API:** At illustrative prices, Brightpost's two-replica minimum (\$4,320/month) crosses a mid-size API at ~21,000 requests/day, but never crosses a model a tenth of the price because the API follows the average while the fleet is sized for the peak.
+    - **Hidden operational costs:** Include on-call engineering time, spares, monitoring, and cold starts in the fleet total.
+    - **Non-cost drivers:** Treat data residency, fine-tuning, and latency control as the other primary reasons to self-host.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why plan for 60 % utilisation instead of 90 %?" category="Scaling" level="Mid">
+    - **Non-linear queueing delay:** In the simplest M/M/1 queue, average wait is ρ ÷ (1 − ρ) service times—1.5 at 60 % versus 9 at 90 %, six times as long.
+    - **Burst and failure buffer:** Even with continuous batching, a burst or a failed replica at 90 % pushes the queue past the TTFT budget.
+    - **Decode contention:** The 40 % headroom also pays for decode steps sharing the GPU with prefill.
+    - **Empirical target:** Set the exact utilisation cap from a load test that finds the knee where queue wait starts to climb.
+  </InterviewQuestion>
+  <InterviewQuestion question="Traffic doubles next quarter. What do you do to the plan?" category="Scaling" level="Senior">
+    - **Re-run the sizing chain:** At 24 requests/s peak, prefill needs 3.52 replicas at the 60 % target, rounding up to 4 plus 1 spare = 5 GPUs (67 % more GPUs for 100 % more traffic, since the spare does not double).
+    - **Check memory and latency:** In-flight answers double from 18 to 36, so verify KV-cache memory and confirm that queue depth still meets the first-token budget.
+    - **Buy baseline ahead:** Autoscaling covers spikes, but loading model weights takes minutes, so baseline capacity must be provisioned in advance.
+    - **Apply cost levers:** Enable prefix caching, route easy questions to a smaller model, and move offline work to a batch path.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your estimate says 3 GPUs, but the load test shows the queue growing at 8 requests/s. What went wrong?" category="Failure modes" level="Senior">
+    - **Longer real prompts:** If retrieved passages push prompts past 2,200 tokens, prefill compute grows linearly.
+    - **Lower sustained FLOP/s:** The 400 TFLOP/s figure was an assumption; sustaining half of that doubles the GPU time per prompt.
+    - **Decode and engine settings:** Decode steps competing with prefill, suboptimal batch limits, or unconfigured chunked prefill can throttle throughput.
+    - **Corrective loop:** Fix the largest bottleneck first, re-measure tokens/s at the latency target, and replace the assumed rate in the capacity plan.
+  </InterviewQuestion>
+  <InterviewQuestion question="A teammate says the API is cheaper than your fleet. How do you settle it?" category="Trade-offs" level="Senior">
+    - **Lock the quality bar:** Agree on the golden-set pass threshold first, then evaluate both the hosted API model and the self-hosted candidate on it.
+    - **Cost at real traffic shape:** Price the API from average volume (requests × tokens × price) and the fleet from peak requirements (replicas × hours × rate, including spares and idle hours).
+    - **Include ops overhead:** Add the engineering and tooling cost of running and monitoring the fleet.
+    - **Find the crossover volume:** If a cheaper hosted model passes the golden set, the API wins at low volume; compute and document the exact request volume where the fleet crosses it.
+  </InterviewQuestion>
+</InterviewQuestions>

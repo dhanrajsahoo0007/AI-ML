@@ -12,6 +12,7 @@ import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { remarkAssetRefs } from "@/lib/remark-asset-refs";
 import { remarkPremium, type PremiumSplit } from "@/features/paywall";
+import { isPathVisible } from "@/features/sections";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestion } from "@/components/mdx/interview-qa";
 import { ArticleInterviewQuestions } from "@/components/mdx/article-interview-qa";
@@ -23,6 +24,7 @@ import { Diagram } from "@/components/diagrams/diagram";
 import {
   DatabasePicker,
   DatabaseWorkloadMatrix,
+  PatternUseCaseExplorer,
   CompareDatabases,
   DataModelView,
   DataModelTab,
@@ -38,6 +40,7 @@ import { CloudServiceProfile } from "@/components/cloud/cloud-service-profile";
 import { ResponsibilityGrid } from "@/components/cloud/responsibility-grid";
 import { CloudMapping } from "@/components/cloud/cloud-mapping";
 import { CloudOnly } from "@/components/cloud/cloud-only";
+import { mdxLink } from "@/components/mdx/internal-link";
 import {
   KeyIdea,
   Term,
@@ -49,12 +52,20 @@ import {
   Quiz,
   QuizItem,
   DecisionTree,
+  SpotTheFlag,
+  GuessTheLevel,
+  WhichPrinciple,
+  StoryBuilder,
+  StoryMatrix,
+  MockLoop,
+  PrepChecklist,
   RequirementsTable,
   EstimateTable,
   Numbers,
   PatternUses,
   LearningPath,
 } from "@/components/teach";
+import { InterviewPrompt } from "@/components/case-studies/interview-prompt";
 import {
   LatencyLadder,
   EstimateCalculator,
@@ -79,6 +90,9 @@ function remarkDetectMath(flags: { math: boolean }) {
 }
 
 export type { ContentSection };
+
+// Links into hidden or off sections render as plain text (see components/mdx/internal-link.tsx).
+const MdxLink = mdxLink(isPathVisible);
 
 export async function getContentSlugs(section: ContentSection): Promise<string[]> {
   const dir = path.join(process.cwd(), "content", section);
@@ -152,6 +166,7 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       Download,
       DatabasePicker,
       DatabaseWorkloadMatrix,
+      PatternUseCaseExplorer,
       CompareDatabases,
       DbProfile,
       DataModelView,
@@ -179,11 +194,19 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       Quiz,
       QuizItem,
       DecisionTree,
+      SpotTheFlag,
+      GuessTheLevel,
+      WhichPrinciple,
+      StoryBuilder,
+      StoryMatrix,
+      MockLoop,
+      PrepChecklist,
       RequirementsTable,
       EstimateTable,
       Numbers,
       PatternUses,
       LearningPath,
+      InterviewPrompt,
       // Interactive teaching widgets (plan §5.2): server wrappers that validate props, then lazy islands.
       LatencyLadder,
       EstimateCalculator,
@@ -197,6 +220,7 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       IndexPlayground,
       QuorumPicker,
       pre: Pre,
+      a: MdxLink,
     },
   });
   return {

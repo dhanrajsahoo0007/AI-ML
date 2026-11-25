@@ -245,7 +245,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 568,
       y: 620,
-      w: 146,
+      w: 152,
       h: 50,
     },
     {
@@ -255,7 +255,7 @@ const spec: DiagramSpec = {
       icon: "card",
       tone: "neutral",
       step: 6,
-      x: 714,
+      x: 718,
       y: 620,
       w: 142,
       h: 50,

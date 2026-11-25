@@ -1,0 +1,213 @@
+---
+title: "Distributed Time, Clocks and Ordering"
+description: "Why wall-clock timestamps cannot order writes across machines, and what Lamport clocks, version vectors, hybrid logical clocks and TrueTime do instead."
+icon: clock
+updated: 2026-11-16
+tier: advanced
+---
+
+A shopper removes a kettle from the cart 100 ms after adding it on another device, and the kettle comes back, because one server's clock was 200 ms slow.
+
+- Interviewers ask about clocks to see whether you know that timestamps from different machines cannot order events, and which tool you reach for instead.
+
+## Overview
+
+- Every machine's clock drifts. NTP keeps them close, not equal: **skew** of milliseconds is normal, hundreds of milliseconds happen.
+- A **wall clock** can jump backwards when it is corrected; a **monotonic clock** only moves forwards but means nothing on another machine.
+- **Last-write-wins** by timestamp silently drops writes when clocks disagree.
+- **Lamport clocks** give an order consistent with cause and effect; **version vectors** tell ordered writes from concurrent ones.
+- **Hybrid logical clocks** (HLC) stay close to real time while keeping the causal guarantee; **TrueTime** bounds the clock error and waits it out.
+- The cheapest fix is often to avoid comparing clocks at all: **one writer per partition** hands out sequence numbers.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Order the writes by timestamp and keep the latest."
+  - **Why the interviewer pushes back:** "The two servers' clocks differ by 200 ms. Which write is the latest?"
+  - **The answer that stands out:** timestamps from different machines cannot order writes. Give each key one writer that assigns sequence numbers, or detect concurrent writes with version vectors and merge them; use HLC or TrueTime only where you need an order close to real time. Name the cost: metadata per write, or a commit wait.
+</Callout>
+
+## Mental model
+
+- Two witnesses describe a crash, each reading a different watch. One watch is two minutes slow.
+- Their times cannot tell you which thing happened first; what they saw can: "I heard the horn, then the bang."
+- Lamport and vector clocks record exactly that: what each event had already seen.
+
+## Core concepts
+
+- The running example is a Brightpost cart edited on a **phone served by London** and a **laptop served by Frankfurt** within **100 ms**, with Frankfurt's clock **200 ms slow** (illustrative skew).
+
+### Clock skew and last-write-wins
+
+- Each server stamps a write with its own clock, and replicas keep the write with the highest stamp.
+- If a later write is stamped by a slower clock, it loses.
+
+<AnimatedDiagram spec="animated/patterns/clock-skew-lww" stepper caption="The removal happened 100 ms later, but its server's clock was 200 ms slow, so last-write-wins throws it away." />
+
+<StepCards>
+  <StepCard n={1} title="Each server stamps with its own clock">
+    London stamps the add 12:00:00.000. One hundred milliseconds later Frankfurt stamps the remove, but its clock is 200 ms slow, so the stamp is 11:59:59.900.
+  </StepCard>
+  <StepCard n={2} title="Last-write-wins keeps the earlier write">
+    The replicas compare stamps and keep the higher one: the add. The shopper's removal vanishes and the kettle is back in the cart.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Real times: 0 ms and 100 ms. Frankfurt's stamp: 100 − 200 = −100 ms. Last-write-wins keeps max(0, −100) = the add.
+- Any two writes closer together than the skew between their servers can be ordered the wrong way round.
+
+<PremiumBreak />
+
+### Lamport clocks
+
+- Each process keeps a counter. It adds 1 before each event, sends the counter with each message, and on receiving sets its counter to max(own, received) + 1.
+- If event A caused event B, A's counter is smaller than B's.
+- The reverse does not hold: a smaller counter does not mean "happened before". Lamport clocks cannot tell ordered events from concurrent ones.
+
+### Version vectors
+
+- Each replica keeps one counter per replica: what it has seen from everyone.
+- Write X happened before write Y if every entry of X is at most Y's. If neither dominates, the writes are **concurrent** and must be merged.
+
+<AnimatedDiagram spec="animated/patterns/clock-vector" caption="A vector says what each write had seen: B and C each saw A, but not each other, so they are concurrent." />
+
+**How to read it:**
+
+- Vectors are [London, Frankfurt, Dublin]. B and C each saw A, so A is before both.
+- B is [1, 1, 0] and C is [1, 0, 1]: each is bigger in one entry, so neither came first. They are handed to a merge (keep both items in the cart, or ask the shopper).
+
+**The numbers:**
+
+- A vector holds one counter per replica: with 3 replicas, 3 integers per write. Dynamo-style stores keep one per replica that has coordinated a write for the key.
+
+## Architecture
+
+When the order must match real time, as for a globally consistent database, two designs dominate.
+
+- **Hybrid logical clocks** (Kulkarni et al., 2014): a timestamp is the larger of the physical clock and the largest timestamp seen, plus a small counter to break ties. It stays within the clock skew of real time and never runs backwards.
+- **TrueTime** (Spanner, 2012): GPS and atomic clocks give each machine an interval guaranteed to contain true time. A commit stamps the interval's upper edge and waits until that moment is surely past.
+
+<AnimatedDiagram spec="animated/patterns/clock-uncertainty" stepper caption="With a clock that is only known to within ±4 ms, a commit stamps the latest possible time and waits until that time is certainly past." />
+
+<StepCards>
+  <StepCard n={1} title="The clock is an interval, not a point">
+    When the local clock says t, TrueTime only promises that true time lies between t − 4 ms and t + 4 ms (an illustrative uncertainty; Spanner's paper reports it generally under 10 ms).
+  </StepCard>
+  <StepCard n={2} title="Stamp the commit at the interval's upper edge">
+    The transaction takes s = t + 4 ms, the latest moment it could possibly be, as its commit timestamp.
+  </StepCard>
+  <StepCard n={3} title="Wait until that stamp is surely past">
+    It holds its locks for about twice the uncertainty, 8 ms, until even the earliest possible time is after s. Any transaction that starts afterwards, anywhere, gets a larger timestamp.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Wall clocks and monotonic clocks
+
+- Use a **monotonic** clock to measure durations (timeouts, latencies): it never jumps backwards.
+- Use a **wall** clock only for showing times to people, and never compare wall clocks from two machines to decide an order.
+
+### The cheap way out: one writer per key
+
+- Route every write for a cart, an account or a partition to one leader, which assigns sequence numbers 1, 2, 3.
+- Order then comes from the leader, not from clocks, at the cost of a single writer per key (see [Leader Election and Consensus](/system-design/patterns/leader-election)).
+- Snowflake-style ids embed a timestamp but are only roughly ordered across machines (see [Unique ID Generation](/system-design/patterns/unique-id-generation)).
+
+### Bounding the skew
+
+- CockroachDB uses hybrid logical clocks and assumes a maximum clock offset, 500 ms by default; a node whose clock is out of sync with at least half the others by 80 % of that limit shuts itself down rather than risk wrong answers.
+- Spanner's commit wait grows with the uncertainty, so Google keeps the uncertainty small with GPS and atomic clocks in every data centre.
+
+### Worked example: the cart edited twice
+
+The phone adds a kettle at real time 0 ms (London); the laptop removes it at real time 100 ms (Frankfurt, clock 200 ms slow).
+
+1. **Last-write-wins by wall clock:** stamps 0 and −100; the add wins and the removal is lost.
+2. **Version vectors:** the laptop had not seen the add, so the vectors are [1, 0] and [0, 1]: concurrent. The store keeps both and the cart merge decides, for example "removals win".
+3. **One writer per cart:** both writes go to the cart's leader in London, which orders them as they arrive: add = 1, remove = 2. The kettle is removed.
+4. **Hybrid logical clocks:** Frankfurt's HLC is at least the largest stamp it has seen; if it had already received the add, its remove is stamped above it.
+
+**The numbers:**
+
+- Skew 200 ms against a gap of 100 ms: any gap below 200 ms can flip. At the sale-day peak of 300 orders a second, many edits to busy carts fall inside that window.
+- Spanner-style commit wait with ε = 4 ms adds about 8 ms to each read-write commit.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Wall-clock last-write-wins | Simple; no metadata | Loses writes under skew | Data where losing a concurrent write is fine |
+| One writer per key (sequence numbers) | Exact order; no clocks | A leader per key; failover | Carts, accounts, logs per partition |
+| Lamport clocks | Order consistent with causality | Cannot detect concurrency | Total ordering for replicated logs |
+| Version vectors | Detect concurrent writes | Metadata per write; merges | Multi-leader and leaderless stores |
+| Hybrid logical clocks | Close to real time and causal | Assumes bounded skew | Distributed SQL without special hardware |
+| TrueTime with commit wait | External consistency worldwide | Special clocks; wait per commit | Global databases needing real-time order |
+
+## Production systems
+
+- **Lamport (1978), "Time, Clocks, and the Ordering of Events in a Distributed System":** logical clocks that order events consistently with causality.
+- **Spanner** (OSDI 2012): TrueTime exposes clock uncertainty, kept generally under 10 ms; commits wait out the uncertainty so timestamps reflect real-time order.
+- **CockroachDB** (as of November 2026): a 500 ms default maximum clock offset; a node more than 80 % of that out of sync with half the cluster shuts itself down.
+- **Dynamo-style stores** use version vectors to detect concurrent writes and hand them to the application to merge.
+- **Used in our case studies:** [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Key-Value Store](/system-design-case-studies/case-studies/key-value-store) · [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter)
+
+## Failure modes & pitfalls
+
+- **Ordering by wall-clock timestamps across machines.** Writes closer than the skew flip. Use one writer per key or version vectors.
+- **Measuring timeouts with the wall clock.** An NTP correction makes a timeout fire early or never. Use the monotonic clock.
+- **Lamport clocks to detect conflicts.** They cannot. Use version vectors.
+- **Unbounded skew with HLC.** A node with a wild clock poisons timestamps. Monitor offset and stop nodes that drift too far.
+- **Last-write-wins on data people edit together.** Concurrent edits vanish. Merge, or serialise through one writer.
+
+## Interview framework
+
+1. Say why timestamps fail: skew, NTP corrections, and a concrete gap smaller than the skew.
+2. Prefer one writer per key with sequence numbers where possible.
+3. Where several replicas accept writes, detect concurrency with version vectors and say how you merge.
+4. Where order must match real time globally, name HLC or TrueTime and their costs.
+5. Use monotonic clocks for durations.
+
+**What interviewers listen for:** "clocks cannot order writes across machines", and a concrete alternative.
+
+**Red flags:** "use NTP so the clocks agree", or last-write-wins on money or carts.
+
+## Further reading
+
+- [Time, Clocks, and the Ordering of Events in a Distributed System (Lamport, 1978)](https://lamport.azurewebsites.net/pubs/time-clocks.pdf)
+- [Logical Physical Clocks (Kulkarni et al., 2014)](https://cse.buffalo.edu/tech-reports/2014-04.pdf)
+- [Spanner: Google's Globally-Distributed Database (OSDI 2012)](https://research.google/pubs/spanner-googles-globally-distributed-database-2/)
+- [Operational FAQs: clock synchronisation (CockroachDB docs)](https://docs.cockroachlabs.com/docs/stable/operational-faqs)
+- Related pages: [Consistency Models](/system-design/patterns/consistency-models) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Key-Value & In-Memory stores](/system-design/databases/key-value-stores)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why can't you order writes by timestamp across servers?" category="Concepts" level="Junior">
+    - Each server's clock drifts, and NTP keeps them close, not equal: tens or hundreds of milliseconds apart.
+    - Two writes closer together than that skew can be stamped in the wrong order.
+    - Last-write-wins then keeps the earlier write and silently drops the later one.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between a Lamport clock and a version vector?" category="Concepts" level="Mid">
+    - A Lamport clock is one counter; it guarantees that a cause has a smaller number than its effect.
+    - It cannot tell whether two events are ordered or concurrent.
+    - A version vector keeps one counter per replica, so it can say "before", "after" or "concurrent", which is what conflict detection needs.
+  </InterviewQuestion>
+  <InterviewQuestion question="A cart is edited on two devices within 100 ms through two regions. How do you keep the right result?" category="Architecture" level="Senior">
+    - Avoid comparing the two servers' clocks.
+    - Simplest: send every write for a cart to one leader that assigns sequence numbers.
+    - If both regions must accept writes, attach version vectors, detect the concurrent edits and merge them with a rule such as "removals win" or by asking the shopper.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does Spanner's commit wait do, and what does it cost?" category="Trade-offs" level="Senior">
+    - TrueTime gives each machine an interval known to contain true time.
+    - A commit takes the interval's upper edge as its timestamp and waits until that time is certainly past before releasing locks.
+    - Then any later transaction anywhere gets a larger timestamp; the cost is a wait of about twice the uncertainty on every read-write commit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which clock should you use to measure a timeout?" category="Failure modes" level="Mid">
+    - A monotonic clock, which only moves forwards.
+    - The wall clock can jump when NTP corrects it, making a timeout fire early or never.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a hybrid logical clock and why use one?" category="Trade-offs" level="Senior">
+    - A timestamp built from the physical clock plus a logical counter, never smaller than any timestamp the node has seen.
+    - It keeps the causal guarantee of a Lamport clock while staying close to real time, without special hardware.
+    - It assumes clock skew is bounded, so nodes that drift too far must be stopped.
+  </InterviewQuestion>
+</InterviewQuestions>

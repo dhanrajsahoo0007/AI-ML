@@ -1,0 +1,220 @@
+---
+title: "Request Batching, Pipelining and Scatter-Gather"
+description: "The cost of a round trip, and trading a few milliseconds of delay for throughput: linger windows, pipelining, batch APIs and scatter-gather with deadlines."
+icon: layers
+updated: 2026-11-16
+tier: advanced
+---
+
+Thousands of tiny writes a second each pay a full round trip, a request header and a system call, and the overhead costs more than the work.
+
+- Interviewers ask about batching to see whether you can trade a few milliseconds of delay for much higher throughput, and whether you know where that trade hurts.
+
+## Overview
+
+- Every request pays a fixed cost: a **round trip**, headers, a system call, a log line. Small requests are mostly overhead.
+- **Batching** groups many items into one request. A **linger window** (wait up to N ms) and a **size cap** (send at M items or bytes) decide when a batch goes.
+- **Pipelining** sends the next request on a connection before the last reply arrives, so N requests cost about one round trip.
+- **Batch APIs** need **per-item results**: one bad item must not fail the other 149.
+- **Scatter-gather** sends one query to many shards and merges the answers. It waits for the slowest shard, so it needs a **deadline** and **partial results**.
+- Batching hurts **tail latency** for the item that waits longest, and a **poison item** can block a whole batch.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Each order event is written to the search index as it arrives."
+  - **Why the interviewer pushes back:** "That is 300 requests a second at the peak, each with its own round trip and overhead. What does the index do on sale day?"
+  - **The answer that stands out:** buffer events and send a bulk request of up to 150 every 500 ms: 2 requests a second instead of 300. Say the cost: up to half a second of extra delay before an order is searchable, and per-item error handling.
+</Callout>
+
+## Mental model
+
+- Think of a post office van. It could leave each time a single letter is posted, or every 30 minutes with a full sack.
+- The full sack costs each letter up to half an hour of waiting, and saves hundreds of trips.
+- Pipelining is the clerk handing over the next parcel without waiting for a receipt for the last one.
+- Scatter-gather is sending a question to 20 branch offices and replying to the customer when 19 have answered, rather than waiting all day for the twentieth.
+
+## Core concepts
+
+- The running example is Brightpost's order events: **300/s** at the sale-day peak, each written to the search index; and product search over an index split into **20 shards**.
+
+### Linger windows and size caps
+
+- A batcher holds items until the **linger time** passes or the **batch is full**, whichever comes first.
+- Longer lingers mean bigger batches and fewer requests, and more delay for every item.
+- At low traffic the linger time sets the delay; at high traffic the size cap does, and batches leave full and early.
+
+<AnimatedDiagram spec="animated/patterns/batch-linger" stepper caption="A 5 ms linger cuts 50 requests to 10; the price is up to 5 ms of waiting for each write." />
+
+<StepCards>
+  <StepCard n={1} title="Send each write: 50 requests">
+    A producer makes one write a millisecond and sends each one at once. Fifty writes cost fifty requests and fifty round trips, and no write waits.
+  </StepCard>
+  <StepCard n={2} title="Linger 5 ms: 10 requests of 5">
+    The producer collects writes for 5 ms and sends them together. Ten requests carry the same fifty writes; each write waits up to 5 ms, about 2.5 ms on average.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 50 writes ÷ 5 per window = 10 requests: 80 % fewer round trips and request headers.
+- Kafka's producer lingers 5 ms by default since Kafka 4.0 (it was 0 before) and caps each partition's batch at 16,384 bytes.
+
+<PremiumBreak />
+
+### Pipelining on one connection
+
+- Request-reply waits for each answer before sending the next request, so N requests cost N round trips.
+- Pipelining sends them back to back and reads the answers together: about one round trip, and fewer system calls on both ends.
+- Order is kept: answers come back in the order the requests went out.
+
+<AnimatedDiagram spec="animated/patterns/batch-pipeline" stepper caption="Pipelining sends the next request before the last reply arrives, so three reads cost one round trip." />
+
+**How to read it:**
+
+- Step 1 is three GETs, each waiting for its answer: three round trips.
+- Step 2 sends the same three GETs back to back: the answers arrive together after one round trip.
+
+**The numbers:**
+
+- With a 250 ms round trip, request-reply manages at most 1,000 ÷ 250 = 4 requests a second, however fast the server is (Redis docs).
+- Inside a data centre the round trip is well under a millisecond, but pipelining still cuts system calls: Redis reports up to about 10 times the throughput.
+
+### Batch APIs and per-item errors
+
+- A batch request must say what happened to each item, not just "the batch failed".
+- Elasticsearch's bulk API returns an `errors` flag and one result per action, so the client retries only the failed items.
+- Keep batches bounded in bytes as well as items: Elasticsearch rejects HTTP requests over 100 MB by default, and there is no single right batch size.
+- The **N + 1 query** is the read-side version: one query for a list, then one per item. Batch the per-item reads into one (a DataLoader does this for GraphQL, see [GraphQL](/system-design/fundamentals/graphql)).
+
+## Architecture
+
+Product search over 20 index shards, built one step at a time.
+
+<AnimatedDiagram spec="animated/patterns/batch-scatter" stepper caption="A search waits for the slowest of 20 shards, so it sets a deadline and answers with the shards that made it." />
+
+<StepCards>
+  <StepCard n={1} title="One index answers every search">
+    One index holds all 1,000,000 products. It works until the index outgrows one machine.
+  </StepCard>
+  <StepCard n={2} title="Scatter the query to 20 shards">
+    The index is split into 20 shards, and a coordinator sends each search to all of them in parallel. The search is now as slow as the slowest shard.
+  </StepCard>
+  <StepCard n={3} title="Gather the top 10 from each and merge">
+    Each shard returns its own top 10; the coordinator merges 200 candidates into the overall top 10.
+  </StepCard>
+  <StepCard n={4} title="Answer at the deadline with what arrived">
+    The coordinator waits at most 80 ms. Shard 20 is slow today, so the answer is built from 19 shards and marked partial. The shopper gets results on time, missing a few products.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Scatter-gather and the slowest shard
+
+- A request that waits for all N shards is slower than any one of them: it takes the maximum of N latencies.
+- If each shard is slower than its p99 1 % of the time, a 20-shard query hits at least one slow shard 1 − 0.99^20 = 18 % of the time.
+- Defences: a **deadline** with **partial results**, **hedged requests** to a replica of a slow shard, and fewer, larger shards.
+- The full treatment: [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation).
+
+### When batching hurts
+
+- **Tail latency:** the first item in a batch waits for the whole linger window. For interactive paths, keep lingers short or batch only in the background.
+- **Head-of-line blocking:** in a pipeline, one slow request delays every answer queued behind it.
+- **Poison items:** one item that always fails can fail or retry the whole batch forever. Use per-item results and send repeat failures to a dead-letter queue.
+- **Memory:** a server answering a long pipeline queues every reply. Redis suggests sending pipelines in chunks, for example 10,000 commands.
+
+### Worked example: order events into the search index
+
+At the sale-day peak Brightpost writes 300 order events a second into the search index.
+
+1. **Single writes.** Each event is one index request.
+2. **Bulk writes.** The indexer buffers events and sends one bulk request every 500 ms or at 150 events, whichever comes first.
+3. **A bad event.** One event has a malformed field. The bulk response marks it failed; the other 149 are indexed, and the bad one goes to a dead-letter queue.
+
+**The numbers:**
+
+- Single writes: 300 requests a second.
+- Bulk: 300 ÷ 150 = 2 requests a second, each carrying 150 events. That is 298 fewer requests a second, over 99 %.
+- Delay added: up to 500 ms, about 250 ms on average, before an order is searchable.
+- At a quiet 2.3 events a second the 500 ms timer decides: about 1 event per request, so batching costs nothing at night.
+- With a fixed overhead of 2 ms per request (illustrative), single writes spend 300 × 2 = 600 ms of server time a second on overhead; bulk spends 2 × 2 = 4 ms.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| One request per item | Lowest delay per item; simple errors | Overhead per item dominates | Interactive requests, low rates |
+| Linger window plus size cap | Far fewer requests; bigger, cheaper writes | Up to one window of delay per item | Logs, events, index writes, producers |
+| Pipelining | One round trip for many requests | Head-of-line blocking; reply memory | Many small commands to one server |
+| Scatter-gather, wait for all | Complete results | As slow as the slowest shard | Small fan-out, strict completeness |
+| Scatter-gather with a deadline | Bounded latency | Partial results some of the time | Search, feeds, recommendations |
+
+## Production systems
+
+- **Apache Kafka** (as of November 2026): the producer batches per partition up to `batch.size` (16,384 bytes by default) and waits up to `linger.ms`, which Kafka 4.0 raised from 0 to 5 ms because larger batches usually give similar or lower latency.
+- **Redis pipelining**: commands are sent without waiting for replies; the docs show a 250 ms round trip limiting request-reply to 4 requests a second, and pipelining reaching about 10 times the throughput.
+- **Elasticsearch bulk API**: many index, update and delete actions in one request, with an `errors` flag and per-item results; HTTP requests are limited to 100 MB by default.
+- **Used in our case studies:** [Web Crawler](/system-design-case-studies/case-studies/web-crawler) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue)
+
+## Failure modes & pitfalls
+
+- **All-or-nothing batches.** One bad item fails 149 good ones, and a retry fails them again. Return and handle per-item results.
+- **Long lingers on interactive paths.** A user waits for a batch to fill. Keep lingers to a few milliseconds, or batch only background work.
+- **Unbounded batches.** A burst builds a batch too big for the server's request limit or memory. Cap by items and by bytes.
+- **Waiting for every shard.** One slow shard sets everyone's latency. Use a deadline and partial results.
+- **Losing buffered items on a crash.** Items in an in-memory batch vanish with the process. Batch after a durable queue, or accept the loss for metrics.
+- **N + 1 queries.** One query per item in a list. Batch the lookups.
+
+## Interview framework
+
+1. Count the requests a second and the fixed cost of each.
+2. Introduce batching with a linger window and a size cap, and give the request rate before and after.
+3. State the delay you add, and keep it off interactive paths.
+4. Handle partial failure with per-item results and a dead-letter queue.
+5. For fan-out reads, do the slowest-shard maths and add a deadline with partial results.
+
+**What interviewers listen for:** the requests-per-second arithmetic, the added delay stated plainly, and per-item errors.
+
+**Red flags:** one request per tiny event at thousands a second, or a scatter-gather with no deadline.
+
+## Further reading
+
+- [Producer configs: linger.ms and batch.size (Apache Kafka docs)](https://kafka.apache.org/40/configuration/producer-configs/) · [KIP-1030: changed defaults](https://cwiki.apache.org/confluence/display/KAFKA/KIP-1030:+Change+constraints+and+default+values+for+various+configurations)
+- [Redis pipelining (Redis docs)](https://redis.io/docs/latest/develop/using-commands/pipelining/)
+- [Bulk API (Elasticsearch docs)](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk)
+- Related pages: [GraphQL](/system-design/fundamentals/graphql) · [Compression](/system-design/fundamentals/compression) · [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does batching raise throughput?" category="Concepts" level="Junior">
+    - Every request pays a fixed cost: a round trip, headers, a system call, a log line.
+    - A batch pays that cost once for many items, so the server spends its time on the work instead of the overhead.
+    - Storage also prefers fewer, larger writes.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do linger.ms and batch.size do in a Kafka producer?" category="Concepts" level="Mid">
+    - The producer collects records per partition and sends a batch when it reaches `batch.size` bytes or when `linger.ms` has passed, whichever comes first.
+    - A longer linger gives bigger batches and fewer requests, at the cost of a few milliseconds of delay per record.
+    - Kafka 4.0 changed the `linger.ms` default from 0 to 5 ms, because larger batches usually give similar or lower latency under load.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is pipelining, and how is it different from batching?" category="Concepts" level="Mid">
+    - Pipelining sends several requests on one connection without waiting for each reply; the replies come back in order.
+    - It saves round trips but each request is still separate on the server.
+    - Batching puts many items into one request, which also saves per-request work on the server, and usually needs a batch API with per-item results.
+  </InterviewQuestion>
+  <InterviewQuestion question="Order events reach the search index at 300 a second. Design the writes." category="Scaling" level="Senior">
+    - Buffer events in the indexer and send a bulk request every 500 ms or at 150 events: 2 requests a second instead of 300.
+    - Each order becomes searchable up to 500 ms later, about 250 ms on average, which is fine for search.
+    - Read the per-item results, retry the transient failures and send items that keep failing to a dead-letter queue.
+    - Read from a durable queue so a crash loses nothing that was not yet indexed.
+  </InterviewQuestion>
+  <InterviewQuestion question="A search fans out to 20 shards. Why is p99 latency bad, and what do you do?" category="Failure modes" level="Senior">
+    - The search waits for the slowest of 20 shards; if each is slow 1 % of the time, 1 − 0.99^20 = 18 % of searches hit at least one slow shard.
+    - Set a deadline and answer with the shards that replied, marking the result partial.
+    - Hedge: after a short wait, send the same query to a replica of a slow shard and use whichever answers first.
+    - Fewer, bigger shards also shrink the fan-out.
+  </InterviewQuestion>
+  <InterviewQuestion question="When does batching make things worse?" category="Trade-offs" level="Senior">
+    - On interactive paths, where the first item waits for the whole window.
+    - When one poison item fails the batch and every retry fails it again.
+    - When batches grow unbounded under a burst and exceed request size limits or memory.
+    - When buffered items are lost on a crash because the batch lived only in memory.
+  </InterviewQuestion>
+</InterviewQuestions>

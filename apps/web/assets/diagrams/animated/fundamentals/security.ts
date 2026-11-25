@@ -43,7 +43,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 285,
       y: 230,
-      w: 150,
+      w: 170,
       h: 64,
     },
     {
@@ -55,7 +55,7 @@ const spec: DiagramSpec = {
       accent: true,
       x: 510,
       y: 230,
-      w: 150,
+      w: 172,
       h: 64,
     },
     {
@@ -99,7 +99,7 @@ const spec: DiagramSpec = {
       tone: "red",
       x: 510,
       y: 420,
-      w: 150,
+      w: 156,
       step: 2,
     },
 
@@ -122,7 +122,7 @@ const spec: DiagramSpec = {
       tone: "red",
       x: 770,
       y: 420,
-      w: 160,
+      w: 172,
       step: 3,
     },
   ],

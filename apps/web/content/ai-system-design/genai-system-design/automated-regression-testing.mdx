@@ -1,0 +1,232 @@
+---
+title: Automated Regression Testing
+description: CI pipelines, prompt snapshots, assertions, and reliability practices for ML and LLM regression suites.
+icon: shield-check
+updated: 2026-11-15
+---
+
+Every prompt edit can fix one ticket type and quietly break another.
+
+- Interviewers ask about regression testing because LLM outputs are not repeatable, so a plain "did the output change" test fails on day one, and a team that cannot tell a real regression from noise either blocks good changes or ships bad ones.
+
+## Overview
+
+- A **regression suite** is a fixed set of cases that runs on every change to a prompt, model, retriever or tool. It answers one question: did anything that worked stop working?
+- Run the **golden set** (Brightpost: **200 tickets**) in CI and compare with a **stored baseline run** of the live version. Put cheap checks first (schemas, code assertions), the judge-scored suite next.
+- **Compare cases, not just totals.** A net gain of 4 passes can hide **10 cases fixed and 6 broken**. Always list the cases that flipped from pass to fail.
+- **Measure the noise.** Run the unchanged prompt k times (here k = 5). If the pass count moves by ±4.5 cases (**±2.2 points**), a change smaller than that is **not a change**.
+- A **gate** combines three rules: an absolute floor, no drop beyond the noise band, and zero broken **must-pass** cases (safety, refund limits).
+
+## Mental model
+
+- A bakery tests every new recipe against a tray of its twelve best-selling items.
+- The baker tastes the tray before and after. Two things matter.
+- First, did any item that was good turn bad? An average score would miss that: three better loaves and one burnt one can average out.
+- Second, how much does the same recipe vary from one batch to the next?
+- If a batch can differ by a pinch of salt, a slightly better tray after a recipe change proves nothing.
+- Regression testing for an LLM is the same tasting routine, run by a machine on every change.
+
+## Core concepts
+
+1. **Regression.** A case that passed with the live version and fails with the candidate. It matters more than a new failure, because customers already rely on that behaviour.
+2. **Golden set.** The labelled cases the suite runs, built as described in [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets). Brightpost has 200 tickets across intents and difficulty levels.
+3. **Baseline.** A stored run of the live version on the same set, with the same judge and settings. Compare against it, not against a number someone remembers.
+4. **Graders in order of cost.** Code assertions first (valid JSON, the refund tool was called, no forbidden phrase), then an LLM judge for open answers (see [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)), and people for audits.
+5. **Pinned settings.** Pin model version, temperature, prompt, retrieval index and tool stubs. Record retrieval and tool results as fixtures so a failure points at the change and not at a moving index.
+6. **Flips.** The cases that changed outcome between baseline and candidate: fixed (fail to pass) and broken (pass to fail).
+7. **Noise band.** The range a pass count covers when the same version is run again. It exists because sampling, provider load and judge variance are never zero.
+8. **Must-pass cases.** A small set where one failure blocks a release whatever the average says: the refund over £30 that needs approval, a request for another customer's data.
+9. **Gate.** The rule that turns a run into allow or block. It lives in the pipeline described in [CI/CD & Continuous Training Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines).
+10. **Tiers.** Fast checks on every push, the full suite on every pull request, larger or multilingual suites nightly.
+
+- This page covers the test itself: how to compare runs and how to separate signal from noise.
+- The release path around it (build, canary, promote) is in the CI/CD page, and live monitoring after release is in [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
+
+## Architecture
+
+The suite sits between a pull request and the merge button. It reads the candidate change, runs the golden set, and compares the result with the baseline before anything is built.
+
+<AnimatedDiagram
+  spec="animated/eval/regress-ci-gate"
+  stepper
+  caption="A prompt change runs the 200-ticket suite, meets the stored baseline, and passes or fails three rules. Pass counts are illustrative; the token counts are computed."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A change runs the suite and meets the baseline">
+    The pull request triggers the suite. One run sends 200 × 2,200 = 440,000 input tokens, 0.1 % of a day's 440 million, plus the judge's tokens. The baseline is the stored run of the live prompt: 180 of 200.
+  </StepCard>
+  <StepCard n={2} title="Prompt p12 passes all three rules">
+    It scores 184 of 200 (92 %), above the floor of 170 (85 %). It is 4 cases above the baseline, inside the noise band, so there is no drop. All 12 refund-limit cases pass. The gate allows the merge.
+  </StepCard>
+  <StepCard n={3} title="Prompt p13 fails two and is blocked">
+    It scores 164 of 200 (82 %), under the floor, and 16 cases below the baseline, far outside the band. Its must-pass cases still pass, but two failed checks are enough. Nothing is built.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### What goes in the suite
+
+- **Code assertions.** Cheap and exact: the output parses against a schema, a refund above £30 calls the approval tool, the answer contains the required disclaimer, no forbidden text appears on safety cases. Run these on every push, with no judge.
+- **Judge-scored cases.** Open answers (tone, correctness against policy) need a grader. Use the judge you have already compared with people, with a fixed rubric and temperature.
+- **Fixtures.** Record the retrieved passages and tool results for each case. Then a failing test says the prompt or model changed, not that a help article was edited last night. Keep a smaller set of end-to-end cases that use the live index, and run it separately.
+- **Snapshots of structure, not prose.** Diffing free text breaks whenever the provider changes a word. Snapshot extracted fields (intent, tool name, arguments) and compare those.
+- **Growth.** Every production failure becomes a case. See [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) for how the set is sampled, labelled and refreshed.
+
+### Compare cases, not totals
+
+<AnimatedDiagram
+  spec="animated/eval/regress-flips"
+  stepper
+  caption="Of 200 cases, 10 were fixed, 6 broke, 10 still fail and 174 still pass. The net gain of 4 hides 16 changed cases. Counts are illustrative."
+/>
+
+**How to read it:**
+
+- The bar is the 200 cases, split by what happened between the live prompt p11 and the candidate p12.
+- The totals are 180 and 184 passes, a net gain of 10 − 6 = **+4**.
+- But 16 cases changed, and the 6 broken ones are real customers who were served correctly yesterday.
+- A pass-rate threshold sees only the net. A flip list shows the six, and a reviewer reads them.
+
+This is a paired comparison: the same 200 cases under both prompts. It is more sensitive than comparing two separate samples, because the easy and hard cases appear on both sides.
+
+### The noise band
+
+<AnimatedDiagram
+  spec="animated/eval/regress-noise-band"
+  stepper
+  caption="Five runs of the same prompt p11 score 177 to 183. The band is the mean plus or minus two spreads, 175.5 to 184.5. Pass counts are illustrative; the band is computed from them."
+/>
+
+**The working:**
+
+- Five runs of p11 give 177, 181, 180, 183 and 179 passes.
+- The mean is 900 ÷ 5 = 180. The deviations squared are 9, 1, 0, 9 and 1, which add to 20; divided by k − 1 = 4 that is a variance of 5 and a spread (standard deviation) of √5 = **2.24 cases**.
+- Two spreads is 4.47 cases, or **2.2 points** of 200.
+- Five runs cost 5 × 440,000 = 2,200,000 input tokens, 0.5 % of a day's input.
+
+**What it means:**
+
+- p12 scores 184: only 4 above 180, so a rerun of the unchanged p11 could score the same.
+- It is not shown to differ. A candidate p14 that scores 190 clears the band and counts as a change.
+- The same variance implies that two runs of one prompt disagree on about 2 × 5 = **10 cases**, so the 16 flips between p11 and p12 are only 6 above what noise gives you for free.
+
+- Three ways to shrink the noise: set temperature to zero for the gate (it removes sampling noise, not provider or judge noise), average k runs, or enlarge the set.
+- The interval for a pass rate near 90 % on n cases is about 1.96 × √(0.9 × 0.1 ÷ n), which is ±4.2 points at n = 200; that sampling error of the 200 cases is wider than the run-to-run band, so a small gain is weak evidence unless the comparison is paired.
+- The statistics of comparing evals are set out in Miller (2024).
+
+### Flaky tests
+
+- A test that fails one run in five is noise, not a regression.
+- Reproduce it with the logged prompt and context, check for provider errors, and tighten the assertion to a less brittle property.
+- Quarantine only with an owner and an expiry date, and report the flake rate: a flaky suite teaches people to click re-run.
+
+### Worked example: Brightpost changes the refund prompt
+
+1. **Change.** A developer edits the refund section of the prompt (p11 to p12) to ask for the order number first. The pull request starts the suite.
+2. **Cheap checks.** Unit tests pass (no model calls). The 12 refund-limit cases pass: each refund above £30, such as order 4471, a cracked kettle at £42, calls the approval tool.
+3. **Suite and gate.** 184 of 200 pass. Floor 170: pass. Baseline 180, band ±4.5: +4 is inside, so no drop. Must-pass 12 of 12: pass. The gate allows the merge.
+4. **Flips.** The report lists 10 fixed and 6 broken. A reviewer reads the 6 broken tickets and finds (illustrative) that 4 are long multi-order questions where the new instruction made the answer too short. The developer adds a clause; the rerun has 3 broken.
+5. **Next stage.** The merge triggers the build, canary and promotion. The nightly job runs the larger multilingual suite, and every failure there becomes a new case.
+
+<Callout tone="red" title="What breaks">
+  The team sets the gate to "candidate must score at least baseline". A rerun of the unchanged prompt scores 177 against a stored baseline of 180, and the build fails with no change made. After a week of random red builds, someone adds a retry-until-green step. Now the gate passes any change that is lucky once in three. Use a band from measured runs, and fail on real flips.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Temperature zero in CI | Fewer flaky runs; cheap | Does not match production sampling; provider noise remains | The gate on every pull request |
+| Average k runs | Narrower noise band | k times the cost | Borderline changes; nightly runs |
+| Absolute floor only | Simple to explain | Misses a drop from 95 % to 86 % | A backstop beside the baseline rule |
+| Baseline plus band | Catches drops; tied to measured noise | Needs stored runs and re-measuring after provider changes | The main rule |
+| Judge-scored suite | Covers open answers | Judge cost, judge drift | After code assertions |
+| Large nightly suite | Broad coverage | Slow feedback | Multilingual, long inputs, load |
+
+## Production systems
+
+- **Prompt evals in CI.** The open-source promptfoo tool runs a prompt evaluation from a pull-request workflow in GitHub Actions and fails the job on an assertion failure or on a pass-rate threshold you compute from its JSON output (promptfoo docs, November 2026).
+- **Offline evaluation as a pre-ship check.** LangSmith's documentation describes offline evaluation on curated datasets as the way to compare versions and catch regressions before shipping, with online evaluation on live traces as its counterpart (LangChain docs, November 2026).
+- **Error bars for evals.** Miller (2024) treats eval questions as a sample from a larger population and gives formulas for the uncertainty of a score and for comparing two models, which is the statistics behind a noise band.
+- **Gates in release pipelines.** Brightpost's own pipeline puts this suite at stage two of five, as drawn on [CI/CD & Continuous Training Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines).
+
+## Failure modes & pitfalls
+
+- **Judging by the average.** The gain hides the broken cases. Always print the flip list.
+- **No noise measurement.** Without a band you cannot tell a 2-point gain from luck; measure it once and again after a provider or judge change.
+- **A moving baseline.** If the baseline is rerun with a different judge or index, every comparison shifts. Store the run, with its settings.
+- **Live retrieval in unit-style tests.** An index rebuild fails the suite and nobody changed the prompt. Use fixtures for the gate.
+- **A suite that never grows.** If production failures do not become cases, the suite certifies yesterday's problems.
+- **Retries until green.** It turns a safety net into a lottery.
+
+## Interview framework
+
+1. State the goal: catch a case that worked and stopped working, before release, at a cost that allows running it on every change.
+2. Describe the suite: fixed golden set, pinned settings, fixtures, code assertions first, then a judge.
+3. Explain the comparison: stored baseline, paired by case, with the flip list and the must-pass cases.
+4. Handle the noise: run k times, compute the band (mean ± 2 spreads), treat a change inside it as no change.
+5. Place it in the pipeline: fast tier on push, full suite on the pull request, bigger suite nightly, failures promoted to cases.
+
+**What interviewers listen for:** a number for the noise, paired comparison with flips, a gate with more than one rule, and the habit of turning production failures into cases.
+
+**Red flags:** "assert the output equals the saved answer", a single average pass rate as the gate, retrying until green, and no plan for provider model changes.
+
+## Further reading
+
+- [promptfoo: CI/CD integration (docs)](https://www.promptfoo.dev/docs/integrations/ci-cd/)
+- [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations (Miller, 2024)](https://arxiv.org/abs/2411.00640)
+- [LangSmith: evaluation concepts, offline and online (docs)](https://docs.langchain.com/langsmith/evaluation)
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- Related pages: [CI/CD & Continuous Training Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines) · [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [A/B Testing for Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you test LLM applications in CI when outputs are not bitwise reproducible?" category="Concepts" level="Junior">
+    - Do not compare text for equality. Pin the model version, prompt and decoding settings, and assert on properties: the output parses against a schema, the right tool was called with the right arguments, forbidden text is absent.
+    - For open answers use a judge with a fixed rubric and compare pass rates against a stored baseline, allowing for run-to-run noise.
+    - Keep ordinary unit tests for all code that does not call a model, so flakiness stays confined to labelled suites.
+  </InterviewQuestion>
+  <InterviewQuestion question="What belongs in the CI pipeline and what in a scheduled offline job?" category="Architecture" level="Junior">
+    - CI runs fast checks on every push (schemas, assertions, prompt rendering) and the 200-case golden suite on each pull request, with fixtures so results do not depend on a live index.
+    - Scheduled jobs run the larger judge-scored sets, other languages, long inputs and load tests that would slow every merge.
+    - A repeatable high-severity failure found in a scheduled job is promoted to a CI case, so the same bug cannot return unnoticed.
+  </InterviewQuestion>
+  <InterviewQuestion question="The new prompt scores 92 % against 90 % for the live one. Do you ship it?" category="Trade-offs" level="Mid">
+    - Not on that number alone. First ask how much the unchanged prompt moves between runs: if five runs spread by about ±4.5 cases out of 200 (±2.2 points), a 2-point gain is inside the noise.
+    - Then look at the flips: 10 fixed and 6 broken is a very different story from 4 fixed and 0 broken, and the broken cases may be must-pass ones.
+    - Check the guardrails, cost and latency as well.
+    - If the gain is real and the broken cases are understood, ship it behind a canary.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you measure the noise band, and what would you do if it is too wide?" category="Scaling" level="Mid">
+    - Run the unchanged live version k times, say five, on the whole golden set with the production settings, and compute the mean and standard deviation of the pass count.
+    - A band of mean plus or minus two standard deviations is a practical cut-off for a change worth acting on.
+    - If it is too wide, find the source: sampling temperature, a noisy judge or provider variance.
+    - Fix what you can (lower temperature, a clearer rubric), average several runs, or grow the set; remeasure after any change of judge or provider.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle a flaky evaluation test that sometimes fails without a product regression?" category="Failure modes" level="Mid">
+    - Reproduce it with the logged inputs and settings, and check for provider errors or version skew.
+    - Then make the assertion less brittle: assert on an extracted field, not on wording.
+    - Move borderline cases to a human-reviewed set, and quarantine a test only with an owner and an expiry date.
+    - Track the flake rate as a metric, because chronic flakes make people ignore red builds.
+    - Avoid blind retries except for documented transient network errors with a small limit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the regression gate for a refund assistant. What rules does it enforce?" category="Architecture" level="Senior">
+    - Three rules at least. An absolute floor, such as 85 % on the golden set, as a backstop.
+    - A comparison with the stored baseline that fails on a drop larger than the measured noise band, using paired cases and a flip report.
+    - And a must-pass set, such as every refund over the approval limit calling the approval tool, where a single failure blocks the merge.
+    - I would run code assertions before the judge, use fixtures for retrieval and tools, and log the baseline's settings so the comparison is fair.
+  </InterviewQuestion>
+  <InterviewQuestion question="The provider updates the model behind your alias and the nightly suite drops three points. How do you respond?" category="Failure modes" level="Senior">
+    - First decide whether three points is outside the band; if so, confirm with a rerun and by pinning the previous version to see whether it still scores the old number.
+    - Read the flipped cases to see which behaviour changed, and check whether the judge model also moved.
+    - Then either adapt the prompt and re-baseline, pin the old version while it lasts, or route that intent elsewhere.
+    - Afterwards re-measure the noise band, store the new baseline, and pin versions in the gate so a silent change shows up as a labelled event.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why compare cases one by one instead of comparing two pass rates?" category="Concepts" level="Senior">
+    - Both prompts answer the same 200 cases, so the comparison is paired: easy cases are easy on both sides and drop out of the difference.
+    - That makes the test far more sensitive than comparing two independent samples.
+    - It also exposes what a net figure hides: fixed and broken cases cancel in the total but not for the customers behind them.
+    - The flip list lets a person judge severity, and it is the input for a statistical test on the discordant cases when a firm decision is needed.
+  </InterviewQuestion>
+</InterviewQuestions>

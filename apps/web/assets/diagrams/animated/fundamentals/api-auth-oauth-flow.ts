@@ -17,7 +17,7 @@ const spec: SequenceSpec = {
   ],
   lanes: [
     { id: "browser", label: "Your browser", icon: "browser", tone: "neutral" },
-    { id: "planner", label: "PlanMyWeek app", icon: "server", tone: "blue" },
+    { id: "planner", label: "PlanMyWeek app", tone: "blue" },
     { id: "auth", label: "Larder login", icon: "key", tone: "violet" },
     { id: "api", label: "Larder API", icon: "api", tone: "green" },
   ],

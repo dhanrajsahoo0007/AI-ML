@@ -2,6 +2,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseAvailable } from "@/server/db/testing";
 import { call, setupAuthTestEnv, testLoginAs } from "@/features/auth/test-helpers";
 import { contentKeySchema, isKnownContentKey } from "./content-key";
+import {
+  clearAllLocalProgress,
+  clearLocalProgress,
+  clearPendingProgressEntry,
+  completedKeys,
+  hydrateLocalProgress,
+  localProgressState,
+  readLocalProgress,
+  setLocalProgress,
+} from "./local";
 
 // The page list a build inlines (next.config.ts SEARCH_INDEX); tests set their own.
 const PAGES = ["system-design/caching/cdn", "cloud/aws/s3", "cloud/aws/ec2"];
@@ -35,6 +45,50 @@ describe("content keys", () => {
     for (const bad of ["", "/abs", "../x", "UPPER/case", "a b", "x".repeat(201)]) {
       expect(contentKeySchema.safeParse(bad).success).toBe(false);
     }
+  });
+});
+
+describe("browser progress storage (pending queue + synced account cache)", () => {
+  const store = new Map<string, string>();
+  beforeAll(() => {
+    const mockStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    (globalThis as unknown as { window: unknown }).window = {
+      localStorage: mockStorage,
+      dispatchEvent: () => true,
+    };
+  });
+  afterEach(() => {
+    store.clear();
+  });
+
+  it("keeps completed keys in the synced cache when the pending queue is cleared after sign-in", () => {
+    setLocalProgress("system-design/caching/cdn", "complete", true);
+    expect(readLocalProgress().map((i) => i.contentKey)).toEqual(["system-design/caching/cdn"]);
+    expect(completedKeys()).toEqual(["system-design/caching/cdn"]);
+
+    // Sign-in merges the pending queue, clears tts_progress_v1, and hydrates from the account.
+    clearLocalProgress();
+    expect(store.get("tts_progress_v1")).toBeUndefined();
+    expect(completedKeys()).toEqual(["system-design/caching/cdn"]);
+
+    hydrateLocalProgress(["system-design/caching/cdn", "cloud/aws/s3"], ["cloud/aws/ec2"]);
+    expect(completedKeys().sort()).toEqual(["cloud/aws/s3", "system-design/caching/cdn"]);
+    expect(localProgressState("cloud/aws/s3")).toEqual({ complete: true, bookmark: false });
+    expect(localProgressState("cloud/aws/ec2")).toEqual({ complete: false, bookmark: true });
+
+    clearAllLocalProgress();
+    expect(completedKeys()).toEqual([]);
+  });
+
+  it("removes individual pending entries once saved to the account while keeping the synced cache", () => {
+    setLocalProgress("cloud/aws/s3", "complete", true);
+    clearPendingProgressEntry("cloud/aws/s3", "complete");
+    expect(readLocalProgress()).toEqual([]);
+    expect(completedKeys()).toEqual(["cloud/aws/s3"]);
   });
 });
 

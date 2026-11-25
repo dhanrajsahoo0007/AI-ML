@@ -1,0 +1,23 @@
+title: The degradation ladder
+alt: >-
+  A bar chart in three steps of the GPUs needed at the global peak, each bar split into teal prefill, green decode and
+  blue small-model GPUs, against two dashed lines: half the fleet at 7,260 GPUs and a region lost at 9,680, both
+  fractions of the 14,520-GPU FP8 plan. Step 1: normal needs 11,819; rung 1, the free tier without reasoning, 10,621;
+  rung 2, running hot with decode at 0.95 busy and prefill at rho 0.8, 8,109, which fits a region loss; rung 3, the free
+  tier on the small model, 3,183, which fits half the fleet; rung 4, paid thinking capped at 1,000 tokens, 3,034;
+  rung 5, shedding new free chats with a 429, 2,766. Notes say paid users stay on the large model and that if decode
+  must run BF16 attention, 16,896 GPUs, the ladder covers the 2,376-GPU gap until they arrive. Step 2: two transient
+  bars in red: rung 3's first minutes, when every free chat's first small-model turn is cold, need about 4,894 GPUs,
+  inside half the fleet; a region lost needs about 8,048 in its first minutes, 6,941 of 9,680 large GPUs and 1,107
+  small-model GPUs for the lost region's free users, covered 2.6 times by spare large GPUs. Step 3: with half the
+  fleet lost at peak, 210,710 streams are in flight against 268,786 decode slots at plan and 170,035 in half the racks
+  running hot, so 40,675 streams, in red, have no slot: new turns are shed first, then free streams pause for up to 26
+  seconds; the 105,355 streams on lost GPUs resume elsewhere after 72.6 million tokens are recomputed, in about 1.6
+  seconds.
+caption: >-
+  Each rung has a capacity: a lost region fits at rung 2 and half the fleet at rung 3, with room for the cold first
+  minutes. At half the fleet, streams on lost GPUs resume in ≈ 1.6 s and 40,675 free streams wait up to 26 s for a
+  decode slot; paid users stay on the large model. Volumes are illustrative.
+tags: [genai, chat-service, degradation, availability, capacity-planning, case-study]
+source: original
+created: 2026-11-23

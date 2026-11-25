@@ -1,0 +1,17 @@
+title: Dating app high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, swipe and match, application services, async
+  pipeline and storage. Step 1: the user's app calls the API gateway, and the profile service builds a deck by
+  scanning every row of the profile database by distance; photos come from a CDN. Step 2: profile changes flow from
+  the profile database through an event log into a geo index sharded by cell, and a recs service queries it for the
+  deck. Step 3: the swipe service, the solid accent, appends every swipe to a wide-column swipe log and to the event
+  log. Step 4: each swipe is added to the swiper's seen filter in the cache, and the recs service drops seen
+  profiles. Step 5: a right swipe updates the pair's row in the likes and matches store atomically. Step 6: a match
+  notifier reads match events from the log and nudges the user through a socket gateway. Step 7: a location service
+  publishes each user's new cell to the event log. Step 8: a ranker scores the candidates and keeps 50.
+caption: >-
+  A dating app: decks from a geosharded index minus what you have seen, swipes into a write-optimised log, one atomic
+  row per pair for the match, and a nudge the moment it happens.
+tags: [case-studies, tinder, architecture, geospatial]
+source: original
+created: 2026-11-17

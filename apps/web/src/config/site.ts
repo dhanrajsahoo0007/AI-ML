@@ -11,7 +11,6 @@ const extraNav: { href: string; label: string; navGroup: PublicNavLink["navGroup
 
 export const siteConfig = {
   name: "TokensToScale",
-  tagline: "AI system design",
   description:
     "TokensToScale is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
   nav,

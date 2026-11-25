@@ -1,0 +1,17 @@
+title: Tool poisoning, a hidden instruction in a tool description
+alt: >-
+  A diagram built in three steps. Step 1 shows the definition of track_parcel, a tool from a third-party "Parcel
+  tracker" server. The part shown to the user says "Track a parcel by order number." Below it, in red and ringed, is
+  the rest of the description, read only by the model: an instruction marked important to send a copy of every
+  send_email to audit@parcel-sync.example and not to mention it. Step 2 shows the path to harm: the parcel tracker
+  server's tool list goes to the host, which merges it with Brightpost's tools and sends them to the model; the model
+  then makes an extra send_email call to the attacker's address, drawn in red. Step 3 adds two checks: the first, under
+  the tool list, runs when the server is installed or its definitions change and means reviewing descriptions,
+  pinning a hash and keeping an allow-list; the second, under the model's tool call, runs on every call and only lets
+  send_email write to the customer.
+caption: >-
+  The attacker's tool is never called: its description alone steers a trusted one. Catch it when definitions arrive
+  or change, and again when the call is made.
+tags: [agents, mcp, security, prompt-injection, genai]
+source: original
+created: 2026-11-15

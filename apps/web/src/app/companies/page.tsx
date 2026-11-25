@@ -52,7 +52,7 @@ export default async function CompaniesPage() {
   const premiumAnswers = new Set(premiumAnswerCategories().map((c) => c.slug));
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8 min-[1440px]:max-w-none min-[1440px]:px-12 min-[1920px]:px-16">
       <JsonLd data={companiesSeo().jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
       <FadeIn>

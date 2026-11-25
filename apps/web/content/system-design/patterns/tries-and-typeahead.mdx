@@ -1,0 +1,261 @@
+---
+title: "Tries, Prefix Trees and Typeahead"
+description: "Radix tries with top-k per node, built offline, served from memory."
+icon: search
+updated: 2026-11-16
+tier: advanced
+---
+
+The search box suggests completions as the shopper types, and the first version runs a `LIKE` query per keystroke until the database falls over at lunchtime.
+
+- Interviewers ask about typeahead to see whether you can turn a prefix into five suggestions inside one keystroke's budget, and say where that work moves instead.
+
+## Overview
+
+- A **trie** (prefix tree) stores strings by their characters: every query that starts "ke" sits under one node.
+- A **radix trie** merges chains of single-child nodes into one edge, so it stores far fewer nodes.
+- **Top-k per node:** each node keeps its k most searched completions, so a lookup is one walk down the prefix and one list read.
+- The trie is **built offline** from search logs, shipped as a snapshot and **served from memory** on replicas.
+- A **fast path** merges trending queries from the last few minutes; **debounce** and **edge caching** cut the requests that reach a server.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "Run `LIKE 'ke%' ORDER BY count LIMIT 5` on the queries table."
+  - **Why the interviewer pushes back:** "On every keystroke, for every shopper, under 50 ms?"
+  - **The answer that stands out:** serve suggestions from an in-memory trie that stores the top 5 at every node, built offline from query logs, with a small trending list merged in. The cost is memory for a list on every node and suggestions that lag the logs by up to a day.
+</Callout>
+
+## Mental model
+
+- Think of a dictionary with a thumb tab for every prefix ("k", "ke", "ket"), and a sticky note on each tab listing its five most looked-up words.
+- To help a reader who has typed "ke", you open the "ke" tab and read the note. You never leaf through the section.
+- Every night someone rewrites the notes from the day's lookups; during the day, a whiteboard by the door lists today's surprises.
+- Tabs are trie nodes, the sticky notes are the stored top-k lists, the nightly rewrite is the offline build, and the whiteboard is the trending fast path.
+
+## Core concepts
+
+- Brightpost numbers on this page: **2,000,000 shoppers a day** each search about 4 times (illustrative), so **8,000,000 searches a day**; the shop's peak is 5 × its average; servers sit in **London**.
+
+### A trie and a radix trie
+
+- A **trie** has one node per character position: walking "k", "e", "t" reaches the node for the prefix "ket".
+- A node that ends a query holds that query's **count** (how often it was searched).
+- A **radix trie** (or compressed trie) stores a string on each edge instead of one letter, so a chain like "itchen scale" becomes one node.
+
+The figure shows six Brightpost queries that start with "k" as a radix trie.
+
+<AnimatedDiagram spec="animated/patterns/trie-structure" caption="Every query that starts “ke” sits under one node, and the radix trie stores 10 nodes where a letter-by-letter trie stores 36." />
+
+**How to read it:**
+
+- Each box's bold text is the edge into it; its second line is the prefix so far, or the finished query and its count (illustrative).
+- The orange path is what the shopper has typed: root, "k", "e".
+- Violet nodes end a query. "tle" ends "kettle" and still has a child, "bell", for "kettlebell".
+
+**The numbers:**
+
+- Plain trie: one node per distinct prefix = 6 + 4 + 4 + 6 + 4 + 12 = 36 nodes for these six queries.
+- Radix trie: 10 nodes. Each new query adds at most 2 (one leaf and one split), so 10 M queries need at most 20 M nodes.
+
+<PremiumBreak />
+
+### Top-k stored at every node
+
+- Without help, answering "ke" means visiting every node below it and sorting what you find. Short prefixes are the worst: "k" covers most of the trie.
+- **Storing the top k at every node** turns that into one walk down the prefix and one list read.
+- The cost is memory (a list on every node) and updates: a new count can change every list from its node up to the root.
+
+<AnimatedDiagram spec="animated/patterns/trie-topk-nodes" stepper caption="A list stored at the prefix node turns “walk everything below and sort” into one read, paid for with a list on every node." />
+
+<StepCards>
+  <StepCard n={1} title="Find the prefix node">
+    The shopper has typed "ke". The server walks root, "k", "e": three visits, whatever the trie's size.
+  </StepCard>
+  <StepCard n={2} title="No lists: walk the subtree">
+    Without stored lists it must visit all 7 nodes below "ke" and sort the 5 queries it finds. In a trie of 10 M queries, a one-letter prefix can cover millions.
+  </StepCard>
+  <StepCard n={3} title="Read the top 3 stored there">
+    With a list on every node, the answer is already at "ke": kettle, keyboard, kettlebell. No node below it is visited.
+  </StepCard>
+  <StepCard n={4} title="Pay in memory and updates">
+    Every node carries its own list: 21 entries for 6 queries. A new count for kettlebell can change 6 lists, so the lists are rebuilt in a batch rather than edited live.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Lookup with lists: 3 node visits + 1 list read. Without: 3 + 7 visits and a sort of 5.
+- List entries: the sum over nodes of min(3, queries below) = 21.
+
+## Architecture
+
+Brightpost's typeahead, built up from the search box to the edge cache.
+
+<AnimatedDiagram spec="animated/patterns/trie-pipeline" stepper caption="Suggestions are built offline from yesterday’s searches and shipped as a file; only the trending list and the cache misses move in real time." />
+
+<StepCards>
+  <StepCard n={1} title="Shoppers type, the search service logs">
+    Every pause in typing sends a prefix to the suggest servers; every finished search goes to the search service, which writes it to a log. The servers have nothing yet to answer from.
+  </StepCard>
+  <StepCard n={2} title="Count searches per query every day">
+    A daily batch job reads the log and counts searches per normalised query over the last 30 days. Rare and blocked queries are dropped here.
+  </StepCard>
+  <StepCard n={3} title="Build a trie with the top 5 per node">
+    The builder turns 10 M counted queries into a radix trie with the top 5 stored at every node, and writes it as one snapshot file.
+  </StepCard>
+  <StepCard n={4} title="Ship the snapshot to every server">
+    Each suggest server loads the new file beside the old one and swaps a pointer. Suggestions now lag the log by up to a day.
+  </StepCard>
+  <StepCard n={5} title="A fast path for trending queries">
+    A stream job counts the last 10 minutes of searches and pushes a short trending list. Servers merge it into the stored top 5 at answer time.
+  </StepCard>
+  <StepCard n={6} title="Cache popular prefixes at the edge">
+    An edge cache answers repeated prefixes, most of all the short ones, before they reach London. Only misses reach a suggest server.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Building offline from query logs
+
+- **Normalise** first: lower-case, trim, collapse spaces, so "Kettle " and "kettle" count as one query.
+- **Filter:** drop queries searched fewer than a few times in the window, and anything on a blocklist.
+- **Weight:** recent searches count more (for example, halve a count's weight every 7 days), so last winter's queries fade.
+- **Build bottom-up:** a node's top 5 is the best 5 among its own query and its children's top-5 lists, so one pass computes every list.
+
+### A fast path for trending queries
+
+- A daily build cannot see a query that took off at 11:50. A stream job counts searches in short windows (see [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)).
+- It keeps the heavy hitters of the last 10 minutes (see [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards)) and pushes a short list to every server.
+- At answer time the server merges trending matches for the prefix into the stored top 5, with a boost. The fast path skips the nightly filters, so it needs its own blocklist.
+
+### Serving from memory, replicas and sharding by prefix range
+
+- The whole trie lives in each server's memory, so a lookup touches no disk and no other machine. **Replicas** load the same snapshot and add throughput.
+- When the trie outgrows one machine, **shard by prefix range** (for example a–f, g–m): each prefix lives in one range, so one request still touches one shard.
+- Split the ranges by measured traffic, not the alphabet: "s" and "k" take far more searches than "x".
+
+### Debounce and caching on the client and the edge
+
+- **Debounce:** the client waits for a short pause in typing before it sends, so "kettle" costs a few requests, not six.
+- The client drops replies for older prefixes, so a late answer for "k" never overwrites "ke". A **client cache** per prefix makes backspacing free.
+- The **edge cache** keys answers by prefix with a TTL of an hour or so. Letter-only prefixes of 1 or 2 characters number 26 + 26² = 702, so they all fit.
+
+The waterfall follows one suggestion from the last keystroke to the list on screen.
+
+<AnimatedDiagram spec="animated/patterns/trie-latency" caption="The trie lookup is 2 ms of 150: the debounce and the network set the latency, so that is where caching pays." />
+
+**How to read it:**
+
+- Each row is one stage; its bar runs from when it starts to when it ends on a shared millisecond axis.
+- The dashed line at 100 ms is the request leaving the browser; the one at 150 ms is the list on screen.
+
+**The numbers:**
+
+- Illustrative: 100 ms debounce + 20 ms to London + 2 ms lookup + 20 ms back + 8 ms to draw = 150 ms.
+- The request is in flight for 42 ms, inside a 50 ms server budget; the lookup is under 5 % of it.
+
+### The search-engine alternative
+
+- A search engine's completion feature does the job without a trie of your own. Elasticsearch's completion suggester keeps its suggestion structures in memory and sorts by a weight you supply; it matches prefixes, with optional typo tolerance.
+- To match words in the middle of a title ("electric kettle" for "kett"), index **edge n-grams** in an [Inverted Index](/system-design/databases/inverted-index) and rank like any search.
+- Choose it when you already run [Search Engines](/system-design/databases/search-engines) for the catalogue; build your own trie when suggestions come from query logs at high volume.
+
+### Worked example: a shopper types "kettle"
+
+A shopper in Manchester types "kettle" at 12:00. Follow the six steps of the Architecture figure.
+
+1. Yesterday's 8 M searches went through the search service into the log.
+2. At 02:00 the aggregation job counted 10 M distinct queries over 30 days.
+3. The builder wrote a radix trie with the top 5 at every node as one snapshot.
+4. All three London suggest servers loaded it and swapped it in by 03:00.
+5. At 11:55 "kettle descaler" spiked during the sale; the trending list carries it.
+6. "k" and "ke" are answered at the edge; "ket" reaches a server, which reads the stored top 5 at "ket", merges in "kettle descaler" and replies.
+
+**The numbers:**
+
+- Requests: 8 M searches × 6 suggestion requests = 48 M a day; 48 M ÷ 86,400 = 556/s on average, × 5 = 2,780/s at peak.
+- Memory (illustrative): query text 10 M × 20 bytes = 200 MB; at most 20 M nodes × 32 bytes = 640 MB; top 5 as 4-byte ids, 20 M × 20 bytes = 400 MB; total about 1.24 GB.
+- One server holds the trie; three replicas share the 2,780/s peak at about 927/s each.
+- If a third of requests are 1- or 2-letter prefixes answered at the edge, servers see about 371/s on average.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Trie with top-k per node, in memory | One walk and one list read; latency set by the network | A list on every node; changes wait for a rebuild | High-volume suggestions from query logs |
+| Search-engine completion suggester | No custom build; weights, typo tolerance, filters | Lives in the engine's memory; one more cluster to size | You already run a search engine for the catalogue |
+| Edge n-grams in an inverted index | Matches words anywhere in a title | Bigger index; relevance needs tuning | Product names where shoppers type a middle word |
+| Database `LIKE` per keystroke | No new system | A scan and a sort per keystroke | Prototypes and tiny tables only |
+
+## Production systems
+
+- **Elasticsearch completion suggester** (docs, as of November 2026): built for search-as-you-type, held in memory and ranked by a weight you index with each suggestion. Elastic's 2013 blog describes it as an in-memory **finite state transducer** (FST) built per segment at index time.
+- **Lucene FST** (Michael McCandless, 2010): 9.8 million terms from a Wikipedia index built into an FST of 69 MB.
+- **Redis Stack** (as of November 2026): `FT.SUGADD` adds a string with a score to a suggestion dictionary, `INCR` updates it from live queries, and `FT.SUGGET` returns 5 suggestions by default, with an optional fuzzy match at edit distance 1.
+- **Google autocomplete** (Google blog, 2018): predictions come from real searches, common and trending, and reduce typing by about 25 %.
+- **Used in our case studies:** [Typeahead](/system-design-case-studies/case-studies/typeahead)
+
+## Failure modes & pitfalls
+
+- **Walking the subtree per keystroke.** Short prefixes cost the most. Store the top k at every node.
+- **Rebuilding on the live server.** Lookups stall or see half-built lists. Build offline, swap a pointer, and keep yesterday's snapshot to roll back.
+- **Offensive or spam suggestions.** The trending path skips the nightly filters. Apply the blocklist on both paths and count distinct shoppers, not searches.
+- **No debounce, no cancel.** Every keystroke becomes a request and late replies overwrite newer ones. Debounce, cancel stale requests and drop out-of-order replies.
+- **Personalised results at the edge.** A cached answer leaks one shopper's history to another. Cache the global list and personalise on the client or server.
+
+## Interview framework
+
+1. State the budget: requests per second (8 M searches × 6 = 556/s) and a latency target per keystroke.
+2. Pick the structure: a radix trie with the top 5 stored at every node, in memory.
+3. Draw the pipeline: logs, daily counts, offline build, snapshot to replicas, and a trending fast path.
+4. Cut traffic: debounce and cancel on the client, prefix caching at the edge.
+5. Size it and scale it: about 1.24 GB for 10 M queries, replicas for throughput, prefix-range shards when it outgrows one machine.
+
+**What interviewers listen for:** top-k stored per node, an offline build with a stated staleness, and the arithmetic for requests and memory.
+
+**Red flags:** a database `LIKE` query per keystroke, or a trie that is updated in place on every search.
+
+## Further reading
+
+- [Suggesters: completion suggester (Elasticsearch docs)](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/search-suggesters)
+- [You complete me (Elastic blog, 2013)](https://www.elastic.co/blog/you-complete-me)
+- [Using Finite State Transducers in Lucene (Michael McCandless, 2010)](https://blog.mikemccandless.com/2010/12/using-finite-state-transducers-in.html)
+- [FT.SUGGET (Redis docs)](https://redis.io/docs/latest/commands/ft.sugget/)
+- [How Google autocomplete works in Search (Google blog, 2018)](https://blog.google/products/search/how-google-autocomplete-works-search/)
+- Related pages: [Top-K, Heavy Hitters and Leaderboards](/system-design/patterns/top-k-and-leaderboards) · [Caching](/system-design/patterns/caching) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a trie, and why does typeahead use one?" category="Concepts" level="Junior">
+    - A trie stores strings by their characters, so all strings with the same prefix share one path and sit under one node.
+    - Finding the node for a prefix takes as many steps as the prefix has characters, whatever the number of strings.
+    - Typeahead needs exactly that: everything that starts with what the shopper has typed.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why store the top k at every node instead of computing it per request?" category="Trade-offs" level="Mid">
+    - Computing it means visiting the whole subtree and sorting; a one-letter prefix covers most of the trie.
+    - A stored list makes the lookup one walk plus one read, the same cost for "k" and "kettle".
+    - The price is memory for a list on every node and updates that touch every list up to the root, so the lists are rebuilt in a batch.
+  </InterviewQuestion>
+  <InterviewQuestion question="Brightpost has 8 M searches a day. How many suggestion requests is that, and how much memory does the trie need?" category="Scaling" level="Mid">
+    - At about 6 requests per search after debounce: 48 M a day, or 556/s on average and about 2,780/s at a 5 × peak.
+    - For 10 M distinct queries at 20 bytes: 200 MB of text, at most 20 M nodes at 32 bytes (640 MB) and top-5 lists of 4-byte ids (400 MB).
+    - About 1.24 GB in all, so one server holds it and three replicas share the peak.
+  </InterviewQuestion>
+  <InterviewQuestion question="A query starts trending at 11:50. How does it reach the suggestions before tomorrow's build?" category="Architecture" level="Senior">
+    - A stream job counts searches in short windows and keeps the heavy hitters of the last 10 minutes.
+    - It pushes that short list to every suggest server, which merges matches for the prefix into the stored top 5 with a boost.
+    - The fast path must apply the blocklist and count distinct shoppers itself, because it skips the nightly filters.
+    - Tomorrow's build absorbs the query into the regular counts.
+  </InterviewQuestion>
+  <InterviewQuestion question="The trie no longer fits in one machine's memory. How do you shard it?" category="Scaling" level="Senior">
+    - Shard by prefix range, so every prefix lives on exactly one shard and a request touches one machine.
+    - Split ranges by measured traffic, not by letter: a few letters take most of the searches.
+    - A thin router maps the first characters to a shard; each shard keeps its own replicas and loads its own snapshot.
+    - Hashing whole queries would scatter a prefix's completions across every shard and force a fan-out per keystroke.
+  </InterviewQuestion>
+  <InterviewQuestion question="An offensive query appears in the suggestions during a sale. What failed, and how do you stop it happening again?" category="Failure modes" level="Senior">
+    - Most likely the trending fast path promoted it: it skips the nightly filters and reacts within minutes.
+    - Remove it at once with a serve-time blocklist that every server checks before replying.
+    - Apply the same blocklist in the stream job, and require a minimum number of distinct shoppers before a query can trend.
+    - Keep the nightly filter too, so the regular build never re-adds it.
+  </InterviewQuestion>
+</InterviewQuestions>

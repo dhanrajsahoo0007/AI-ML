@@ -1,0 +1,205 @@
+---
+title: "Materialized Views and Read Projections"
+description: "Precompute the answer to a read and keep it fresh: query tables, index tables, stream-updated projections, staleness and rebuilds."
+icon: table
+updated: 2026-11-16
+tier: advanced
+---
+
+The "My orders" page joins orders, items and shipments, which live on different shards and in different services, on every page view.
+
+- Interviewers ask about materialized views to see whether you can turn an expensive read into a single lookup, and say how stale the answer is allowed to be.
+
+## Overview
+
+- A **materialized view** stores the precomputed answer to a query, so a read becomes one lookup instead of a join.
+- Three common shapes: a **denormalised query table** (one row per order with everything the page shows), an **index table** keyed by another column (orders by customer), and a **projection** built from events.
+- It is refreshed **on write** (same transaction), from a **change stream** (seconds behind) or on a **timer** (minutes behind).
+- The view is **derived data**: it can always be **rebuilt** from the source, and a new view is **backfilled** by replaying history.
+- The cost is **staleness**, **storage** and a **projector** to run.
+
+<Callout tone="violet" title="Interview edge: how this sets a senior answer apart" icon="sparkles">
+  - **What most candidates say:** "The My orders page joins orders, items and shipments."
+  - **Why the interviewer pushes back:** "Those tables live on different shards and in different services. How many queries is one page view?"
+  - **The answer that stands out:** precompute a my_orders view keyed by customer id, fed by the services' change streams, so a page view is one lookup. Say the cost: about a second of staleness, extra storage, and a projector that must be rebuildable from the source.
+</Callout>
+
+## Mental model
+
+- A restaurant does not cook every dish from raw when you order: the stock is made in the morning, and the sauce is ready.
+- The stock is the view: prepared in advance, kept topped up, and remade from scratch if it goes off.
+- The trade is freshness for speed: the morning's stock is a little older than the vegetables delivered at noon.
+
+## Core concepts
+
+- The running example is Brightpost's **My orders** page: **200,000 orders a day**, the page viewed about **400,000 times a day** (two views per order, illustrative), each showing a customer's last **20 orders**.
+
+### Why joins at read time hurt
+
+- Orders are sharded by order id; items and shipments live in their own services.
+- One page view for one customer becomes a scatter to every order shard plus a lookup per order in two more services.
+- Each query is fast; the page is as slow as the slowest of all of them, and the services carry load for a page that only reads.
+
+### Shapes of a view
+
+- **Query table:** one denormalised row per order, holding the columns the page shows: kettle, £42, "delivered 12 Nov".
+- **Index table:** the same data keyed by a different column, such as orders by customer id, so a lookup by customer reads one partition. A global secondary index is a managed index table (see [Sharding and Partitioning](/system-design/patterns/sharding)).
+- **Projection:** a view built by folding events, as on the [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) page.
+
+## Architecture
+
+The My orders page, moved from a read-time join to a view, one part at a time.
+
+<AnimatedDiagram spec="animated/patterns/mv-pipeline" stepper caption="The page stops joining three services on every view and reads one precomputed row set, kept fresh from a stream and rebuildable from it." />
+
+<StepCards>
+  <StepCard n={1} title="Join three services at read time">
+    For customer 1847's last 20 orders, the page asks all 8 order shards, then items and shipments once per order: 48 queries for one page view. This is the system without the pattern.
+  </StepCard>
+  <StepCard n={2} title="Services publish their changes">
+    Each service publishes its changes to a stream, through an outbox or change data capture, so no change is lost.
+  </StepCard>
+  <StepCard n={3} title="A projector keeps a view by customer">
+    A projector folds the changes into a my_orders view keyed by customer id, one row per order with everything the page needs.
+  </StepCard>
+  <StepCard n={4} title="The page reads one key">
+    The page reads the customer's rows with one lookup. The three services no longer see this page's traffic.
+  </StepCard>
+  <StepCard n={5} title="Rebuild a v2 view, then swap">
+    When the page needs a new column, a v2 view is built by replaying the stream from the start. When it has caught up, reads move to it and the old view is dropped.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Before: 8 + 20 + 20 = 48 queries per page view. After: 1.
+- At about 400,000 views a day, that is 19,200,000 queries a day before and 400,000 after.
+
+<PremiumBreak />
+
+## Technical mechanics
+
+### Keeping it fresh
+
+<AnimatedDiagram spec="animated/patterns/mv-staleness" caption="Freshness moves cost: on write charges every write, a stream costs a second of lag, a timer costs minutes." />
+
+**How to read it:**
+
+- The change stream is ringed: it is the usual choice for views that serve users.
+- The red cells are where each strategy hurts: on write slows every write and couples it to the view; a timer leaves data minutes old.
+
+**The numbers:**
+
+- A 5-minute timer: data up to 300 s old, 150 s on average. A stream: about 1 s (illustrative). On write: none.
+
+- Inside one database, PostgreSQL's materialized views refresh on demand; `CONCURRENTLY` keeps the view readable during the refresh but needs a unique index:
+
+```sql
+CREATE MATERIALIZED VIEW my_orders AS
+  SELECT o.customer_id, o.id, i.title, o.total, s.status
+  FROM orders o JOIN items i ON i.order_id = o.id
+  JOIN shipments s ON s.order_id = o.id;
+
+CREATE UNIQUE INDEX my_orders_uidx ON my_orders (id);
+REFRESH MATERIALIZED VIEW CONCURRENTLY my_orders;  -- readers keep reading
+```
+
+### Rebuilding and backfilling
+
+- A view is derived data: if it is wrong, drop it and rebuild it from the source or the stream.
+- A new view starts with a **backfill** of history, then follows the live stream; switch reads only once it has caught up.
+- Keep the projector **idempotent** (apply each change once by version), so a replay or a redelivery cannot double-count.
+
+### Staleness in the product
+
+- After placing an order, a shopper may open My orders before the view has the new row.
+- Return the new order in the checkout response and show it directly, or wait for the view to reach the order's version (see [Consistency Models](/system-design/patterns/consistency-models)).
+
+### Worked example: My orders at the sale-day peak
+
+At the peak, My orders is viewed about 5 times its average rate.
+
+1. **Average rate:** 400,000 views ÷ 86,400 s ≈ 4.6 views a second; the peak is about 23 a second.
+2. **Read-time join at the peak:** 23 × 48 ≈ 1,100 queries a second spread across three services, every one on the page's critical path.
+3. **View at the peak:** 23 lookups a second on one table, by key.
+4. **Freshness:** a new order appears in the view about 1 s after checkout, and the checkout page shows it directly in the meantime.
+
+**The numbers:**
+
+- View size: about 146,000,000 orders after two years at about 300 bytes a row (illustrative) is about 44 GB, partitioned by customer id.
+- Rebuilding it at an illustrative 50,000 rows a second: 146,000,000 ÷ 50,000 = 2,920 s, under an hour.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Join at read time | Always fresh; no extra storage | Many queries per read; cross-service load | Low traffic, one database |
+| View updated on write | Never stale | Slower writes; couples writers to the view | One database, the view must be exact |
+| View from a change stream | Fast reads; writers unaffected | About a second of staleness; a projector to run | User-facing pages across services |
+| View on a timer | Simple; no stream | Minutes of staleness; refresh cost | Reports, dashboards |
+| Index table | Lookup by another key | Two writes or a lagging index | Queries by a non-shard column |
+
+## Production systems
+
+- **PostgreSQL** (as of November 2026): `CREATE MATERIALIZED VIEW` stores a query's result; `REFRESH MATERIALIZED VIEW CONCURRENTLY` keeps it readable during a refresh, needs a unique index and a populated view, and is faster than a plain refresh only when few rows change.
+- **DynamoDB**: a global secondary index is a managed index table with its own key, kept up to date asynchronously; reads from it are eventually consistent only.
+- **Used in our case studies:** [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok)
+
+## Failure modes & pitfalls
+
+- **A view nobody can rebuild.** Logic lives only in the view's past updates. Keep projectors replayable from the source.
+- **Non-idempotent projectors.** A redelivered change counts twice. Apply each change once, by version.
+- **Showing a stale view right after a write.** The shopper's new order is missing. Show the write's result directly.
+- **Refreshing a huge view on a timer** with `CONCURRENTLY`. Every refresh diffs the whole view. Use a stream for large, busy views.
+- **Views on the write path.** Updating three views in every checkout transaction slows checkout. Move them to a stream.
+
+## Interview framework
+
+1. Count the queries one read costs today.
+2. Shape a view for that read and pick its key.
+3. Choose the refresh: on write, stream or timer, with the staleness of each.
+4. Show the rebuild: replay into a new view, then swap.
+5. Handle the staleness the user can see right after a write.
+
+**What interviewers listen for:** a query count before and after, a staleness bound, and a rebuild story.
+
+**Red flags:** a cross-shard join on every page view, or a view that cannot be rebuilt.
+
+## Further reading
+
+- [REFRESH MATERIALIZED VIEW (PostgreSQL docs)](https://www.postgresql.org/docs/current/sql-refreshmaterializedview.html)
+- [Secondary indexes (DynamoDB docs)](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/SecondaryIndexes.html)
+- [Event Sourcing pattern: materialized views (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing)
+- Related pages: [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Analytical Databases](/system-design/databases/analytical-databases)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a materialized view?" category="Concepts" level="Junior">
+    - A stored, precomputed result of a query, so a read is a lookup instead of a join.
+    - It is derived from source tables or events and kept up to date by a refresh.
+    - It trades freshness and storage for read speed.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you serve a My orders page when orders, items and shipments live in different services?" category="Architecture" level="Mid">
+    - Build a view keyed by customer id with one row per order and everything the page shows.
+    - Feed it from the services' change streams through a projector.
+    - The page becomes one lookup by key; the view lags the writes by about a second.
+  </InterviewQuestion>
+  <InterviewQuestion question="On write, change stream or timer: how do you keep a view fresh?" category="Trade-offs" level="Mid">
+    - On write keeps it exact but slows every write and couples writers to the view.
+    - A change stream keeps writes fast at the cost of about a second of staleness and a projector to run.
+    - A timer is simplest but leaves data minutes old; it suits reports, not user pages.
+  </InterviewQuestion>
+  <InterviewQuestion question="The view has a bug and some rows are wrong. What do you do?" category="Failure modes" level="Senior">
+    - Fix the projector, then rebuild: replay the source or the stream into a new view.
+    - Keep serving the old view while the new one catches up, then switch reads.
+    - This only works if the view is pure derived data and the projector is idempotent and replayable.
+  </InterviewQuestion>
+  <InterviewQuestion question="A shopper places an order and My orders does not show it. Why, and how do you fix it?" category="Failure modes" level="Mid">
+    - The view lags the write by the time the change takes to reach the projector.
+    - Return the new order from checkout and show it directly, or wait until the view has reached the order's version.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you add a new column to a large, live view?" category="Scaling" level="Senior">
+    - Build a v2 view alongside the old one, backfilled by replaying history, then following the live stream.
+    - Compare a sample of rows between v1 and v2.
+    - Switch reads to v2 once it has caught up, then drop v1. Nothing is updated in place.
+  </InterviewQuestion>
+</InterviewQuestions>

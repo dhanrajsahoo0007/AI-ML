@@ -25,7 +25,7 @@ export function ProviderTag({ id, className }: { id: ProviderId; className?: str
         "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.04em]",
         className
       )}
-      style={{ background: `var(--dg-${tone}-soft)`, color: `var(--dg-${tone})` }}
+      style={{ background: `var(--dg-${tone}-soft)`, color: `var(--dg-${tone}-text)` }}
     >
       {PROVIDER_BY_ID[id].short}
     </span>

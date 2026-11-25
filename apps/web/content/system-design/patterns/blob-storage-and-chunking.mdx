@@ -1,98 +1,262 @@
 ---
 title: "Blob Storage, Chunking and Dedup"
 description: "Storing and moving large files: object storage, chunked and resumable uploads, content-addressed dedup, pre-signed URLs and CDNs."
+icon: hard-drive
+updated: 2026-11-16
 ---
 
-Videos, photos and documents are too large and too numerous for a relational database. The pattern is: metadata in a database, bytes in object storage, delivery through a CDN.
+Push an 800 MB video through an app server and it is busy for minutes, then starts again from zero when the link drops.
+The fix: metadata in a database, bytes in object storage, uploads straight to the store, delivery through a CDN.
 
-## TL;DR
+- Interviewers ask about blob storage to see whether you keep large bytes off your servers and database, and can say how an upload resumes, how copies are deduplicated and how much raw disk durability costs.
 
-- Keep **metadata** in a database and **bytes** in an object store.
-- Split large files into **chunks** for parallel, **resumable** transfer and efficient sync.
-- **Content-addressed chunks** (hash as the key) give **deduplication**.
-- Use **pre-signed URLs** so clients upload and download directly, bypassing your servers.
-- Serve popular content through a **CDN**.
+## Overview
 
-## The idea in plain English
+- Keep **metadata** (owner, size, status, key) in a database and **bytes** in an [object store](/system-design/databases/object-storage).
+- Split large files into **chunks** for parallel, **resumable** transfer; **content-addressed chunks** (the hash is the key) give **deduplication**.
+- **Pre-signed URLs** let clients upload and download directly, bypassing your servers.
+- Serve popular content through a **CDN**; move old content to cheaper **storage classes**.
+- Pay for durability in raw disk: **3 copies** cost 3.0 ×, **erasure coding** with 10 data and 4 parity fragments costs 1.4 ×.
 
-A warehouse (object store) holds boxes; a catalogue (database) says what is in each box and where. Large shipments arrive in pallets (chunks) so a dropped truck means resending one pallet, not everything.
+## Mental model
+
+- A warehouse (the object store) holds boxes; a catalogue (the database) says what is in each box and where.
+- Large shipments arrive in pallets (chunks), so a dropped truck means resending one pallet, not everything.
+- Each pallet carries a barcode of its contents (the hash): a pallet the warehouse already holds is not unloaded twice.
+- Back in the system: the catalogue row is small and queried often; the boxes are large, written once and read many times.
 
 ## Core concepts
 
-1. **Object storage.** Flat namespace of immutable objects with replication or erasure coding for durability.
-2. **Chunking.** Fixed-size (for example 4-8 MB) or content-defined chunks.
-3. **Resumable / multipart upload.** Upload parts independently; track which exist; complete when all arrive.
-4. **Dedup.** Hash each chunk; store only unseen hashes; files become lists of chunk hashes.
-5. **Delta sync.** Only changed chunks transfer when a file is edited.
-6. **Pre-signed URLs.** Time-limited URLs grant direct access to a specific object.
-7. **CDN and tiering.** Hot content at the edge; cold data on cheaper storage classes.
+- Brightpost: 1,000,000 products × 5 photos × 2 MB = 10 TB of photos, and **2,300 product page views/s** at peak. A seller uploads an **800 MB** kettle video over a 20 Mbit/s (2.5 MB/s) link (sizes and link illustrative).
+
+### Metadata apart from bytes
+
+- **Object storage** is a flat namespace of **immutable objects** addressed by key, kept durable with replication or erasure coding.
+- The database row holds the key, owner, size, content type, hash and status (`pending`, `ready`); the bytes never enter the database.
+
+### Direct upload with a pre-signed URL
+
+- A **pre-signed URL** is a store URL signed with your server's credentials: it allows one action (`PUT` of one key) until it expires.
+- The API signs locally, with no call to the store, so 50 part URLs cost it milliseconds.
+- A **multipart upload** sends a large object as numbered parts, in any order and in parallel, then a `complete` call joins them into one object.
+- Because the store keeps the parts it has, a client that drops resumes by asking for the list of parts and sending only the missing ones.
+
+The seller's video goes from the app to the object store; the API only signs and records.
+
+<AnimatedDiagram spec="animated/patterns/blob-direct-upload" stepper caption="The API only signs; the 800 MB go straight to the object store, and after a drop the store’s own list of parts says where to resume." />
+
+<StepCards>
+  <StepCard n={1} title="Ask, sign, send the parts">
+    The app asks to upload 800 MB. The API writes a pending row, starts a multipart upload, signs 50 part URLs valid for 15 minutes and hands them back. The app sends parts 1 to 30 straight to the store.
+  </StepCard>
+  <StepCard n={2} title="The link drops: resume at part 31">
+    Part 31 never arrives. The app asks to resume, the API lists the parts the store holds (1 to 30) and signs 20 fresh URLs, and the app sends parts 31 to 50.
+  </StepCard>
+  <StepCard n={3} title="Complete and mark ready">
+    The app reports the 50 ETags, the API completes the upload into one object, and the row turns from pending to ready.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 800 MB ÷ 16 MB parts = 50 parts; at 2.5 MB/s the whole upload takes 320 s.
+- The drop comes after 30 parts = 480 MB (192 s); the resume sends 20 × 16 = 320 MB (128 s), not 800 MB.
+- A 16 MB part takes 6.4 s, well inside a 15-minute URL lifetime.
+
+<PremiumBreak />
+
+### Chunks, hashes and dedup
+
+- **Chunking** cuts a file into pieces: **fixed-size** (for example 4 to 8 MB) or **content-defined** (boundaries chosen by the bytes themselves).
+- Hash each chunk (SHA-256); the ordered list of hashes, the **blocklist**, is the file's recipe and lives in metadata.
+- **Dedup:** store only hashes the store has not seen, so a copy uploads nothing. **Delta sync:** when a file is edited, only the changed chunks transfer.
+
+The same 800 MB video, cut, hashed, resumed and seen a second time.
+
+<AnimatedDiagram spec="animated/patterns/blob-chunks" stepper caption="Hash every chunk and the file becomes a list of hashes: a drop resends only the missing chunks, and a copy sends nothing at all." />
+
+<StepCards>
+  <StepCard n={1} title="Split into 16 MB chunks">
+    The 800 MB file becomes 50 chunks with fixed boundaries every 16 MB. Each chunk can be sent, retried and stored on its own.
+  </StepCard>
+  <StepCard n={2} title="Hash each chunk">
+    SHA-256 of each chunk gives h1 to h50. The ordered list is the blocklist: 1.6 kB that describe the whole 800 MB file.
+  </StepCard>
+  <StepCard n={3} title="The link drops: resend the rest">
+    Chunks 1 to 30 are stored when the link drops during chunk 31. The resume sends chunks 31 to 50, 320 MB instead of 800 MB.
+  </StepCard>
+  <StepCard n={4} title="Same video again: nothing to send">
+    The seller attaches the same video to a second listing. All 50 hashes are already known, so no bytes move and only a new blocklist row is written.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 800 ÷ 16 = 50 chunks; 50 SHA-256 hashes of 32 bytes = 1.6 kB of blocklist.
+- Resume: 20 × 16 = 320 MB sent, saving 480 MB. Second listing: 0 MB sent, 800 MB of storage saved.
+
+<Callout tone="red" title="What breaks">
+  Insert a few bytes at the start of a file and every fixed 16 MB boundary shifts: all 50 hashes change and dedup finds nothing. Content-defined chunking moves only the boundaries near the edit.
+</Callout>
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    CL["Client"] -->|"1. request upload"| API["API / metadata service"]
-    API -->|"2. pre-signed URLs per chunk"| CL
-    CL -->|"3. upload chunks in parallel"| OBJ[("Object store")]
-    OBJ -->|"4. event: chunk stored"| API
-    API --> META[("Metadata DB<br/>file -> chunk hashes")]
-    CL2["Viewer"] --> CDN["CDN"] --> OBJ
-```
+Brightpost's media path, from the version that pushes bytes through the app to one where the store and the CDN do the heavy lifting.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/blob-serving" stepper caption="The database keeps the facts about each file, the object store keeps the bytes, and the CDN means only 1 image request in 20 reaches the store." />
 
-### Dedup and security
+<StepCards>
+  <StepCard n={1} title="Bytes through the app servers">
+    The seller's 800 MB video streams through the upload API into rows of the database. An app server is busy for 320 s per upload, and the database now holds video. A drop restarts the whole upload.
+  </StepCard>
+  <StepCard n={2} title="Metadata in a database, bytes direct">
+    The API writes a pending row and returns pre-signed part URLs; the app sends the parts straight to the object store. The API handles a few small requests instead of 800 MB.
+  </StepCard>
+  <StepCard n={3} title="An event marks the upload ready">
+    The store emits an object-created event; a media worker makes thumbnails and renditions and marks the row ready. A listing shows the video only once the row says ready.
+  </StepCard>
+  <StepCard n={4} title="Shoppers read through the CDN">
+    2,300 page views a second ask for 11,500 images a second. With 95 % served at the edge, 575 a second reach the store, and the bucket accepts reads only from the CDN.
+  </StepCard>
+  <StepCard n={5} title="Old originals move to archive">
+    The renditions serve shoppers, so the original upload is rarely read. A lifecycle rule moves it to a cool class at 30 days and an archive class at 180 days.
+  </StepCard>
+</StepCards>
 
-Cross-user dedup can leak whether someone else has a file; many products dedup per user or per account and encrypt before upload where privacy matters.
+## Technical mechanics
 
-### Durability
+### Multipart object or content-addressed chunks
 
-Object stores replicate across zones or use erasure coding (data plus parity shards) to reach very high durability at lower storage overhead than full copies.
+- **Multipart object** (S3 style): the parts become one object under one key. You get resume and parallelism; dedup works only per whole file (key the object by the file's hash).
+- **Content-addressed chunk store** (Dropbox style): every chunk is its own object keyed by its hash, and a file is its blocklist. You get resume, chunk-level dedup and delta sync, at the cost of one metadata entry per chunk.
+- **Dedup and security:** cross-user dedup leaks whether someone else already has a file (an upload that finishes instantly says "seen before"). Many products dedup per user or per account, and encrypt before upload where privacy matters.
+- Never trust the client's hash alone: the store recomputes it, or a client could claim a hash it does not own and read someone else's chunk.
+- Clean up: a multipart upload that never completes keeps its parts, and its storage bill, until it is aborted.
+
+### Durability: replication against erasure coding
+
+- **Replication** keeps full copies: 3 copies cost **3.0 ×** raw disk and survive the loss of any 2.
+- **Erasure coding** with a (k, m) Reed–Solomon code splits data into k fragments and adds m parity fragments; any k of the k + m rebuild it.
+- 10 data + 4 parity costs 14 ÷ 10 = **1.4 ×** and survives the loss of any 4 of the 14 fragments. The price: rebuilding one lost fragment reads 10 others.
+- Placement matters: over 3 zones, one zone holds at least 5 of 14 fragments, more than the 4 the code can lose. Survive a zone with more zones or a cross-zone layer on top.
+- Brightpost's 10 TB of photos: 30 TB of disk with 3 copies, 14 TB with 10 + 4. Replicate small, hot data; erasure code large or cold data.
+
+### Storage classes and lifecycle
+
+- **Hot** data is read often and needs milliseconds; **cool** data is read about once a month; **archive** data is read rarely and can wait hours.
+- Cheaper classes add retrieval fees and a **minimum storage duration**: deleting earlier is still billed for the minimum.
+
+| Tier | Amazon S3 class | First byte | Minimum storage |
+| --- | --- | --- | --- |
+| Hot | Standard | Milliseconds | None |
+| Cool | Standard-IA | Milliseconds, per-GB retrieval fee | 30 days, 128 KB billed minimum |
+| Cool archive | Glacier Instant Retrieval | Milliseconds | 90 days |
+| Archive | Glacier Flexible Retrieval | Restore first: 1–5 min expedited, 3–5 h standard, 5–12 h bulk | 90 days |
+| Deep archive | Glacier Deep Archive | Restore first: within 12 h standard, within 48 h bulk | 180 days |
+
+- A **lifecycle rule** moves or deletes objects by age: Brightpost keeps photos in Standard and moves original videos to Standard-IA at 30 days and Deep Archive at 180 days.
+- By default S3 lifecycle does not transition objects under 128 KB, so small thumbnails stay where they are.
+
+### Worked example: an 800 MB kettle video from a seller
+
+Follow the five steps of the Architecture figure.
+
+1. Without the pattern, the video streams through an app server for 320 s and lands in database rows; a drop at 480 MB starts again from 0.
+2. The app sends the file's SHA-256; no object has that key, so the API writes a pending row and signs 50 part URLs. The link drops after part 30; the app lists the stored parts and sends 31 to 50.
+3. `complete` joins 50 parts into one object; the event starts the media worker, which writes renditions and marks the row ready.
+4. Shoppers load the listing through the CDN: photos and the video poster frame come from the edge, and misses go to the store.
+5. At 30 days the original moves to Standard-IA, at 180 days to Deep Archive; the renditions keep serving shoppers.
+6. Later, the seller adds the same video to the red and white kettle listings: its SHA-256 matches the existing key, so no upload, two new rows.
+
+**The numbers:**
+
+- Parts: 800 ÷ 16 = 50; the largest file at 16 MB parts is 16 MB × 10,000 = 160 GB.
+- Resume: 480 MB sent (192 s), then 320 MB (128 s): 320 s of transfer, against 192 + 320 = 512 s with a restart.
+- Dedup: 3 listings × 800 MB = 2,400 MB naive; stored once = 800 MB, saving 1,600 MB and two uploads.
+- Reads: 2,300 pages/s × 5 images = 11,500 requests/s; 5 % misses = 575/s reach the store.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Small chunks | Fine-grained resume and dedup | More metadata, more requests |
-| Large chunks | Less overhead | Costly retries |
-| Direct upload | Offloads servers | More client logic, URL security |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Small chunks | Fine-grained resume and dedup | More metadata, more requests | Sync of files that change in place |
+| Large chunks | Less overhead | Costly retries | Large write-once media |
+| Direct upload (pre-signed URL) | Offloads servers | More client logic, URL security | Any file larger than a few MB |
+| 3 copies | Fast reads, cheap repair | 3.0 × disk | Small, hot objects |
+| Erasure coding 10 + 4 | 1.4 × disk, survives 4 losses | Repair reads 10 fragments, decode cost | Large, warm or cold objects |
 
-## Real-world examples
+## Production systems
 
-- File sync and chunk dedup: [Dropbox](/system-design/case-studies/dropbox).
-- Building the store itself: [S3](/system-design/case-studies/s3).
-- Upload, transcode and stream: [YouTube](/system-design/case-studies/youtube), [Netflix](/system-design/case-studies/netflix), [TikTok](/system-design/case-studies/tiktok).
-- Photos and media: [Instagram](/system-design/case-studies/instagram), [Facebook Messenger](/system-design/case-studies/facebook-messenger).
-- Large generated archives: [User Data Export](/system-design/case-studies/user-data-export).
+- **Amazon S3** (as of November 2026): parts of 5 MiB to 5 GiB (the last may be smaller), at most 10,000 parts, objects up to 50 TB, a single `PUT` up to 5 GB. Pre-signed URLs last up to 7 days from the SDKs (12 hours from the console) and end early when the signing credentials expire.
+- **Dropbox**: files are split into 4 MB blocks hashed with SHA-256; the client commits the blocklist and uploads only the blocks the server says it needs.
+- **Facebook f4**: warm BLOBs use Reed–Solomon (10, 4) inside a datacenter, cutting the effective replication factor from 3.6 to 2.8 or 2.1 for over 65 PB (2014 paper).
+- **Backblaze Vaults**: each file is split into 17 data shards plus 3 parity shards, and any 17 of the 20 rebuild it.
+- **Used in our case studies:** [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [S3](/system-design-case-studies/case-studies/s3) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Netflix](/system-design-case-studies/case-studies/netflix) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [Instagram](/system-design-case-studies/case-studies/instagram) · [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Proxying large uploads through app servers.
-- Pre-signed URLs with long lifetimes or broad scope.
-- Not cleaning up abandoned multipart uploads.
-- Storing blobs in the primary database.
+- **Proxying large uploads through app servers.** Each upload holds a server for minutes. Hand out pre-signed URLs and let the client talk to the store.
+- **Pre-signed URLs with long lifetimes or broad scope.** A leaked URL is a bearer token. Sign one key and one method, for minutes, not days.
+- **Not cleaning up abandoned multipart uploads.** Their parts are billed until someone aborts them. Add a lifecycle rule that aborts them after a few days.
+- **Storing blobs in the primary database.** Backups, replicas and caches fill with bytes nobody queries. Keep a key in the row and the bytes in the store.
+- **Showing a file before it is ready.** A listing links to an object still uploading or being transcoded. Keep a status in the row and flip it on the store's event.
 
-## How to answer in an interview
+## Interview framework
 
-Separate metadata from bytes, describe the upload path with chunks and pre-signed URLs, add dedup and CDN where relevant, and mention durability and cleanup.
+1. Separate metadata from bytes: say what the row holds and what the store holds.
+2. Describe the upload path: pre-signed URLs, chunk or part size, parallel parts, resume from the stored list, and the `complete` call.
+3. Add dedup where copies are likely (hash as key) and say who may share chunks.
+4. Size durability: copies or erasure coding, the overhead, and which failure domains it survives.
+5. Serve through a CDN with the bucket closed to everyone else, and add lifecycle rules and cleanup.
 
-## Related patterns
+**What interviewers listen for:** the part count and resume arithmetic, and the 3.0 × against 1.4 × durability trade.
 
-[Caching](/system-design/patterns/caching) · [Message Queues](/system-design/patterns/message-queues) · [Consistent Hashing](/system-design/patterns/consistent-hashing)
+**Red flags:** "store the video in Postgres", or uploads that go through the API servers with no resume.
 
 ## Further reading
 
 - [Amazon S3: multipart upload overview](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html)
+- [Amazon S3: download and upload objects with presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)
+- [Amazon S3: storage classes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html)
 - [Streaming File Synchronization (Dropbox Tech Blog)](https://dropbox.tech/infrastructure/streaming-file-synchronization)
+- [f4: Facebook's Warm BLOB Storage System (OSDI 2014)](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/muralidhar)
+- [Reed-Solomon erasure coding in Backblaze Vaults (Backblaze blog)](https://www.backblaze.com/blog/reed-solomon/)
+- Related pages: [Caching](/system-design/patterns/caching) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) · [Gossip Protocols, Heartbeats and Failure Detection](/system-design/patterns/gossip-and-failure-detection)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you upload a 5 GB file reliably?" category="Design" level="Mid">
-    Use multipart or chunked upload with pre-signed URLs, upload parts in parallel, record completed parts so the upload can resume, verify checksums and finalise when all parts arrive.
+  <InterviewQuestion question="How do you upload a 5 GB file reliably?" category="Architecture" level="Mid">
+    - Use multipart or chunked upload with pre-signed URLs: 5 GB is also the largest single `PUT` S3 accepts.
+    - Upload parts in parallel, for example 313 parts of 16 MB, and record completed parts so the upload can resume: after a drop, send only the missing ones.
+    - Verify checksums per part and finalise with `complete` when all parts arrive.
   </InterviewQuestion>
   <InterviewQuestion question="How does chunk-level deduplication work?" category="Concepts" level="Mid">
-    Each chunk is hashed; if the hash already exists, only a reference is stored. A file is a list of chunk hashes, so identical chunks are stored once.
+    - Each chunk is hashed; if the hash already exists, only a reference is stored.
+    - A file is a list of chunk hashes, so identical chunks are stored once.
+    - The client sends the hash list first and uploads only the chunks the server reports missing.
   </InterviewQuestion>
   <InterviewQuestion question="Why use pre-signed URLs?" category="Architecture" level="Junior">
-    They let clients transfer data directly to storage with limited, expiring permission, keeping large traffic off your application servers.
+    - They let clients transfer data directly to storage with limited, expiring permission.
+    - Large traffic stays off your application servers, which only sign and record metadata.
+    - Scope each URL to one key and one method with a short lifetime: anyone holding it can use it.
+  </InterviewQuestion>
+  <InterviewQuestion question="A few bytes are inserted at the start of a large file. Why does fixed-size chunking lose all dedup, and what fixes it?" category="Concepts" level="Senior">
+    - Fixed boundaries sit at fixed offsets, so an insertion shifts every chunk after it and every hash changes.
+    - Content-defined chunking picks a boundary where a rolling hash of the last few bytes matches a pattern.
+    - After an insertion the boundaries re-align a chunk or two later, so the rest of the hashes still match; set a minimum and maximum chunk size.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should Brightpost store 10 TB of product photos with three copies or with erasure coding?" category="Trade-offs" level="Senior">
+    - Three copies: 30 TB of disk, survives losing any 2, cheap repair and fast reads from any copy.
+    - Reed–Solomon 10 + 4: 14 TB of disk, survives losing any 4 of 14 fragments, but repair reads 10 fragments.
+    - Check placement: over 3 zones one zone holds at least 5 fragments, so surviving a zone needs more zones or a cross-zone layer. Replicate small, hot thumbnails; erasure code large originals.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your storage bill keeps growing although uploads are flat. What do you check?" category="Failure modes" level="Mid">
+    - Incomplete multipart uploads: their parts are billed until aborted; add a lifecycle abort rule.
+    - Old object versions kept by versioning, and orphan objects whose rows were deleted.
+    - Early transitions to classes with a minimum storage duration, which bill the minimum anyway.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you serve product images for 2,300 page views a second without overloading the store?" category="Scaling" level="Mid">
+    - At 5 images a page that is 11,500 requests a second; put a CDN in front.
+    - At a 95 % hit ratio, 575 requests a second reach the store.
+    - Use immutable keys (a new key per version) so the CDN caches for a long time without invalidation, and let only the CDN read the bucket.
   </InterviewQuestion>
 </InterviewQuestions>

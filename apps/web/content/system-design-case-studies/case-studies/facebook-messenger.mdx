@@ -1,0 +1,744 @@
+---
+title: "Design Facebook Messenger"
+description: "One-to-one and group chat at billion-user scale: requirements, estimates, APIs, schema and an animated architecture."
+logo: systems/messenger
+updated: 2026-11-16
+---
+
+Design a chat service like Facebook Messenger: text and media to one person or a group, delivery and read receipts, and who is online.
+The hard parts are millions of open connections, order inside a conversation, and delivering to people who are offline.
+
+- Interviewers use this question to see whether you can run a stateful connection tier, keep order where users notice it, and promise that "sent" is never a lie.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a chat app like Messenger, with one-to-one and group chat. Messages must arrive in order, and nothing that shows as sent may be lost."
+  level="Senior"
+  minutes={45}
+  bankId="design-a-chat-app"
+  tests={[
+    "Real-time delivery to online users, store and forward for offline ones",
+    "Order inside a conversation without trusting client clocks",
+    "No lost and no duplicated message across retries and reconnects",
+    "Running hundreds of millions of persistent connections",
+  ]}
+  clarify={[
+    { q: "One-to-one only, or groups too? How big?", a: "Both; groups of up to a few hundred members." },
+    { q: "Do we need receipts and presence?", a: "Yes: sent, delivered and read per member; online and last seen." },
+    { q: "Several devices per user?", a: "Yes: phone and web; every device sees the same history." },
+    { q: "How many users?", a: "500 million daily active users, 40 messages each a day." },
+    { q: "What does sent mean?", a: "The message is stored durably; it can never disappear after the tick." },
+    { q: "Is end-to-end encryption in scope?", a: "No: the server can read messages here (WhatsApp covers the other case)." },
+  ]}
+  outOfScope={["Voice and video calls", "E2EE key management", "Stories", "Payments", "Search ranking"]}
+/>
+
+## Overview
+
+- Every device keeps one **WebSocket** open to a **chat server**; a **session registry** says which server holds which user.
+- A message is **saved before it is acknowledged**: the chat server publishes it to a replicated **message bus** keyed by conversation, and acks once the bus has it.
+- The bus gives each conversation **one ordered partition**; a store writer persists messages in that order into a **wide-column store** partitioned by conversation.
+- **Fan-out workers** deliver to every member: online members through their chat server, offline members through **push**, then a **sync** call on reconnect.
+- **Receipts** are two pointers per member, **presence** is a heartbeat with a TTL, and **media** goes straight to a blob store and a CDN.
+
+<Numbers
+  items={[
+    { value: "700K/s", label: "messages at peak", hint: "3 × the 230K/s average" },
+    { value: "100M", label: "open WebSockets at peak", hint: "about 1,000 chat servers" },
+    { value: "4.4 PB", label: "message storage a year", hint: "3 replicas" },
+    { value: "200 ms", label: "p99 send to online recipient" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "One-to-one chat", notes: "Send and receive text messages in real time." },
+    { id: "F2", requirement: "Group chat", notes: "Groups of up to a few hundred members; add and remove members." },
+    { id: "F3", requirement: "Delivery and read receipts", notes: "Sent, delivered and read per message (per member in groups)." },
+    { id: "F4", requirement: "Presence", notes: "Online status and last seen; typing indicators." },
+    { id: "F5", requirement: "Media", notes: "Photos, video and files as attachments." },
+    { id: "F6", requirement: "History and sync", notes: "Scroll back through old messages; a new device catches up." },
+    { id: "F7", requirement: "Push notifications", notes: "Offline users are notified and receive messages when they reconnect." },
+  ]}
+/>
+
+- Out of scope: voice and video calls, end-to-end encryption key management, stories, payments, message search ranking.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Latency", target: "p99 under 200 ms sender to online recipient (same region)", why: "Chat feels broken above a few hundred milliseconds." },
+    { id: "N2", property: "Availability", target: "99.99% for send and receive", why: "Messaging is a core daily habit." },
+    { id: "N3", property: "Durability", target: "No acknowledged message is ever lost", why: "Users trust that sent means stored." },
+    { id: "N4", property: "Ordering", target: "Same order for every member of a conversation", why: "Out-of-order replies change meaning." },
+    { id: "N5", property: "Consistency", target: "Strict per-conversation order; presence and unread counts eventual", why: "Strictness only where users notice." },
+    { id: "N6", property: "Scale", target: "Hundreds of millions of concurrent connections", why: "Drives the stateful connection tier." },
+    { id: "N7", property: "Efficiency", target: "Low battery and data use on mobile", why: "Persistent connections and small payloads." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Assumptions are round numbers chosen to size the system, not real Meta figures.
+
+<EstimateTable
+  rows={[
+    { quantity: "Daily active users", assumption: "Given", result: "500 million" },
+    { quantity: "Messages a day", assumption: "500M users × 40 messages", result: "20 billion messages/day" },
+    { quantity: "Average write rate", assumption: "20 B ÷ 86,400 s", result: "≈ 230K messages/s" },
+    { quantity: "Peak write rate", assumption: "3 × average", result: "≈ 700K messages/s" },
+    { quantity: "Text per day", assumption: "20 B × 200 bytes (text + metadata)", result: "≈ 4 TB/day, ≈ 1.5 PB/year" },
+    { quantity: "Stored with 3 replicas", assumption: "1.5 PB × 3", result: "≈ 4.4 PB/year" },
+    { quantity: "Peak concurrent connections", assumption: "20% of DAU online", result: "≈ 100 million WebSockets" },
+    { quantity: "Chat servers", assumption: "≈ 100K connections per server", result: "≈ 1,000 servers (plus headroom)" },
+    { quantity: "Presence heartbeats", assumption: "100M sockets ÷ one heartbeat per 30 s", result: "≈ 3.3M writes/s" },
+    { quantity: "Media", assumption: "5% of messages × 200 KB average", result: "≈ 200 TB/day of blobs" },
+    { quantity: "Text ingress at peak", assumption: "700K/s × 200 B", result: "≈ 140 MB/s" },
+  ]}
+  note="Writes are huge and steady, connections are the scarce resource, and media dwarfs text."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Every message is written once and read about once per recipient device, mostly as a push; history reads are small pages | A write-optimised store and push delivery, not reads on demand |
+| D2 | Peak against average | 700K/s at peak against 230K/s average (3 ×); evenings and big events | A bus that absorbs bursts; consumers sized to the peak |
+| D3 | Consistency per operation | Message order strict per conversation; sender reads their own message at once; presence, unread counts and inbox previews eventual | Per-conversation partitions; presence and counts in a TTL cache |
+| D4 | Latency target | p99 200 ms sender to online recipient (N1) | Server push over an open socket; ack after the log, not after every downstream write |
+| D5 | Durability | No acknowledged message lost (N3); recovery point zero for acked messages | Ack only after a replicated commit (2 of 3 copies) |
+| D6 | Ordering | Per conversation, not global, not per user | Bus keyed by conversation id; order from the partition, never from clocks |
+| D7 | Duplicates | Harmful: a repeated message looks like a resend to the whole group | A client message id on every send; idempotent store writes |
+| D8 | Data size and growth | 200 B a message, 20 B a day, 4.4 PB a year with replicas; old months are cold | Partitions bounded by a time bucket; cold months tiered off |
+| D9 | Fan-out shape | One to one, or one to a few hundred | Fan-out on write by workers; very large channels need another design |
+| D10 | Contention | Not a driver here: each message is a new row, and each receipt pointer is written by one member only | No locks or conditional writes on the message path |
+| D11 | Geography | One home region per conversation in this design; multi-region is an extension | Cross-region conversations route through one home region |
+| D12 | Availability and degradation | 99.99% (N2); under stress drop typing, then presence, then receipts, never messages | Separate paths and stores for presence and receipts |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| WebSocket `send_message` | Sender app | Every message; carries `client_msg_id`, `conversation_id`, `body`, `attachment_ids` |
+| WebSocket `message_ack` | Chat server | Once the message is saved; carries `client_msg_id`, `message_id`, `server_ts` |
+| WebSocket `new_message` | Chat server | Pushes a message to an online member: `message_id`, `seq`, `conversation_id`, `sender_id`, `body` |
+| WebSocket `receipt` | Recipient app | Delivered or read: `conversation_id`, `message_id`, `type` |
+| WebSocket `typing` | Either side | `conversation_id`, `is_typing` |
+| WebSocket `heartbeat` | Every app | Every 20 to 30 s; keeps presence and the connection alive |
+| REST (below) | Apps over HTTPS | Inbox, history, groups, uploads, sync |
+
+```http
+GET    /v1/conversations?cursor=...                         # inbox, newest first
+GET    /v1/conversations/{id}/messages?before=...&limit=50  # history page
+POST   /v1/conversations                                    # create a group
+POST   /v1/conversations/{id}/members                       # add members
+DELETE /v1/conversations/{id}/members/{user_id}             # remove a member
+POST   /v1/media/upload-url                                 # returns a pre-signed upload URL
+GET    /v1/sync?since=...                                   # catch up a new or offline device
+```
+
+- **Idempotency:** `client_msg_id` is generated by the app, so a retry is safe: the server returns the same `message_id` for a repeated send.
+- **Pagination:** history pages by `before=<seq>`; the inbox by an opaque cursor; sync by the last `seq` the device saw.
+- **Errors:** `429` with `Retry-After` when a client floods; `410` from sync when the cursor is older than the log keeps, so the app reloads the conversation.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Messages | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra, HBase) | 230K writes/s, append-mostly, read by conversation (D1, D8) | `(conversation_id, bucket)` | Per-partition order from the writer | Relational sharded by user: a group's messages land on many shards |
+| Inbox per user | Wide-column store | One row per conversation, newest first (D1) | `user_id` | Eventual (D3) | Computing the inbox from messages on every open |
+| Receipts | Wide-column store | Two pointers per member (D8, F3) | `conversation_id` | Eventual | A row per message per member: 200 × the rows |
+| Users, groups, members | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | Transactions for membership changes; reads cached (D3) | `id` | Strong | Wide-column: membership changes and admin queries get hard |
+| Sessions, presence, dedup | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | 3.3M heartbeats/s with a TTL (D3, D12) | `user_id` | Eventual, expires | The message store: heartbeats would swamp it |
+| Media | Blob store + CDN | 200 TB/day of bytes (D8) | object key | Read after write | Through chat servers: they would carry 200 TB/day |
+
+```sql
+-- One partition per conversation and time bucket keeps partitions bounded.
+CREATE TABLE messages (
+  conversation_id  bigint,
+  bucket           int,          -- e.g. month number, splits very old or busy chats
+  seq              bigint,       -- order in the conversation (Deep dive 1)
+  message_id       bigint,       -- Snowflake id: unique, time-sortable
+  client_msg_id    uuid,         -- the sender's id, for deduplication
+  sender_id        bigint,
+  body             text,
+  attachment_ids   list<bigint>,
+  created_at       timestamp,
+  PRIMARY KEY ((conversation_id, bucket), seq)
+) WITH CLUSTERING ORDER BY (seq DESC);
+
+-- Each user's inbox: conversations ordered by latest activity.
+CREATE TABLE user_conversations (
+  user_id bigint, last_message_id bigint, conversation_id bigint,
+  preview text, unread_count int,
+  PRIMARY KEY (user_id, last_message_id, conversation_id)
+) WITH CLUSTERING ORDER BY (last_message_id DESC);
+
+-- Receipts are a pointer per member, not a row per message.
+CREATE TABLE receipts (
+  conversation_id bigint, user_id bigint,
+  last_delivered_id bigint, last_read_id bigint,
+  PRIMARY KEY (conversation_id, user_id)
+);
+```
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(100), avatar_url VARCHAR(500), created_at TIMESTAMP);
+CREATE TABLE conversations (
+  id BIGINT PRIMARY KEY, type VARCHAR(10),  -- 'direct' or 'group'
+  title VARCHAR(200), created_by BIGINT REFERENCES users(id), created_at TIMESTAMP);
+CREATE TABLE conversation_members (
+  conversation_id BIGINT REFERENCES conversations(id), user_id BIGINT REFERENCES users(id),
+  role VARCHAR(10),                         -- 'admin' or 'member'
+  joined_at TIMESTAMP, PRIMARY KEY (conversation_id, user_id));
+CREATE TABLE media (id BIGINT PRIMARY KEY, owner_id BIGINT REFERENCES users(id),
+  blob_key VARCHAR(300), mime_type VARCHAR(100), size_bytes BIGINT);
+```
+
+| Key (in-memory store) | Value | TTL |
+| --- | --- | --- |
+| `session:{user_id}` | chat server id and device ids holding a connection | refreshed by heartbeat |
+| `presence:{user_id}` | online flag and last-seen time | ≈ 30 to 60 s |
+| `recent:{conversation_id}` | last 50 message ids for a fast open | minutes to hours |
+| `dedup:{conversation_id}:{client_msg_id}` | the `message_id` already given | 24 h |
+
+- **Messages:** open a chat (latest page of one partition), scroll back (`seq < before`), sync (`seq > since`).
+- **Inbox:** the latest conversations of one user, one partition read.
+- **Receipts:** all pointers of one conversation in one read; a message's ticks are computed from them.
+
+Every receipt cell a member sees comes from two numbers stored for that member.
+
+<AnimatedDiagram spec="animated/messenger/receipt-pointers" caption="Every cell is derived from two numbers per member, so a 200-member group stores 200 rows, not one per message per member." />
+
+**How to read it:**
+
+- Columns are messages m1 to m8 of one group; rows are members.
+- Green cells are read, blue delivered, grey not delivered yet; the green box on the right is the only row stored.
+
+**The numbers:**
+
+- A 200-member group that sends 1,000 messages a day needs 200 × 1,000 = 200,000 receipt rows a day with a row per message per member.
+- With pointers it keeps 200 rows, overwritten in place.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One-to-one chat (F1)
+
+The smallest design that works: two sockets, one chat server, one store.
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={1} caption="Step 1: both users hold a WebSocket to one chat server through a load balancer." />
+
+- **Adds:** a WebSocket per device, a load balancer, a chat server, the message store.
+- **Flow:**
+  1. The sender sends `send_message` over its socket.
+  2. The chat server writes the message to the **message store** and replies `message_ack`: the sent tick.
+  3. The server pushes `new_message` down the recipient's socket.
+- **Why this and not that:** polling every few seconds from 100 million devices is billions of empty requests and seconds of delay (D4, N1). A persistent socket lets the server push the instant a message arrives and costs little battery when idle (N7).
+- **The gap:** this only works if both users are connected to the same chat server.
+
+<PremiumBreak />
+
+### Step 2: Many chat servers (N6)
+
+About 1,000 chat servers means the sender and the recipient are almost never on the same one.
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={2} caption="Step 2: a session registry maps each user to the chat server that holds their socket." />
+
+- **Adds:** the **session registry** (`session:{user_id}` in the in-memory store).
+- **Flow:**
+  1. A chat server registers a user when the socket opens and removes them when it closes.
+  2. To deliver, the sender's server looks the recipient up and forwards the message to that server.
+  3. That server pushes it down the socket.
+- **Why this and not that:** chat servers stay stateless apart from the sockets they hold (N6). If one dies, its clients reconnect elsewhere and re-register; a broadcast to all 1,000 servers per message would cost 1,000 × 700K sends a second.
+- **The gap:** if the recipient has no open socket, there is no one to deliver to.
+
+The same lookup, shown on the pattern page with a dead gateway and a pub/sub alternative:
+
+<AnimatedDiagram spec="animated/patterns/rt-routing" stepper caption="A registry maps user to gateway with a TTL; a dead gateway’s entries expire and the user re-registers on reconnect." />
+
+**How to read it:** step 2 is this design; step 3 swaps the registry for a channel per user; step 4 is a chat server dying.
+
+### Step 3: Offline users and push (F7)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={3} caption="Step 3: no registry entry means the recipient is offline, so the push service notifies the device." />
+
+- **Adds:** the **push service** (APNs and FCM).
+- **Flow:**
+  1. The registry has no entry for the recipient.
+  2. The chat server hands the message to the push service, which sends a notification.
+  3. When the app reconnects it asks for everything after the last message it saw (Step 8).
+- **Why this and not that:** keeping the message in the chat server until the user returns fails when that server restarts (D5). Storing first and notifying second means sent is never a lie (N3).
+- **The gap:** one recipient is easy; a group has hundreds.
+
+### Step 4: Group chat and fan-out (F2)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={4} caption="Step 4: an API gateway and group service for membership; fan-out workers deliver one copy per member." />
+
+- **Adds:** the **API gateway** (authentication, rate limiting), the **group service** with the relational **metadata DB**, a **cache** of member lists, **fan-out workers**.
+- **Flow:**
+  1. Creating a group and adding members are REST calls to the group service.
+  2. The chat server hands a group message to the fan-out workers.
+  3. Workers read the member list from the cache (falling back to the metadata DB) and look each member up in the registry.
+  4. Online members get the message through their chat server; offline members go to the push service.
+- **Why this and not that:** delivering to 200 members inline would hold up the sender's ack and tie up a server that should serve sockets (D4, D9). Workers scale on their own; see [Fan-out: Push vs Pull](/system-design/patterns/fan-out).
+- **The gap:** the chat server calls the store and the workers directly. If either is slow or down, messages are lost or arrive out of order.
+
+### Step 5: A durable, ordered pipeline (N3, N4)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={5} caption="Step 5: a replicated message bus keyed by conversation sits between the chat tier and everything downstream." />
+
+- **Adds:** the **message bus** (a Kafka-style replicated log). The direct store write of Step 1 goes away.
+- **Flow:**
+  1. The chat server assigns a time-sortable `message_id` and publishes, keyed by `conversation_id`.
+  2. It acks the sender once the bus has the message on two of three replicas.
+  3. The store writer and the fan-out workers consume the log independently.
+- **Why this and not that:**
+  - Ordering: every message of a conversation lands in one partition, in order (D6).
+  - Durability: if the store or the workers are down, messages wait in the log instead of being dropped (D5).
+  - Decoupling: a slow consumer does not slow the other (D2).
+- **The numbers:** at 700K messages/s the bus needs a few hundred partitions. See [Message Queues and Pub/Sub](/system-design/patterns/message-queues) and [Unique ID Generation](/system-design/patterns/unique-id-generation).
+- **The gap:** users still cannot see who has read what, or who is online.
+
+### Step 6: Presence and receipts (F3, F4)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={6} caption="Step 6: heartbeats refresh a presence key with a TTL; receipts move pointers through the same bus." />
+
+- **Adds:** the **presence service**.
+- **Flow:**
+  1. Each app sends a `heartbeat` every 20 to 30 s; the chat server forwards it to the presence service.
+  2. The presence service refreshes `presence:{user_id}` with a short TTL; no heartbeat for a minute and the user shows as offline with a last-seen time.
+  3. Delivered and read receipts travel back over the socket and through the bus, and move one pointer per member.
+- **Why this and not that:** presence may be slightly stale (D3, N5), so 3.3M heartbeats/s never touch the message store. Receipts as pointers keep group storage flat (D8).
+- **The gap:** photos and video do not fit through chat servers.
+
+### Step 7: Photos and video (F5)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={7} caption="Step 7: the app uploads to the blob store with a pre-signed URL; recipients download through the CDN." />
+
+- **Adds:** the **media service**, the **blob store** and a **CDN**.
+- **Flow:**
+  1. The app asks the media service for a pre-signed upload URL.
+  2. It uploads the file straight to the blob store.
+  3. It sends a normal message carrying only the `attachment_id`; recipients download through the CDN.
+- **Why this and not that:** about 200 TB a day is far too much to push through chat servers (D8). See [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking).
+- **The gap:** a new device, or one back from offline, has nothing on screen.
+
+### Step 8: History and sync (F6)
+
+<AnimatedDiagram spec="animated/messenger/architecture" step={8} caption="Step 8: the history service pages through the message store; a reconnecting device syncs from its last seq." />
+
+- **Adds:** the **history service**.
+- **Flow:**
+  1. Opening a chat or scrolling back reads pages from the message store by `(conversation_id, bucket)` in `seq` order; recent conversations come from the cache.
+  2. A new or reconnecting device calls `GET /v1/sync?since=<last seq>` and receives everything it missed.
+- **Why this and not that:** this is how offline users from Step 3 catch up without the server tracking every device's queue (F6, F7).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/messenger/architecture" stepper caption="Messenger architecture: send, persist, fan out, then deliver or push. Use the numbers to replay the build." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Mobile and web apps | Keep one WebSocket open, retry with `client_msg_id`, cache recent chats locally |
+| **Edge** | Load balancer, API gateway | Terminate TLS, route WebSockets to chat servers, authenticate and rate limit REST calls |
+| **Real-time messaging** | Chat servers, session registry, presence | Hold connections, know which server each user is on, track who is online |
+| **Application services** | Group, media and history services | Membership, upload URLs and thumbnails, paged history reads |
+| **Async pipeline** | Message bus, fan-out workers, push service | Order and persist messages, deliver to every member, notify offline devices |
+| **Storage** | Message store, cache, metadata DB, blob store + CDN | Durable messages, hot data, relational metadata, media bytes |
+
+Sending a message, step by step:
+
+1. The sender's app sends `send_message` over its WebSocket; the load balancer keeps the connection on one chat server.
+2. The chat server claims the `client_msg_id`, assigns a Snowflake `message_id` and publishes to the **message bus**, keyed by `conversation_id`.
+3. Once two of three replicas have it, the sender receives `message_ack`: the sent tick.
+4. The store writer persists it with its `seq`; **fan-out workers** read the members and look up each one's chat server in the **session registry**.
+5. Online members get `new_message` from the chat server that holds their socket; their app replies with a delivered receipt.
+6. Offline members are handed to the **push service** (APNs, FCM); when they reconnect, the app calls `GET /v1/sync`.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: a WebSocket for chat, REST for the rest
+
+- **Choice:** one WebSocket per device carries send, receive, receipts, typing and heartbeats; plain REST over HTTPS serves the inbox, history, groups, uploads and sync.
+- **Why:** the server must push a message the moment it arrives (D4, N1); one idle socket costs little battery and data (N7).
+- **Why not polling or long polling:** 100M devices asking every few seconds is billions of empty requests a day; long polling reopens a request after every message and every timeout. Keep long polling only as a fallback for networks that block sockets.
+- **Why not Server-Sent Events:** they only flow server to client; the app also sends on the hot path, so it would need a second channel.
+- **Why not MQTT:** a strong choice on mobile (see How real systems do it), but it needs its own broker and is awkward in a browser; a WebSocket serves the app and the web client with one protocol.
+- **Why REST for history, groups and uploads:** these are request and response, cacheable and paged by cursor; nothing there needs push, and REST is what every client and proxy understands.
+
+### Load balancer: layer 4 for sockets, layer 7 for REST
+
+- **Choice:** a layer-4 (TCP) load balancer in front of the chat servers; a layer-7 (HTTP) one, behind the API gateway, in front of the REST services.
+- **Why layer 4 for sockets:** a WebSocket lives for hours, and the balancer only has to pass bytes through; it keeps one TCP connection on one server for its whole life, so no sticky cookie is needed (N6).
+- **Why not layer 7 for sockets:** it would read every frame of 100M long-lived connections for no routing benefit; layer 7 earns its cost on REST, where it routes by path and retries a failed request.
+- **Algorithm:** least connections, because open connections, not requests, are the load on a chat server; round robin piles reconnect bursts unevenly.
+
+### Chat servers: stateful, sized by connections
+
+- **Choice:** a fleet that holds sockets and nothing durable: about 100K connections each, so about 1,000 servers (N6).
+- **Why:** a socket has to live on some machine; keeping these servers free of durable state means a dead one costs reconnects, never data.
+- **Why not a managed WebSocket service:** these bill per connection-minute; 100M always-on connections cost more than running the fleet (see the AWS section where the cloud view is on).
+
+### API gateway: on the REST path only
+
+- **Choice:** authentication, rate limiting and routing for every REST call.
+- **Why:** one place to check tokens and throttle abusive clients (N2).
+- **Why not on the socket path:** the chat server checks the token once when the socket opens; a gateway hop on every message would add latency for nothing (D4).
+
+### Session registry and presence: an in-memory key-value store (Redis)
+
+- **Choice:** keys with a TTL: `session:{user_id}` and `presence:{user_id}`, in their own cluster.
+- **Why:** 3.3M heartbeat writes/s, every value expires within a minute, and losing it is harmless because reconnects rebuild it (D3, D12).
+- **Why not the message database:** durable, replicated writes for data that is worthless after 60 s, competing with 230K message writes/s.
+- **Why not ZooKeeper or etcd:** they are built for small, strongly consistent configuration, not millions of writes a second.
+- **Why not broadcast to every chat server:** each of 1,000 servers would have to track where 100M users are.
+
+### Message bus: a Kafka-style replicated log
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, one topic keyed by `conversation_id`, three replicas, the ack sent after two have the message.
+- **Why:** order per key inside a partition (D6); acknowledged messages survive a broker loss (D5); the store writer and the fan-out workers each read every message at their own pace and can replay after a bug (D2).
+- **Why not a work queue (RabbitMQ, SQS):** a queue hands each message to one consumer and deletes it; we need two consumers reading the same messages in order, plus replay.
+- **Why not Redis pub/sub:** delivery is at most once and nothing is kept for a subscriber that is down, so an acked message could vanish (D5).
+- **Why not write to the database and fan out from it:** that is the Step 4 gap: a slow store or worker loses or reorders messages.
+
+### Message store: a wide-column database (Cassandra, HBase)
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra-style wide-column store; partition `(conversation_id, bucket)`, rows clustered by `seq`.
+- **Why:** 230K writes/s on average and 4.4 PB a year (D1, D8); log-structured storage turns writes into sequential appends; one partition read returns a page of a conversation already in order; capacity grows by adding nodes.
+- **Why not sharded PostgreSQL or MySQL:** it can work, but you build sharding, resharding and failover yourself, and B-tree pages split under this insert rate; a log-structured engine under MySQL closes much of that gap (see How real systems do it).
+- **Why not MongoDB:** documents give nothing extra for append-only rows, and ordering inside a partition is native to wide-column tables.
+- **Why not DynamoDB:** a fine managed equivalent (the AWS section uses it); the generic design names the store type, not the vendor.
+
+### Metadata: a relational database (PostgreSQL)
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL for users, conversations, members and media records, with read replicas.
+- **Why:** small and relational: adding a member touches several rows in one transaction, and support needs ad hoc queries (D3).
+- **Why not the wide-column store:** no joins, no multi-row transactions; membership changes would need hand-built consistency.
+
+### Cache: member lists and hot conversations (Redis)
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, cache-aside: a conversation's member list, the last 50 messages of recently opened chats, inbox previews.
+- **Why:** fan-out reads the member list for every group message, and membership rarely changes, so nearly every read is a hit (D1, D9).
+- **Why not cache all messages:** a message is read about once per device; caching every one buys memory, not speed.
+- **Keeping it right:** a membership change deletes the cached list; the next read refills it from the metadata database.
+
+### Blob store and CDN: media off the chat path
+
+- **Choice:** an object store for photos, video and files, uploaded with pre-signed URLs; a CDN in front for downloads, with short-lived signed URLs.
+- **Why a blob store:** 200 TB a day of large, immutable files (D8); object storage is cheap per gigabyte, durable and serves byte ranges.
+- **Why not the message database:** megabytes per row bloat partitions and are copied to every replica.
+- **Why a CDN:** a photo in a 200-member group is fetched up to 200 times, often from the same region; the edge serves the repeats close to users and keeps them off the origin.
+- **Why not serve straight from the blob store:** every view crosses to the origin region, which is slower and pays egress each time.
+
+### Push: APNs and FCM
+
+- **Choice:** the platform push services, called by our push service.
+- **Why:** they are the only way to wake an app in the background on iOS and Android (F7).
+- **Why not keep the socket open in the background:** the phone's operating system suspends it.
+
+### Message ids: Snowflake-style 64-bit ids
+
+- **Choice:** time-sortable 64-bit ids made on each chat server from time, server id and a counter.
+- **Why:** unique across 1,000 servers with no coordination at 700K/s (D2); roughly time-ordered for inbox sorting.
+- **Why not UUIDv4:** 128 bits and random, so no time order.
+- **Why not a database sequence:** one counter for 700K/s is a bottleneck.
+- Order inside a conversation comes from `seq`, not from this id (Deep dive 1).
+
+<CloudOnly>
+
+## Running it on AWS
+
+- The design above does not depend on any cloud. Use the **Services** buttons on the final diagram to see which managed service plays each role.
+- This section builds the AWS version: which service, why the estimates point to it, and what it costs at this scale.
+
+### Service mapping
+
+<CloudMapping diagram="messenger/architecture" lead="aws" />
+
+### The deployment, step by step
+
+<AnimatedDiagram name="messenger/aws" stepper caption="Messenger on AWS: one Region, a VPC across three Availability Zones, managed services beside it. Use the numbers to replay the build." />
+
+- Everything inside the VPC runs in **three Availability Zones**.
+- Only the two load balancers sit in public subnets; chat servers, workers, services, caches, the message bus and Aurora are private.
+- DynamoDB and S3 are reached through **gateway endpoints**, and SNS, ECR and CloudWatch through **interface endpoints**, so no NAT gateway is needed and traffic stays on the AWS network.
+
+### Key decisions
+
+| Decision | AWS choice | Why (from the estimates) | Alternative and its cost |
+|---|---|---|---|
+| **Connection tier** | ECS on EC2 (network-optimised Graviton instances) behind an NLB | 100M WebSockets at about 100K per server is roughly 1,000 instances running all day, which is cheapest on EC2 with Savings Plans. The NLB passes long-lived TCP connections through with little overhead. | API Gateway WebSocket APIs bill \$0.25 per million connection-minutes: 100M always-on connections is about 4.3 trillion minutes, or roughly **\$1M a month before any messages**, and connections drop every 2 hours. |
+| **Message bus** | Amazon MSK, topic keyed by `conversation_id` | Peak 700K messages/s × 200 B ≈ 140 MB/s. A few hundred partitions over brokers in three zones (replication factor 3) handle it with headroom. | Kinesis: 1,000 records/s per shard means at least 700 shards at peak (1,000+ with headroom). Simpler to run, but there is no Kafka ecosystem and per-shard limits apply to hot conversations. |
+| **Message store** | DynamoDB: partition key `conversation_id` (plus a time bucket for very large groups), sort key `seq` | 230K writes/s on average suits provisioned capacity with autoscaling; a history page is one `Query`. | Keyspaces if the team already speaks Cassandra. Self-managed Cassandra on storage-optimised EC2 is cheapest at this volume but needs a dedicated team. |
+| **Session registry and presence** | Two ElastiCache for Valkey clusters | The registry is written on connect and disconnect and read on every fan-out. Presence takes a heartbeat from 100M clients every 30 s, about **3.3M writes/s**, so it gets its own cluster with dozens of shards. | One shared cluster: heartbeat load would slow the lookups every message delivery depends on. |
+| **Workers and services** | ECS on Fargate | Stateless, uneven load, scaling on MSK consumer lag or request count, with no hosts to patch. | Lambda with an MSK trigger works, but at 700K messages/s all day, per-invocation pricing costs more than tasks. |
+| **Metadata** | Aurora PostgreSQL with read replicas; membership cached | Users, groups and membership need transactions and admin queries; reads dominate. | DynamoDB would scale further but makes membership changes and support queries harder. |
+| **Media** | S3 with pre-signed multipart uploads, CloudFront for delivery | About 200 TB a day of media must never pass through app servers. | None worth the cost. |
+| **Push** | SNS mobile push to APNs and FCM | Manages device endpoints and fan-out to Apple and Google. | Calling APNs and FCM directly from workers: more control over batching, more code to own. |
+
+### Storage over time
+
+- Text alone is about **4 TB a day, or 1.5 PB a year**. DynamoDB replicates across zones for you, so the 3 × in the estimates is AWS's job.
+- After the first few months, **storage, not throughput, is the largest part of the bill**.
+- A common approach is one table per month (`messages_2026_11`): recent months in the Standard table class, older months in **Standard-IA**, then an export to S3 as Parquet and the table dropped.
+- The history service reads old pages from S3 on the rare occasions someone scrolls back that far.
+
+### Availability, failover and limits
+
+- **Three zones everywhere** covers the 99.99% target within one Region:
+  - ECS tasks spread across zones.
+  - MSK brokers in three zones with replication factor 3 and `min.insync.replicas=2`.
+  - Aurora and ElastiCache in Multi-AZ mode with automatic failover.
+  - DynamoDB and S3 are multi-zone by design.
+- **When a chat server or a zone fails**, clients reconnect through the NLB with jittered backoff, so 100M users don't all reconnect in the same second. Stale session entries expire by TTL, and clients resync from their last `seq`.
+- **Multi-Region** (for Regional outages or global latency):
+  - Home each user to a Region with Route 53 latency routing.
+  - Replicate messages with DynamoDB global tables, metadata with Aurora Global Database, and events with MSK Replicator.
+  - Deliver cross-Region conversations through the recipient's home Region.
+- **Limits that bite at this scale:**
+  - A very active group chat concentrates writes on one DynamoDB partition key. Add a time bucket to the key.
+  - MSK partition counts are hard to reduce, so size for growth.
+  - Celebrity-size groups make hot keys in the membership cache. Cache membership inside the fan-out workers.
+  - Each EC2 host holding 100K sockets needs higher file-descriptor and kernel limits.
+  - The NLB closes idle TCP flows after 350 seconds by default, so client heartbeats (every 30–60 s) also keep connections open.
+
+### Security and operations
+
+- **Identity:**
+  - Cognito (or an in-house identity service) issues JWTs.
+  - Chat servers validate the token when a WebSocket connects; API services validate it on every request.
+  - AWS WAF on the ALB and CloudFront rate-limits abusive clients.
+- **Encryption:**
+  - TLS on the NLB and ALB listeners.
+  - KMS keys at rest for DynamoDB, S3, MSK, Aurora and ElastiCache.
+  - An IAM task role per service, so each one can reach only its own tables and topics.
+- **Observability:**
+  - Custom CloudWatch metrics for connections per task and p99 send-to-deliver latency.
+  - Alarms on MSK consumer lag and DynamoDB throttling.
+  - OpenTelemetry traces that carry `message_id` across hops.
+- **Delivery:** one CDK app per service, deployed per Region. Chat servers drain connections gradually during rollouts so reconnects are spread out.
+
+### On Google Cloud and Azure
+
+| Concern | Google Cloud | Azure |
+|---|---|---|
+| Connection tier | GKE behind a passthrough Network Load Balancer | AKS behind Azure Load Balancer (Web PubSub at smaller scale) |
+| Message bus | Managed Service for Apache Kafka, or Pub/Sub with `conversation_id` as the ordering key | Event Hubs (Kafka endpoint), partition key `conversation_id` |
+| Message store | Bigtable, row key `conversation_id#seq` | Cosmos DB, partition key `conversation_id`, session consistency |
+| Sessions and presence | Memorystore for Valkey | Azure Managed Redis |
+| Push | Firebase Cloud Messaging | Notification Hubs |
+| Multi-Region | Bigtable replication; the global VPC removes cross-Region network plumbing | Cosmos DB multi-Region writes (eventually consistent, so keep per-conversation writes in one home Region) |
+
+- See [Containers on AWS](/cloud/aws/containers), [Messaging & Streaming on AWS](/cloud/aws/messaging) and [Databases on AWS](/cloud/aws/databases) for the services in depth.
+
+</CloudOnly>
+
+## Deep dives
+
+### Ordering inside a conversation
+
+- **Never order by the sender's clock.** Phones are minutes off; two servers' clocks differ by milliseconds, enough to flip a fast reply.
+- **One writer decides the order.** The bus keys by `conversation_id`, so one partition, read by one consumer, sees a conversation's messages in one order.
+- **`seq` is the partition offset** of the message: it only grows inside a partition, and a redelivered message keeps its offset, so the store writer's upsert stays idempotent.
+- **Clients sort by `seq`**, not by arrival time or `message_id`; a message that arrives late still lands in its place. Gaps in `seq` are normal (other conversations share the partition).
+- **The cost:** one conversation's throughput is capped by one partition, far above any human group's rate.
+
+What goes wrong when a timestamp decides, shown on the clocks pattern page:
+
+<AnimatedDiagram spec="animated/patterns/clock-skew-lww" stepper caption="Each server stamps its own clock; a 200 ms skew makes the later write look older, so last-write-wins keeps the wrong one." />
+
+**How to read it:** the later write gets the smaller timestamp because its server's clock is slow; any order built on those stamps is wrong in the same way.
+
+<Callout tone="red" title="What breaks">
+  Adding partitions to the topic moves conversations to new partitions with smaller offsets, so `seq` goes backwards. Never re-key a live topic: prefix `seq` with a partition epoch, or migrate conversation by conversation.
+</Callout>
+
+### No loss and no duplicate across retries and reconnects
+
+- **Save before ack:** the ack is sent only after the bus has the message on two of three replicas (D5). A crash before that sends no ack, and the app retries.
+- **Same id on retry:** the app keeps `client_msg_id` until it sees an ack. The chat server claims it with `SET NX` in the dedup cache; a repeat gets the `message_id` already given (D7).
+- **Second guard:** the store writer upserts by `(conversation_id, client_msg_id)`, so a duplicate that slipped past an evicted dedup key still writes one row.
+- **Last-seen cursor:** every device remembers the last `seq` it rendered and syncs from it after any gap.
+
+<AnimatedDiagram spec="animated/messenger/send-ack" stepper caption="“Sent” means the replicated log has it; a retry with the same client id gets the same message id, never a second message." />
+
+<StepCards>
+  <StepCard n={1} title="Save, then ack">
+    The app sends c7. The chat server claims c7 as m42, publishes m42 keyed by conversation 88 and waits for two of three replicas. Only then does the sent tick appear; the store writer persists m42 a moment later.
+  </StepCard>
+  <StepCard n={2} title="The ack is lost: same id, same message">
+    The ack never reaches the phone. After 2 s the app resends c7. The dedup cache already holds c7 = m42, so the server answers with m42 and publishes nothing: the group sees one message.
+  </StepCard>
+</StepCards>
+
+**The numbers:** the dedup cache holds one key per message for 24 h: 20 billion keys of about 60 bytes is about 1.2 TB, spread over the cache cluster.
+
+### A chat server dies: 100,000 sockets reconnect at once
+
+- **The storm:** one server holds about 100K sockets. If every app reconnects in the same second, that is 100K TLS handshakes, token checks and registry writes at once.
+- **Jitter:** apps wait a random 0 to 5 s before reconnecting, so 100,000 ÷ 5 s = 20,000 connects/s, about 20 per server per second across 1,000 servers.
+- **Registry expiry:** the dead server's entries stop being refreshed; until they expire, fan-out to it fails, and workers treat those members as offline (push, then sync).
+- **Draining for deploys:** a server being replaced stops accepting sockets and asks its clients to reconnect in batches over a few minutes.
+
+<AnimatedDiagram spec="animated/patterns/rt-reconnect" stepper caption="The app reconnects after a random wait and resumes from its last-seen cursor; a cursor older than the log gets a snapshot." />
+
+**How to read it:** step 2 is the jittered reconnect with `after = 3`; step 3 is the `410` case where the app reloads the conversation.
+
+### Worked example: one message to a 200-member group
+
+1. The sender's chat server claims `client_msg_id`, publishes once, and acks after 2 of 3 replicas: 1 log write, 3 copies.
+2. The store writer persists one 200-byte row with its `seq`.
+3. Fan-out workers read 200 members from the cache; 20% online is 40 members, on up to 40 chat servers.
+4. 40 `new_message` pushes go out; the other 160 members get a notification through the push service.
+5. The 40 online apps send delivered receipts: 40 pointer updates, no new rows.
+
+**The numbers:**
+
+- One send costs 1 log write, 1 store row, 200 registry lookups, 40 socket pushes and 160 notifications.
+- At 700K messages/s, if 1% go to such groups, that is 7,000 × 200 = 1.4M deliveries/s: the reason fan-out runs on its own workers.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Client connection | Polling, long polling, WebSocket, MQTT | One WebSocket per device | D4, D9, N1, N7 | A stateful tier and reconnect storms | Clients sit behind proxies that block sockets: add long polling |
+| Message store | Relational sharded by user, wide-column by conversation | Wide-column, `(conversation_id, bucket)` | D1, D8, F6 | Joins and cross-conversation queries | Message search becomes a feature: add an index |
+| Bus key | Per user, per conversation | Per conversation | D6, D9, N4 | One user's inbox is not one ordered stream | Multi-device sync dominates: a per-user queue, as Meta built |
+| When to ack | Before saving, after the log, after the store | After the replicated log | D4, D5, N1, N3 | History may lag the ack by a moment | The log loses its replication guarantee |
+| Group delivery | Fan-out on write, read at open | Fan-out on write by workers | D9, F2 | Work grows with members | Channels pass about 10,000 members |
+| Receipts | Row per message per member, pointers | Two pointers per member | D8, F3 | No exact read time per message per member | The product needs read-at times |
+| Presence | Database rows, TTL cache | Heartbeat into a TTL key | D3, D12, N5 | Last seen can be a TTL out | Presence becomes billing-grade |
+| Duplicates | Exactly-once broker, client id | Client id + idempotent upsert | D7 | A dedup cache to run | Never: retries never go away |
+| Media path | Through chat servers, direct upload | Pre-signed direct upload + CDN | D8, F5 | A two-step send | Attachments are tiny enough to inline |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) (advanced) | Chat servers, session registry, presence | 100M sockets need routing, heartbeats and safe reconnects |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The message bus | Durable, ordered hand-off from the chat tier to slow consumers |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | Fan-out workers | One message becomes a delivery per member |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Store and bus by conversation | Spreads 230K writes/s and keeps a conversation together |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | `message_id` | Unique, time-sortable ids from 1,000 servers without a central counter |
+| [Idempotency](/system-design/patterns/idempotency) | `client_msg_id`, store upserts | Retries must not create a second message |
+| [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) (advanced) | `seq` from the partition | Clocks cannot order a conversation |
+| [Caching](/system-design/patterns/caching) | Member lists, recent messages | Fan-out reads members on every group message |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Media | 200 TB/day must bypass the chat tier |
+| [Load Balancing](/system-design/patterns/load-balancing) | In front of chat servers | Sticky, long-lived connections spread across servers |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Slack or Discord channels | Sockets, registry, bus keyed by channel, receipts as pointers | Channels with 100,000 members: members read at open instead of a push per member |
+| Customer support live chat | One-to-one sockets, history, push | Routing to an available agent, queues and hand-offs |
+| An in-app notification inbox | Store and forward, push, sync cursor | One-way: no receipts per member, no typing |
+| WhatsApp | Sockets, store and forward, receipts | The server cannot read messages: encryption and per-device copies (see that page) |
+
+## How real systems do it
+
+- **2011:** Meta's first Messenger app used **MQTT** over a persistent connection to save battery and bandwidth, and often delivered phone to phone in hundreds of milliseconds.
+- **2014:** **Iris** is a totally ordered queue of messaging updates per user, with separate pointers for the app and for storage; each pointer advances only when its target succeeds. The app moved to a snapshot plus deltas pushed over MQTT, cutting non-media data use by about 40%.
+- **2018:** Messenger moved its storage from HBase to **MyRocks** account by account, double-writing during the move: storage fell 90%, replication went from six copies to three, and read latency fell 50 times.
+- **2020:** Project **LightSpeed** rebuilt the app around **SQLite** on the device: core code fell from over 1.7M lines to 360,000.
+- **2023:** Messenger began making personal chats **end-to-end encrypted by default**, using the Signal protocol, with a new encrypted storage system, Labyrinth, for history.
+- **Where this design differs:** we partition and order per conversation; Meta orders per user (Iris). Per conversation is easier to explain in 45 minutes and gives the same guarantee users see.
+
+## Failure modes & pitfalls
+
+- **A chat server dies:** 100K reconnects in a second; alert on connect rate; jittered backoff, draining on deploys, registry TTLs.
+- **A hot group:** one conversation's partition and store row lag; watch per-partition consumer lag; time buckets and a membership cache inside the workers.
+- **Ack before the log:** a broker failover loses acked messages; watch under-replicated partitions; ack only after `min.insync.replicas` copies.
+- **Ordering by clocks:** replies appear above their questions; compare `seq` order with display order in tests; order by partition offset only.
+- **Dedup key evicted:** a retry becomes a second message; count duplicate `client_msg_id` at the writer; idempotent upsert as the second guard.
+- **Presence on the message path:** 3.3M heartbeats/s slow message writes; watch store latency; presence in its own cache cluster.
+- **Repartitioning the topic:** `seq` goes backwards; never re-key live; use a partition epoch.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify groups, devices, receipts, scale and what sent means; write F1 to F7 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 230K/s average, 700K/s peak, 100M sockets, 1,000 servers, 4 TB a day.
+3. **Minutes 10 to 15:** API (socket events, REST) and the message table keyed by conversation.
+4. **Minutes 15 to 30:** build Steps 1 to 5; say the gap that forces each part.
+5. **Minutes 30 to 38:** receipts, presence, media and sync (Steps 6 to 8).
+6. **Minutes 38 to 45:** one deep dive the interviewer picks: ordering, duplicates or the reconnect storm.
+
+**What interviewers listen for:**
+
+- **Mid:** WebSockets and why, a registry to find the right server, store and forward with push.
+- **Senior:** save before ack, client message ids, order from one partition, receipts as pointers, presence off the message path.
+- **Staff:** reconnect storms and draining, repartitioning hazards, per-user against per-conversation ordering, what degrades first.
+
+**Red flags:** ordering by client timestamps; acking before anything durable has the message; one row per message per member for receipts; polling at this scale.
+
+## Further reading
+
+- [Building Facebook Messenger](https://engineering.fb.com/2011/08/12/android/building-facebook-messenger/) (Meta Engineering, 2011)
+- [Building Mobile-First Infrastructure for Messenger](https://engineering.fb.com/2014/10/09/production-engineering/building-mobile-first-infrastructure-for-messenger/) (Meta Engineering, 2014)
+- [Migrating Messenger storage to optimize performance](https://engineering.fb.com/2018/06/26/core-infra/migrating-messenger-storage-to-optimize-performance/) (Meta Engineering, 2018)
+- [Project LightSpeed: Rewriting the Messenger codebase](https://engineering.fb.com/2020/03/02/data-infrastructure/messenger/) (Meta Engineering, 2020)
+- [Building end-to-end security for Messenger](https://engineering.fb.com/2023/12/06/security/building-end-to-end-security-for-messenger/) (Meta Engineering, 2023)
+- Related pages: [Design WhatsApp](/system-design-case-studies/case-studies/whatsapp) · [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you guarantee message order in a conversation?" category="Architecture" level="Mid">
+  - Key the message bus by conversation id, so one partition, read by one consumer, holds a conversation's messages in one order.
+  - Stamp each message with a `seq` from that order (the partition offset); never use the sender's clock.
+  - Clients sort by `seq`, so a message that arrives late still displays in the right place.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a message reach a user connected to a different chat server?" category="Architecture" level="Mid">
+  - The session registry maps each user to the chat server holding their connection, refreshed by heartbeats with a TTL.
+  - Fan-out workers look the recipient up and forward the message to that server.
+  - That server pushes it down the WebSocket; no entry means offline, so the push service takes over.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid duplicate messages when the client retries?" category="Failure modes" level="Mid">
+  - The client sends a client-generated id with every message and reuses it on every retry.
+  - The server claims the id in a dedup cache and returns the existing message id for a repeat, so a retry after a timeout never creates a second copy.
+  - The store writer upserts by conversation and client id, a second guard if a dedup key was evicted.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you store read receipts for a 200-person group efficiently?" category="Architecture" level="Senior">
+  - Store one pointer per member per conversation: last delivered id and last read id.
+  - A message is read by a member if its id is at or below their read pointer.
+  - 200 rows overwritten in place, instead of 200 rows for every message.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens when a chat server crashes?" category="Failure modes" level="Senior">
+  - Its clients reconnect through the load balancer, after a random wait, to other servers, which re-register them.
+  - No messages are lost: a message is only acknowledged after it is in the replicated log.
+  - Clients resync from their last received `seq`; the dead server's registry entries expire by TTL.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you use API Gateway WebSocket APIs for Messenger on AWS?" category="Cloud" level="Senior">
+  - Not at this scale: it bills per connection-minute and per message.
+  - 100 million always-on connections cost about a million dollars a month in connection time alone, and connections are closed every two hours.
+  - Self-managed WebSocket servers on ECS with EC2 behind an NLB cost an order of magnitude less; API Gateway fits thousands to low millions of connections.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep DynamoDB storage costs under control for years of chat history?" category="Cloud" level="Senior">
+  - Partition messages into monthly tables and keep recent months in the Standard table class.
+  - Move older months to Standard-IA, then export them to S3 as Parquet and drop the table.
+  - The history service reads old pages from S3 on a miss, because almost nobody scrolls back years.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why WebSockets and not long polling for chat?" category="Trade-offs" level="Mid">
+  - Long polling opens a new request after every message and every timeout: at 100M users that is billions of requests a day carrying nothing.
+  - A WebSocket stays open, so the server pushes in one hop and the p99 of 200 ms is reachable.
+  - Keep long polling as a fallback for networks that block sockets.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does one user with a phone and a laptop see the same conversation?" category="Architecture" level="Senior">
+  - The registry holds every device's connection, and fan-out delivers to each device, including the sender's other devices.
+  - Each device keeps its own last-seen `seq` and syncs from it after any gap.
+  - Receipts are per user, so reading on the laptop clears the unread badge on the phone.
+  </InterviewQuestion>
+  <InterviewQuestion question="What changes if groups grow to 100,000 members?" category="Scaling" level="Senior">
+  - Fan-out on write becomes 100,000 deliveries per message, most to people who never open the channel.
+  - Store the message once and let members read the channel when they open it; push only to the few who are active or mentioned.
+  - Receipts per member stop making sense: show counts instead.
+  </InterviewQuestion>
+</InterviewQuestions>

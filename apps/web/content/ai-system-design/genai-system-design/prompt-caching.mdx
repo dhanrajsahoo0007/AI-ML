@@ -1,0 +1,314 @@
+---
+title: "Prompt Caching"
+description: "Reusing the computed prefix of a prompt across requests to cut cost and latency, and how to structure prompts for cache hits."
+icon: save
+updated: 2026-11-15
+---
+
+Most LLM prompts are 80 % the same text every time: instructions, tool definitions, a policy.
+
+- Interviewers ask about prompt caching because it is the cheapest saving on the bill, and because one careless line at the top of a prompt can turn the saving into a loss.
+
+## Overview
+
+- **Prompt caching** reuses the model's work on a prompt **prefix** that an earlier request already processed. The match runs from the first token and stops at the first difference.
+- The provider charges a **premium to write** an entry and a **discount to read** one. On Anthropic's API (as of November 2026) a 5-minute write costs **1.25×** the input price and a read costs **0.1×** on most models; a hit also skips part of the prefill, so the first token comes sooner.
+- **Order is the whole skill.** Put what never changes first (tools, instructions, policy), what changes slowly next, and what changes every request last. One edit early in the prompt invalidates everything after it.
+- Entries **expire** after a short lifetime (5 minutes by default on Anthropic, refreshed by each read), and a prompt shorter than the **minimum cacheable length** is not cached at all.
+- It is **not a semantic cache**: the model still writes a fresh answer. Measure it from the **usage fields** (tokens read, tokens written, tokens uncached), not from the bill.
+
+## Mental model
+
+- A cook who starts every dinner by chopping the same onions, carrots and celery keeps a tray of them ready.
+- The tray saves the first ten minutes of every dish, but only the part that really is the same: if tonight's soup needs the carrots diced instead of sliced, the tray is no use, and neither is anything prepared on top of it.
+- Keeping a tray costs a little shelf space (the write premium), and a tray that nobody uses for a while goes in the bin (the lifetime).
+- Prompt caching is that tray for the part of a prompt that never changes.
+
+## Core concepts
+
+- The running example is Brightpost's support assistant: **200,000 requests a day**, **2.3 requests/s** on average, about **2,200 tokens in and 250 out**.
+- On this page its prompt has three blocks in a fixed order: **200 tokens** of instructions, **1,000 tokens** of tool definitions and refund policy (a size chosen for this page, illustrative), and **1,000 tokens** of retrieved help articles plus the customer's question.
+- The first two, **1,200 tokens**, are identical on every request.
+
+### What is cached: the prefix and its KV state
+
+- A model reads a prompt in a step called prefill and keeps, for every token, the key and value vectors that attention will need later: the **KV cache** (see [LLM Inference Engines](/ai-system-design/genai-system-design/llm-inference-engine)).
+- Those vectors for token 500 depend only on tokens 1 to 500.
+- So if a new request starts with the same 1,200 tokens, the vectors already exist, and recomputing them is waste.
+- Prompt caching keeps them between requests and reuses them.
+- It saves **prefill compute only**: decoding the answer is unchanged, and the answer is generated fresh every time.
+
+<AnimatedDiagram
+  spec="animated/serving/pcache-prefix"
+  stepper
+  caption="Matching runs from the first token and stops at the first difference, so the part that changes belongs at the end."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The first request writes the fixed part">
+    The cache is empty, so the provider processes all 2,200 tokens as usual and stores the vectors for the first 1,200: the instructions and the tools and policy. The 1,000 tokens of articles and question are new and are not stored.
+  </StepCard>
+  <StepCard n={2} title="The second request reads it">
+    Another customer writes in 0.4 s later. The first 1,200 tokens match, so they are read from the cache at a discount and only the 1,000 new tokens are prefilled.
+  </StepCard>
+  <StepCard n={3} title="An early edit breaks the match">
+    Someone adds today's date to the first line of the instructions. The first block no longer matches, so it and everything after it miss, and the full 2,200 tokens are processed again, plus a new write.
+  </StepCard>
+</StepCards>
+
+### Cache hits, writes and lifetimes
+
+- An entry is created by a **write**, found by a **hit** and removed when its **lifetime** (TTL, time to live) runs out.
+- Providers differ in how much of this you control.
+- Both of these are as of November 2026, from each provider's own docs:
+
+- **Anthropic** caches only where you place a breakpoint, or from the last cacheable block if you use automatic caching.
+  - A write costs **1.25×** the base input price for the default 5-minute lifetime and **2×** for the optional 1-hour lifetime (`"ttl": "1h"`).
+  - A read costs **0.1×** on most models and 0.05× on some newer ones.
+  - Each read restarts the lifetime at no charge.
+  - The minimum cacheable prompt is **512 to 4,096 tokens, depending on the model**; a shorter prompt is processed without caching and without an error. You can set up to four breakpoints.
+- **OpenAI** caches automatically, with no code change. The minimum is 1,024 tokens on the newest models. On GPT-5.6 and later a read costs 0.1× (0.05× on some models), and a write costs 1.25× for the default 30-minute lifetime; earlier models charge nothing extra to write. In-memory entries typically live 5 to 10 minutes after the last use, up to an hour, and some models offer a 24-hour option.
+
+- Two timing rules matter. A hit needs the entry to exist, and on Anthropic an entry becomes available **only after the first response starts**, so ten parallel identical requests all miss: send one, wait, then send the rest.
+- And a gap longer than the lifetime means the next call writes again.
+
+<AnimatedDiagram
+  spec="animated/serving/pcache-read-write"
+  stepper
+  caption="The first call pays a premium, every later call inside the lifetime gets a discount, and a quiet gap longer than the lifetime makes the next call pay the premium again."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The first call writes the prefix">
+    Request 1 carries a breakpoint after the refund policy. The provider looks up the 1,200-token prefix, finds nothing, writes it at 1.25× the price and answers. The usage block reports the 1,200 tokens as written.
+  </StepCard>
+  <StepCard n={2} title="Later calls read it">
+    Request 2 arrives 0.4 s later with the same prefix. The cache hits, the lifetime restarts, and the 1,200 tokens are billed at 0.1×.
+  </StepCard>
+  <StepCard n={3} title="After the lifetime ends, it is written again">
+    Six quiet minutes pass, longer than the 5-minute lifetime, so request 3 misses and writes again at 1.25×. Brightpost's average gap is 1 ÷ 2.3 = 0.43 s, so this happens only overnight and after a deploy.
+  </StepCard>
+</StepCards>
+
+**The break-even:**
+
+- A 5-minute write costs 0.25× more than an uncached read of the prefix, and each hit saves 0.9× (1 − 0.1).
+- One hit repays the write. A 1-hour write costs 1× more, so it needs two hits to break even.
+
+### Ordering a prompt for cache hits
+
+The rule is: **stable first, volatile last**. The order Anthropic hashes is tools, then system prompt, then messages, and a change at one level invalidates that level and every level after it. In practice:
+
+1. Tool definitions, in a fixed order (do not sort them differently per request).
+2. System instructions and policy, with no timestamp, request id or user name.
+3. Long reference material that is the same for many requests.
+4. Conversation history, which only grows at the end.
+5. Retrieved articles and the customer's question, which change every time.
+
+Anything that varies belongs at the bottom, including "today's date". Also keep the exact bytes stable: whitespace, key order in a JSON block and a changing set of enabled tools all break a match.
+
+## Architecture
+
+Where the three caches sit, and what each one reuses. They stack; a request can meet all three.
+
+<AnimatedDiagram
+  spec="animated/serving/pcache-three-caches"
+  stepper
+  caption="The semantic cache saves the whole call, the other two save only prefill; the further down the table, the less you control, unless you run the engine yourself."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The semantic cache reuses an answer">
+    It lives in your app or gateway and stores whole answers keyed by the meaning of a question. A hit skips the model call, and a false hit serves a wrong answer. See [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching).
+  </StepCard>
+  <StepCard n={2} title="The prompt cache reuses a prefix">
+    It lives on the provider's servers, kept apart per organisation (and, on some platforms, per workspace). You control the prompt order, the breakpoints and, on Anthropic, the lifetime option. The provider sets the minimum length and the expiry.
+  </StepCard>
+  <StepCard n={3} title="The engine cache reuses key-value blocks">
+    It lives in the GPU memory of one replica. The operator of the engine controls it, which is you only when you self-host. A provider's prompt cache is the same kind of reuse offered as a priced feature; how each provider builds it is not published, so treat it as a black box with a documented price list.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Prompt caching versus semantic caching
+
+- They answer different questions. A semantic cache asks "have I answered something like this question?" and, on a hit, returns a stored answer with no model call: the saving is the whole cost and the whole latency, and the risk is a wrong or stale answer.
+- A prompt cache asks "have I already read this exact prefix?" and, on a hit, still runs the model on the new part: the saving is part of the input cost and part of the prefill, and the answer is as fresh and as correct as ever.
+- The prompt cache has no similarity threshold to tune and cannot serve a wrong answer, so it is safe to turn on everywhere; the semantic cache needs the care described on its own page.
+- Use both: the semantic cache in front for repeated questions, the prompt cache for everything that still reaches the model.
+- A cheap way to remember the difference is that one caches **answers** and the other caches **reading**.
+
+### Self-hosted: automatic prefix caching
+
+- Engines you run yourself do the same with no price list.
+- **vLLM's automatic prefix caching** splits each prompt into KV blocks (16 tokens by default) and identifies a **full** block by a hash of its tokens, the hash of the block before it and any extras such as a LoRA adapter id or a per-request `cache_salt`.
+- Two prompts with the same first 1,200 tokens therefore map to the same physical blocks.
+- Freed blocks stay cached and are evicted least-recently-used, so the "lifetime" is however long the memory lasts.
+- A partial block at the end of a prefix is not reused.
+- Enable it with the `enable_prefix_caching` engine option, and check your version's default.
+- **SGLang's RadixAttention** keeps the cached prefixes of prompts and generations in a radix tree, evicts the least recently used leaf first and uses a cache-aware scheduler to raise the hit rate (Zheng et al., 2023).
+- The tree suits agents and programs that branch from a shared history; its radix cache can be switched off with `--disable-radix-cache`.
+
+- Self-hosting adds a problem the API hides: the cache lives on **one replica**.
+- A load balancer that spreads requests evenly gives each replica a cold cache, so route by prefix: send a request to the replica that holds its prefix, unless that replica is much busier than the rest (see [Load Balancing & Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling)).
+- Use `cache_salt` to keep tenants' caches apart, because a hit that is faster than a miss can leak whether someone else sent a given prompt.
+
+### Caching in agents and long conversations
+
+- A conversation is a growing prefix: turn 2 is turn 1 plus an answer plus a follow-up, so each turn can read what the last one wrote.
+- An agent loop is the same, with tool calls and results appended each step, so its prefix grows by a few hundred tokens a step and most of every request is a hit.
+- Two cautions. Append only: editing or summarising old turns changes the middle of the prefix and invalidates the rest, so compact the history in one batch and accept one miss.
+- And a breakpoint on content that changes every request writes at 1.25× and never hits; Anthropic's lookback checks only 20 block positions behind a breakpoint, so in a long loop move the breakpoint forward as the history grows.
+- See [Context Engineering](/ai-system-design/genai-system-design/context-engineering) for what to keep in the window.
+
+### Measuring hit rate and savings
+
+- Each response reports what happened. On Anthropic, `usage` has `cache_creation_input_tokens` (written), `cache_read_input_tokens` (read) and `input_tokens` (after the last breakpoint, uncached); the total input is their sum.
+- OpenAI reports `cached_tokens` inside `input_tokens_details`. vLLM exports `vllm:prefix_cache_hits` and `vllm:prefix_cache_queries`, both counted in tokens, and you divide them over a time window.
+
+```json
+{
+  "system": [
+    {
+      "type": "text",
+      "text": "You are Brightpost's support assistant. Refund policy: ...",
+      "cache_control": { "type": "ephemeral" }
+    }
+  ],
+  "messages": [{ "role": "user", "content": "<articles>...</articles> My kettle arrived cracked..." }]
+}
+```
+
+- This follows Anthropic's Messages API (as of November 2026).
+- The breakpoint on the last system block caches everything before it, including the `tools` array, because tools come first in the prefix; add `"ttl": "1h"` for the 1-hour lifetime.
+- The response then carries, for a hit, `"cache_read_input_tokens": 1200`, `"cache_creation_input_tokens": 0` and `"input_tokens": 1000`.
+
+- Two ratios tell you different things. The **token hit rate** is reads ÷ (reads + writes + uncached); the **request hit rate** is the share of requests with any read.
+- Compare the token rate with the **ceiling**, the fixed share of the prompt.
+- Brightpost's ceiling is 1,200 ÷ 2,200 = 54.5 %.
+- Alert when the rate falls well below it, and when `cache_creation_input_tokens` stays high: that means writes without reads.
+
+### Worked example: Brightpost's day, with and without the date
+
+<AnimatedDiagram
+  spec="animated/serving/pcache-savings"
+  caption="A hit cuts a day's input cost by 48 percent and the first token by 48 ms; a prefix that changes on every request costs 14 percent more than no caching at all. Multipliers from provider docs as of November 2026; the miss rate and prefill speed are illustrative."
+/>
+
+**How to read it:**
+
+- Each bar is a day of input tokens, in millions of input-token equivalents (one token at the base price counts as 1, so the price per million cancels).
+- Violet is the 1,200-token fixed prefix, orange is the 1,000 tokens that change.
+- The vertical line is what the day costs with no caching.
+- The bottom chart is one request's first token: 312 ms of queueing and network, then prefill.
+
+**The numbers:**
+
+- Without caching: 200,000 × 2,200 = 440 M. With caching, assuming 1 % of requests miss and write (illustrative: overnight expiry, deploys, cold replicas): writes 2,000 × 1,200 × 1.25 = 3.0 M; reads 198,000 × 1,200 × 0.1 = 23.76 M; the changing part 200,000 × 1,000 = 200 M; total **226.76 M, 48 % less**.
+- At an illustrative $3 per million input tokens that is $1,320 against $680 a day.
+- On a model that reads at 0.05×, the reads fall to 11.88 M and the saving rises to 51 %.
+- First token: prefill at an illustrative 0.04 ms per token takes 2,200 × 0.04 = 88 ms of the 400 ms; a hit prefills 1,000 tokens, 40 ms, so the first token arrives at 312 + 40 = **352 ms**.
+- The time saving is modest because the prompt is short; money is the main win here, and long prompts of tens of thousands of tokens gain much more time.
+
+- At 09:00 a customer asks about order 4471, the cracked £42 kettle.
+- The 1,200-token prefix is already cached from the last request 0.4 s ago, so the provider reads it and prefills only the 1,000 new tokens: the retrieved articles and the question.
+- The usage fields show 1,200 read, 0 written, 1,000 uncached, and a token hit rate of 54.5 % for this request, which is the ceiling.
+
+<Callout tone="red" title="What breaks">
+  A developer adds "Today is 15 November" to line 1 of the instructions. Every request now misses and writes: 200,000 × 1,200 × 1.25 = 300 M plus the 200 M that changes, **500 M a day, 14 % more than no caching**, and no latency gain. The bill rose and nothing errored. Keep timestamps and ids out of the prefix, and alert on `cache_read_input_tokens` falling to zero.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| 5-minute lifetime (Anthropic default) | Cheapest write (1.25×); refreshed free by each read | Expires in quiet periods | Steady traffic with gaps under 5 minutes, like Brightpost in the day |
+| 1-hour lifetime | Survives gaps up to an hour | Write costs 2×; needs two hits to repay | Bursty traffic, or a large prefix reused every 10 to 30 minutes |
+| Provider prompt cache | Nothing to run; priced discount; cannot serve a wrong answer | Minimum length, short lifetime, provider-controlled | The default for any API-served app with a long fixed prefix |
+| Self-hosted prefix cache | No write premium; you control routing and memory | Per-replica; needs prefix-aware routing; uses GPU memory | You run the engine and have shared prefixes |
+| Semantic cache in front | Skips the model call completely | A false hit serves a wrong answer | Repeated, low-risk questions; see its own page |
+
+## Production systems
+
+All as of November 2026, from each provider's docs:
+
+- **Anthropic prompt caching**: explicit `cache_control` breakpoints (up to four) or automatic caching, 5-minute and 1-hour lifetimes, reads at 0.1× on most models, a minimum of 512 to 4,096 tokens by model, and caches isolated per organisation.
+- **OpenAI prompt caching**: automatic on supported models, with reads at 0.1× on GPT-5.6 and later, `cached_tokens` in the usage block, and an optional `prompt_cache_key` for cache accounting.
+- **vLLM automatic prefix caching**: hash-identified full KV blocks, LRU eviction and a `cache_salt` for tenant isolation, with hit counters exported for Prometheus.
+- **SGLang RadixAttention**: a radix tree of cached prefixes with LRU leaf eviction and a cache-aware scheduler, designed for multi-call programs and agents.
+- **Used in our case studies:** [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) · [Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway) · [Code Assistant](/genai-system-design/case-studies/code-assistant) · [Content Moderation System](/genai-system-design/case-studies/content-moderation-system) · [ChatGPT-Style Chat Service](/genai-system-design/case-studies/chatgpt-style-chat-service)
+
+## Failure modes & pitfalls
+
+- **A timestamp, request id or user name in the system prompt.** It makes every prefix unique. Move it to the last message.
+- **A breakpoint on content that changes.** It writes at 1.25× on every call and never reads.
+- **A prompt below the minimum length.** It is silently not cached; Brightpost's original 200-token instructions would never qualify, which is why the tool definitions and policy come first.
+- **Parallel first requests.** Ten simultaneous identical requests all miss on Anthropic, because the entry exists only after the first response starts. Warm it with one call.
+- **Tool definitions that change order or contents.** They sit at the very start, so any change invalidates everything.
+- **Watching the bill instead of the usage fields.** A broken cache can raise cost for weeks before anyone looks.
+
+## Interview framework
+
+1. Define it: reuse of the KV work on an identical prompt prefix, saving prefill cost and time, with the answer still generated fresh.
+2. Show the order: tools, instructions, stable context, history, then the volatile part; one early edit breaks the rest.
+3. Give the economics: write 1.25×, read 0.1×, so one hit repays the write; then compute a day for the example.
+4. Separate the three caches: semantic (answers), provider prompt (prefix, billed), engine (KV blocks, self-hosted).
+5. Say how you measure it: read, written and uncached tokens against the fixed-share ceiling, with an alert on a drop.
+
+**What interviewers listen for:** the prefix rule, the write premium and break-even, the TTL and minimum length, and the difference from a semantic cache.
+
+**Red flags:** saying it caches answers, putting dynamic text at the top, or claiming savings without a hit rate.
+
+## Further reading
+
+- [Prompt caching (Anthropic docs)](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+- [Prompt caching (OpenAI docs)](https://developers.openai.com/api/docs/guides/prompt-caching)
+- [Automatic prefix caching (vLLM docs)](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html) · [Prefix caching design (vLLM docs)](https://docs.vllm.ai/en/latest/design/prefix_caching.html) · [Metrics design (vLLM docs)](https://docs.vllm.ai/en/latest/design/metrics.html)
+- [SGLang: Efficient Execution of Structured Language Model Programs (Zheng et al., 2023)](https://arxiv.org/abs/2312.07104)
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., 2023)](https://arxiv.org/abs/2309.06180)
+- Related pages: [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching) · [Cost & Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization) · [LLM Inference Engines](/ai-system-design/genai-system-design/llm-inference-engine) · [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is prompt caching, and what does it save?" category="Concepts" level="Junior">
+    - Prompt caching keeps the model's processed state for the start of a prompt so a later request with the same start does not recompute it.
+    - The state is the key and value vectors from prefill, and they depend only on the tokens before them, so any request with an identical prefix can reuse them.
+    - It saves input cost, because cached tokens are billed at a discount, and it shortens prefill, so the first token comes sooner.
+    - It does not save decoding, and the answer is still generated fresh each time.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does the order of a prompt matter for caching?" category="Concepts" level="Junior">
+    - A cache match runs from the first token and stops at the first difference, so everything after a changed token is a miss.
+    - Put what never changes at the top, such as tool definitions, instructions and policy, then slowly changing material, then history, and the per-request text last.
+    - A timestamp or user name in the first line makes every prompt unique and the hit rate falls to zero.
+    - On Anthropic the hashed order is tools, system, then messages, so a tool change invalidates the most.
+  </InterviewQuestion>
+  <InterviewQuestion question="Anthropic charges 1.25 times to write and 0.1 times to read. When does caching pay off?" category="Trade-offs" level="Mid">
+    - A 5-minute write costs 0.25 times the base price more than an uncached call, and each read saves 0.9 times, so one hit repays the write.
+    - The 1-hour write at 2 times needs two hits. Caching therefore loses only when the prefix is written and never read: it changes every request, it is below the minimum length, or traffic is so sparse that the lifetime expires between calls.
+    - For Brightpost's 1,200-token prefix at 200,000 requests a day with a 1 % miss rate, the input bill falls from 440 M to about 227 M token equivalents, 48 %.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do prompt caching and semantic caching differ, and would you use both?" category="Architecture" level="Mid">
+    - A semantic cache stores whole answers keyed by the meaning of a question, so a hit skips the model call and saves all cost and latency, but a false hit returns a wrong answer and needs a tuned threshold.
+    - A prompt cache reuses the model's reading of an identical prefix, so the model still runs on the new part and the answer is fresh and correct.
+    - Use both: the semantic cache in front for repeated low-risk questions, and the prompt cache for every request that reaches the model.
+    - They save different things and fail differently.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your cache hit rate dropped from 54 % to 0 after a release, and the bill went up. How do you find the cause?" category="Failure modes" level="Senior">
+    - Look at the usage fields first: reads at zero and writes equal to the whole prefix mean every request is writing a prefix that never matches.
+    - Then diff the prompt from before and after the release, looking for anything that varies per request in the prefix: a date, a request id, a reordered tool list, a changed whitespace, a new tool.
+    - Move the volatile text to the end, stabilise the tool order, and redeploy.
+    - Add an alert on token hit rate against the fixed-share ceiling, and a test that sends the same prompt twice and asserts the second reads from the cache.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you get prefix caching to work well on a fleet of self-hosted vLLM replicas?" category="Scaling" level="Senior">
+    - Each replica keeps its own prefix cache, so round-robin balancing gives every replica a mostly cold cache.
+    - Route by prefix: hash the leading tokens or a session id so requests with the same prefix reach the same replica, with a guard that falls back to the least loaded replica when one gets much busier, so a popular prefix does not create a hot spot.
+    - Enable automatic prefix caching, size KV memory so blocks survive between requests, and watch the exported hit and query counters over a window.
+    - Use a per-tenant cache salt where tenants must not share cache state.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does caching change for an agent that appends tool results at every step?" category="Architecture" level="Senior">
+    - The conversation is a growing prefix, so each step can read what the previous step wrote and most of every request is a hit, as long as you only append.
+    - Rewriting or summarising earlier turns changes the middle of the prefix and invalidates everything after it, so compact in one batch and accept a single miss.
+    - Keep the breakpoint near the end of the stable history and move it forward as the loop grows, because Anthropic checks only a limited number of block positions behind a breakpoint.
+    - Keep tool definitions fixed for the whole run, and use the 1-hour lifetime if steps are slow enough that the 5-minute entry could expire between calls.
+  </InterviewQuestion>
+</InterviewQuestions>

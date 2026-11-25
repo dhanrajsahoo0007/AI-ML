@@ -1,0 +1,14 @@
+title: "A 429: wait, back off, or stop"
+alt: >-
+  A sequence between a Brightpost worker and a provider API in four steps. Step 1: the worker sends a request of 2,200
+  tokens and the provider answers 429 rate_limit_error with retry-after 4. Step 2: the worker waits the 4 seconds plus
+  a random extra of up to one second, retries at 4.3 seconds, and gets a 200 with a streamed answer. Step 3: a 429
+  without retry-after; the worker retries after a random wait of up to 1 second, gets another "429", waits a random
+  time of up to 2 seconds and succeeds. Step 4: a 429 with the error code enforced_spend_limit_reached, meaning the
+  monthly spend cap is used up; the worker stops and alerts a person instead of retrying.
+caption: >-
+  Obey retry-after when it is there, add jitter so workers do not return together, back off when it is missing, and
+  never retry a spent cap. Timings are illustrative.
+tags: [rate-limiting, retries, backoff, "429", serving, genai]
+source: original
+created: 2026-11-15

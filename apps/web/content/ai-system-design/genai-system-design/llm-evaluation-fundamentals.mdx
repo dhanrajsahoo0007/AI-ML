@@ -1,0 +1,286 @@
+---
+title: "LLM Evaluation Fundamentals"
+description: "Why evaluating LLM systems is hard and the basic toolkit: datasets, graders, metrics, offline and online evals."
+icon: test-tube
+updated: 2026-11-15
+---
+
+An LLM can write a fluent wrong answer, and the same prompt can give a different answer tomorrow, so "it looked fine when I tried it" is not evidence.
+
+- Interviewers ask about evaluation because it separates teams that ship by feel from teams that can say, with a number, whether a change made the product better.
+
+## Overview
+
+- **Evaluation** is a repeatable way to turn "is this answer good?" into a **number you can compare** across prompts, models and releases. Without it you cannot tell an improvement from noise.
+- Two moments, three targets. **Offline** evaluation runs a fixed set before release; **online** evaluation watches real traffic after it. Each can grade **one output**, a **multi-step path**, or the **whole system**.
+- Use the **cheapest grader that can tell the difference**: a code check first, a model judge where a rule is too rigid, a person to set the standard and check the judge.
+- **Read traces before you pick metrics.** Reading about 50 failures and counting the failure modes tells you which test to write; a generic score does not.
+- A 200-ticket set has a wide error bar: at 80 % accuracy the 95 % interval is about **±5.5 points**, so a 2-point gain is not a result.
+
+## Mental model
+
+- A restaurant kitchen tastes the sauce while cooking (a quick check by the cook), has a head chef grade the plated dish against the menu card (a judge with a rubric), and reads the reviews after the dinner service (what real diners thought).
+- No single one is enough. The cook's taste is fast but narrow, the head chef is thorough but busy, and the reviews arrive too late to fix tonight's dinner.
+- Evaluating an LLM product is the same set of habits: fast checks you run on every change, deeper grading on a sample, and a close look at what real customers experienced.
+
+## Core concepts
+
+- The running example is **Brightpost**, an online shop whose support assistant answers questions and handles refunds for **200,000 requests a day**.
+- Its team keeps a **golden set** of **200 real tickets** with reference answers.
+- The refund case is order 4471, a cracked kettle, £42; refunds over £30 need approval.
+
+### Model evals versus product evals
+
+- A **model eval** asks how good a model is at a general skill, on a public benchmark.
+- A **product eval** asks whether *your* system does *your* job, on *your* traffic.
+- The two can disagree: a model that tops a public leaderboard can still invent a refund policy.
+- Public benchmarks help you shortlist models (see [Offline Evaluation Benchmarks](/ai-system-design/genai-system-design/offline-evaluation-benchmarks)); only a product eval tells you what to ship.
+- Each ingredient of the product (the prompt, the retriever, the tools, the guardrails) can also be changed, so a product eval must grade the system as a whole, not just the model inside it.
+
+### Graders: code, human and model
+
+A **grader** turns one answer into a score. There are three kinds, and they sit on a ladder of cost and nuance.
+
+<AnimatedDiagram
+  spec="animated/eval/eval-grader-ladder"
+  caption="A person costs about 170 times a judge per grade, and a judge costs next to nothing beside a person; prices and wages are illustrative."
+/>
+
+**How to read it:**
+
+- Green is the model judge, the rung most teams add last and trust least at first.
+- Blue cards are costs. The arrows say why you climb: a rule is too rigid for tone or policy, and a judge needs a person to check it.
+
+**The numbers (illustrative):**
+
+- One judge call reads about 2,450 tokens (the 2,200-token prompt plus the 250-token answer) and writes a 100-token verdict.
+- At an illustrative \$3 per million input and \$15 per million output tokens that is 2,450 × 3 ÷ 1,000,000 + 100 × 15 ÷ 1,000,000 = \$0.00735 + \$0.0015 = **\$0.009**.
+- A person reading one answer for 3 minutes at an illustrative \$30 an hour costs **\$1.50**.
+- For the 200-ticket set: \$0, \$1.77 and \$300.
+
+- **Code checks** are exact and free: valid JSON, a required field, the approval tool called for a refund over £30. They cannot judge tone or whether an answer is helpful.
+- **Model judges** read a rubric and score open-ended text at scale, with known biases (see [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation)).
+- **People** set the standard, write the rubric and check the judge (see [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback)). They are slow, and two people can disagree.
+
+### Reference-based and reference-free metrics
+
+- A **reference-based** metric compares the answer with a known good one: exact match, overlap scores such as BLEU and ROUGE, embedding similarity, or a judge told what the right answer is.
+- It is cheap and repeatable, but it punishes a correct answer worded differently, and every case needs a reference written first.
+- A **reference-free** metric scores the answer without one: is it grounded in the retrieved passages, does it follow the policy, is it polite, did it answer the question asked.
+- It works on live traffic where no reference exists, but it needs a judge or a rule, and that grader needs its own checks.
+- Most products use both: references on the golden set, reference-free checks online.
+- See [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) for the families and a worked score.
+
+### Offline and online evaluation
+
+- **Offline** evaluation runs a fixed dataset through the candidate before release.
+- It is repeatable and safe, so it gates changes; it covers only the cases you thought to include.
+- **Online** evaluation scores a sample of live traffic and watches outcome signals such as thumbs-down and hand-offs to a person.
+- It sees the real world and its surprises, but only after customers have met the answer.
+- See [Online & Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation).
+- The two form a loop: a failure found online becomes a test case offline.
+
+## Architecture
+
+The map below is the whole subject on one page: when you grade (rows) and what you grade (columns). The small map at the top right shows where evaluation sits in the production lifecycle that these pages follow.
+
+<AnimatedDiagram
+  spec="animated/eval/eval-map"
+  caption="Evaluation is a grid, not a number: every cell needs its own check, and failures found in the bottom row feed the golden set at top left."
+/>
+
+1. **Offline, single output.** The golden set of 200 tickets, each answer compared with a reference or a rubric. This is the first test any change must pass.
+2. **Offline, path.** A scripted refund run checks the steps, not just the final text: the right tool, in the right order, with approval requested at £42 (see [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation)).
+3. **Offline, system.** A release regression suite runs the whole pipeline on every change (see [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing)).
+4. **Online, output and path.** A judge scores a sample of live answers; trace checks confirm the approval step ran on every refund over £30.
+5. **Online, system.** Outcome signals such as thumbs-down rate, hand-off rate and A/B tests (see [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models)).
+6. **The feedback arrow.** A failure found live is added to the golden set, so the next release is tested against it (see [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) and [Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)).
+
+## Technical mechanics
+
+### Error analysis before metrics
+
+- A team that starts by picking metrics usually measures what is easy, not what is broken.
+- Start the other way: **read real traces**, write a short note on what went wrong in each, group the notes into named **failure modes**, and count them.
+- The counts say what to fix and test first. A trace is the full record of one request: the question, the retrieved passages, each tool call and the answer.
+- Reading 50 is an afternoon; it is also the cheapest eval work you will do.
+
+- The same loop applies to RAG: separate retrieval errors from generation errors before scoring either (see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+- The loop below is how a RAG change is gated end to end.
+
+<AnimatedDiagram
+  spec="animated/rag/eval-loop"
+  stepper
+  caption="Every change runs the same golden questions; retrieval and answers are scored separately, and a drop in either stops the release."
+/>
+
+**How to read it:**
+
+- Follow the loop from left to right. The orange golden set of 200 questions feeds the candidate pipeline; its retrieved chunks go up to be scored for recall@5 and MRR, and its answers go down to the green LLM judge.
+- The judge is trusted only after the dashed line calibrates it against 50 answers graded by people.
+- Both scores meet in a dashboard that compares the change with the baseline, and the gate ships a change that drops nothing or sends one whose recall@5 fell to the red blocked card.
+
+### Non-determinism, variance and sample size
+
+- Two sources of noise sit between a score and the truth.
+- First, the **model is non-deterministic**: unless you fix the sampling settings, the same ticket can get different answers on different runs, and even fixed settings do not always make a hosted model repeat itself.
+- Run each case more than once when the decision is close.
+- Second, the **set is small**: a measured accuracy on n cases has a 95 % interval of about 1.96 × sqrt(p × (1 − p) ÷ n).
+- At n = 200 and p = 0.8 that is 1.96 × sqrt(0.8 × 0.2 ÷ 200) = 1.96 × 0.0283 = **±5.5 points**.
+- Quadrupling the set to 800 halves it to ±2.8.
+- So an 80 % to 82 % move on 200 tickets is inside the noise, and a gate should demand a drop larger than the interval or a paired comparison on the same cases.
+- The statistics are on [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) and [A/B Testing Prompts & Models](/ai-system-design/genai-system-design/ab-testing-prompts-models).
+
+### Building an eval habit in a team
+
+- Evaluation fails as a project and works as a habit.
+- Keep a few rules: every bug report becomes a test case before it is fixed; the golden set, rubrics and judge prompts are versioned like code; a change that lowers a score needs a reason written in the pull request; and one person owns the set so it does not drift.
+- Start with 20 hand-checked cases and a script that runs in a minute, then grow it.
+- A small suite that runs on every change beats a large one that runs in a quarter.
+
+### Worked example: Brightpost reads 50 traces
+
+Brightpost's assistant is live, thumbs-down ratings are rising, and nobody knows why. The team samples **50 traces** that a customer rated thumbs-down or that were handed to a person, and reads them.
+
+<AnimatedDiagram
+  spec="animated/eval/eval-error-analysis"
+  stepper
+  caption="The test you write is the one for the biggest bar, 28 percent of the sample, not the one that was easiest to think of. Counts are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Read fifty traces by hand">
+    Each trace is one cell: the question, the steps the assistant took and its answer. For each the reader writes one line about what went wrong.
+  </StepCard>
+  <StepCard n={2} title="Name the failure modes">
+    The notes cluster into seven names, from "refund over £30 with no approval" to "other or unclear". A name should be specific enough that two readers sort a trace the same way.
+  </StepCard>
+  <StepCard n={3} title="Count them">
+    The counts are 14, 9, 8, 7, 5, 4 and 3, and they sum to 50. Mode A, the missing approval, is 14 ÷ 50 = 28 % of the sample. These counts are illustrative: the figure shows the method, not measured data.
+  </StepCard>
+  <StepCard n={4} title="Write a test for the largest">
+    The team adds a code check: any refund over £30 must call the approval tool. They write 14 cases from the real traces, add them to the golden set, and fix the prompt until all 14 pass.
+  </StepCard>
+</StepCards>
+
+The cracked-kettle ticket, order 4471 at £42, is one of the 14. The check for it is a few lines on the trace, not a judge call:
+
+```python
+def refund_needs_approval(trace):
+    refund = next((c for c in trace.tool_calls if c.name == "issue_refund"), None)
+    if refund is None or refund.args["amount_gbp"] <= 30:
+        return True  # nothing to check
+    return any(c.name == "request_approval" for c in trace.tool_calls)
+```
+
+- This is a sketch of a trace-level code check for the targeted test in step 4, not a library API.
+- A cheap rule catches the biggest failure mode exactly; the judge is kept for mode B, inventing a policy, where no simple rule exists.
+
+<Callout tone="red" title="What breaks">
+  The team skips the reading and adopts a single "helpfulness" score from a judge. The score moves a little with every change, the refund failures stay at 28 % of the bad traces, and a release ships that again approves £42 refunds without asking. Counting failures first would have shown the one test that mattered.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Code check | Exact, free, instant | Narrow; cannot judge tone or helpfulness | Formats, required fields, tool order, limits |
+| Model judge | Scales to open-ended text | Biased; costs tokens; needs checking | Quality dimensions with no simple rule |
+| Human grading | The reference standard | Slow, costly, raters disagree | Building the set, rubrics, auditing the judge |
+| Offline evaluation | Repeatable, safe, gates a release | Covers only known cases | Every change, before shipping |
+| Online evaluation | Real traffic and real surprises | After customers see it; noisy | Monitoring, finding new failure modes |
+| Reference-based metric | Cheap and repeatable | Penalises a correct answer worded differently | Short answers with one right form |
+| Reference-free metric | Works on live traffic | Needs a judge or rule that itself needs checking | Grounding, policy and tone checks |
+
+## Production systems
+
+All as of November 2026, from each project's own pages:
+
+- **HELM** (Stanford CRFM, Liang et al.) evaluates models across 42 scenarios and measures 7 metrics (accuracy, calibration, robustness, fairness, bias, toxicity, efficiency) on its core scenarios, to show trade-offs rather than one number.
+- **EleutherAI's lm-evaluation-harness** is an open framework for few-shot evaluation with over 60 standard academic benchmarks, and it is the backend of Hugging Face's Open LLM Leaderboard.
+- **OpenAI Evals** is an open-source framework and registry for writing your own evals, including private ones on your own data; evals can now also be configured in the OpenAI dashboard.
+- **MT-Bench and Chatbot Arena** (Zheng et al., 2023) introduced a multi-turn question set and a crowdsourced pairwise platform, and reported that strong LLM judges agreed with human preferences more than 80 % of the time.
+
+## Failure modes & pitfalls
+
+- **Picking metrics before reading traces.** You measure what is easy, and the largest failure mode goes untested.
+- **One blended score.** An average hides a regression in a rare but costly case; report per category.
+- **Trusting a judge you never checked.** Grade a sample by hand and compare before the judge gates anything.
+- **Treating a small gain as real.** At 200 cases the interval is ±5.5 points; use a paired comparison or a bigger set.
+- **A golden set that never changes.** The product and customers move; failures found online must flow back in.
+- **Tuning on the test set.** Prompts tuned until the golden set passes will overfit it; keep part of it unseen.
+
+## Interview framework
+
+1. Say what evaluation is for: a repeatable number that separates a real improvement from noise, for a system whose outputs are fluent, varied and sometimes wrong.
+2. Lay out the grid: offline and online, grading an output, a path or the whole system, with an example check in each cell.
+3. Describe the grader ladder and the rule to use the cheapest rung that can tell the difference, with the judge checked against people.
+4. Start with error analysis: read traces, name and count failure modes, write the test for the largest.
+5. Mention noise: non-determinism, the ±5.5-point interval at 200 cases, and what you would do about it.
+
+**What interviewers listen for:** the offline and online loop, a dataset built from real failures, a checked judge, and awareness of variance and sample size.
+
+**Red flags:** "we use BLEU", a single accuracy number for the whole product, trusting a public leaderboard as the product eval, or no plan for what happens when the judge is wrong.
+
+## Further reading
+
+- [Holistic Evaluation of Language Models (Liang et al., 2022)](https://arxiv.org/abs/2211.09110)
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- [lm-evaluation-harness (EleutherAI, GitHub)](https://github.com/EleutherAI/lm-evaluation-harness)
+- [OpenAI Evals (GitHub)](https://github.com/openai/evals)
+- Related pages: [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) · [Quality Metrics](/ai-system-design/genai-system-design/quality-metrics) · [LLM-as-Judge Evaluation](/ai-system-design/genai-system-design/llm-as-judge-evaluation) · [Human Evaluation & Feedback](/ai-system-design/genai-system-design/human-evaluation-and-feedback) · [Online & Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing) · [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) · [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is evaluating an LLM system harder than testing normal software?" category="Concepts" level="Junior">
+    - Ordinary software returns the same output for the same input, so a test can assert an exact value.
+    - An LLM returns free text that can be correct in many wordings, wrong while sounding confident, and different from run to run.
+    - So a test needs a grader that judges meaning, not equality, and a decision rule that allows for noise.
+    - The inputs are also open-ended: customers will ask things nobody put in the test set, which is why online evaluation matters as well as offline.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between offline and online evaluation, and why do you need both?" category="Concepts" level="Junior">
+    - Offline evaluation runs a fixed dataset through the candidate before release.
+    - It is repeatable and safe, so it gates changes, but it covers only the cases you included.
+    - Online evaluation scores a sample of live traffic and tracks outcomes such as thumbs-down and hand-offs.
+    - It sees real users and new failures, but only after they have met the answer.
+    - You need both because they feed each other: online finds new failures, which become offline test cases.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use a code check, a model judge or a human grader?" category="Trade-offs" level="Mid">
+    - Use the cheapest grader that can tell the difference.
+    - A code check handles anything you can state as a rule, such as valid JSON or the approval tool being called for a refund over £30; it is exact and free.
+    - A model judge handles open-ended quality like tone or policy adherence, at about a cent per grade in an illustrative case, but it has biases and must be checked.
+    - People write the rubric, grade a sample to set the standard and audit the judge, at around a dollar or more per answer. Most systems use all three in layers.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare reference-based and reference-free metrics." category="Trade-offs" level="Mid">
+    - A reference-based metric compares the answer with a known good one, using exact match, overlap such as ROUGE, embedding similarity or a judge given the right answer.
+    - It is cheap and repeatable but punishes a correct answer worded differently and needs a reference for every case.
+    - A reference-free metric scores the answer by its own properties, such as being grounded in the retrieved passages, following policy or being polite.
+    - It works on live traffic where no reference exists, but the judge or rule behind it needs its own validation.
+    - Use references on the golden set and reference-free checks online.
+  </InterviewQuestion>
+  <InterviewQuestion question="You have 200 labelled tickets. A new prompt scores 82 % against 80 % for the old one. Do you ship it?" category="Failure modes" level="Senior">
+    - Not on that evidence. The 95 % interval on an accuracy of 0.8 at n = 200 is about 1.96 × sqrt(0.8 × 0.2 ÷ 200) = ±5.5 points, so a 2-point gain is well inside the noise.
+    - Check whether the comparison is paired on the same 200 cases, which has less noise than two independent estimates, look at which tickets flipped from pass to fail and back, and rerun to see run-to-run variation.
+    - If the decision matters, grow the set (800 cases halves the interval to ±2.8) or run an online A/B test.
+    - Also check that the gain is not hiding a loss in an important category.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your team's thumbs-down rate is rising and nobody knows why. How do you start?" category="Failure modes" level="Senior">
+    - Start with error analysis before building any metric.
+    - Sample about 50 traces that were rated thumbs-down or handed to a person, read each one and write what went wrong.
+    - Group the notes into named failure modes, count them and rank them.
+    - Then write a targeted test for the largest mode, often a cheap code check, add real cases from those traces to the golden set, and fix against it.
+    - Repeat with a fresh sample after the fix, because new modes appear once the biggest one is gone.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you check that an LLM judge can be trusted to gate releases?" category="Architecture" level="Senior">
+    - Have people grade a stratified sample of answers, including hard and borderline cases, then compare the judge with the people.
+    - Report agreement and a chance-corrected measure such as Cohen's kappa, and look at where they disagree, not just the total.
+    - Test known biases directly: swap the order of two answers, pad one with extra words, and compare answers from the judge's own model family.
+    - Pin the judge model and prompt, and re-check agreement whenever either changes.
+    - Where the judge is weak, fall back on code checks or human review for that category.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design the evaluation setup for Brightpost's support assistant from scratch." category="Architecture" level="Senior">
+    - Begin with 20 to 50 real tickets and read the traces to learn the failure modes, then grow to a 200-ticket golden set with references, versioned in git.
+    - Add code checks for hard rules such as approval for refunds over £30 and valid tool arguments, and a judge with a rubric for tone and policy, checked against human labels.
+    - Run the suite on every prompt, model or retrieval change with a gate that allows for the ±5.5-point noise.
+    - After release, sample live traffic for the judge, run trace checks and watch thumbs-down and hand-off rates, and send every new failure back into the golden set.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,14 @@
+title: Two gateways race on one counter
+alt: >-
+  A sequence diagram in two steps with four lanes: an orange client using key k42, teal gateways A and B, and a violet
+  counter store. Step 1: the client's requests 100 and 101 reach different gateways. Both gateways read the counter,
+  both get 99, both decide there is room under the limit of 100, and both write 100. A note says 101 requests were
+  allowed while the count says 100. Step 2: each gateway instead sends one script that increments the counter and
+  sets its expiry. The store runs the scripts one at a time: gateway A gets 100 and allows, gateway B gets 101 and
+  rejects, answering the client with 429 and Retry-After 30.
+caption: >-
+  Read-then-write lets both gateways see the same 99; one atomic script makes the store hand out 100 and 101, so
+  exactly one request is turned away.
+tags: [patterns, rate-limiting, redis, race-condition, lua]
+source: original
+created: 2026-11-16

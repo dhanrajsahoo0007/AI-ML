@@ -1,0 +1,683 @@
+---
+title: "Design a Parking Garage"
+description: "Object design for spaces, tickets and pricing, plus a small backend that never oversells a time slot and gates that keep working offline."
+logo: systems/parking-garage
+updated: 2026-11-17
+---
+
+Design the system behind a chain of parking garages: drivers reserve a space or drive up, enter with a ticket or their plate, and pay on the way out.
+The hard parts are the object design most interviewers spend the round on, a reservation that must never oversell a time window, and a gate that must open when the network is down.
+
+- Interviewers use this question to see whether you clarify first, model classes cleanly, find the one place that needs strong consistency, and say plainly what a system this small does not need.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a parking garage system: drivers reserve a space or drive up, enter with a ticket, and pay on the way out."
+  level="Mid"
+  minutes={45}
+  bankId="design-parking"
+  tests={[
+    "Clarifying requirements before drawing anything",
+    "A class design with allocation and pricing as swappable strategies",
+    "Never overselling a reserved time window when drivers race for the last spaces",
+    "Gates that keep working offline, and knowing what a small system does not need",
+  ]}
+  clarify={[
+    { q: "One garage or a chain?", a: "A chain: 1,000 garages, 500 spaces each on average, run by one operator." },
+    { q: "Which vehicles?", a: "Motorcycles, cars and vans; a smaller vehicle may use a larger space, never the reverse." },
+    { q: "Does a reservation get a numbered space?", a: "No: it buys capacity for a vehicle type and a time window; any fitting space will do." },
+    { q: "How is a driver identified at the gate?", a: "A camera reads the plate; a printed ticket or a booking code is the fallback." },
+    { q: "How do drivers pay?", a: "Card at the exit, or in the app before leaving; an external card processor, called with an idempotency key." },
+    { q: "What if a garage loses its internet link?", a: "Gates must keep opening; nothing may be lost or charged twice." },
+    { q: "Is the object design or the backend the focus?", a: "Both: about half the round on classes, the rest on capacity, payment and the offline gate." },
+  ]}
+  outOfScope={["Licence-plate recognition itself", "Permits and season tickets", "Dynamic pricing models", "Enforcement and fines"]}
+/>
+
+## Overview
+
+- Each garage has an on-site **controller** that decides every entry and exit from local data, writes the event to a **local log** before the barrier opens, and uploads it later.
+- Reservations sell **capacity, not a numbered space**: one counter row per garage, vehicle type and **15-minute slot**, all slots of a window updated in **one transaction**.
+- One **relational database** (PostgreSQL) per region holds slots, reservations, tickets and payments for the whole fleet; a **standby replica** takes reads and failover.
+- The garage's object model keeps **allocation** (which space) and **pricing** (which fee) as **strategy** classes, so a new rule is a new class.
+- Uploads carry a **per-garage event id**; the cloud applies each id once, so a replay after an outage never double-counts or double-charges.
+- No cache, no message queue, no sharding: at about 300 writes/s at peak, each would add a part with nothing to do.
+
+<Numbers
+  items={[
+    { value: "≈ 300/s", label: "peak writes, whole fleet", hint: "104 entries/s plus exits and payments" },
+    { value: "180", label: "sellable car spaces per slot", hint: "garage 17: 200 offered, 20 held back" },
+    { value: "1.35 MB", label: "events per garage per day", hint: "fits on the controller for weeks" },
+    { value: "0", label: "slots sold past capacity" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Reserve for a time window", notes: "A vehicle type, a garage, a start and an end; cancel up to the start." },
+    { id: "F2", requirement: "Drive-up entry", notes: "Admit a car only if a fitting space is free; suggest a space for its type." },
+    { id: "F3", requirement: "Exit: fee and payment", notes: "Price the stay, take payment once, open the barrier." },
+    { id: "F4", requirement: "Live availability", notes: "Free spaces per garage in the app; per level on signs at the entrance." },
+    { id: "F5", requirement: "Operator settings", notes: "Rates, sellable capacity per vehicle type, opening hours." },
+  ]}
+/>
+
+- Out of scope: plate recognition itself, permits and season tickets, dynamic pricing, enforcement.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Correctness", target: "0 slots sold past capacity; 0 stays charged twice", why: "An oversold slot is a driver with a booking and no space." },
+    { id: "N2", property: "Gate latency", target: "Barrier opens within 1 s of the plate read, p99", why: "A queue at the entrance backs onto the street." },
+    { id: "N3", property: "Gate availability", target: "Entry and exit keep working through a 24-hour link outage", why: "A stuck exit traps every car inside." },
+    { id: "N4", property: "Reservation latency", target: "p99 under 500 ms", why: "The driver is booking on a phone." },
+    { id: "N5", property: "Availability freshness", target: "App under 30 s stale; signs under 5 s", why: "Drivers decide where to turn from it." },
+    { id: "N6", property: "Cloud availability", target: "99.9% for booking and the app", why: "Gates do not depend on it, so the budget can be modest." },
+    { id: "N7", property: "Durability", target: "No entry, exit or payment lost once the barrier has opened", why: "Each one is revenue and an audit record." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Spaces", assumption: "1,000 garages × 500 spaces", result: "500,000 spaces" },
+    { quantity: "Sessions", assumption: "500,000 spaces × 3 parks a day", result: "1,500,000 a day" },
+    { quantity: "Gate events", assumption: "3 per session (entry, exit, payment) ÷ 86,400 s", result: "4,500,000 a day ≈ 52/s" },
+    { quantity: "Peak entries", assumption: "25% of entries in the 08:00 hour ÷ 3,600 s", result: "375,000 ≈ 104/s fleet; 1 car every 10 s per garage" },
+    { quantity: "Peak writes", assumption: "Entries, exits and payments at the peak", result: "≈ 300/s for the whole fleet" },
+    { quantity: "Reservations", assumption: "20% of sessions ÷ 86,400 s; 8 slot rows each (2 hours)", result: "300,000 a day ≈ 3.5/s ≈ 28 row updates/s" },
+    { quantity: "Event night", assumption: "10,000 drivers race for one garage's 180 slots in 10 minutes", result: "≈ 17 attempts/s × 8 rows = 136 row updates/s on one garage" },
+    { quantity: "Availability reads", assumption: "5,000,000 app views a day, peak 10 × average", result: "≈ 58/s average, 580/s peak" },
+    { quantity: "Session data", assumption: "300 bytes × 1,500,000 a day; 13 months hot", result: "450 MB a day; ≈ 180 GB hot; ≈ 1.15 TB over 7 years" },
+    { quantity: "Slot rows", assumption: "1,000 garages × 3 types × 96 slots a day × 90 days ahead", result: "≈ 26,000,000 rows × 60 bytes ≈ 1.6 GB" },
+    { quantity: "One garage offline", assumption: "4,500 events × 300 bytes a day", result: "1.35 MB a day: 30 days = 40 MB on the controller" },
+  ]}
+  note="Every number fits one database server; the network at each garage is the problem."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | 580 availability reads/s against ≈ 300 writes/s at peak: about 2 to 1 | Not a driver here: no cache, the replica serves the reads |
+| D2 | Peak against average | ≈ 300 writes/s at 08:00 against 52/s on average: about 6 ×; an event night is 17 bookings/s on one garage | Size for the peak hour; no autoscaling story is needed |
+| D3 | Consistency per operation | Slot capacity and payment strong; availability 30 s stale; tickets reach the cloud seconds to hours late | Counters in one ACID database; tickets synced, not called |
+| D4 | Latency target | Barrier within 1 s (N2); booking within 500 ms (N4) | The gate never waits on a wide-area round trip |
+| D5 | Durability | No gate event lost once the barrier opens (N7) | fsync to the local log before opening; upload until acknowledged |
+| D6 | Ordering | Per garage: entry before exit for one ticket; nothing global | A per-garage event sequence; no global order anywhere |
+| D7 | Duplicates | A double payment is harmful; a replayed upload must be harmless | Event ids per garage; idempotency keys on every charge |
+| D8 | Data size and growth | 450 MB a day; 180 GB hot | One primary; old sessions to object storage |
+| D9 | Fan-out shape | Not a driver here: one booking touches one garage; signs are fed on site | Nothing to fan out |
+| D10 | Contention | The last spaces of a garage on an event night: 136 row updates/s on one garage's rows | Guarded updates on counter rows; never read, then write |
+| D11 | Geography | Garages in one country; each region's garages in that region's database | One primary per region; no cross-region writes |
+| D12 | Availability and degradation | The gate must work with no network: the defining driver | Local decisions and a local log; the cloud is switched off last for gates, first for the app |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/garages?near=…&type=car&from=…&to=…` | Driver | Search; returns sellable capacity per garage for the window |
+| `POST /v1/reservations` | Driver | Book, with `Idempotency-Key`; returns a code and the price |
+| `DELETE /v1/reservations/{id}` | Driver | Cancel before the start; releases every slot |
+| `POST /v1/tickets/{id}/payments` | Driver | Pay in the app before leaving, with `Idempotency-Key` |
+| `PUT /v1/garages/{id}/rates`, `…/capacity` | Operator | Change rates or sellable capacity; versioned |
+| `POST /v1/devices/{garage}/events` | Garage controller | Every few seconds: a batch of gate events with ids |
+| `GET /v1/devices/{garage}/config?since=…` | Garage controller | Every 30 s: rates, capacity and the next 24 hours of bookings |
+
+The controller's upload is the call that makes the offline gate safe.
+
+```http
+POST /v1/devices/g17/events
+(mTLS: the client certificate names garage g17)
+{ "events": [
+    { "event_id": 9042, "kind": "exit", "ticket": "g17-t5531", "plate": "AB12CDE",
+      "at": "2026-11-17T18:04:11Z", "fee_cents": 1200, "payment": "offline-card" },
+    { "event_id": 9043, "kind": "entry", "ticket": "g17-t5602", "at": "2026-11-17T18:04:40Z" } ] }
+
+200 OK  { "acked_up_to": 9043, "applied": 1, "already_seen": 1 }
+```
+
+- **Idempotency:** each event is applied once per `(garage, event_id)`; a replay returns `already_seen`. `POST /v1/reservations` and every payment take an `Idempotency-Key`.
+- **Errors:** `409` a slot in the window is full (the body names the first one); `410` the reservation has started and cannot be cancelled; `402` the card was declined.
+- **Pagination:** the garage search and the operator's reports, by cursor; the config pull is incremental by version.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Slot counters, reservations | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL) | All slots of a window in one transaction (D3, D10) | `garage_id` (one primary, no shards) | Strong | In-memory counters (<TechIcon id="oss/redis" /> Redis): cannot commit with the reservation |
+| Tickets, payments | Same relational database | A ticket joins its reservation and payment (D5, D7) | `garage_id` | Strong once uploaded | A time-series store: tickets are updated at exit, not only appended |
+| Uploaded event ids | Same relational database, a unique key | A replay must be a no-op forever (D7) | `garage_id` | Strong | A dedup cache with a TTL: a replay older than the TTL would apply twice |
+| Rates, capacity settings | Same relational database, versioned | Read by 1,000 controllers every 30 s (D12) | `garage_id` | Strong, pulled | A config service: one more system for one small table |
+| Gate events on site | Embedded database (SQLite) on the controller | Survives a reboot; works offline (D5, D12) | One per garage | Strong locally | Counts in memory: a restart forgets who is inside |
+| Sessions older than 13 months | Object storage, files per garage and month | 1.15 TB over 7 years, read for audits (D8) | `garage_id`, month | Eventual | Keeping them in the primary: cold rows slow every backup and restore |
+
+```sql
+CREATE TABLE slot_capacity (
+  garage_id    int,
+  vehicle_type text,             -- 'motorcycle' | 'car' | 'van'
+  slot_start   timestamptz,      -- every 15 minutes, 90 days ahead
+  sellable     int,              -- set by the operator, minus the overstay buffer
+  reserved     int NOT NULL DEFAULT 0 CHECK (reserved <= sellable),
+  PRIMARY KEY (garage_id, vehicle_type, slot_start)   -- every query starts with garage_id
+);
+CREATE TABLE reservations (
+  reservation_id bigint PRIMARY KEY, garage_id int, driver_id bigint, vehicle_type text,
+  during tstzrange,                 -- '[09:00, 11:00)': start included, end excluded
+  code text UNIQUE, status text,    -- 'booked' | 'arrived' | 'cancelled' | 'no_show'
+  idempotency_key text UNIQUE
+);
+CREATE TABLE tickets (
+  garage_id int, ticket_id text,    -- made on site by the controller: 'g17-t5531'
+  plate text, vehicle_type text, space_id text, reservation_id bigint,
+  entered_at timestamptz, exited_at timestamptz, fee_cents int, status text,
+  PRIMARY KEY (garage_id, ticket_id)
+);
+CREATE TABLE device_events (
+  garage_id int, event_id bigint,   -- the controller's own sequence
+  kind text, body jsonb, received_at timestamptz,
+  PRIMARY KEY (garage_id, event_id) -- a replayed event inserts nothing
+);
+```
+
+- **Reserve:** add 1 to every slot row of the window where `reserved < sellable`; keep it only if the row count equals the number of slots (Deep dive 1).
+- **Upload:** insert the event `ON CONFLICT DO NOTHING`; only a new row updates its ticket, in the same transaction.
+- **Availability:** active tickets and booked arrivals per garage and type, read from the replica.
+- **Config pull:** rates, capacity and bookings for the next 24 hours where `version > :since`.
+
+A booking becomes a ticket when the car arrives, and a ticket only moves forward.
+
+<AnimatedDiagram spec="animated/parking-garage/ticket-states" caption="A booking becomes a ticket on arrival; a ticket is paid, then closed at the exit, and a paid ticket that lingers owes the extra time." />
+
+**How to read it:**
+
+- Top row, the booking: orange while its slots are taken; grey when it ends without a car (cancelled, or a no-show 30 minutes after the start).
+- Bottom row, the ticket: blue while the car is inside, green once paid, grey once out.
+- The dashed arrow back: a driver who pays and then waits more than 15 minutes owes the extra time at the exit.
+
+## Building the architecture, step by step
+
+- We start with one garage and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: One garage, counts in memory (F2)
+
+The smallest design: a controller in the garage counts cars in and out and opens the barrier.
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={1} caption="Step 1: the gate sends each plate read to the garage controller, which keeps the counts in memory." />
+
+- **Adds:** the gates (camera, barrier, sign) and the **garage controller**, one small computer per garage.
+- **Flow:**
+  1. The entry camera reads the plate and sends it to the controller.
+  2. The controller admits the car if `inside < spaces`, adds 1 and opens the barrier.
+  3. At the exit it subtracts 1 and opens the barrier.
+- **Why this and not that:** a count, not a list of spaces, is all a full or not-full decision needs (F2). This is the honest answer for one garage with no bookings.
+- **The gap:** a restart forgets who is inside; there is no ticket, no fee and no record.
+
+<PremiumBreak />
+
+### Step 2: Tickets in a database (F2, F3)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={2} caption="Step 2: the controller creates every ticket through the sync service and waits for the answer; a broken link stops the gate." />
+
+- **Adds:** the **device API**, the **sync service** and the **garage database**, with the ticket lifecycle (active, paid, exited).
+- **Flow:**
+  1. At entry the controller asks the sync service to create ticket `g17-t5531` and waits for `201`.
+  2. The barrier opens; at exit the controller asks for the ticket's fee and closes it.
+- **Why this and not that:** a ticket row gives each stay an entry time, a fee and an audit trail (F3, N7). This is the design most candidates draw first.
+- **The gap:** the gate now waits on a wide-area call; when the garage's link drops, cars queue at both barriers (D12). Step 6 fixes it.
+
+### Step 3: A space by vehicle type (F2)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={3} caption="Step 3: the controller picks the smallest free space that fits the vehicle and shows the bay at the entrance." />
+
+- **Adds:** a space allocator inside the controller, with a free list per space size and level; the gate shows "Level 2, bay 214".
+- **Flow:**
+  1. The camera or the ticket machine gives the vehicle type: motorcycle, car or van.
+  2. The allocator takes the nearest free space of the smallest size that fits; a motorcycle may use a car bay, a van only a van bay.
+- **Why this and not that:** smallest fit first keeps van bays free for vans; a free list per size makes the pick a heap pop, not a scan of 500 spaces (Deep dive 2).
+- **The gap:** nobody can book a space in advance.
+
+### Step 4: Reservations as capacity per slot (F1)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={4} caption="Step 4: a booking adds one to every 15-minute slot counter of its window in one transaction; a sweeper releases no-shows." />
+
+- **Adds:** the **driver app**, the **API gateway**, the **reservation service**, the `slot_capacity` table and the **no-show release** job.
+- **Flow:**
+  1. The driver books a car space at garage 17 from 09:00 to 11:00.
+  2. The reservation service adds 1 to the 8 slot rows of the window where `reserved < sellable`, and commits only if all 8 changed.
+  3. Thirty minutes after the start with no arrival, the sweeper marks a no-show and releases the rest of the window.
+- **Why this and not that:** selling capacity per vehicle type, not a numbered space, means an overstaying car never blocks a booked one; any fitting space will do (D10, F1).
+- **The gap:** nobody pays yet, and the operator cannot set rates.
+
+### Step 5: Pricing and payment (F3, F5)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={5} caption="Step 5: the billing service prices with the garage's rate strategy and charges with an idempotency key; the exit gate takes cards on site." />
+
+- **Adds:** the **operator console**, the **billing service** and the external **card processor**.
+- **Flow:**
+  1. The operator sets the rate table for garage 17: \$3 an hour, \$24 a day at most, \$20 flat on event nights.
+  2. In the app, a driver pays for a ticket with an `Idempotency-Key`; the billing service charges the processor once.
+  3. At the exit, the controller prices the stay with the same rate table and takes the card at the barrier.
+- **Why this and not that:** pricing is a strategy object chosen per garage and time (F5), so an event-night rate is a new class, not a new branch. The idempotency key makes a retried charge safe (D7).
+- **The gap:** the gate still waits on the cloud for every car.
+
+### Step 6: Many garages, gates that work offline (N3, N7)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={6} caption="Step 6: the controller decides from local data, logs each event, and syncs batches up and configuration down; a standby replica and an archive are added." />
+
+- **Adds:** a local log on the controller; a batch sync replaces the per-car call; the **standby replica**, the **archive job** and the **archive store**.
+- **Flow:**
+  1. Every 30 s the controller pulls rates, capacity and the next 24 hours of bookings.
+  2. At the gate it decides from that copy, appends the event to its local log with `fsync`, then opens the barrier.
+  3. Every few seconds it uploads new events with their ids; the sync service applies each id once and acknowledges.
+- **Why this and not that:** the barrier opens within 1 s whether the link is up or not (N2, N3, D12). A replay after an outage is harmless because event ids are unique per garage (D7).
+- **The gap:** drivers and signs still cannot see how many spaces are free.
+
+### Step 7: Availability for drivers and signs (F4)
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" step={7} caption="Step 7: the app reads free spaces from the availability service on the replica; the controller drives the signs from its own counts." />
+
+- **Adds:** the **availability service**; the controller also drives the level signs.
+- **Flow:**
+  1. The app asks for free car spaces near the stadium; the availability service counts active tickets and due bookings on the replica.
+  2. At the garage, the controller updates each level sign every 5 s from its own counts.
+- **Why this and not that:** the signs come from the controller, so a link outage never blanks them (D12, N5). 580 reads/s at peak need no cache (D1).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/parking-garage/architecture" stepper caption="A parking garage system: gates decide on site, reservations take capacity per 15-minute slot in one transaction, and one relational database serves the whole fleet." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Drivers and garages** | Driver app, operator console, card processor (external), garage controller, gates and signs | Book and pay; set rates; decide every entry and exit on site |
+| **Edge** | API gateway, device API | Authenticate drivers and operators; authenticate each garage by certificate |
+| **Capacity core** | Reservation service, availability service | Slot counters: the only strongly consistent path; free spaces for the app |
+| **Application services** | Billing service, sync service | Rates, fees, idempotent charges; apply gate events once, send config down |
+| **Async pipeline** | No-show release, archive job | Free unused slots; move old sessions to cheap storage |
+| **Storage** | Garage DB, standby replica, archive store | Everything (ACID); reads and failover; 7 years of history |
+
+A booked evening at garage 17, step by step:
+
+1. At 14:00 the driver books a car space for 18:00 to 20:00; the reservation service adds 1 to 8 slot rows in one transaction and returns code `K7Q2`.
+2. Within 30 s the controller's config pull brings the booking down with the plate.
+3. At 18:05 the camera reads the plate; the controller matches the booking, assigns bay 2-214, logs `entry` 9030 and opens the barrier.
+4. At 20:10 the controller prices 2 hours 5 minutes as 3 started hours × \$3 = \$9, takes the card, logs `exit` 9041 and opens the barrier.
+5. Seconds later the batch upload reaches the sync service, which inserts 9041 once and closes the ticket.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for people, batched HTTPS for garages
+
+- **Choice:** REST over HTTPS for the app and the operator console; garages push event batches and pull config over HTTPS every few seconds.
+- **Why:** every action is a short request and response; garages start every connection, so they work behind any firewall or mobile router (D12).
+- **Why not MQTT:** it shines when a fleet of 100,000 devices needs commands pushed in real time; here rates change daily and 1,000 garages send 1.35 MB a day each (D8).
+- **Why not WebSockets to each garage:** 1,000 long-lived sockets to keep alive and rebalance, to push data that can wait 30 s.
+- **Why not gRPC streaming:** nothing streams; a batch every few seconds is simpler to retry and to debug.
+
+### Load balancer and API gateway
+
+- **Choice:** a managed layer-7 load balancer in front of an API gateway that authenticates drivers and operators and limits requests per account.
+- **Why:** short HTTP requests routed by path (`/reservations` to the reservation service, `/garages` to availability); per-account limits stop one script from booking a stadium garage's last slots (D10).
+- **Why not layer 4:** it cannot route by path or terminate TLS for the gateway's checks.
+- **Algorithm:** least outstanding requests; at 580 reads/s any algorithm works, so pick the one that avoids a slow node.
+
+### Device API: a separate front door for garages
+
+- **Choice:** its own endpoint with mutual TLS: each controller holds a client certificate that names its garage.
+- **Why:** the certificate, not a field in the body, says which garage an event comes from; a stolen app token cannot upload gate events (N7).
+- **Why not share the driver gateway:** different identity, limits and failure modes; a bug in app auth must not stop 1,000 garages from syncing.
+- **Why not a VPN per garage:** 1,000 tunnels to run for traffic that mutual TLS already protects.
+
+### Garage controller: an on-site computer that decides
+
+- **Choice:** one small industrial computer per garage, wired to the cameras, barriers, card terminals and signs; a second one on standby in large garages.
+- **Why:** it makes every entry and exit decision from local data, so the barrier opens within 1 s with or without the network (N2, N3, D12).
+- **Why not gates that call the cloud:** a 30-minute outage at the 08:00 peak strands about 190 cars at one garage.
+- **Why not barrier hardware alone:** a barrier controller can count, but it cannot price a stay, match a booking or keep a log.
+
+### Local log: SQLite on the controller, written before the barrier opens
+
+- **Choice:** an embedded database (SQLite) in write-ahead-log mode holding the events, the open tickets and the cached config.
+- **Why:** each event is on disk (`fsync`) before the barrier moves, so a power cut never loses a car that left (D5, N7); 30 days is 40 MB.
+- **Why not counts in memory:** Step 1's design; a restart forgets every car inside.
+- **Why not a broker on site (Kafka):** a cluster to run in a basement for 4,500 events a day.
+- **Why not flat files:** no transactions, so a crash mid-write leaves a half event to clean up by hand.
+
+### Garage database: relational (PostgreSQL), one primary and a standby per region
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL holding slots, reservations, tickets, payments, event ids and config; one primary and a synchronous standby per region.
+- **Why:** a booking updates 8 slot rows all or nothing, and a ticket joins its booking and payment (D3, D10); ≈ 300 writes/s and 180 GB fit one server (D1, D8).
+- **Why not sharding:** one primary takes thousands of small writes a second; shards would add routing for a load 10 × below the limit.
+- **Why not a distributed SQL database (CockroachDB, Spanner):** consensus on every write and more to run, to solve a scale problem this system does not have.
+- **Why not Cassandra:** its lightweight transactions are per partition; 8 slot rows and a reservation cannot change together.
+- **Why not DynamoDB:** transactions over up to 100 items would cover a booking; we keep SQL because operators report by garage, day and rate in ad hoc queries.
+
+### Slot counters: rows in the same database, not a lock service
+
+- **Choice:** one `slot_capacity` row per garage, vehicle type and 15-minute slot, changed only by a guarded `UPDATE`.
+- **Why:** the database serialises writes to one row, so the last space goes to exactly one driver (D10, N1); the counters commit with the reservation in one transaction (D3).
+- **Why not Redis counters with `DECR`:** fast and atomic, but they cannot commit with the reservation row; a crash between them oversells or strands a space.
+- **Why not a lock per garage (ZooKeeper, Redis):** a second system to hold a lock that the row update already gives us for free.
+- **Why not a row per numbered space with an overlap constraint:** correct, but a driver who overstays blocks the next booking of that exact space (Design decisions).
+
+### Sync service: idempotent ingest, no message queue
+
+- **Choice:** a stateless service that inserts each event by `(garage_id, event_id)` and updates its ticket in the same transaction, and serves the config pull.
+- **Why:** 52 events/s on average and ≈ 300/s at peak go straight into one database (D1); the unique key makes a replay a no-op (D7).
+- **Why not Kafka or SQS in front:** a queue absorbs bursts the database does not have, and the consumer would still need the same dedup key.
+- **Revisit when:** 100,000 connected devices send telemetry every second; then a log in front of the database pays for itself.
+
+### Billing: pricing as a strategy, payments through a processor
+
+- **Choice:** a rate table per garage, versioned and pulled by its controller, evaluated by a `PricingPolicy` strategy; charges through an external card processor with an idempotency key.
+- **Why:** the exit gate and the app must compute the same fee, even offline, so the rule travels as data to the controller (F3, F5, D12). Card data never touches our systems.
+- **Why not compute fees only in the cloud:** an offline exit could not be priced.
+- **Why not authorise on entry and capture on exit:** a hold of an unknown amount for hours; the stay is priced at the exit anyway.
+- **Offline cards:** the terminal stores the payment and forwards it when the link returns; above \$100 the gate asks for another method, and if that fails the plate is invoiced (Deep dive 3).
+
+### No-show release: a sweeper, not a timer per booking
+
+- **Choice:** a job every minute that finds bookings 30 minutes past their start with no arrival, marks them `no_show` and subtracts 1 from their remaining slots in one transaction.
+- **Why:** one query replaces 300,000 timers a day, and a missed run only delays the release (D10).
+- **Why not a delayed message per booking:** a lost message strands capacity until someone notices.
+
+### Availability: the replica for the app, the controller for the signs
+
+- **Choice:** the availability service counts active tickets and due bookings per garage on the standby replica; signs are driven by the controller.
+- **Why:** 580 reads/s at peak are indexed counts, well within one replica (D1); signs stay right when the link is down (D12, N5).
+- **Why not a cache:** the data changes with every car, and the replica already answers in milliseconds.
+- **Why not a CDN for availability:** possible with a 10 s lifetime, but 580 reads/s do not need it; the CDN serves only the app's and console's static files.
+
+### Archive store: object storage for cold sessions
+
+- **Choice:** a monthly job writes sessions older than 13 months to object storage (files per garage and month) and deletes them from the primary.
+- **Why:** 1.15 TB over 7 years is read only for audits and disputes (D8).
+- **Why not keep everything in PostgreSQL:** cold rows slow every backup, restore and index rebuild.
+- **Why not delete after 13 months:** tax and dispute records must outlive the hot data.
+
+### What this design leaves out, and why
+
+- **Choice:** no cache, no message queue, no sharding, no search index and no separate microservice per box; the services can ship as one deployable with modules.
+- **Why:** every number on this page fits one database and one service tier (D1, D8); each extra part is one more thing to page someone about.
+- **Why not microservices:** one team, ≈ 300 writes/s and one database; the boxes in the diagram are modules with clear owners, not separate deployments.
+- **Revisit when:** the operator runs 50,000 garages or sells parking from other operators, which turns search and capacity into a marketplace problem.
+
+## Deep dives
+
+### Capacity by time window
+
+- **The rule:** a booking takes one unit in every 15-minute slot of its window, in one transaction, or none; the database checks and changes each counter in one statement.
+- **The same idea, other pages:** [Design a Hotel Booking Service](/system-design-case-studies/case-studies/hotel-booking) keeps one row per room type per night; [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) shows why a read, then a write, sells a seat twice. Here the unit is a slot, not a night or a seat.
+- **Rounding:** the start rounds down and the end rounds up to 15 minutes; 09:10 to 10:50 takes the 8 slots from 09:00 to 10:45.
+- **Overstays:** a car booked until 11:00 that leaves at 11:40 sits in slots nobody counted; 20 of garage 17's 400 car spaces (5%) are never sold ahead to absorb them.
+- **Drive-ups on site:** the controller admits a drive-up car only if cars inside plus bookings due now and not yet arrived is below the spaces for that type.
+- **Operator changes (F5):** the `CHECK (reserved <= sellable)` refuses a cut below what is already sold; the console shows which slots block it.
+
+The whole booking is one short transaction.
+
+```sql
+BEGIN;
+SELECT 1 FROM slot_capacity                      -- lock the 8 rows in slot order,
+ WHERE garage_id = 17 AND vehicle_type = 'car'   -- so two overlapping bookings
+   AND slot_start >= '2026-11-17 09:00' AND slot_start < '2026-11-17 11:00'
+ ORDER BY slot_start FOR UPDATE;                 -- cannot deadlock
+UPDATE slot_capacity SET reserved = reserved + 1
+ WHERE garage_id = 17 AND vehicle_type = 'car'
+   AND slot_start >= '2026-11-17 09:00' AND slot_start < '2026-11-17 11:00'
+   AND reserved < sellable;                      -- must change all 8 rows
+INSERT INTO reservations (garage_id, vehicle_type, during, code, status, idempotency_key)
+VALUES (17, 'car', '[2026-11-17 09:00, 2026-11-17 11:00)', 'K7Q2', 'booked', :key);
+COMMIT;                                          -- ROLLBACK if fewer than 8 changed
+```
+
+<AnimatedDiagram spec="animated/parking-garage/slot-capacity" stepper caption="A reservation takes one unit in every 15-minute slot of its window in one transaction, or none." />
+
+<StepCards>
+  <StepCard n={1} title="A fits: every slot +1">
+    Driver A books 09:00 to 11:00. All 8 slot rows are below 180, so the guarded update changes 8 rows and the booking commits; 09:45 and 10:00 are now full.
+  </StepCard>
+  <StepCard n={2} title="B hits a full slot: nothing kept">
+    Driver B asks for 09:30 to 10:30. Two of the four rows are full, so the update changes 2 rows, not 4; the transaction rolls back and B gets a 409 naming 09:45.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Sellable per slot: 200 offered − 20 held back = 180.
+- Event night: 17 attempts/s × 8 rows = 136 row updates/s on one garage. A transaction that holds its rows for about 2 ms allows about 500 bookings/s on the same rows, so the race is 3% of what one primary handles.
+
+<Callout tone="red" title="What breaks">
+  Reading the counts, checking them in the service and then writing `reserved + 1` lets two drivers both see 179 and both take the 180th space. The check and the change must be one guarded statement, with the row count checked.
+</Callout>
+
+### The object design
+
+- **What interviewers want first:** the nouns (garage, level, space, gate, vehicle, ticket, reservation) and who owns whom, before any database.
+- **Fit rules:** a space has a size (small, standard, large); `VehicleType.fits(size)` says a motorcycle fits all three, a car standard or large, a van only large.
+- **Allocation is a strategy:** `SpaceAllocator.pick(type)` returns a space; `SmallestFit` keeps a free set per size and level ordered by distance to the lift, so a pick is a heap pop, not a scan of 500 spaces.
+- **Pricing is a strategy:** `PricingPolicy.fee(ticket, exitAt)`; `Hourly`, `DailyMax` and `EventFlat` are classes, chosen per garage and time by the rate table.
+- **State is explicit:** a ticket moves active → paid → exited (the figure in "Data model"); each transition is one method that checks the current state.
+- **Concurrency on site:** two entry lanes can ask at the same instant, so `pick` runs under one lock in the controller, or on one thread that serves all lanes.
+
+<AnimatedDiagram spec="animated/parking-garage/classes" stepper caption="The garage owns levels, spaces and gates; allocation and pricing are strategies, so a new rule is a new class." />
+
+<StepCards>
+  <StepCard n={1} title="The garage, its spaces and tickets">
+    A garage has levels and gates; a level has spaces. An entry gate issues a ticket for a vehicle, and the ticket records the space; a reservation becomes a ticket when the car arrives.
+  </StepCard>
+  <StepCard n={2} title="Allocation and pricing as strategies">
+    The garage asks a `SpaceAllocator` for a space and a `PricingPolicy` for a fee. An event-night price or an "EV bays first" rule is a new class plugged in, not a new branch in the gate code.
+  </StepCard>
+</StepCards>
+
+The pricing strategy, as an interviewer would want to see it:
+
+```ts
+interface PricingPolicy { fee(ticket: Ticket, exitAt: Date): number }   // cents
+
+class HourlyWithDailyMax implements PricingPolicy {
+  constructor(private perHour: number, private dayMax: number) {}
+  fee(t: Ticket, exitAt: Date): number {
+    const hours = Math.ceil((exitAt.getTime() - t.enteredAt.getTime()) / 3_600_000);
+    const days = Math.floor(hours / 24);
+    return days * this.dayMax + Math.min((hours % 24) * this.perHour, this.dayMax);
+  }
+}
+// 18:05 to 20:10 at 300 an hour, 2,400 a day: ceil(2.08) = 3 hours = 900 cents
+```
+
+**The numbers:** 500 spaces in 3 sizes and 5 levels is 15 free sets; a pick is O(log n) on a set of at most 500.
+
+<Callout tone="red" title="What breaks">
+  A `ParkingGarage` singleton, or the fee as a chain of `if` branches inside `ExitGate`, works for one garage and one rate. The first event-night price or the second garage forces a rewrite; strategies and one object per garage do not.
+</Callout>
+
+### The offline gate
+
+- **What the controller keeps:** the current rate table and capacity (versioned), the bookings for the next 24 hours with plates and codes, and every open ticket.
+- **The order at the gate:** decide, append the event to the local log with `fsync`, then open the barrier; an event the log does not hold never happened.
+- **Upload:** events carry the controller's own sequence number; batches of up to 500 go up every few seconds; the cloud acknowledges "applied up to n"; failures retry with exponential backoff and jitter.
+- **Exactly once in effect:** the cloud inserts by `(garage_id, event_id)`; a replay after an outage inserts nothing and changes no ticket (D7).
+- **Bookings made while the garage is offline:** the booking code is signed with a key the controller holds, carrying garage, vehicle type and window, so the gate can check it with no lookup.
+- **Cards offline:** the terminal stores the payment and forwards it when the link returns; the operator carries the risk of a later decline, so offline payments are capped at \$100 and the plate is invoiced above that.
+- **Clocks:** a fee uses entry and exit times from the same controller's clock; the cloud stores both the device time and the time it received the event.
+- **The controller dies:** large garages run a standby controller; if both fail, exit barriers fail open so cars can leave, and the cameras still record plates.
+
+<AnimatedDiagram spec="animated/parking-garage/gate-offline" stepper caption="The gate decides from local data and logs before it opens; uploads happen after, and a replay is safe because each event id is applied once." />
+
+<StepCards>
+  <StepCard n={1} title="Online: decide locally, upload after">
+    The plate is read and the card taken; the controller logs exit e-9041 to disk and opens the barrier. The upload follows; the sync service inserts the event because its id is new and acknowledges up to 9041.
+  </StepCard>
+  <StepCard n={2} title="Link down: same decision, replay later">
+    The next exit is decided the same way and the card is stored on the terminal. The upload gets no answer; 40 minutes later the controller replays 9042 to 9101, and the sync service skips any id it has already seen.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 40 minutes offline at the evening peak is about 60 events here; at 300 bytes each that is 18 KB, one batch.
+
+<Callout tone="red" title="What breaks">
+  An event id made by the cloud, or no id at all, turns a replay into a second exit and a second charge. The id must be made on site, before the upload, and be unique per garage.
+</Callout>
+
+### Worked example: an event night at garage 17
+
+1. **13:00:** a match is announced for 19:30; 10,000 drivers try to book a car space from 18:00 to 22:00 (16 slots) in 10 minutes: about 17 attempts/s.
+2. **13:00 to 13:10:** each attempt locks 16 rows for a few milliseconds; 180 bookings commit, then every attempt changes fewer than 16 rows and gets a `409` in a few milliseconds.
+3. **13:11:** the controller's config pull has brought down all 180 bookings; the event-night policy, `EventFlat` at \$20, applies from 17:00.
+4. **18:00 to 22:00:** the garage's link fails. Entries continue from the cached bookings; 600 exits at \$20 are taken offline: \$12,000 stored on the terminals.
+5. **22:00:** the link returns; 600 exits, 450 entries and 600 payments (1,650 events, ≈ 0.5 MB) go up in 4 batches; any event already sent is skipped.
+6. **Next morning:** if 2% of offline cards are declined (an assumption), 12 × \$20 = \$240 is lost, against \$12,000 and 600 trapped cars had the exits waited for the cloud.
+
+**The numbers:** the race peaks at 17 × 16 = 272 row updates/s on one garage; the offline evening adds 1,650 rows to a database that takes ≈ 300 writes/s.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| What a booking buys | A numbered space with an overlap constraint, capacity per type and slot | Capacity per vehicle type per 15-minute slot | D10, F1, N1 | The driver cannot pick a bay in advance | Named bays sell at a premium (EV chargers): sell those few as numbered spaces |
+| Slot length | 5, 15 or 60 minutes; exact ranges | 15 minutes | D8, D10 | Up to 14 minutes of rounding at each end | Most stays are shorter than an hour |
+| Database | Sharded, distributed SQL, one relational primary per region | One PostgreSQL primary and a standby per region | D1, D8, D3 | A regional outage stops booking (not gates) | Writes reach a few thousand a second |
+| Where the gate decides | A cloud call per car, a controller on site | Controller with a local log | D12, N2, N3 | A booking made seconds ago may not be on site yet; signed codes cover it | Never while links fail |
+| How events reach the cloud | A message queue, MQTT, HTTPS batches | HTTPS batches with per-garage event ids | D1, D7, D8 | The cloud sees an exit seconds late | Telemetry from 100,000 devices every second |
+| Offline card payments | Block the exit, let cars out free, store and forward | Store and forward up to \$100, invoice the plate above | D12, D7, N3 | Some declines show up hours later | Declines cost more than the delays they avoid |
+| Pricing code | Branches in one fee function, strategy objects with rate tables | Strategies driven by a rate table pulled to each garage | F5, D12 | One more abstraction | Never: rates change every season |
+| Overstay buffer | Sell 100%, hold back a share | Hold back 5% (20 of 400 car spaces) | N1, D10 | 20 spaces a slot not sold ahead | Measured overstays sit far from 5% |
+| Sign counts | From the cloud, from the controller | From the controller | D12, N5 | The app and the sign can differ for a few seconds | Never: signs must survive outages |
+| No-show release | Never, a timer per booking, a sweeper at start + 30 minutes | Sweeper every minute | F1, D10 | A booked space can sit empty for 30 minutes | Late drivers lose bookings they still wanted |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Slot counters, the allocator's lock on site | The last spaces on an event night; two lanes picking at once |
+| [Idempotency](/system-design/patterns/idempotency) | Event ids on upload, keys on bookings and charges | A replay or a retry must change nothing |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | No-show release, archive job | Work that must happen later, even after a crash |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | Upload retries with backoff and jitter | 1,000 garages coming back after one outage must not retry in step |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | Gates keep working; the app degrades first | The cloud is the part we can lose |
+| [Distributed Time, Clocks and Ordering](/system-design/patterns/distributed-time-and-clocks) (advanced) | Fees from one controller's clock; device and receive times | 1,000 clocks that drift |
+
+- Not needed at this size, and worth saying out loud: sharding, a message queue, a cache, a search index.
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Electric-vehicle chargers | Capacity per slot, a controller on site, offline sessions with event ids | The unit is a connector; the fee is per kWh as well as per minute |
+| Parcel lockers | Sizes and smallest fit first, a strategy for allocation, offline unlock codes | A locker is numbered, so the code opens one door; no time window for the courier |
+| Shared desks | Capacity per floor per slot, no-show release | No gate; check-in is a tap in the app, so offline does not matter |
+| Bike docks | Counts per dock, offline unlock, event ids | Bikes move between docks, so availability is rebalanced by vans |
+
+## How real systems do it
+
+- **SpotHero (2025):** a parking reservation service that sells space in partner garages and lots; it does not hold a particular space for each booking, and partners supply inventory data to limit overbooking. Drivers get a parking pass by email or in the app.
+- **SpotHero (2025):** over 90 million cars parked, at over 14,000 locations in more than 400 cities in the US and Canada.
+- **PostgreSQL 18 documentation (read 2026):** an exclusion constraint with `&&` on a range column rejects overlapping ranges; with the `btree_gist` extension it does so only for equal keys, such as the same room. That is the numbered-space variant of this design.
+- **Stripe Terminal documentation (read 2026):** in offline mode a reader stores payments and forwards them when the connection returns; authorisation is attempted only then, the business carries the decline risk, a US\$10,000 maximum applies, and the docs suggest refusing offline payments above an amount.
+- **Stripe (2017):** a client sends an idempotency key with each operation; a retry with the same key returns the stored result instead of repeating it, and clients back off exponentially with jitter.
+- **Where this design differs:** garage operators do not publish their internals, so this design rests on documented building blocks: a marketplace that sells capacity, database constraints and offline card terminals. The sizes on this page are chosen, not measured.
+
+## Failure modes & pitfalls
+
+- **Read, then write on slot counts:** two drivers take the last space; alert on any slot with `reserved > sellable`; one guarded `UPDATE` with the row count checked.
+- **Gates that call the cloud:** a link outage queues cars onto the street; watch upload lag per garage; decide on site and log first.
+- **Event ids made in the cloud:** a replay after an outage double-counts exits and charges twice; watch `already_seen` against `applied`; ids made on site, unique per garage.
+- **Thundering herd after an outage:** 1,000 controllers reconnect at once and retry in step; watch sync error rate after an incident; exponential backoff with jitter.
+- **Clock drift on a controller:** fees come out a few minutes wrong; compare device time with receive time on every batch; NTP and an alarm above 30 s of drift.
+- **No overstay buffer:** booked drivers arrive to a full garage; count booked arrivals turned away; hold back a share of spaces from advance sale.
+- **Sweeper down:** no-shows keep slots off sale; watch the oldest booked reservation past start + 30 minutes; run the job on two nodes with a lease.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify one garage or a chain, vehicle types, bookings and drive-ups, how drivers pay, and what happens offline; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 20:** the object design: garage, level, space, gate, vehicle, ticket, reservation; fit rules; allocator and pricing as strategies; the ticket's states.
+3. **Minutes 20 to 25:** estimates: 1,000 garages, ≈ 300 writes/s at peak, 180 GB; say one database is enough.
+4. **Minutes 25 to 35:** Steps 2 to 5: tickets in a database, slot counters for bookings, pricing and payment with idempotency keys.
+5. **Minutes 35 to 45:** Steps 6 and 7 and one deep dive: the offline gate or the slot race; answer the "why not" for sharding, queues and caches.
+
+**What interviewers listen for:**
+
+- **Mid:** clean classes with clear ownership, fit rules by vehicle size, a ticket with entry and exit times, a fee computed by a pricing object.
+- **Senior:** capacity per slot updated atomically across the window, why a numbered space is the harder product, idempotent payments, gates that decide on site.
+- **Staff:** what this system does not need and why, event ids made on site, decline risk of offline payments as a business choice, how the design changes for chargers or lockers.
+
+**Red flags:** a `ParkingGarage` singleton; fees as `if` branches in the gate; read a count, then write it; a cache added "for scale"; a gate that waits on the cloud.
+
+## Further reading
+
+- [How SpotHero works](https://blog.spothero.com/how-spothero-works) (SpotHero, 2025)
+- [Range types: constraints on ranges](https://www.postgresql.org/docs/current/rangetypes.html) (PostgreSQL 18 documentation)
+- [Accept offline payments](https://docs.stripe.com/terminal/features/operate-offline/overview) (Stripe Terminal documentation)
+- [Collect card payments while offline](https://docs.stripe.com/terminal/features/operate-offline/collect-card-payments) (Stripe Terminal documentation)
+- [Designing robust and predictable APIs with idempotency](https://stripe.com/blog/idempotency) (Stripe, 2017)
+- Related pages: [Design a Hotel Booking Service](/system-design-case-studies/case-studies/hotel-booking) · [Design Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Design a Vending Machine](/system-design-case-studies/case-studies/vending-machine) · [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) · [Idempotency](/system-design/patterns/idempotency)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which questions would you ask before designing the parking garage?" category="Concepts" level="Mid">
+  - One garage or a chain, and how many spaces: it decides whether this is an object design or a backend too.
+  - Which vehicle types and which spaces fit which: it decides the allocation rules.
+  - Bookings or drive-up only, and does a booking get a numbered space: it decides the capacity model.
+  - How drivers pay, and what must happen when the garage loses its network.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk me through your classes for a parking garage." category="Architecture" level="Mid">
+  - A garage has levels and gates; a level has spaces with a size; a gate issues a ticket for a vehicle.
+  - A ticket records entry, exit, the space and its state: active, paid, exited.
+  - A reservation becomes a ticket when the car arrives.
+  - Allocation and pricing are strategy interfaces the garage uses, so new rules are new classes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose a space for an arriving vehicle?" category="Concepts" level="Mid">
+  - Fit rules by size: a motorcycle fits any space, a car a standard or large one, a van only a large one.
+  - Take the smallest size that fits, nearest the lift, so large spaces stay free for vans.
+  - Keep a free set per size and level ordered by distance, so a pick is a heap pop.
+  - Make the policy a `SpaceAllocator` strategy, so "EV bays first" is a new class.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure a time slot is never oversold when drivers race for the last spaces?" category="Concepts" level="Senior">
+  - Keep a counter row per garage, vehicle type and 15-minute slot.
+  - Add 1 to every slot of the window in one transaction with a guarded `UPDATE … WHERE reserved < sellable`.
+  - Commit only if the row count equals the number of slots; otherwise roll back and return `409`.
+  - Lock the rows in slot order so two overlapping bookings cannot deadlock.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why sell capacity instead of a numbered space?" category="Trade-offs" level="Senior">
+  - A numbered space needs an overlap check per space, which a range constraint can do, but one overstaying car then blocks the next booking of that exact space.
+  - Capacity per vehicle type lets any fitting space serve the booking, and a small held-back share absorbs overstays.
+  - The driver loses the choice of bay; sell the few bays that matter, such as EV chargers, as numbered spaces.
+  </InterviewQuestion>
+  <InterviewQuestion question="The garage loses its internet connection for four hours. What happens at the gates?" category="Failure modes" level="Senior">
+  - Nothing visible: the controller decides from its cached rates, capacity and bookings, and logs each event to disk before opening.
+  - Cards are stored on the terminal and forwarded later; offline payments are capped and the plate is invoiced above the cap.
+  - When the link returns, events replay with ids made on site, and the cloud applies each id once.
+  - Bookings made during the outage carry a signed code the gate can check with no lookup.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid charging a driver twice?" category="Failure modes" level="Mid">
+  - Every charge from the app carries an `Idempotency-Key`; a retry returns the first result.
+  - Exit payments are gate events with a per-garage event id; a replayed upload inserts nothing.
+  - A ticket moves to paid once; a second payment for a paid ticket is refused by its state check.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you shard the database, add a cache or put a message queue in front of it?" category="Scaling" level="Senior">
+  - No: ≈ 300 writes/s at peak and 180 GB of hot data fit one PostgreSQL primary with a standby.
+  - A cache would hold counts that change with every car; the replica already answers 580 reads/s.
+  - A queue would absorb bursts the database does not have, and still need the same dedup key.
+  - Revisit when writes reach a few thousand a second or the fleet becomes a marketplace of other operators.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you add a new pricing rule, such as a flat event-night price?" category="Architecture" level="Mid">
+  - Write a new `PricingPolicy` class, such as `EventFlat`, with its own `fee` method.
+  - Add it to the garage's rate table with the hours it applies; the controller pulls the new version.
+  - The gate code does not change, and old tickets keep the rate version they started with.
+  </InterviewQuestion>
+  <InterviewQuestion question="The interviewer changes the question to parcel lockers. What changes?" category="Architecture" level="Senior">
+  - The classes stay: sizes, smallest fit first, an allocator strategy, a state per locker.
+  - A locker is numbered, so the code opens one door; there is no time window to sell.
+  - Offline unlock with signed codes and event ids carries over unchanged.
+  </InterviewQuestion>
+</InterviewQuestions>

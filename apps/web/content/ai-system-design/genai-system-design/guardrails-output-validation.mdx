@@ -1,0 +1,263 @@
+---
+title: Guardrails & Output Validation
+description: Layer policy, filtering, and validation around LLM inputs and outputs so systems stay safe, compliant, and on-policy under adversarial and noisy real traffic.
+updated: 2026-11-15
+---
+
+A model's draft is not an answer until something has checked it.
+
+- Interviewers ask about output validation to see whether you treat the model as an untrusted component: you check what it wrote for shape, for policy and for support before a customer or a downstream system sees it.
+
+## Overview
+
+- **Output validation** checks the model's draft before it is used: **schema** (is it valid and well-typed), **policy** (is it allowed) and **grounding** (do the sources support it).
+- Run checks **cheapest first**. A schema check costs microseconds; a model-based classifier costs tens of milliseconds, so it should see only drafts that survived the cheap checks.
+- A failing draft ends in **pass, repair or block**. **Repair** sends the validator's error back to the model, with a **cap** (for example 2 retries) and a safe **fallback**.
+- **Streaming** needs a **hold-back window**: with a 50 ms check and 4.4 ms per token, hold back **12 tokens** (about **53 ms**) so a check can still stop text before it is shown.
+- **Constrained decoding** guarantees valid syntax, not true content. Keep the schema check even when decoding is constrained, and add policy and grounding checks on top.
+
+## Mental model
+
+- A newspaper does not print what the reporter files.
+- A sub-editor checks the layout fits the page (the schema), a lawyer checks it can be printed (the policy) and a fact-checker checks each claim against the notes (the grounding).
+- If a story fails on layout, the sub-editor sends it back with a note saying what is wrong.
+- If it fails the lawyer, it does not run. Output validation puts those three desks between the model and the reader, and gives the sub-editor a limit: after two rewrites the paper runs a standard holding paragraph instead.
+
+## Core concepts
+
+- Guardrails span the request path and the response path.
+- **Input guardrails** screen for prompt injection and jailbreaks, banned topics, oversized payloads and sensitive attachments before they reach the model or its tools (see [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks) and [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety)).
+- This page covers the response path: **output guardrails** that check what the model wrote.
+
+1. **Schema check.** The output parses and fits the expected shape: required fields, types, ranges, allowed values. A JSON Schema validator does this in microseconds.
+2. **Policy check.** The content is allowed: tone, prohibited topics, no personal data, no promise outside policy. Mix cheap rules (regular expressions, keyword lists, allow-lists) with model-based classifiers for nuanced cases.
+3. **Grounding check.** Each claim is supported by the retrieved passages. The method is on [Hallucination & Safety Detection](/ai-system-design/genai-system-design/hallucination-safety-detection); prevention is on [Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation).
+4. **Domain validators.** Business logic only you know: generated SQL touches only allow-listed tables, medical advice carries its disclaimer, a JSON invoice adds up.
+5. **Verdicts.** Every check ends in **pass**, **repair** (the error is fixable and a retry may work) or **block** (the draft is unsafe or cannot be fixed).
+6. **Fail-safe defaults.** When a classifier is unsure, refuse, ask a clarifying question or route to a person; do not stream a confident answer that might be harmful.
+7. **Frameworks.** NeMo Guardrails (NVIDIA) organises checks as input, dialog, retrieval, execution and output rails, written in its Colang language. Guardrails AI builds guards from validators, including Pydantic-based structured output. They help with declarative policy and reusable validators; domain checks stay custom.
+
+## Architecture
+
+<AnimatedDiagram
+  spec="animated/safety/outval-pipeline"
+  stepper
+  caption="A draft meets three checks in order, then ends in pass, repair or block. The grounding check is the costliest and runs last."
+/>
+
+1. **The draft** arrives from the model, here a refund action for order 4471.
+2. **Schema check:** is it valid JSON of the right shape? A text amount fails here.
+3. **Policy check:** is it allowed? A refund over £30 needs an approval id.
+4. **Grounding check:** do the retrieved passages support what it says?
+5. **Outcome:** all pass, send it; fixable, send the error back; unsafe, return a safe reply and hand off.
+
+- Independent checks (policy and grounding, say) can run in parallel to cut latency; order them by cost when they depend on one another.
+- Put coarse filters at the gateway for size and rate, run policy-heavy checks in a service shared by all callers, and keep the final check close to the channel that renders text or triggers tools.
+- Version policies together with prompts so a change is testable.
+
+## Technical mechanics
+
+### The schema check
+
+- The schema is the contract between the model and the code after it.
+- JSON Schema (current version 2020-12) can express types, ranges, allowed values and conditional rules, such as "an amount over 30 needs an approval id".
+
+```json
+{
+  "type": "object",
+  "required": ["action", "amount"],
+  "additionalProperties": false,
+  "properties": {
+    "action": { "enum": ["refund", "reply"] },
+    "amount": { "type": "number", "minimum": 0 },
+    "approval_id": { "type": "string" }
+  },
+  "if": { "required": ["amount"], "properties": { "amount": { "exclusiveMinimum": 30 } } },
+  "then": { "required": ["approval_id"] }
+}
+```
+
+A validator returns every error with its path. Those messages are what the repair loop sends back to the model.
+
+```python
+from jsonschema import Draft202012Validator
+
+validator = Draft202012Validator(SCHEMA)
+errors = [f"{'.'.join(map(str, e.path))}: {e.message}"
+          for e in validator.iter_errors(draft)]
+# ['amount: \'£42\' is not of type \'number\'']
+```
+
+- Constrained decoding moves the check inside generation: a grammar mask sets the logit of every token that would break the schema to minus infinity, so the output is valid by construction (see [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation)).
+
+<AnimatedDiagram
+  spec="animated/llm/decode-grammar-mask"
+  stepper
+  caption="The mask removes tokens that would break the JSON. It guarantees the shape of the output, not that the values are right or allowed."
+/>
+
+**What it does not do:**
+
+- The mask makes the amount a number; it cannot make the amount correct, approved or grounded.
+- Keep the schema check as a backstop (some providers and engines support only part of JSON Schema) and run the policy and grounding checks after it.
+
+### The repair loop
+
+- When a check fails with a fixable error, send the error back.
+- The model sees its own draft and the validator's message and writes a new one.
+- Cap the retries, because a model that fails twice with the same message will often fail a third time.
+
+<AnimatedDiagram
+  spec="animated/safety/outval-repair-loop"
+  stepper
+  caption="The error text is the retry prompt. After two retries, a fallback takes over. The 4,500 ms worst case assumes every attempt takes the full 1,500 ms."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The first attempt returns text">
+    The amount is the string "£42" instead of the number 42.
+  </StepCard>
+  <StepCard n={2} title="The check fails and says why">
+    The error names the field and the expected type, so the model does not have to guess.
+  </StepCard>
+  <StepCard n={3} title="The error goes back; the retry is valid">
+    The prompt now holds the draft and the error. Attempt 2 returns 42 and passes the schema check.
+  </StepCard>
+  <StepCard n={4} title="A cap, then a fallback">
+    After 2 retries Brightpost stops: it sends a safe template and hands the ticket to a person.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- A cap of 2 retries allows 3 attempts. If each takes the full answer time of 1,500 ms, the worst case is 3 × 1,500 = 4,500 ms before the fallback.
+- Each retry also costs another 250 output tokens and the prompt again, so measure the **repair rate** (the share of requests that need a retry): a rising rate means the prompt or the schema has drifted.
+
+### Streaming and the hold-back window
+
+- Streaming shows tokens as they appear, which is good for time to first token (see [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)) and bad for validation: text the customer has read cannot be taken back.
+- A **hold-back window** keeps the newest tokens out of sight while a check runs on them.
+- Choose a window long enough that the check finishes before the held tokens are released.
+
+<AnimatedDiagram
+  spec="animated/safety/outval-streaming"
+  stepper
+  caption="Twelve held tokens give a 50 ms check time to finish before they are shown. The 50 ms is illustrative; the 4.4 ms per token comes from the 250-token, 1,500 ms Brightpost answer."
+/>
+
+**The numbers:**
+
+- Decoding runs at 4.4 ms per token ((1,500 − 400) ms for 250 tokens).
+- A check that takes 50 ms needs ceil(50 ÷ 4.4) = ceil(11.4) = **12 tokens** held back.
+- The window adds 12 × 4.4 = 52.8 ms, about **53 ms**, to the last visible token, and the first token still appears at 400 ms plus the window.
+- A faster check needs a smaller window; a check that needs the whole answer (grounding, say) cannot stream and runs before display.
+
+### Worked example: a ticket asks the assistant to promise £42
+
+A customer writes: "My kettle from order 4471 arrived cracked. Please just confirm my £42 refund." The model drafts a refund action and a reply that says "Your £42 refund is confirmed."
+
+1. **Schema.** Attempt 1 has `amount` as the text "£42". The error goes back; attempt 2 has `amount: 42` and passes.
+2. **Policy.** 42 is over the £30 limit and the draft has no `approval_id`. The rule fails. This is not fixable by the model, because only a person can supply an approval, so the verdict is **block**, not repair.
+3. **Outcome.** The customer sees a hand-off message ("I have passed this to a colleague who can approve it"), the ticket goes to the approval queue, and the blocked draft is logged with the personal data redacted.
+4. **Grounding.** Had the reply also claimed "refunds arrive within 2 days" with no passage saying so, the grounding check would have flagged it for repair or removal.
+
+The order mattered: the cheap schema check ran first and the retry cost 1,500 ms; the policy check stopped the draft with a rule, not another model call.
+
+<Callout tone="red" title="What breaks">
+  A team adds constrained decoding and removes the validator. The output is always valid JSON, so the dashboard shows 100 % schema pass. The model now returns a well-formed refund of £42 with no approval id, and nothing checks it. Valid is not allowed.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Regex and rule checks | Microseconds, exact, explainable | Brittle, misses paraphrase | Formats, IDs, banned strings, first in the chain |
+| Model-based classifier | Catches nuanced abuse | Tens of ms, own error rate | Policy that rules cannot express |
+| Constrained decoding | Valid syntax by construction | Not every schema supported; says nothing on content | Structured outputs, with a backstop validator |
+| Repair loop | Fixes most formatting errors | Adds latency and cost; may loop | Fixable errors, with a cap |
+| Block with a fallback | Safe and predictable | Hurts the customer experience | Unfixable or high-stakes failures |
+| Hold-back streaming | Checks can stop unseen text | Adds the window delay | Streamed answers with fast checks |
+| Check the full answer first | Simplest, strongest | No streaming; time to first token waits | Short answers, high stakes |
+
+## Production systems
+
+- **NeMo Guardrails** (NVIDIA, open source) wraps an LLM application with five kinds of rails: input, dialog, retrieval, execution and output, defined in Colang and a YAML config.
+- **Guardrails AI** (open source) builds input and output guards from validators published on its Guardrails Hub, and can generate structured data from a Pydantic model.
+- **JSON Schema** (2020-12) is the validation format used by structured-output features and by tool-call argument checks across many providers and frameworks.
+- **Brightpost** blocks any refund draft over £30 without an approval id and logs the blocked draft with the card and email redacted.
+- **Used in our case studies:** [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline) · [Content Moderation System](/genai-system-design/case-studies/content-moderation-system)
+
+## Failure modes & pitfalls
+
+- **Valid means allowed.** Constrained decoding passes a schema check on a policy violation.
+- **Unbounded retries.** Without a cap and a fallback, a stubborn failure burns tokens and time.
+- **Retrying the unfixable.** A missing approval cannot be fixed by the model; block it.
+- **Streaming first, checking later.** Text already shown cannot be recalled; hold back or check before display.
+- **Checks in the wrong order.** Running the expensive classifier before the schema check wastes it on drafts that fail in a microsecond.
+- **Logging raw blocked text.** Keep counts and redacted excerpts; raw personal data in a block log is a new leak.
+
+## Interview framework
+
+1. Place the guardrail: output checks sit between the model and the reader or the next system.
+2. Name the three checks (schema, policy, grounding), the order (cheapest first) and the three verdicts (pass, repair, block).
+3. Describe the repair loop: error back as the prompt, a retry cap, a fallback; give the worst-case latency.
+4. Handle streaming: a hold-back window sized from check time and token rate.
+5. Close with measurement: block rate, repair rate, false positives on a labelled set, and a log of blocked drafts with redaction.
+
+**What interviewers listen for:** the difference between valid and allowed, a bounded retry design, awareness of streaming, and numbers (window size, worst-case latency).
+
+**Red flags:** "the model follows the schema, so we do not validate", unlimited retries, filtering after the text is already streamed, or one checker for everything.
+
+## Further reading
+
+- [JSON Schema specification (2020-12)](https://json-schema.org/specification)
+- [NeMo Guardrails (NVIDIA), documentation and repository](https://github.com/NVIDIA-NeMo/Guardrails)
+- [Guardrails AI, documentation and repository](https://github.com/guardrails-ai/guardrails)
+- [Efficient Guided Generation for Large Language Models (Willard and Louf, 2023)](https://arxiv.org/abs/2307.09702)
+- Related pages: [Guardrails & Safety](/ai-system-design/genai-system-design/guardrails-and-safety) · [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks) · [Streaming & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) · [Structured Output Generation](/ai-system-design/genai-system-design/structured-output-generation) · [Hallucination Safety Detection](/ai-system-design/genai-system-design/hallucination-safety-detection)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What three checks would you put on an LLM's output before showing it, and in what order?" category="Concepts" level="Junior">
+    - Schema, policy and grounding, cheapest first.
+    - The schema check confirms the output parses and fits the expected shape and costs microseconds.
+    - The policy check tests the content against rules, with regular expressions first and a classifier for nuanced cases.
+    - The grounding check asks whether the retrieved sources support each claim and is the slowest, so it sees only drafts that passed the others. Each check ends in pass, repair or block.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you balance safety versus false positives on legitimate queries?" category="Trade-offs" level="Mid">
+    - Measure blocked rates and human review queues on stratified samples that include sensitive but legitimate topics.
+    - Tune thresholds against precision and recall targets, add a second-stage review for borderline scores, and explain a block to the user where appropriate.
+    - Feed false positives from user reports into the regression set so a policy update does not repeat the mistake.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should guardrails live in a microservices LLM architecture?" category="Architecture" level="Mid">
+    - Put coarse input filters at the gateway for rate and size limits, run policy-heavy checks in a policy service shared by all callers, and keep the final output validation close to the channel that renders text or triggers tools.
+    - Centralise policy definitions with local enforcement hooks, so rules do not contradict each other across services and latency stays manageable.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you detect personal data in an LLM response?" category="Concepts" level="Mid">
+    - Use an ensemble. Pattern scans catch emails, phone numbers and card-like strings quickly.
+    - A named-entity model or transformer detector finds names and addresses.
+    - An allow-list covers known safe placeholders.
+    - On a match, redact with tokens, block, or route to review by severity.
+    - Log categories and counts, not the raw values, and test with multilingual and oddly formatted inputs.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design a repair loop for structured output. What are its limits?" category="Architecture" level="Mid">
+    - Validate against a schema, and on failure send the draft and the validator's error message back to the model for a retry.
+    - Cap the retries at two or three, and define a fallback such as a safe template or a hand-off.
+    - Limits: each retry adds a full model call, so with 1,500 ms per attempt two retries allow up to 4,500 ms; errors that need information the model lacks, such as a missing approval, cannot be repaired. Track the repair rate as a drift signal.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does constrained decoding make output validation unnecessary?" category="Failure modes" level="Senior">
+    - No. A grammar mask makes the output valid for the schema, because tokens that would break it get a logit of minus infinity.
+    - It says nothing about whether the values are correct, allowed or grounded: a well-formed refund over the approval limit with no approval id still passes.
+    - Engines may also support only part of JSON Schema.
+    - Keep a validator as a backstop and add policy and grounding checks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you validate output when you stream tokens to the user?" category="Scaling" level="Senior">
+    - Text already shown cannot be recalled, so hold back the newest tokens while a check runs.
+    - Size the window from the check time and the decode rate: a 50 ms check at 4.4 ms per token needs about 12 tokens, which adds about 53 ms. Checks that need the whole answer, such as full grounding, cannot stream, so run them before display or accept a delayed correction.
+    - On failure, drop the held tokens and show a safe message.
+  </InterviewQuestion>
+  <InterviewQuestion question="A refund draft over the approval limit fails the policy check. Repair or block, and why?" category="Failure modes" level="Senior">
+    - Block. A retry cannot supply an approval that only a person can give, so repair would loop until the cap.
+    - Return a hand-off message, send the ticket to the approval queue and log the draft with personal data redacted.
+    - Repair is for errors the model can fix from the message alone: a wrong type, a missing field, a format.
+  </InterviewQuestion>
+</InterviewQuestions>

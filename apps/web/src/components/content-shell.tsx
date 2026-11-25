@@ -15,11 +15,11 @@ export function ContentShell({ navTree, children }: ContentShellProps) {
   return (
     <div data-content-shell data-tone={tone} className="flex w-full items-start">
       <ContentShellSidebar navTree={navTree} />
-      <div className="relative flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col @container">
         <div className="flex-1">{children}</div>
-        {/* On desktop the footer sits in the content column, next to the sticky sidebar; the root footer
-            is hidden there by globals.css. */}
-        <div className="hidden md:block">
+        {/* On desktop (lg+, matching the persistent sidebar) the footer sits in the content column; the root
+            footer is hidden there by globals.css. */}
+        <div className="hidden lg:block">
           <SiteFooter />
         </div>
       </div>

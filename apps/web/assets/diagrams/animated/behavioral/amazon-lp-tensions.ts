@@ -1,7 +1,7 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
 
 const spec: DiagramSpec = {
-  title: "How Amazon Bar Raisers test the tension between competing Leadership Principles",
+  title: "Four pairs of Leadership Principles that pull against each other",
   width: 920,
   height: 410,
   steps: [
@@ -11,9 +11,9 @@ const spec: DiagramSpec = {
     { title: "4. Candor vs Alignment", covers: "Have Backbone ↔ Earn Trust & Commit" },
   ],
   zones: [
-    { id: "pole-a", title: "Principle Pole A", tone: "blue", x: 16, y: 20, w: 250, h: 370 },
-    { id: "pole-b", title: "Competing Pole B", tone: "orange", x: 335, y: 20, w: 250, h: 370 },
-    { id: "synthesis", title: "Bar Raiser Resolution", tone: "green", x: 654, y: 20, w: 250, h: 370 },
+    { id: "pole-a", title: "One principle", tone: "blue", x: 16, y: 20, w: 250, h: 370 },
+    { id: "pole-b", title: "The one pulling against it", tone: "orange", x: 335, y: 20, w: 250, h: 370 },
+    { id: "synthesis", title: "An answer that holds both", tone: "green", x: 654, y: 20, w: 250, h: 370 },
   ],
   nodes: [
     {
@@ -24,7 +24,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 141,
       y: 85,
-      w: 214,
+      w: 224,
       h: 54,
       step: 1,
     },
@@ -73,7 +73,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 460,
       y: 175,
-      w: 214,
+      w: 234,
       h: 54,
       step: 2,
     },
@@ -85,7 +85,7 @@ const spec: DiagramSpec = {
       tone: "green",
       x: 779,
       y: 175,
-      w: 214,
+      w: 228,
       h: 54,
       step: 2,
     },
@@ -110,7 +110,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 460,
       y: 265,
-      w: 214,
+      w: 218,
       h: 54,
       step: 3,
     },
@@ -135,7 +135,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 141,
       y: 350,
-      w: 214,
+      w: 218,
       h: 54,
       step: 4,
     },
@@ -147,7 +147,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 460,
       y: 350,
-      w: 214,
+      w: 240,
       h: 54,
       step: 4,
     },

@@ -2,9 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { GLYPH_NAMES, Glyph, isGlyph, type GlyphName } from "@/components/diagrams/glyphs";
-import type { Tone } from "@/components/diagrams/types";
+import type { LayoutTone } from "@/components/diagrams/types";
 
-const TONES: Tone[] = ["blue", "green", "orange", "red", "violet", "teal", "neutral"];
+const TONES: LayoutTone[] = ["blue", "green", "orange", "red", "violet", "teal", "neutral", "pink", "lime"];
 
 describe("diagram glyphs", () => {
   it("renders every glyph to SVG with at least one shape", () => {
@@ -101,6 +101,19 @@ describe("diagram glyphs", () => {
       "model",
       "policy",
       "pipeline",
+      // RAG batch.
+      "chunk",
+      "vector",
+      "embedder",
+      "vector-index",
+      "reranker",
+      "prompt",
+      "graph",
+      // Agents batch.
+      "tool",
+      "plan",
+      "approval",
+      "sandbox",
     ];
     for (const name of expected) expect(GLYPH_NAMES, name).toContain(name);
     expect(GLYPH_NAMES).toHaveLength(expected.length);
@@ -150,6 +163,8 @@ describe("diagram glyphs", () => {
     expect(isGlyph("ring")).toBe(true);
     expect(isGlyph("folder-share")).toBe(true);
     expect(isGlyph("pipeline")).toBe(true);
+    expect(isGlyph("vector-index")).toBe(true);
+    expect(isGlyph("approval")).toBe(true);
     expect(isGlyph("not-a-glyph")).toBe(false);
     expect(isGlyph("")).toBe(false);
     expect(isGlyph(undefined)).toBe(false);

@@ -1,0 +1,660 @@
+---
+title: "Design Tinder"
+description: "Nearby profiles from a geosharded search index, swipes at 145,000 a second, and exactly one match pushed the moment two people like each other."
+logo: systems/tinder
+updated: 2026-11-17
+---
+
+Design a dating app: show each user a deck of nearby people they have not seen, record every swipe, and tell both people the moment they like each other.
+The hard parts are a location search that is filtered and ranked per user, a swipe stream of 145,000 writes a second, and a match that must be created exactly once when two likes arrive together.
+
+- Interviewers use this question to see whether you can split a read-heavy search path from a write-heavy event path, shard by geography, and find the one place that needs an atomic step.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design Tinder: show people nearby, let users swipe, and tell both sides the moment they match."
+  level="Senior"
+  minutes={45}
+  bankId="design-tinder"
+  tests={[
+    "A location search that filters and ranks, and how location data is partitioned",
+    "Lookups near a cell or shard boundary",
+    "A write-heavy swipe stream kept apart from the read path",
+    "Exactly one match when both people like each other at once",
+  ]}
+  clarify={[
+    { q: "How big?", a: "50,000,000 daily users, 100 swipes each a day." },
+    { q: "How far does the deck reach?", a: "The user's distance setting; 40 km by default, up to 160 km." },
+    { q: "Must the order be smart, or only nearby?", a: "Filtered by both people's preferences, then ranked; ranking is a short step here." },
+    { q: "Can a left swipe be undone?", a: "No: a swiped profile never comes back, except a rare paid undo of the last swipe." },
+    { q: "Is chat after a match in scope?", a: "No: a match opens a conversation in a separate chat system." },
+    { q: "How fast must a match arrive?", a: "Within 2 s when the other person has the app open; a mobile push otherwise." },
+  ]}
+  outOfScope={["Chat after the match", "Payments and subscriptions", "Photo moderation", "Fraud and bot detection"]}
+/>
+
+## Overview
+
+- Profiles and preferences live in a **relational database**; photos sit in a **blob store** behind a **CDN**.
+- The deck comes from a **search engine sharded by geography**: map cells grouped into **geoshards of equal load**, queried with distance, age and gender filters, then **ranked**.
+- Every swipe is appended to a **wide-column swipe log** built for writes; a per-user **seen filter** in memory keeps swiped profiles out of the deck.
+- A like sets one flag on **one row per pair** in a key-value store, **atomically**, and reads the other flag: exactly one request sees both likes and creates the match.
+- Matches and index updates travel on a **durable event log**; a notifier **nudges** the app over a **WebSocket**, or sends a mobile push when the app is closed.
+- Location updates move a profile **between shards** when it crosses an edge: delete in one, insert in the other.
+
+<Numbers
+  items={[
+    { value: "145K/s", label: "swipes at peak", hint: "2.5 × the 58K/s average" },
+    { value: "2,900/s", label: "decks built at peak", hint: "1,000 candidates each" },
+    { value: "870/s", label: "matches at peak", hint: "2 % of likes" },
+    { value: "55 TB", label: "of swipes a year", hint: "30 bytes × 5 billion a day" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Profile and preferences", notes: "Photos, bio, age, gender; who they want to see, age range, distance." },
+    { id: "F2", requirement: "A deck of nearby people", notes: "Within distance, fitting both people's preferences, never swiped before, ranked." },
+    { id: "F3", requirement: "Swipe", notes: "Left (pass) or right (like), from a deck, in batches from the app." },
+    { id: "F4", requirement: "A match on a mutual like", notes: "Created once, shown to both people in real time." },
+    { id: "F5", requirement: "Location updates", notes: "The deck follows the user when they travel." },
+  ]}
+/>
+
+- Out of scope: chat after the match (see [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger)), payments, photo moderation, bot detection.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Match correctness", target: "0 missed matches; 0 duplicate matches", why: "A missed match is the product failing." },
+    { id: "N2", property: "Swipe latency", target: "p99 under 100 ms to acknowledge", why: "The next card must not wait on the last one." },
+    { id: "N3", property: "Deck latency", target: "p99 under 300 ms for 50 profiles", why: "The app opens on the deck." },
+    { id: "N4", property: "Match delivery", target: "Under 2 s p99 to an online user", why: "The moment of the match is the reward." },
+    { id: "N5", property: "No repeats", target: "A swiped profile shown again in under 0.1 % of cards", why: "Repeats feel broken." },
+    { id: "N6", property: "Location freshness", target: "A new location searchable within 60 s", why: "Travellers expect local people." },
+    { id: "N7", property: "Availability", target: "99.95 % for decks and swipes", why: "Peak evenings are the business." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Swipes", assumption: "50,000,000 users × 100 a day = 5,000,000,000 ÷ 86,400 s", result: "≈ 58,000/s; peak 2.5 × ≈ 145,000/s" },
+    { quantity: "Likes", assumption: "30 % of swipes", result: "1,500,000,000 a day ≈ 17,400/s; peak ≈ 43,500/s" },
+    { quantity: "Matches", assumption: "2 % of likes are returned", result: "30,000,000 a day ≈ 350/s; peak ≈ 870/s" },
+    { quantity: "Deck builds", assumption: "100 swipes ÷ 50 per deck = 2 per user a day", result: "100,000,000 a day ≈ 1,160/s; peak ≈ 2,900/s" },
+    { quantity: "Candidates scored", assumption: "1,000 per deck × 2,900/s", result: "2,900,000 documents/s at peak" },
+    { quantity: "Swipe log", assumption: "30 bytes × 5,000,000,000 a day", result: "150 GB a day ≈ 55 TB a year (× 3 replicas ≈ 165 TB)" },
+    { quantity: "Pair rows", assumption: "40 bytes × 1,500,000,000 likes a day", result: "60 GB a day ≈ 22 TB a year" },
+    { quantity: "Search index", assumption: "100,000,000 active profiles × 2 KB", result: "200 GB; 40 geoshards of 5 GB" },
+    { quantity: "Seen filters", assumption: "10,000 swiped ids per user; Bloom filter at 1 % ≈ 12 KB", result: "50,000,000 × 12 KB = 600 GB (exact ids: 4 TB)" },
+    { quantity: "Location updates", assumption: "4 per user a day; 2 % cross a shard edge", result: "≈ 2,300/s; ≈ 46 shard moves/s" },
+    { quantity: "Photos", assumption: "5,000,000,000 cards × 2 photos × 200 KB", result: "2 PB a day ≈ 23 GB/s, all from the CDN" },
+    { quantity: "Open sockets", assumption: "20 % of 50,000,000 users with the app open at peak", result: "10,000,000; at 100,000 per gateway node ≈ 100 nodes" },
+  ]}
+  note="Two workloads in one app: a read-heavy search and a write-heavy log."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Decks read 2,900,000 candidates/s; swipes write 145,000/s and are read back only in bulk | A search engine for decks; a write-optimised log for swipes; never one store for both |
+| D2 | Peak against average | 2.5 × on Sunday evenings, predictable, not a spike | Provision for the evening peak; no waiting room |
+| D3 | Consistency per operation | A match: strong, per pair; the deck: minutes stale is fine; profile edits: read-your-writes | An atomic row per pair; an eventually consistent index fed from a log |
+| D4 | Latency target | Swipe ack 100 ms (N2), deck 300 ms (N3) | Swipe path is one append and one row update; the deck is one index round trip plus ranking |
+| D5 | Durability | An acknowledged like is never lost (it may be half a match); a pass may be lost | Likes on a replicated store before the ack; the seen filter can be rebuilt from the log |
+| D6 | Ordering | Per user: a location move must apply delete before insert; no global order | Key the event log by user id |
+| D7 | Duplicates | A repeated card is annoying; a duplicate match is harmful; a retried swipe is harmless | Seen filter; match id from the pair key with insert-if-absent; client swipe ids |
+| D8 | Data size and growth | Swipes grow 55 TB a year, the fastest of anything; profiles stay at 200 GB of index | Swipes in a store that scales by adding nodes; profiles stay small and relational |
+| D9 | Fan-out shape | One to two: a match tells two people; a profile edit updates one index document | A notifier, not a fan-out system; push to sockets by user |
+| D10 | Contention | Low: a pair row has two writers at most; a dense city is hot for reads, not writes | A plain atomic update, no locks; split hot cities into their own shards |
+| D11 | Geography | Almost all traffic is local; a deck never spans continents | Shard the index by place; serve each continent from a nearby region |
+| D12 | Availability and degradation | 99.95 %; under stress, serve stale decks before failing swipes | Cache the next deck; drop ranking to the cheap score first; never drop a like |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/recs?count=50` | App | Opening the app and when 10 cards remain |
+| `POST /v1/swipes` | App | Every few swipes, in a batch, with a client id per swipe |
+| `GET /v1/updates?since=<cursor>` | App | After a nudge, a push or opening the app |
+| `PUT /v1/me/location` | App | On open and after moving more than 1 km |
+| `PUT /v1/me/profile` | App | Editing profile or preferences |
+| `POST /v1/me/photos` | App | Returns an upload URL for the blob store |
+| `WSS /v1/socket` | App | While open; carries nudges only, never data |
+
+```http
+POST /v1/swipes
+Authorization: Bearer <session>
+{ "swipes": [
+    { "id": "s_7f2a", "target": 88123, "dir": "like", "at": "2026-11-17T20:01:05Z" },
+    { "id": "s_7f2b", "target": 40917, "dir": "pass", "at": "2026-11-17T20:01:07Z" } ] }
+
+200 OK  { "matches": [ { "match_id": "12:88123", "with": 88123 } ] }
+```
+
+- **Idempotency:** each swipe carries a client id; a retried batch rewrites the same rows and the same match id, so nothing doubles.
+- **Pagination:** `GET /v1/updates` uses a cursor per user, so a lost nudge or push is recovered on the next fetch.
+- **Errors:** `409` swiping a profile you already swiped (ignored by the app); `429` too many swipes a minute (bots); `404` the profile was deleted.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Profiles, preferences | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL) | Small (D8), edited rarely, read-your-writes (D3) | `user_id` | Strong | A document store: no gain at 200 GB, weaker constraints |
+| Deck candidates | Search engine (<TechIcon id="oss/elasticsearch" /> Elasticsearch) | Geo, range and term filters plus scoring in one query (D1, D4) | Geoshard (cells grouped by load) | Eventual, under 60 s | A geohash in a key-value store: no filters or scoring |
+| Swipe log | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra) | 145,000 appends/s, 55 TB a year (D1, D8) | `swiper_id` | Eventual (quorum writes) | Relational: sharding by hand as it grows 55 TB a year |
+| Likes and matches | Key-value store with atomic item updates (DynamoDB) | One row per pair, updated and read in one step (D3, D7) | Pair key `min:max` | Strong per item | Cassandra lightweight transactions: consensus round trips on every like |
+| Seen filters, sessions, deck cache | In-memory store (<TechIcon id="oss/redis" /> Redis) | Read on every deck, rebuilt from the log (D4, D5) | `user_id` | Eventual | Exact id sets: 4 TB instead of 600 GB |
+| Events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Several readers per change, replay (D6, D9) | `user_id` or pair key | Ordered per key | A work queue: one reader, no replay |
+| Photos | Blob store + CDN | 2 PB a day of reads (D1) | Object key | Immutable | Serving from our servers |
+
+```sql
+-- Relational: profiles and preferences (sharded by user_id when it outgrows one primary)
+CREATE TABLE profiles (
+  user_id     bigint PRIMARY KEY,
+  birth_date  date, gender text, bio text,
+  pref_gender text[], pref_age int4range, pref_km int,
+  lat double precision, lon double precision,
+  photo_keys  text[],              -- blob store keys
+  updated_at  timestamptz
+);
+
+-- Wide-column (CQL): every swipe, append-only
+CREATE TABLE swipes (
+  swiper_id bigint,                -- partition key: one user's history together
+  target_id bigint,                -- clustering key: point lookups and full scans
+  dir       tinyint,               -- 0 pass, 1 like
+  at        timestamp,
+  PRIMARY KEY ((swiper_id), target_id)
+);
+
+-- Key-value item, shown as a table: one row per pair of people
+CREATE TABLE pairs (
+  pair_key   text PRIMARY KEY,     -- '12:88123': the smaller id first
+  low_likes  boolean, high_likes boolean,
+  match_at   timestamp             -- set once, by the request that sees both flags
+);
+```
+
+- **Deck:** a search for `cell IN cover(lat, lon, km)` with age and gender filters both ways, minus the seen filter, scored, top 1,000; the ranker keeps 50.
+- **Swipe:** append to `swipes`; for a like, one atomic update of the pair row that returns the other flag.
+- **Seen filter rebuild:** scan one `swiper_id` partition from the swipe log.
+- **Matches for a user:** a second item per person (`user_id`, `match_at`) written with the match, read by `GET /v1/updates`.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and F2 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Profiles and a naive deck (F1, F2)
+
+The smallest design: one profile service and one database, with the deck computed by distance.
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={1} caption="Step 1: the profile service builds a deck by scanning every profile row by distance; photos come from the CDN." />
+
+- **Adds:** the API gateway, a CDN for photos, the profile service, the profile database.
+- **Flow:**
+  1. The app asks for a deck; the profile service computes the distance to every profile and keeps those within 40 km.
+  2. It filters by both people's preferences and returns 50.
+- **Why this and not that:** correct for a town of 10,000 users; it shows what the deck must do before we make it fast.
+- **The gap:** 100,000,000 rows scanned per deck, 2,900 times a second.
+
+<PremiumBreak />
+
+### Step 2: A geo index sharded by cell (F2)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={2} caption="Step 2: profile changes flow through the event log into a search index sharded by map cell; the recs service queries it." />
+
+- **Adds:** the **recs service**, the **geo index** (a search engine) and the **event log**; the scan goes away.
+- **Flow:**
+  1. Every profile change is captured from the database's log onto the event log, keyed by user.
+  2. An indexer writes the profile into the shard that owns its map cell.
+  3. The recs service asks only the shards whose cells the search circle covers.
+- **Why this and not that:** a search engine filters by distance, age and gender and scores in one query (D1, D4); a geohash in a key-value store finds nearby ids but leaves filtering and scoring to us. Sharding by place keeps each query on 1 or 2 small shards (D11).
+- **The gap:** nobody can swipe yet.
+
+### Step 3: Swipes into a write-optimised log (F3)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={3} caption="Step 3: the swipe service appends every swipe to a wide-column swipe log and publishes it on the event log." />
+
+- **Adds:** the **swipe service** and the **swipe log**.
+- **Flow:**
+  1. The app sends swipes in batches; the swipe service appends each to the swipe log, partitioned by swiper.
+  2. It publishes each swipe on the event log and acknowledges the batch.
+- **Why this and not that:** 145,000 writes/s and 55 TB a year (D1, D8) suit a log-structured wide-column store that scales by adding nodes; a relational table would need resharding by hand every few months.
+- **The gap:** the deck still shows people the user has already swiped.
+
+### Step 4: Never show a profile twice (F2, N5)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={4} caption="Step 4: each swipe is added to the swiper's seen filter in the cache, and the recs service drops seen profiles." />
+
+- **Adds:** the **cache** holding one **seen filter** per user.
+- **Flow:**
+  1. A consumer of the event log adds each swiped id to the swiper's Bloom filter.
+  2. The recs service passes the filter to the index query, so seen profiles never reach ranking.
+- **Why this and not that:** a Bloom filter of 10,000 ids is 12 KB instead of 80 KB (D7, D8); a false positive hides 1 % of unseen people, and nobody notices a person they never saw (Deep dive 3).
+- **The gap:** two people can like each other and never find out.
+
+### Step 5: A match on a mutual like (F4, N1)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={5} caption="Step 5: a like sets one flag on the pair's row in the likes store, atomically, and reads the other flag." />
+
+- **Adds:** the **likes and matches** store.
+- **Flow:**
+  1. A like updates the row `min:max` for the pair: set my flag, return the row, in one atomic step.
+  2. If the other flag is set, the same request writes the match, insert-if-absent, and publishes a match event.
+- **Why this and not that:** the store applies the two updates to one row one after the other, so exactly one request sees both flags (D3, N1). Checking the other person's like, then saving mine, loses the match when both arrive together (Deep dive 2).
+- **The gap:** the other person only finds out the next time they open the app.
+
+### Step 6: Push the match in real time (F4, N4)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={6} caption="Step 6: the match notifier reads match events and nudges the app through the socket gateway." />
+
+- **Adds:** the **match notifier** and the **socket gateway**.
+- **Flow:**
+  1. The notifier reads the match event and looks up each person's socket in the session store.
+  2. It sends a nudge with no data; the app fetches `GET /v1/updates` from its cursor.
+  3. If there is no socket, it sends a mobile push instead.
+- **Why this and not that:** polling every 30 s from 10,000,000 open apps is 333,000 requests/s that mostly return nothing; a nudge costs one message per match (D9, N4).
+- **The gap:** a user who travels keeps getting a deck from home.
+
+### Step 7: People move between shards (F5, N6)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={7} caption="Step 7: the location service publishes each user's new cell; a move across a shard edge becomes a delete and an insert." />
+
+- **Adds:** the **location service**.
+- **Flow:**
+  1. The app sends its location on open and after moving 1 km; the service maps it to a cell.
+  2. It publishes the new cell on the event log, keyed by user.
+  3. The indexer updates the document in place, or deletes it from the old shard and inserts it in the new one.
+- **Why this and not that:** keying by user keeps the delete before the insert (D6), so a profile is never in two shards or none. 2,300 updates a second do not need the relational database.
+- **The gap:** the deck is nearby and unseen, but in no useful order.
+
+### Step 8: Rank the candidates (F2)
+
+<AnimatedDiagram spec="animated/tinder/architecture" step={8} caption="Step 8: the ranker scores the 1,000 retrieved candidates and keeps 50." />
+
+- **Adds:** the **ranker**.
+- **Flow:**
+  1. The index returns 1,000 candidates with a cheap score (distance, recency, activity).
+  2. The ranker scores them with a model and keeps 50; people who already liked the user can be moved up.
+- **Why this and not that:** a model over 1,000 candidates fits the 300 ms budget; over 2,500,000 shard documents it does not (D4).
+- **Depth:** ranking is a machine-learning topic; see [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/tinder/architecture" stepper caption="A dating app: decks from a geosharded index minus what you have seen, swipes into a write-optimised log, one atomic row per pair for the match, and a nudge the moment it happens." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Mobile app | Swipes in batches, location, fetch after a nudge |
+| **Edge** | Socket gateway, API gateway, CDN | Hold sockets; auth and limits; photos |
+| **Swipe and match** | Swipe service | Append swipes; the atomic pair update; create matches |
+| **Application services** | Recs, ranker, profile, location | Build decks; score; profiles; cells and shard moves |
+| **Async pipeline** | Event log, match notifier | Carry swipes, matches and index updates; nudge or push |
+| **Storage** | Likes and matches, swipe log, cache, geo index, profile DB | Pair rows; every swipe; seen filters; candidates; profiles |
+
+Ana likes Ben, and Ben has already liked Ana:
+
+1. Ana's app sends a batch of 5 swipes; the last is a like for Ben.
+2. The swipe service appends all 5 to the swipe log and publishes them on the event log.
+3. For the like, it updates row `12:88123`: sets Ana's flag and reads Ben's, which is already set.
+4. It writes match `12:88123` if absent, adds it to both people's match lists, publishes a match event and answers Ana with the match.
+5. The notifier finds Ben's socket on gateway 7 and nudges; Ben's app fetches the match from its cursor.
+6. Meanwhile the seen-filter consumer adds Ben to Ana's filter, so Ben never appears in her deck again.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST, plus a WebSocket that only nudges
+
+- **Choice:** REST over HTTPS with JSON for every call; swipes sent in batches of about 5; one WebSocket per open app that carries only "something changed".
+- **Why:** decks, swipes and profile edits are short request and response; batching cuts swipe requests 5 × (D4); the nudge reuses `GET /v1/updates`, so there is one path for data and a lost nudge only delays a match (N1, N4).
+- **Why not polling for matches:** 10,000,000 open apps polling every 30 s is 333,000 requests/s that mostly return nothing, and still misses the 2 s target (N4).
+- **Why not sending the match itself over the socket:** the socket then needs acknowledgements, ordering and replay after reconnects; the cursor fetch already has all three.
+- **Why not GraphQL:** the app needs a handful of fixed shapes, and fixed GETs are easier to cache and to rate-limit per route.
+- **Why not gRPC from the app:** it works on mobile, but JSON over HTTP passes every proxy and CDN untouched; services talk gRPC inside.
+
+### Load balancers and API gateway: layer 4 for sockets, layer 7 for calls
+
+- **Choice:** a layer-4 (TCP) load balancer in front of the socket gateways; a layer-7 (HTTP) load balancer and an API gateway such as <TechIcon id="oss/nginx" /> NGINX or Envoy in front of the services, routing by path, with auth and per-user limits.
+- **Why:** a socket lives for minutes or hours, so layer 4 passes it through without parsing; path routing keeps `/recs` and `/swipes` on separate fleets, so a slow deck never blocks a swipe (D12).
+- **Why not one layer-7 tier for both:** 10,000,000 held connections would tie the HTTP tier's memory and every deploy to the socket count.
+- **Why per-user limits at the gateway:** a script that likes everyone sends hundreds of swipes a minute; a `429` above about 100 a minute stops it before the swipe log.
+- **Algorithm:** least outstanding requests for HTTP; for sockets, new connections go to the emptiest gateway, and a gateway drains slowly before a deploy.
+
+### Photos: blob store behind a CDN
+
+- **Choice:** an object store (S3-style blob store) as the origin, a CDN in front; photos are immutable, versioned in the key, resized on upload; the app prefetches the next 10 cards.
+- **Why:** 2 PB a day, about 23 GB/s (D1); an immutable key can be cached at the edge forever.
+- **Why not serving photos from our services:** 23 GB/s through our own fleet for bytes that never change.
+- **Why not photos in the profile database:** 200 KB values bloat backups, replicas and caches of a 200 GB table.
+- **Upload:** the app uploads straight to the blob store with a signed URL; the profile row stores only the key.
+
+### Geo index: a search engine, sharded by cell
+
+- **Choice:** a search engine such as <TechIcon id="oss/elasticsearch" /> Elasticsearch or OpenSearch; one index per geoshard; each document holds the card fields, the cell, the location, both people's preference fields and a status (active, paused, deleted).
+- **Why:** one query applies distance, age range both ways, gender both ways, status, recent activity and the seen filter, then scores the matches (D1, D4); a shard of 2,500,000 documents answers in tens of milliseconds, and a query touches 1 or 2 shards (D11).
+- **Why not a geohash in an in-memory sorted set (`GEOSEARCH`):** it returns nearby ids fast, but six filters and the scoring then run in our code on thousands of fetched profiles; right for "nearest driver", wrong for a filtered, ranked deck.
+- **Why not PostGIS on the profile database:** its spatial index finds nearby rows, but 2,900 scored searches a second would share the primary with profile writes, and scoring and sharding are ours to build.
+- **Why not one index sharded by user id:** every query would fan out to all 40 shards, and the slowest one sets the deck's latency.
+- **Why not a quadtree service of our own:** the search engine already ships the geo index, filters, scoring and replication.
+
+### Profile database: relational
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL, a primary with read replicas; shard by `user_id` only when one primary is not enough.
+- **Why:** 100,000,000 profiles × 2 KB = 200 GB fits one primary; edits are a few per user a month; the user must see their own edit at once (D3).
+- **Why not the search engine as the source of truth:** it is a derived index; a rebuild or a version upgrade needs a store to reindex from.
+- **Why not a document store:** it would work; nothing is gained at 200 GB, and relational constraints keep preferences valid.
+
+### Swipe log: wide-column store
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra or ScyllaDB, partition key `swiper_id`, clustering key `target_id`, 3 replicas, quorum writes.
+- **Why:** its log-structured (LSM) storage turns 145,000 writes/s into sequential appends; it grows 55 TB a year by adding nodes (D1, D8); the only reads are one partition at a time, to rebuild a filter or answer "did A swipe B".
+- **Why not relational:** a B-tree index update on every insert, and resharding by hand several times a year.
+- **Why not the event log alone:** a log is read in order; "has A swiped B" needs a key lookup.
+- **Why not the key-value store used for likes:** it would work; a store billed or sized per write is the costly place for the largest write stream, and the swipe log needs no atomic step.
+
+### Likes and matches: a key-value store with atomic item updates
+
+- **Choice:** a key-value store with single-item atomic updates, such as DynamoDB; one item per pair keyed `min:max`; `UPDATE … SET my_flag = true` returning the whole item; match items per user written with the match.
+- **Why:** one item is the one place both likes meet, and the store applies updates to it one after the other, so exactly one request sees both flags (D3, N1); one round trip (N2); 43,500 updates/s spread over billions of keys has no hot key (D10); 22 TB a year with no resharding (D8).
+- **Why not Cassandra lightweight transactions:** a compare-and-set there runs consensus with several round trips per write, on every one of 43,500 likes a second.
+- **Why not Redis with a Lua script:** atomic and fast, but a write acknowledged before it reaches a replica or disk is lost on failover, and a lost like is a lost match (D5).
+- **Why not a sharded relational table:** `INSERT … ON CONFLICT DO UPDATE … RETURNING` does the same in one statement and is a sound choice; the key-value store wins only because 22 TB a year would mean adding shards by hand.
+- **Why not the swipe log:** Ana's like and Ben's like live in two partitions, so no single atomic step covers both.
+
+### Cache: Redis for seen filters, sessions and the next deck
+
+- **Choice:** a <TechIcon id="oss/redis" /> Redis cluster holding a Bloom filter per user, the session map (user to gateway), and the next deck of 50 ids for 10 minutes.
+- **Why:** every deck reads a 12 KB filter (2,900 × 12 KB ≈ 35 MB/s at peak), every match reads two sessions (D4); all of it can be rebuilt, so losing it costs time, not data (D5).
+- **Why not exact id sets:** 4 TB instead of 600 GB of memory (D8).
+- **Why not marking seen inside the index:** a write to the target's document on every swipe is 145,000 index updates a second.
+- **Why not a cache inside each recs server:** the filter changes on every swipe, from any server; one shared copy avoids thousands of stale ones.
+
+### Event log: Kafka
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topics: `swipes` keyed by swiper, `matches` keyed by pair, `profile-changes` (from change data capture) and `locations`, both keyed by user.
+- **Why:** each event has several readers (seen filters, the notifier, the indexer, ranking features, analytics) and can be replayed to rebuild a filter or an index (D9); order per key puts a shard move's delete before its insert (D6).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is gone; no second reader, no replay.
+- **Why change data capture for profiles:** the index sees exactly what committed; publishing from the service after its commit loses the change if it crashes in between.
+
+### Socket gateway and mobile push
+
+- **Choice:** a gateway fleet holding WebSockets, about 100,000 per node, registered in the session map; the platforms' push services (APNs, FCM) when there is no socket.
+- **Why:** a match reaches an online user in under 2 s (N4); 10,000,000 sockets at peak need about 100 nodes; the push service reaches a closed app.
+- **Why not mobile push alone:** delivery can take seconds to minutes and is not guaranteed while the app is open.
+- **Why a nudge and not the data:** the gateway stays stateless about matches; any lost message is recovered by the cursor fetch.
+
+The match reaches the second person by a nudge and a fetch, or by a mobile push when the app is closed.
+
+<AnimatedDiagram spec="animated/tinder/nudge-push" stepper caption="The socket only says “something changed”; the app fetches from a cursor, so a lost nudge delays a match but never loses it." />
+
+<StepCards>
+  <StepCard n={1} title="Online: a nudge, then a fetch">
+    The notifier finds Ben's socket on gateway 7 and sends a nudge with no data. Ben's app asks for updates since cursor c41 and receives the match with Ana and cursor c42.
+  </StepCard>
+  <StepCard n={2} title="Offline: a mobile push, then a fetch">
+    The session map has no socket for Ben, so the notifier sends a mobile push. When Ben opens the app, it fetches from the same cursor c41.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 870 matches/s at peak × 2 people = 1,740 nudges or pushes a second, about 17 per second for each of 100 gateway nodes.
+
+### Ids: the pair key and client swipe ids
+
+- **Choice:** match id = smaller user id, colon, larger user id; each swipe carries an id made by the app.
+- **Why:** both racing requests compute the same match id, so insert-if-absent keeps one (D7, N1); a retried batch rewrites the same rows.
+- **Why not a random id or a Snowflake id per match:** unique ids are the problem here; two requests would make two matches.
+
+## Deep dives
+
+### Geosharding: cells grouped into shards by load
+
+- **Cells:** a hierarchical cell library (S2, H3 or geohash) maps a point to a cell id and covers a circle with a set of cells.
+- **Shards balance load, not area:** walk the cells along a space-filling curve, which keeps neighbours together, and cut a new shard each time the running load reaches the target.
+- **The shard map:** a small table from cell range to shard, versioned, cached in every recs and indexer process.
+- **A query:** cover the search circle with cells, look up their shards, query them in parallel, merge the top 1,000 by score.
+- **Near an edge:** the circle covers cells of two shards, so the query goes to both; the deck waits for the slower one.
+- **Rebalancing:** when a shard passes 1.5 × the target, move its last cells to a neighbour: backfill their documents, then switch the map version.
+
+<AnimatedDiagram spec="animated/tinder/geoshards" stepper caption="Shards hold equal load, not equal area: 2 cells downtown, 17 in the country. A search near an edge asks both shards." />
+
+<StepCards>
+  <StepCard n={1} title="Cells grouped into shards by load">
+    A region of 40 cells holds 1,510 thousand active profiles. Cut into 4 shards of about 377 thousand, the downtown shard needs only 2 cells while the countryside shards need 17.
+  </StepCard>
+  <StepCard n={2} title="A search near an edge reads two shards">
+    The user stands near the west edge of shard 3. The 40 km circle covers 6 cells, 2 in shard 2 and 4 in shard 3, so the recs service queries both and merges.
+  </StepCard>
+  <StepCard n={3} title="Moving across the edge">
+    The user moves one cell west, into shard 2. The indexer deletes the profile from shard 3 and inserts it in shard 2, in that order, because both events share the user's key.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 1,510 ÷ 4 = 377.5 thousand per shard; the cut gives 380, 420, 390 and 320 thousand.
+- Whole system: 100,000,000 profiles ÷ 2,500,000 per shard = 40 shards; if 30 % of searches hit two shards, 2,900 × 1.3 ≈ 3,800 shard queries/s, about 95 per shard.
+
+<Callout tone="red" title="What breaks">
+  If the indexer and the recs service read different versions of the shard map during a move, a profile sits in a shard nobody queries and vanishes from every deck. Version the map, write moving cells to both shards until every reader has the new version, then delete.
+</Callout>
+
+### The match race: both like at once, exactly one match
+
+- **The race:** Ana's request checks "has Ben liked me?" while Ben's checks "has Ana liked me?"; if both checks run before either like is saved, both see no and the match is lost.
+- **Write, then read is not enough:** on replicas that lag, both reads can still miss; on replicas that do not, both can see the other and create the match twice.
+- **The fix:** one row per pair, keyed by the two ids in sorted order; each like is one atomic "set my flag, return the row"; only the request that sees both flags writes the match.
+- **Retries:** a timeout after the update repeats it; my flag is already set, and the match insert is if-absent with the pair key as its id, so the answer is the same.
+- **Safety net:** a nightly job joins likes in the swipe log both ways and reports any pair with two likes and no match; it should find zero.
+
+<AnimatedDiagram spec="animated/tinder/match-race" stepper caption="Check, then write loses the match when both like at once; one atomic row per pair lets exactly one request see both likes." />
+
+<StepCards>
+  <StepCard n={1} title="Check, then write: the match is lost">
+    Both checks run before either like is saved, so both answer no. Both likes are then saved, yet nobody is told, and nothing will look at the pair again.
+  </StepCard>
+  <StepCard n={2} title="One row per pair: exactly one match">
+    Both requests update row (Ana, Ben). The store applies them one after the other: Ana's sees Ben's flag unset; Ben's sees both and inserts the match once.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- 43,500 like updates/s at peak, one item each, spread across billions of pair keys: two writers per item at most (D10).
+- If only 1 match in 10,000 has both likes inside the race window, check-then-write loses 30,000,000 ÷ 10,000 = 3,000 matches a day.
+
+### Never show again: a set against a Bloom filter
+
+- **The need:** remove every profile the user has swiped from 1,000 candidates, 2,900 times a second (N5).
+- **Exact set:** 10,000 ids × 8 bytes = 80 KB per user, 4 TB for 50,000,000 users; exact, and deletes are easy.
+- **Bloom filter:** a bit array with k hashes per id; "no" is always right, "maybe" is wrong 1 % of the time at 9.6 bits per id; 12 KB per user, 600 GB in all.
+- **A false positive hides a person the user never saw:** 1 % of unseen candidates; invisible to the user, unlike a repeat (D7).
+- **Compressed bitmap:** exact, and small when ids are dense integers; a good choice when ids are assigned in order.
+- **Undo:** a Bloom filter cannot delete; keep the last swipe in a small exact list that overrides it, and rebuild filters from the swipe log when they need resizing.
+
+The bit array below shows how a lookup answers "no" or "maybe".
+
+<AnimatedDiagram spec="animated/patterns/bloom-bits" stepper caption="A 0 in any checked bit proves the key was never added; three 1s set by other keys give the one wrong answer, a false positive." />
+
+**How to read it:**
+
+- Each added id sets k bits; a lookup checks the same k bits.
+- One 0 means the profile was never swiped: keep it. All 1s means "maybe swiped": drop it.
+
+**The numbers:**
+
+- Bits per id for 1 % false positives: m ÷ n = −ln 0.01 ÷ (ln 2)² ≈ 9.6; k = 9.6 × ln 2 ≈ 7 hashes.
+- 10,000 ids: 95,850 bits ≈ 12 KB; a heavy user with 50,000 ids: about 59 KB, against 400 KB exact.
+
+<Callout tone="red" title="What breaks">
+  A filter sized for 10,000 ids that receives 20,000 hides 16 % of unseen people, and at 50,000 it hides 83 %: the deck empties in a busy city. Size each filter from the user's swipe count, and rebuild it larger from the swipe log when it passes its design size.
+</Callout>
+
+### Worked example: Sunday 20:00, a deck and a match
+
+1. Ben opens the app downtown; the location service maps him to a cell in shard 3, near the edge with shard 2.
+2. The recs service covers a 40 km circle: 6 cells across shards 2 and 3; it reads Ben's 12 KB filter from the cache in about 1 ms.
+3. Both shards run the filtered query in parallel and return their top 500 by cheap score in about 80 ms at p99.
+4. The ranker scores 1,000 candidates in about 60 ms and keeps 50; with 50 ms of network and 10 ms at the gateway, the deck takes about 200 ms, inside the 300 ms target (N3).
+5. Ben swipes 50 cards in 5 minutes: 10 batches, 15 likes, 15 pair-row updates.
+6. One of them finds Ana's flag already set: the match is written, and Ana's app gets a nudge on gateway 7 about 1 s later.
+
+**The numbers:** across the city at that minute, 2,900 decks and 145,000 swipes a second land on different stores: the search engine and the swipe log never compete for the same disks.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Deck source | Scan, geohash in a key-value store, PostGIS, search engine | Search engine | D1, D4, F2 | A search cluster to run; the index lags up to 60 s | Decks need no filters or scoring, as in nearest-driver lookups |
+| Index partitioning | Hash by user, by country, cells grouped by load | Cells grouped by load | D11, D10, N3 | Edge searches hit 2 shards; a shard map to keep in step | Users spread evenly, or the whole index fits one shard |
+| Swipe store | Relational, key-value, wide-column | Wide-column, by swiper | D1, D8, N2 | No transactions; quorum tuning | Swipes fall to a few thousand a second |
+| Match detection | Nightly join of likes, check then write, atomic pair row | Atomic pair row at swipe time | D3, N1, N4 | One more write per like | Matches may arrive hours later, as in daily-batch apps |
+| Match id | Random, Snowflake, pair key | Pair key `min:max` | D7, N1 | The id names both users (internal only) | Group matches of more than two people |
+| Seen filter | Exact set, compressed bitmap, Bloom filter | Bloom filter at 1 % | D7, D8, N5 | 1 % of unseen people hidden; no delete | Ids are dense integers (bitmap), or undo is common |
+| Match delivery | Polling, push only, socket with data, socket nudge then fetch | Nudge then fetch; push when offline | N4, D9 | A socket fleet of about 100 nodes | Few users have the app open at once |
+| Change transport | Direct calls, work queue, event log | Event log keyed by user or pair | D6, D9 | Another cluster to run | Every change has one reader |
+| Location writes | Update the profile row, publish to the log | Publish to the log | D6, N6 | No location history kept | Location history becomes a feature |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Geospatial Indexing](/system-design/patterns/geospatial-indexing) | Cells, the circle cover, the geo index | Find people within 40 km without a scan |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Geoshards, swipe log by swiper, pair keys | Each store grows past one machine |
+| [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) | Seen filter per user | 600 GB instead of 4 TB, read on every deck |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Atomic pair-row update | Two likes at once must make one match |
+| [Idempotency](/system-design/patterns/idempotency) | Client swipe ids, match id from the pair key | Retries must not double a match |
+| [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) (advanced) | Socket gateway, session map | Reach the right socket among 10,000,000 |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | Profile changes into the index | The index must see exactly what committed |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The event log and its consumers | One swipe, several readers, replay |
+| [Caching](/system-design/patterns/caching) | Next deck, seen filters, photos at the CDN | Decks and photos are read far more than written |
+| [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing) (advanced) | Dense city cells in their own shards | Downtown carries 10 × the load of the countryside |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Rider and driver matching | Cells, a nearby search, real-time push | No mutual consent; nearest first; locations every few seconds, so an in-memory geo index wins over a search engine; one driver per ride is exclusive |
+| A dating app with one daily batch | Profiles, pair rows, the seen filter | Decks computed overnight and cached; no real-time index or socket fleet |
+| A local marketplace | Geosharded search with filters and ranking | Items, not people; no match; a seen filter is optional |
+| "People near you" | The geo index, the seen filter, the ranker | Consent and privacy rules; social-graph signals rank the list |
+
+## How real systems do it
+
+- **2020:** an AWS Database Blog post on Tinder: Redis caching serves about 2 billion member actions a day, most operations are reads, services read Redis first and fall back to DynamoDB as the source of truth on a miss, and before moving to ElastiCache a Redis node failover was the largest single source of app downtime.
+- **Read 2026:** Tinder's engineering post on moving to Elasticsearch 8: recommendations run on geo-sharded Elasticsearch indices, over 90 % of recommendations come from a single cluster, geosharding uses 12 % CPU against 50 % for one index, and p99 search latency fell 12 % to 56 % after the move; data was kept consistent with a Kafka-based write path and a reindex backfill.
+- **Read 2026:** Elastic's Tinder customer story: Elasticsearch is the first stage of a multistage pipeline, narrowing tens of millions of profiles to about 1,000; users are partitioned into geo indexes; a custom Roaring bitmap filter removes profiles a user has already acted on, about 10,000 for a typical user and up to 70,000 for the heaviest; deep-learning ranking runs outside Elasticsearch on GPUs.
+- **Read 2026:** Tinder's post on its API gateway (TAG): built on Spring Cloud Gateway, it fronts more than 500 microservices, handles authorization and session management, and uses reverse geo IP lookup for rate limiting and request banning; the post says Tinder operates in 190 countries.
+- **2018:** Tinder open-sourced Scarlet, a WebSocket client for Kotlin, Java and Android.
+- **Where this design differs:** we use a Bloom filter where Tinder uses an exact Roaring bitmap, a cheaper but lossy trade worth naming in an interview; the cell grouping, the pair row and the nudge are the generic designs, since the published sources above do not describe Tinder's own versions.
+
+## Failure modes & pitfalls
+
+- **Check, then write for matches:** lost matches with no error; a nightly join of mutual likes without a match finds them; one atomic pair row.
+- **Seen filters lost in a cache failover:** repeats jump; watch the repeat rate per card; rebuild from the swipe log, and the app drops ids it swiped locally meanwhile.
+- **A hot city on a shared shard:** that shard's p99 rises every evening; watch latency per shard; split by load and give the densest cells their own shard.
+- **Shard map out of step during a move:** profiles vanish from decks; compare document counts per cell against the profile database; version the map and write to both shards during a move.
+- **Indexer lag:** new and travelling users are invisible; alert on consumer lag above 60 s (N6); add indexer consumers per partition.
+- **Lost nudge:** a match appears only on the next open; watch the delay from match to fetch; the cursor fetch recovers it, so add a push when no fetch follows within 30 s.
+- **Bots that like everyone:** pair rows and matches inflate; watch likes per user per minute; limit at the gateway and score accounts for fraud.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify scale, distance, whether chat is in scope, how fast a match must arrive; write F1 to F5 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 145,000 swipes/s, 2,900 decks/s, 55 TB of swipes a year, 600 GB of filters; name the two workloads.
+3. **Minutes 10 to 15:** API with batched swipes and the updates cursor; the store table, one store per workload.
+4. **Minutes 15 to 25:** Steps 1 to 4: the scan, the geo index sharded by cell, the swipe log, the seen filter.
+5. **Minutes 25 to 35:** Steps 5 to 8: the pair row, the nudge, shard moves, ranking.
+6. **Minutes 35 to 45:** one deep dive: geosharding at an edge, the match race, or the seen filter; answer the "why not" for each store.
+
+**What interviewers listen for:**
+
+- **Mid:** a geo index instead of a scan, a separate store for swipes, a push when a match happens.
+- **Senior:** shards balanced by load with edge queries, the atomic pair row and why check-then-write fails, a Bloom filter with its false-positive cost.
+- **Staff:** shard moves and map versions, what degrades first on a Sunday evening, reconciliation for lost matches, how the design changes for rider matching.
+
+**Red flags:**
+
+- A `SELECT … ORDER BY distance` over every profile; swipes as rows in the profile database.
+- Matches found by a nightly job when the prompt says "the moment they match"; polling every second for matches.
+
+## Further reading
+
+- [Tinder's migration to Elasticsearch 8](https://lifeattinder.com/blog/tinders-migration-to-elasticsearch-8) (Tinder engineering, read 2026)
+- [Building resiliency at scale at Tinder with Amazon ElastiCache](https://aws.amazon.com/blogs/database/building-resiliency-at-scale-at-tinder-with-amazon-elasticache/) (AWS Database Blog, 2020)
+- [Tinder customer story](https://www.elastic.co/customers/tinder) (Elastic, read 2026)
+- [How we built the Tinder API Gateway](https://lifeattinder.com/blog/how-we-built-the-tinder-api-gateway) (Tinder engineering, read 2026)
+- [Scarlet](https://github.com/Tinder/Scarlet) (Tinder on GitHub, 2018)
+- Related pages: [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing) · [Bloom Filters and Probabilistic Structures](/system-design/patterns/bloom-filter) · [Recommendation Systems](/ml-system-design/case-studies/recommendation-systems)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you find people within 40 km without scanning every profile?" category="Concepts" level="Mid">
+  - Divide the map into cells and store each profile under its cell in a geo index.
+  - Cover the search circle with the cells it touches, read only those, then check the exact distance.
+  - Use a search engine for the index, because the deck also needs age, gender and status filters and a score in the same query.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you partition the location index, and what happens to a search near a shard boundary?" category="Architecture" level="Senior">
+  - Group cells into shards by load, walking them along a space-filling curve, so a dense city gets a small shard and the countryside a large one.
+  - Keep a versioned shard map from cell range to shard in every recs process.
+  - A search near an edge covers cells of two shards: query both in parallel and merge the top results; the deck waits for the slower shard.
+  - Split a shard that passes 1.5 × the target by moving its last cells to a neighbour.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two users swipe right on each other within the same second. How do you make sure exactly one match is created?" category="Failure modes" level="Senior">
+  - Check, then write fails: both checks can run before either like is saved, and the match is lost.
+  - Keep one row per pair, keyed by the two ids in sorted order, and make each like one atomic "set my flag, return the row".
+  - The store applies both updates in order, so exactly one request sees both flags and writes the match.
+  - Use the pair key as the match id with insert-if-absent, so a retry cannot create a second match.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not store swipes in the same database as profiles?" category="Trade-offs" level="Mid">
+  - Swipes are 145,000 writes a second and grow 55 TB a year; profiles are 200 GB and edited rarely.
+  - A wide-column store appends swipes sequentially and grows by adding nodes; a relational table would need resharding by hand.
+  - Keeping them apart stops the largest write stream from slowing profile reads and edits.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you stop showing people the user has already swiped, and what does it cost?" category="Trade-offs" level="Senior">
+  - Keep a seen filter per user and apply it inside the index query, before ranking.
+  - An exact set of 10,000 ids is 80 KB per user, 4 TB in all; a Bloom filter at 1 % false positives is 12 KB, 600 GB in all.
+  - A false positive hides 1 % of unseen people, which nobody notices; a repeat would be noticed.
+  - A Bloom filter cannot delete, so undo uses a small exact list, and filters are rebuilt larger from the swipe log as they fill.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the other person find out about the match in real time?" category="Architecture" level="Mid">
+  - The match is published on the event log; a notifier reads it and looks up the person's socket in the session map.
+  - It sends a nudge with no data; the app fetches its updates from a cursor, so a lost nudge only delays the match.
+  - With no socket, the notifier sends a mobile push, and the app fetches from the same cursor when opened.
+  </InterviewQuestion>
+  <InterviewQuestion question="A user flies from London to New York. What happens to their deck and to their profile in the index?" category="Scaling" level="Senior">
+  - The app sends its new location on open; the location service maps it to a New York cell and publishes it keyed by the user.
+  - The indexer deletes the document from the London shard and inserts it in the New York shard; the shared key keeps that order.
+  - The cached deck from London is dropped, and the next deck queries New York shards within 60 s.
+  - The seen filter travels with the user, because it is keyed by user, not by place.
+  </InterviewQuestion>
+  <InterviewQuestion question="How are candidates generated and then ranked, and how do you filter by status?" category="Architecture" level="Senior">
+  - Generate: the index query filters by distance, both people's age and gender preferences, status (active, not paused or deleted) and the seen filter, and returns 1,000 by a cheap score.
+  - Rank: a model scores those 1,000 and keeps 50; people who already liked the user can be moved up.
+  - Status changes reach the index through change data capture within 60 s; the recs service re-checks a small blocked-and-deleted set before serving.
+  </InterviewQuestion>
+  <InterviewQuestion question="The cache cluster holding the seen filters fails over. What does the user see, and how do you recover?" category="Failure modes" level="Senior">
+  - Filters on the failed node are empty or stale, so some users see profiles they already swiped.
+  - The app drops ids it swiped in this session, which hides most repeats.
+  - Rebuild each affected filter from that user's partition in the swipe log, starting with users who open the app.
+  - Swipes and matches are untouched, because the cache holds nothing that cannot be rebuilt.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which design patterns does this design use, and why each?" category="Concepts" level="Mid">
+  - Geospatial indexing and sharding, because decks are searches by place over 100,000,000 profiles.
+  - A Bloom filter, because the seen check runs on every deck and exact sets need 4 TB.
+  - An atomic pair row (concurrency control) and idempotent ids, because two likes at once must make one match.
+  - A real-time gateway with nudges, because a match must arrive within 2 s.
+  </InterviewQuestion>
+</InterviewQuestions>

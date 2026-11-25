@@ -1,0 +1,258 @@
+---
+title: Tracing & Logging
+description: Distributed tracing, structured logging, and observability platforms for LLM pipelines, tools, and retrieval.
+updated: 2026-11-15
+---
+
+A support answer touches a gateway, a cache, a vector search, a model and a guardrail, and when it is slow or wrong, nobody can tell which step to blame without a record of each one.
+
+- Interviewers ask about tracing and logging to see whether you can follow one request across those steps, keep the record useful, and keep customers' personal data out of it.
+
+## Overview
+
+- A **trace** is the story of one request; a **span** is one timed step in it. Spans form a tree under a **root span**, and the tree shows where the time and tokens went. Brightpost's model call is **1,500 of 1,695 ms**, 88.5 % of the request.
+- Use **OpenTelemetry (OTel)** as the wire format. Its **GenAI semantic conventions** name the attributes (`gen_ai.request.model`, `gen_ai.usage.input_tokens`) so any backend can read them. As of November 2026 they are still marked **development**, so pin a version.
+- **Do not store prompts by default.** Prompt and answer text are opt-in attributes in the conventions. **Redact first, then write**: the store never sees the raw text.
+- **You cannot keep every trace.** Head sampling decides at the first span and drops most failures. **Tail sampling** decides at the end and keeps every slow or failed trace for about three times the storage of a 1 % head sample.
+- A log line says that something happened; a trace says **where** and **in what order**. Log the trace ID on every line so the two join.
+- Generic tracing keeps you in your SRE tools. An LLM-native platform adds prompt versions, scores and review queues. Many of them take OTel, so the choice is not all or nothing.
+
+<KeyIdea>Make each request one trace of timed spans, put its trace ID on every log line, redact before anything is stored, and tail-sample so every slow or failed trace is kept.</KeyIdea>
+
+## Mental model
+
+- Think of a parcel with a tracking number. Each depot scans it on arrival and departure, so when it is late you do not ask "where is the parcel?" but "which depot sat on it for two days?".
+- A trace is that tracking history for one request, and a span is one depot's scan.
+- Sampling is the sorting office deciding which tracking histories to keep.
+- Redaction is the clerk who blacks out the address labels before the history goes in the archive: you keep the route and the timings, not the customer's door number.
+
+## Core concepts
+
+1. **Trace and span.** A trace has one ID. Each span has its own ID, a parent's ID, a name, a start time, a duration, a status and attributes. Together they form a tree.
+2. **Context propagation.** The trace ID and parent span ID travel with the request across services (W3C `traceparent` header) and across queues, or the tree breaks into pieces.
+3. **Attributes.** Key-value facts on a span. For model calls the GenAI conventions fix the names: operation, provider, model, token counts, finish reason.
+4. **Events and logs.** A log is a timestamped line; a span event is a log attached to a span. Put the trace ID in every log line.
+5. **Content capture.** Prompt and answer text are the risky part. The conventions treat them as **opt-in**, so the default span has numbers and names only.
+6. **Redaction.** Find personal data and replace it with placeholders before the write, not after.
+7. **Sampling.** Keep a fraction of traces. **Head** sampling decides at the start; **tail** sampling decides when the trace is complete.
+8. **Retention.** Each store has a lifetime and a list of who may read it. Traces with content live shorter than traces without.
+9. **Collector.** A process that receives spans, redacts, samples and forwards them, so apps stay thin.
+
+## Architecture
+
+The span tree is the picture to know. One Brightpost request has a root span and a child for each step.
+
+<AnimatedDiagram
+  spec="animated/llmops/trace-span-tree"
+  caption="One request as a trace. The model call is 1,500 of 1,695 ms; the customer sees the first token at 535 ms. Only the model call is Brightpost's measured target; the other timings are illustrative."
+/>
+
+**How to read it:**
+
+- Each row is a span. Its bar starts when the span starts and ends when it ends, so the bars of the children sit inside the root.
+- The five children run one after another, so they add up: 15 + 20 + 100 + 1,500 + 60 = 1,695 ms. A slow request is almost always one fat bar.
+- The lime dashed line is the first token the customer sees.
+
+1. **The app or gateway opens the root span** and creates the trace ID.
+2. **Each step opens a child span** and closes it with a status and its attributes.
+3. **A collector receives the spans**, redacts text, applies the sampling rule and forwards them.
+4. **The trace store** keeps them for a fixed time. Dashboards read counts from it; engineers open single traces.
+5. **The trace ID joins everything else**: the log lines, the evaluation score of that answer, the cost record.
+
+## Technical mechanics
+
+### One span as JSON
+
+- The model-call span from the figure, following the OpenTelemetry GenAI semantic conventions.
+- I checked the attribute names on 16 November 2026 against the `semantic-conventions-genai` repository (schema `gen-ai-dev/1.42.0-dev`, status development; the old `opentelemetry.io` GenAI pages now point there). The values are illustrative.
+
+```json
+{
+  "name": "chat claude-sonnet-5-5",
+  "kind": "CLIENT",
+  "attributes": {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": "anthropic",
+    "gen_ai.request.model": "claude-sonnet-5-5",
+    "gen_ai.request.max_tokens": 1024,
+    "gen_ai.response.finish_reasons": ["end_turn"],
+    "gen_ai.usage.input_tokens": 2200,
+    "gen_ai.usage.cache_read.input_tokens": 1000,
+    "gen_ai.usage.output_tokens": 250
+  }
+}
+```
+
+- Four things to notice. The span name is `{gen_ai.operation.name} {gen_ai.request.model}`.
+- `gen_ai.usage.input_tokens` **includes cached tokens**, so it is the total (2,200) and the cache read (1,000) is a part of it; Anthropic's own `input_tokens` field excludes the cache, so the instrumentation must add them up.
+- Reasoning tokens go in `gen_ai.usage.reasoning.output_tokens` and are part of the output total.
+- The attributes are marked development, so names may still change; pin the convention version and watch the changelog.
+- The prompt and answer text go in `gen_ai.input.messages` and `gen_ai.output.messages`, which are opt-in, and the conventions also define `_ref` forms that point to text held elsewhere.
+
+- Retrieval and tool calls get their own spans: the conventions define `retrieval` and `execute_tool` operation names.
+- See [Latency & Token Usage Monitoring](/ai-system-design/genai-system-design/latency-token-monitoring) for the token fields and [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) for where traces sit among the other signals.
+
+### Redact before you store
+
+- Prompts hold email addresses, names and card numbers.
+- A trace store is read by many engineers and kept for weeks, so it is the wrong place for them.
+- Redact in the collector or the app, **before** the write.
+
+<AnimatedDiagram
+  spec="animated/llmops/log-redaction"
+  caption="Personal data is replaced by placeholders before it reaches the trace store. The order number stays because an engineer needs it. Values are made up."
+/>
+
+**How to read it:**
+
+- The top row is the path: raw text, redactor, store.
+- The table is what the redactor does to one ticket.
+- Patterns find emails and card numbers (a card also has to pass the Luhn check, so a 16-digit order reference is left alone).
+- A name needs a trained name finder, which sometimes misses, so redaction lowers the risk without removing it. An allow list keeps what debugging needs.
+
+- Three rules follow. **Redact on the way in**, because a raw copy anywhere, even for a day, is a copy you must secure and delete.
+- **Keep numbers by default**: tokens, timings, versions and a hash of the question diagnose most problems without any text.
+- **Gate the rest**: raw content, where you truly need it, goes to a separate short-lived store with its own access list.
+- The privacy rules themselves are on [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling).
+
+<Callout tone="red" title="What breaks">
+  Logging raw prompts to a plain log file. Everyone with log access can now read customers' emails and cards. Fix: redact before the write.
+</Callout>
+
+### Sampling: keep the slow and the failed
+
+At 200,000 requests a day you will not store every trace with its context. Which ones you keep matters more than how many.
+
+<AnimatedDiagram
+  spec="animated/llmops/trace-sampling"
+  caption="Of a day's 200,000 traces, 2 % are slow or failed (illustrative: 4,000). A 1 % coin at the first span keeps 40 of them. Tail sampling keeps all 4,000."
+/>
+
+**How to read it:**
+
+- The red part of each bar is the traces you most want.
+- Head sampling keeps 1 % of everything, so 1 % of the red: 40 of 4,000.
+- Tail sampling waits until the trace ends, then keeps all the red and 1 % of the blue: 4,000 + 1,960 = 5,960 traces, 2.98 times the 2,000 of the head sample.
+
+- The cost of tail sampling is memory and one routing rule.
+- The OpenTelemetry Collector's `tail_sampling` processor holds spans in memory while it waits (`decision_wait` defaults to 30 s) and needs every span of a trace to reach the **same** collector instance, so a load balancer must route by trace ID.
+- Its policies include `latency`, `status_code` and `probabilistic`.
+- A common recipe is: keep every error, keep every trace slower than a threshold, keep every trace with a low evaluation score, and 1 % of the rest.
+- Head sampling is cheaper and good when traffic is uniform and failures are not rare.
+
+<Callout tone="red" title="What breaks">
+  Head sampling for a rare failure. At 1 %, a failure that happens 4,000 times keeps 40 traces, and the one you needed is not among them. Fix: tail sampling, which keeps all 4,000.
+</Callout>
+
+### Worked example: finding a slow answer
+
+On sale day a customer waits 4.8 seconds for a refund answer about order 4471, a cracked kettle at £42.
+
+1. The customer's ticket carries a request ID, which is the trace ID, so support pastes it into the trace search.
+2. The trace was kept: its duration is over the 3-second threshold, so the tail sampler kept it.
+3. The tree shows retrieval at 100 ms, as usual, and a model call of 4,600 ms. The model call's attributes show `gen_ai.usage.input_tokens` of 31,000: a long order history was pasted in.
+4. The fix is in the gateway: cap the prompt at 32,000 tokens and trim older history, as on [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling).
+5. The stored text reads `[NAME_1]` and `[EMAIL_1]`, so the engineer who solved it never saw the customer's details.
+
+Without the trace the team would have had one number, "p99 is up", and a guess.
+
+### Platforms
+
+- Langfuse, LangSmith and Arize Phoenix each document OTel ingestion, so you can send standard spans and still use their prompt versions, score columns and review queues.
+- Pick by what the team needs this quarter, and keep the instrumentation on OTel so the choice can change.
+
+## Trade-offs
+
+<Compare caption="Backend, sampling and content: what each choice buys, what it costs, and when to use it.">
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Generic tracing (Jaeger, Tempo, an APM) | Joins with existing SRE dashboards and alerts | You build prompt versioning and score views yourself | The team already runs one APM and has strict data-residency rules |
+| LLM-native platform | Prompt versions, scores, annotation queues out of the box | Another data plane to secure and another bill | Several teams iterate on prompts and need review workflows |
+| Head sampling | Cheap, stateless, simple | Drops most rare failures | Uniform traffic, errors counted separately as metrics |
+| Tail sampling | Keeps every slow or failed trace | Memory in the collector, routing by trace ID | Failures are rare and each one matters |
+| Store content | Full replay of a bad answer | Privacy risk, retention duty | A gated, short-lived store for sampled or flagged traces |
+| Store numbers only | Safe and cheap | Cannot read what the model said | Default for all traffic |
+
+</Compare>
+
+## Production systems
+
+- **OpenTelemetry GenAI conventions**: the shared vocabulary for model spans, still in development as of November 2026.
+- **OpenTelemetry Collector tail sampling**: the `tail_sampling` processor with latency, status and probabilistic policies; it holds traces for `decision_wait`, 30 s by default.
+- **Langfuse**: an open-source LLM observability platform that documents OTel ingestion alongside its own SDKs.
+- **Arize Phoenix**: accepts traces over OTLP and adds LLM-specific views of them.
+- **LangSmith**: documents tracing with OpenTelemetry as well as its own SDK.
+
+## Failure modes & pitfalls
+
+- **Broken propagation.** A queue or a thread pool drops the trace context and the tree splits into orphan spans. Test with a request that crosses every hop.
+- **Counting cached tokens twice.** The OTel input total includes the cache read; some provider fields do not. Know which one you are summing.
+- **High-cardinality span names.** Put the order ID in an attribute, not the name, or the backend creates a new series for every request.
+- **No retention rule.** Traces that hold content need a short life and a named owner.
+
+## Interview framework
+
+1. **Name the unit.** One request is one trace; each pipeline step is a span, with the model call as its own span.
+2. **List what to attach**: model, prompt version, token counts, finish reason, index version, and the trace ID on every log line.
+3. **Say what you do not store by default**: prompt text. Redact first, gate the rest, set retention.
+4. **Choose a sampling rule and defend it**: tail sampling to keep the slow and the failed, plus a small random sample for the baseline.
+5. **Close with the tooling choice**: OTel for the wire format, an LLM-native backend if prompt and score workflows matter.
+
+**What interviewers listen for:** token counts as attributes, the privacy default, head against tail with the reason, trace IDs that join logs and evaluations.
+
+**Red flags:** "log everything"; storing raw prompts "for debugging" with no redaction; one number as the only signal; no mention of sampling at 200,000 requests a day.
+
+## Further reading
+
+- [OpenTelemetry semantic conventions for generative AI (GitHub)](https://github.com/open-telemetry/semantic-conventions-genai): the spans, attributes and token fields used above.
+- [Tail Sampling Processor (OpenTelemetry Collector Contrib)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/tailsamplingprocessor): policies, `decision_wait` and scaling advice.
+- [Claude prompt caching (Anthropic docs)](https://platform.claude.com/docs/en/build-with-claude/prompt-caching): how `input_tokens`, cache writes and cache reads add up.
+- [OpenTelemetry for LLM observability (Langfuse docs)](https://langfuse.com/integrations/native/opentelemetry) and [Phoenix tracing (Arize docs)](https://arize.com/docs/phoenix/tracing/llm-traces).
+- Related pages: [LLMOps & Observability](/ai-system-design/genai-system-design/llmops-observability) · [Alerting & Dashboards](/ai-system-design/genai-system-design/alerting-dashboards) · [Observability on the cloud](/cloud/operations/observability-on-the-cloud) · [Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you instrument an LLM agent that calls external tools and a vector database so traces stay useful for on-call?" category="Architecture" level="Mid">
+    - Open a root span per user request and a child span for each phase: retrieval, each tool call, the model call and post-processing.
+    - Propagate the trace context through async workers and queues so the tree stays whole.
+    - Attach stable attributes such as model name, prompt version, index snapshot and token counts, using the OpenTelemetry GenAI names where they exist.
+    - Cap payload sizes and keep full text out of spans, linking to a gated store when it is needed.
+    - Use consistent span names and statuses so dashboards can add up error rates by component.
+  </InterviewQuestion>
+  <InterviewQuestion question="What would you log, and what would you leave out, in a regulated environment?" category="Architecture" level="Senior">
+    - Default to numbers and identifiers: tokens, timings, model and prompt versions, a hash of the question, the decision taken.
+    - Treat prompt and answer text as opt-in, redact personal data before the write, and send any retained text to a separate store with short retention, encryption with managed keys and role-based access with a break-glass route.
+    - Tie each retention period to a purpose such as debugging, not "in case".
+    - Record who read what, so access is itself auditable.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare head sampling and tail sampling for an LLM service." category="Trade-offs" level="Mid">
+    - Head sampling decides at the first span, so it is cheap and stateless, but it cannot know whether the request will fail or run slow.
+    - At 1 % it keeps 1 % of the failures. Tail sampling waits for the complete trace, then keeps every error and every slow trace plus a small random share of the rest.
+    - It costs collector memory and requires all spans of a trace to reach the same collector.
+    - For Brightpost, 4,000 slow or failed traces a day make tail sampling worth the extra storage.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where in the pipeline should personal data be redacted, and what can go wrong?" category="Failure modes" level="Senior">
+    - Redact in the app or the collector before anything is stored, so no raw copy exists to secure.
+    - Patterns catch emails and card numbers well, but names and free-text details need a model, and models miss some.
+    - So treat redaction as risk reduction: add short retention, access control and an allow list for fields you must keep.
+    - Test with seeded fake data and alert when a pattern finds personal data in an already-redacted store.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does the OpenTelemetry GenAI input token attribute matter when the provider reports cached tokens?" category="Concepts" level="Mid">
+    - The convention says `gen_ai.usage.input_tokens` should include cached tokens, with the cache read reported separately as a part of it.
+    - Some providers report input excluding the cache, so a naive copy under-counts.
+    - Brightpost's request is 2,200 input tokens, 1,000 of them cached: Anthropic's field says 1,200 and the OTel attribute should say 2,200.
+    - If you mix the two meanings, cost and capacity dashboards disagree.
+  </InterviewQuestion>
+  <InterviewQuestion question="A customer says an answer took five seconds. Walk me through finding out why." category="Failure modes" level="Junior">
+    - Get the request ID, which is the trace ID, and open that trace.
+    - Look for the widest span: retrieval, the model call or a tool.
+    - Check that span's attributes, such as input tokens, finish reason and retries.
+    - If the trace is missing, check whether the sampler kept it, which is why slow traces should always be kept.
+    - Then fix the cause, for example a long prompt, and add an alert on that span's latency.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose an LLM-native observability platform over generic OpenTelemetry backends?" category="Trade-offs" level="Mid">
+    - Choose a native platform when teams need prompt versions, human labels tied to traces and score views without building them.
+    - Stay on generic backends when residency rules, one standard APM or minimal vendor sprawl matter more.
+    - Because the main platforms accept OTel, instrument with OTel either way, so you can change backends without changing code.
+  </InterviewQuestion>
+</InterviewQuestions>

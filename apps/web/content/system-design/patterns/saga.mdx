@@ -1,92 +1,211 @@
 ---
 title: "Saga and Distributed Transactions"
-description: "Coordinating multi-service workflows with compensations instead of two-phase commit."
+description: "Coordinating multi-service workflows with compensations instead of two-phase commit, and when two-phase commit is still right."
+icon: git-merge
+updated: 2026-11-16
 ---
 
-A booking touches inventory, payment and notifications, each in its own service and database. Sagas keep that workflow correct without a global lock.
+An order touches payment, stock and shipping, each in its own service and database, and there is no transaction that spans all three.
 
-## TL;DR
+- Interviewers ask about sagas to see whether you can keep a multi-service workflow correct without a global lock, and whether you can name the undo for every step.
+
+## Overview
 
 - A **saga** is a sequence of local transactions; if one fails, earlier steps are undone by **compensating actions**.
-- Two styles: **choreography** (services react to events) and **orchestration** (a coordinator drives steps).
-- **Two-phase commit** gives atomicity but blocks and scales poorly.
+- Two styles: **choreography** (services react to each other's events) and **orchestration** (a coordinator drives the steps).
+- **Two-phase commit** (2PC) gives atomicity but blocks participants when the coordinator fails, and many stores and brokers do not support it.
 - Steps and compensations must be **idempotent** and retryable.
-- Use **reservations with expiry** for scarce resources.
+- A saga has **no isolation**: other requests can see its half-finished state, so mark records **pending** and use **reservations with expiry** for scarce resources.
 
-## The idea in plain English
+## Mental model
 
-Booking a trip: reserve the flight, then the hotel. If the hotel fails, cancel the flight. You never held a lock on both at once; you undid the first step.
+- Booking a trip: reserve the flight, then the hotel. If the hotel is full, cancel the flight.
+- You never held a lock on both at once; you undid the first step.
+- The undo is a business action (a cancellation with its own rules), not a database rollback.
 
 ## Core concepts
 
-1. **Local transaction.** Each service commits to its own database.
-2. **Compensation.** A business-level undo (refund, release hold), not a database rollback.
-3. **Orchestrator.** A state machine that calls steps and compensations in order and persists progress.
-4. **Choreography.** Services publish events; others subscribe. Simple for small flows, hard to follow at scale.
-5. **Pivot and retryable steps.** Steps before the pivot are compensatable; after it, they must succeed through retries.
-6. **Semantic locks.** Mark a record "pending" so others do not act on it mid-saga.
+- The running example is **order 4471, a £42 kettle**: charge the payment, reserve the stock, book a courier. At the sale-day peak, stock runs out for some orders after the payment has gone through.
+
+### Two-phase commit, and why it blocks
+
+- 2PC makes several databases commit together. Phase 1: the coordinator asks each participant to **prepare**; each writes the change durably, keeps its locks and votes yes or no. Phase 2: the coordinator tells all to **commit** (or roll back).
+- After voting yes, a participant may not decide on its own. If the coordinator dies before phase 2, participants stay **in doubt**, holding their locks until it returns.
+- In PostgreSQL a prepared transaction keeps its locks and gets in the way of `VACUUM` until `COMMIT PREPARED` or `ROLLBACK PREPARED`.
+
+<AnimatedDiagram spec="animated/patterns/saga-vs-2pc" stepper caption="Two-phase commit leaves participants locked when the coordinator dies; a saga commits each step and undoes it with a compensation." />
+
+<StepCards>
+  <StepCard n={1} title="2PC: both prepare and hold locks">
+    The coordinator asks the payments and stock databases to prepare. Both write the change, keep their rows locked and vote yes.
+  </StepCard>
+  <StepCard n={2} title="The coordinator dies: both stay blocked">
+    The coordinator crashes before sending commit. Neither database may decide alone, so both keep the order's rows locked until the coordinator recovers.
+  </StepCard>
+  <StepCard n={3} title="A saga: commit each step, compensate on failure">
+    Each step commits locally at once, so nothing waits on the coordinator. When stock fails, the payment is undone by a refund, a new transaction of its own.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- With 2PC, every order's rows stay locked for at least two round trips to the coordinator; if the coordinator is down for 60 s at 300 orders/s, up to 18,000 orders' rows wait locked.
+- With a saga, each local commit holds its locks for one local transaction, a few milliseconds.
+
+<PremiumBreak />
+
+### Where two-phase commit is still right
+
+- Inside one database system that runs 2PC internally (distributed SQL databases commit across their own shards this way).
+- Between a few resources that all support XA, on a reliable network, with a coordinator that recovers quickly.
+- Not across independent services, third-party APIs (a card provider will not "prepare" a charge) or message brokers that do not take part.
+
+### The parts of a saga
+
+- **Local transaction.** Each service commits to its own database.
+- **Compensation.** A business-level undo (refund, release a hold), not a rollback: it is visible, and it can have its own rules and costs.
+- **Orchestrator.** A state machine that calls steps and compensations in order and persists its progress.
+- **Choreography.** Services publish events and others subscribe. Simple for short flows, hard to follow at scale.
+- **Pivot and retryable steps.** Steps before the pivot can be compensated; the pivot is the point of no return; steps after it must succeed through retries.
+- **Semantic locks.** Mark a record "pending" so other requests do not act on it mid-saga.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    O["Orchestrator"] --> A["1. Reserve seat"]
-    A --> B["2. Charge payment"]
-    B --> C["3. Confirm booking"]
-    B -. "fails" .-> RA["Release seat"]
-    C -. "fails" .-> RB["Refund payment"]
-    RB --> RA
-```
+An orchestrated saga for order 4471, one step at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/saga-orchestration" stepper caption="The orchestrator runs each local step in order, records where it is, and on a failure runs the compensations in reverse." />
+
+<StepCards>
+  <StepCard n={1} title="Start the saga and record it">
+    The order saga records "saga 4471 started" in its own store before calling anyone. If it crashes, it resumes from the last recorded step.
+  </StepCard>
+  <StepCard n={2} title="Charge the payment">
+    The payment service charges £42 in its own database. The order is now "pending", not "confirmed".
+  </StepCard>
+  <StepCard n={3} title="Reserve the stock">
+    The stock service reserves one kettle. On the happy path it succeeds.
+  </StepCard>
+  <StepCard n={4} title="Book a courier">
+    Shipping books a courier, the saga marks the order confirmed, and the happy path ends.
+  </StepCard>
+  <StepCard n={5} title="Stock fails: refund the payment">
+    On the sale-day path, stock answers "out of stock" at step 3. The saga runs the compensations for the steps already done, in reverse: it refunds the £42, then marks the order cancelled.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Orchestration or choreography
+
+- **Orchestration:** one component owns the flow, its state and its timeouts, so it is easy to see where order 4471 is stuck. Workflow engines (Temporal, AWS Step Functions) give you the state machine and durable retries (see [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling)).
+- **Choreography:** payment publishes "charged", stock listens and publishes "reserved", shipping listens. No central component, but the flow lives in five subscriptions, and cycles are easy to build by accident.
+- Either way, publish events through an [outbox](/system-design/patterns/outbox-and-cdc), so a step's commit and its event cannot drift apart.
+
+### Ordering the steps
+
+- Put the steps most likely to fail and cheapest to undo first, and the hardest to undo last.
+- Reserving stock before charging means a sold-out kettle costs a released hold, not a refund.
+- The charge then becomes the pivot: once it succeeds, shipping must be retried until it works.
 
 ### Reservation with expiry
 
-Hold the seat or room for a few minutes. Payment success confirms it; failure or timeout releases it automatically, which avoids stuck state when a service crashes.
+- Hold the seat, room or kettle for a few minutes. Payment success confirms it; failure or timeout releases it automatically.
+- The expiry avoids stuck holds when a service crashes mid-saga (see [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking)).
 
-### Reliability
+### Worked example: order 4471 when stock runs out
 
-Persist saga state and use the [outbox pattern](/system-design/patterns/message-queues) so events are not lost between the database write and the publish.
+At 12:00:00.000 the order saga starts for order 4471. The payment step runs before the stock step (the design this page then improves).
+
+1. **12:00:00.050** Payment charges £42 and commits.
+2. **12:00:00.090** Stock answers "out of stock": the last kettles went to other orders.
+3. **12:00:00.120** The saga refunds £42 through the payment service, with the same idempotency key on every retry.
+4. **12:00:00.150** The order is marked cancelled and the shopper sees "sold out, refunded".
+
+**The numbers:**
+
+- The shopper's card shows a charge and a refund; the card company may take days to drop the charge from the statement.
+- If 1 % of sale-day orders hit sold-out stock after payment: 300 × 0.01 = 3 refunds a second, 10,800 an hour, each with a fee and a confused shopper.
+- Reordering so stock is reserved first turns those into 3 released holds a second, with no money moved.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Saga | Scales, no distributed locks | Temporary inconsistency, compensation logic |
-| 2PC | Atomic | Blocking, coordinator failure risk |
-| Orchestration | Clear flow | Central component to run |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Saga | Scales; no distributed locks; works across services | Visible intermediate states; compensation logic | Workflows across services and third parties |
+| Two-phase commit | Atomic | Blocks on coordinator failure; needs every participant's support | Inside one distributed database; a few XA resources |
+| Orchestration | Flow, state and timeouts in one place | A central component to run | Long or branching flows |
+| Choreography | No central component | Flow spread across subscribers; hard to trace | Two or three steps |
+| Reservation with expiry | No stuck holds | A timer per hold | Scarce items: seats, rooms, stock |
 
-## Real-world examples
+## Production systems
 
-- [Ticketmaster](/system-design/case-studies/ticketmaster) and [Hotel Booking](/system-design/case-studies/hotel-booking): hold, pay, confirm.
-- [Uber Eats](/system-design/case-studies/uber-eats): order, restaurant, courier, payment.
-- [Kindle Payments](/system-design/case-studies/kindle-payments): purchase and entitlement.
+- **PostgreSQL** (as of November 2026): `PREPARE TRANSACTION` stores a transaction for 2PC; it keeps its locks until `COMMIT PREPARED` or `ROLLBACK PREPARED`, and the docs advise keeping the feature off (`max_prepared_transactions = 0`) without an external transaction manager.
+- **microservices.io** names the two saga styles: choreography, where each local transaction publishes events that trigger the next, and orchestration, where an orchestrator tells participants what to do; it lists the lack of isolation as the main drawback.
+- **Workflow engines** such as Temporal and AWS Step Functions run orchestrated sagas as durable state machines with retries and timeouts.
+- [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) and [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking): hold, pay, confirm. [Uber Eats](/system-design-case-studies/case-studies/uber-eats): order, restaurant, courier, payment. [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments): purchase and entitlement.
+- **Used in our case studies:** [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Hotel Booking](/system-design-case-studies/case-studies/hotel-booking) · [Parking Garage](/system-design-case-studies/case-studies/parking-garage) · [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Tinder](/system-design-case-studies/case-studies/tinder) · [Zillow](/system-design-case-studies/case-studies/zillow)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Compensations that can fail with no retry.
-- Non-idempotent steps.
-- No timeout on pending states.
-- Ignoring that users can observe intermediate states.
+- **Compensations that can fail with no retry.** A refund fails once and the shopper is never refunded. Retry compensations until they succeed, and alert on stuck ones.
+- **Non-idempotent steps.** A retried step charges twice. Give every step and compensation an idempotency key.
+- **No timeout on pending states.** An order stays "pending" forever after a crash. Expire holds and time out sagas.
+- **Ignoring visible intermediate states.** Another request reads the half-done order. Mark records pending (a semantic lock) and show users the real state.
+- **Steps in the wrong order.** The hardest-to-undo step runs first. Reserve before you charge.
 
-## How to answer in an interview
+## Interview framework
 
-List the steps, define a compensation for each, choose orchestration or choreography, and explain how you handle crashes mid-flow.
+1. List the steps and the service that owns each.
+2. Define a compensation for each step, and mark the pivot.
+3. Order the steps: cheapest to undo first, hardest last.
+4. Choose orchestration or choreography, and persist saga state.
+5. Explain crashes mid-flow: resume from the log, retries with idempotency keys, timeouts on holds.
 
-## Related patterns
+**What interviewers listen for:** a compensation per step, ordering by cost of undo, and idempotent retries.
 
-[Idempotency](/system-design/patterns/idempotency) · [Message Queues](/system-design/patterns/message-queues) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing)
+**Red flags:** "use a distributed transaction across the services", or a compensation with no retry.
 
 ## Further reading
 
 - [Sagas (Garcia-Molina and Salem, 1987)](https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf)
 - [Saga pattern (microservices.io)](https://microservices.io/patterns/data/saga.html)
+- [PREPARE TRANSACTION (PostgreSQL docs)](https://www.postgresql.org/docs/current/sql-prepare-transaction.html)
+- Related pages: [Idempotency](/system-design/patterns/idempotency) · [Message Queues](/system-design/patterns/message-queues) · [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling)
 
 <InterviewQuestions>
   <InterviewQuestion question="Why not use two-phase commit across microservices?" category="Concepts" level="Mid">
-    It blocks participants while waiting for the coordinator, hurts availability and throughput, and is unsupported by many stores. Sagas trade atomicity for availability by using compensations.
+    - It blocks participants while waiting for the coordinator, which hurts availability and throughput.
+    - Many stores, brokers and third-party APIs do not support it.
+    - Sagas trade atomicity for availability by using compensations.
   </InterviewQuestion>
-  <InterviewQuestion question="Orchestration or choreography?" category="Design" level="Senior">
-    Choreography fits short flows with few services; orchestration is better for long or branching flows because the logic and state live in one place that is easier to monitor and change.
+  <InterviewQuestion question="Orchestration or choreography?" category="Architecture" level="Senior">
+    - Choreography fits short flows with few services.
+    - Orchestration is better for long or branching flows, because the logic and state live in one place.
+    - That place is easier to monitor and change.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a compensating action?" category="Concepts" level="Junior">
+    - A business operation that undoes the effect of an earlier step, such as a refund for a charge or a release for a hold.
+    - It is not a database rollback: the original step committed and may have been seen.
+    - It must be idempotent and retried until it succeeds.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens when the coordinator dies in the middle of two-phase commit?" category="Failure modes" level="Mid">
+    - Participants that voted yes cannot decide alone, so they stay in doubt, holding their locks.
+    - Other transactions that need those rows wait until the coordinator recovers and sends the decision.
+    - That blocking is why 2PC is avoided across independent services.
+  </InterviewQuestion>
+  <InterviewQuestion question="In what order should a saga's steps run?" category="Trade-offs" level="Senior">
+    - Steps most likely to fail and cheapest to undo first, such as reserving stock.
+    - The step hardest to undo, such as charging money, as late as possible: it becomes the pivot.
+    - After the pivot, remaining steps must succeed through retries rather than be compensated.
+  </InterviewQuestion>
+  <InterviewQuestion question="The orchestrator crashes after charging the payment. What happens to order 4471?" category="Failure modes" level="Senior">
+    - The saga state recorded "payment done", so a restarted orchestrator resumes at the next step.
+    - Steps are retried with the same idempotency keys, so a charge that already happened is not repeated.
+    - A timeout on the saga makes sure a stuck order is either completed or compensated, never left pending.
+  </InterviewQuestion>
+  <InterviewQuestion question="Sagas have no isolation. What anomalies does that cause, and how do you limit them?" category="Trade-offs" level="Senior">
+    - Other requests can read a half-finished saga, for example stock shown as reserved for an order that will be cancelled.
+    - Two sagas can update the same record in between each other's steps.
+    - Mark records pending (a semantic lock), re-check values before the final step, and order steps so that undone work is cheap.
   </InterviewQuestion>
 </InterviewQuestions>

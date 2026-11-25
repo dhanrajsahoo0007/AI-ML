@@ -26,7 +26,7 @@ const spec: DiagramSpec = {
     { id: "storage", title: "Storage", tone: "violet", x: 620, y: 50, w: 240, h: 430 },
   ],
   nodes: [
-    { id: "users", label: "Users", sub: "browser / phone", icon: "users", x: 100, y: 250, w: 140, h: 64 },
+    { id: "users", label: "Users", sub: "browser / phone", icon: "users", x: 100, y: 250, w: 148, h: 64 },
     {
       id: "lb",
       label: "Load balancer",
@@ -36,7 +36,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 280,
       y: 250,
-      w: 140,
+      w: 150,
       h: 64,
     },
     {

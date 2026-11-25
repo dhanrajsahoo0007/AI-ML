@@ -1,0 +1,19 @@
+title: Hotel booking high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, reservation core, application services,
+  async pipeline and storage. Step 1: a guest searches through the API gateway; the search service reads hotels from
+  the catalog and checks each hotel's nights in the inventory database, and photos come from a CDN. Step 2: the
+  hotel's channel manager sends rates and room counts through the partner API, and the booking service writes one row
+  per room type per night. Step 3: a booking reads each night's count, then writes it, drawn red because two guests
+  can get the last room. Step 4: one guarded update reserves every night of the stay in one transaction. Step 5: a
+  booking workflow holds the rooms, asks the payment service to authorise and capture with the card processor, and
+  confirms. Step 6: room-night changes flow from the inventory database through a change stream into a search index;
+  search reads the index and the hotel page re-checks one hotel live through the booking service. Step 7: a trips
+  service reads a guest-keyed trips view built from the same stream, and a cancel runs the workflow's compensation.
+  Step 8: the workflow pushes each booking to the hotel's channel manager through the partner API.
+caption: >-
+  Hotel booking: search from an index fed by a change stream, reserve every night in one transaction, pay through a
+  workflow, and tell the hotel.
+tags: [case-studies, hotel-booking, architecture, reservations]
+source: original
+created: 2026-11-17

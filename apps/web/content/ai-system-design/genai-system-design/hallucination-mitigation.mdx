@@ -3,9 +3,11 @@ title: Hallucination Mitigation
 description: Why LLMs produce confident false statements, and the layered design that reduces them through grounding, citations, verification, abstention and monitoring.
 ---
 
-Every LLM product interview eventually asks "how do you stop it making things up?". There is no single fix. The strong answer is a layered design: ground the model, constrain it, verify it, let it say "I don't know", and measure the rate in production.
+Every LLM product interview eventually asks "how do you stop it making things up?".
 
-## TL;DR
+- There is no single fix. The strong answer is a layered design: ground the model, constrain it, verify it, let it say "I don't know", and measure the rate in production.
+
+## Overview
 
 - Hallucinations are **fluent outputs not supported by facts or the provided context**.
 - They come from how models are trained: they predict **plausible** text, not **verified** text, and lack a reliable sense of what they do not know.
@@ -13,9 +15,11 @@ Every LLM product interview eventually asks "how do you stop it making things up
 - Distinguish **factuality** (true in the world) from **faithfulness** (supported by the given context).
 - Measure the **hallucination rate** on a test set and monitor it in production.
 
-## The idea in plain English
+## Mental model
 
-An LLM is like a very confident storyteller who has read a lot. Ask about something they half-remember and they will fill the gaps with something that sounds right. To keep them honest, you hand them the source documents, ask them to quote where each claim came from, let them say "I'm not sure", and have a fact-checker review important answers.
+- An LLM is like a very confident storyteller who has read a lot.
+- Ask about something they half-remember and they will fill the gaps with something that sounds right.
+- To keep them honest, you hand them the source documents, ask them to quote where each claim came from, let them say "I'm not sure", and have a fact-checker review important answers.
 
 ## Core concepts
 
@@ -37,51 +41,89 @@ An LLM is like a very confident storyteller who has read a lot. Ask about someth
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    Q["User question"] --> RET["Retrieve sources / call tools"]
-    RET --> ENOUGH{"Enough evidence?"}
-    ENOUGH -->|"No"| ABSTAIN["Say what is unknown,<br/>suggest next step"]
-    ENOUGH -->|"Yes"| GEN["Generate with citations,<br/>low temperature, schema"]
-    GEN --> VERIFY["Claim-by-claim verification<br/>against sources"]:::accent
-    VERIFY -->|"unsupported claims"| REVISE["Remove or revise claims"]
-    REVISE --> VERIFY
-    VERIFY -->|"supported"| RISK{"High-stakes?"}
-    RISK -->|"Yes"| HUMAN["Human review"]
-    RISK -->|"No"| OUT["Answer with sources"]
-    HUMAN --> OUT
-    OUT -.-> MON["Log, sample, measure<br/>hallucination rate"]
-```
+- One question from the RAG pages runs through every layer here.
+- Brightpost, a fictional shop, answers customers from a help centre of 1,200 articles, and a customer asks: "How do I reset my password if I lost my phone?" Watch where each layer can stop a made-up answer.
 
-The flow:
+<AnimatedDiagram
+  spec="animated/rag/halluc-grounded-flow"
+  stepper
+  caption="Each layer catches what the one before it lets through: no evidence means no answer, and no claim leaves without a chunk behind it."
+/>
 
-1. Ground the request with retrieval or tools.
-2. If evidence is insufficient, abstain clearly.
-3. Generate with citations and constraints.
-4. Verify each claim against the sources and fix unsupported ones.
-5. Send high-stakes answers to human review.
-6. Log and measure continuously.
+**How to read it**, one card per step:
 
-## Deep dive
+<StepCards>
+  <StepCard n={1} title="The question is grounded in retrieved chunks">
+    - The retriever fetches the 5 help-centre chunks closest to the question, the [RAG pipeline](/ai-system-design/genai-system-design/rag-fundamentals).
+    - The model will answer from these chunks, not from memory; for live data such as an order's status, a tool call plays the same role.
+    - Nobody has checked yet whether the chunks are any good.
+  </StepCard>
+  <StepCard n={2} title="Too little evidence: say so instead of guessing">
+    An evidence check looks at the best chunk's score. Below the floor, the system abstains: it says "I don't know" and links to support, and the model never writes a guess. A question such as "Do you sell gift wrap?", which no article covers, ends here.
+  </StepCard>
+  <StepCard n={3} title="Enough evidence: draft an answer with citations">
+    The model drafts at low temperature, told to use only the chunks and to cite one for each claim, as [1] and [2]. Citations make every claim checkable. A fluent draft can still contain a claim no chunk supports.
+  </StepCard>
+  <StepCard n={4} title="Every claim is checked against the chunks">
+    A verifier splits the draft into claims and asks, for each one, whether a cited chunk supports it. The verifier is a natural language inference (NLI) model, which labels a sentence pair as supported, contradicted or neither, or an LLM judge. It is the layer this page is about.
+  </StepCard>
+  <StepCard n={5} title="An unsupported claim is dropped or revised">
+    The draft says "you can also call support to reset it by phone", and no chunk says that. The claim is cut, or the model rewrites it from the chunks, and the new draft is checked again. The loop stops after one or two rounds; still unsupported means abstain.
+  </StepCard>
+  <StepCard n={6} title="High-stakes answers wait for a person">
+    Answers that promise a refund or unlock an account wait for a support agent. The password answer only repeats the help centre's own steps, so it goes straight on. Strictness follows the risk, not the model's confidence.
+  </StepCard>
+  <StepCard n={7} title="The answer goes out with its sources">
+    The customer sees the steps with links to the two articles they came from, so they can check them. The answer is now as good as the chunks behind it.
+  </StepCard>
+  <StepCard n={8} title="Answers are logged and sampled to measure the rate">
+    Every question, chunk set and answer is logged. A sample is checked claim by claim each week, which gives the hallucination rate: the share of answers with at least one unsupported claim. A rise points to a layer that has stopped working.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- (illustrative): the floor is a similarity of 0.70.
+- The main question's best chunk scores 0.82, and its top 5 run from 0.82 to 0.74, so it passes.
+- The draft makes 4 claims and 3 are in the chunks: 3 ÷ 4 = 75% supported before the revise loop, 3 ÷ 3 = 100% after it.
+
+<Callout tone="red" title="What breaks">
+  A similarity floor checks that a chunk sounds like the question, not that it answers it. The main question's best chunk, at 0.82, is "Change your password", which does not help someone who lost their phone. Fix: base the evidence check on a reranker's score or a relevance grader that reads the question and the chunk together, as in the [corrective loop](/ai-system-design/genai-system-design/advanced-rag).
+</Callout>
+
+## Technical mechanics
 
 ### Detecting hallucinations without references
 
-```mermaid
-flowchart LR
-    Q2["Question"] --> S1["Sample answer 1"]
-    Q2 --> S2["Sample answer 2"]
-    Q2 --> S3["Sample answer 3"]
-    S1 --> CMP["Compare claims across samples"]:::accent
-    S2 --> CMP
-    S3 --> CMP
-    CMP --> CONF["Consistent claims: likely grounded<br/>Inconsistent: likely hallucinated"]
-```
+Sometimes there is nothing to check against: the model answered without retrieval, or a claim cites no chunk. Sampling the model again gives a signal anyway.
 
-The idea behind methods such as SelfCheckGPT: if the model really knows a fact, independent samples tend to agree; invented details vary between samples.
+<AnimatedDiagram
+  spec="animated/rag/halluc-consistency-check"
+  stepper
+  caption="A fact the model knows comes back in every sample; a detail it invents changes each time."
+/>
+
+**How to read it:**
+
+- Step 1 asks the main question with no chunks and splits the answer, written at temperature 0, into three claims.
+- Step 2 samples four more answers at temperature 1, where the model picks less likely words more often.
+- Step 3 asks, for each claim and each sample, whether the sample supports the claim.
+- Step 4 scores each claim by the share of samples that do not: the phone number changes in every sample, so it scores 1.00 and is flagged.
+
+- **The numbers:** (illustrative): "Choose 'Forgot password'" gets 0 of 4 disagreements = 0.00, "Enter a backup code" 1 of 4 = 0.25, and the phone number 4 of 4 = 1.00. Flag at 0.5.
+
+- This is the idea behind SelfCheckGPT (Manakul et al., 2023): if the model really knows a fact, independent samples tend to agree; invented details vary between samples.
+- It needs no external database and no access to token probabilities.
+- The paper checks each sentence against 20 samples, so one check costs about 20 extra model calls.
+
+<Callout tone="red" title="What breaks">
+  Agreement is not truth. A model that learned a wrong fact repeats it in every sample, and the check scores it 0.00. Fix: use consistency to rank answers for review offline, and rely on grounding in real sources for anything customers act on.
+</Callout>
 
 ### Chain-of-verification
 
-The model drafts an answer, writes verification questions about its own claims, answers those questions independently, and revises the draft. It catches some errors without external sources, but grounding in real sources is stronger.
+- The model drafts an answer, writes verification questions about its own claims, answers those questions independently, and revises the draft.
+- It catches some errors without external sources, but grounding in real sources is stronger.
 
 ## Trade-offs
 
@@ -95,21 +137,22 @@ The model drafts an answer, writes verification questions about its own claims, 
 | Self-consistency checks | Flagging uncertainty | Several samples | Offline evaluation, high-stakes items |
 | Human review | Final safety net | People time | Regulated domains |
 
-## Real-world examples
+## Production systems
 
 - Surveys of hallucination in natural language generation catalogue intrinsic and extrinsic types across summarization, dialogue and QA.
 - SelfCheckGPT showed sampling-based consistency can detect hallucinated sentences without external references.
 - Chain-of-Verification reduced hallucinations in list-based and long-form generation by having the model plan and answer its own verification questions.
 - Production assistants increasingly show sources next to answers so users can verify claims.
+- **Used in our case studies:** [AI Answer Engine](/genai-system-design/case-studies/ai-answer-engine) · [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline) · [Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [Clinical Knowledge-Graph Assistant](/genai-system-design/case-studies/kg-healthcare-case-study) · [Yield Root-Cause Assistant on a Fab Knowledge Graph](/genai-system-design/case-studies/kg-semiconductor-case-study)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
 - Assuming RAG eliminates hallucination; models can still ignore or misread the context.
 - Evaluating only answer correctness, not faithfulness to sources.
 - Penalizing "I don't know" in metrics, which trains the system to guess.
 - Letting LLMs do arithmetic or look up figures from memory instead of using tools.
 
-## How to answer in an interview
+## Interview framework
 
 1. Define hallucination, and separate factuality from faithfulness.
 2. Explain the causes briefly.
@@ -124,27 +167,37 @@ The model drafts an answer, writes verification questions about its own claims, 
 ## Further reading
 
 - [Survey of Hallucination in Natural Language Generation (Ji et al., 2022)](https://arxiv.org/abs/2202.03629)
-- [SelfCheckGPT (Manakul et al., 2023)](https://arxiv.org/abs/2303.08896)
+- [SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection (Manakul et al., 2023)](https://arxiv.org/abs/2303.08896)
 - [Chain-of-Verification Reduces Hallucination (Dhuliawala et al., 2023)](https://arxiv.org/abs/2309.11495)
 - [Retrieval-Augmented Generation (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401)
 
 <InterviewQuestions>
   <InterviewQuestion question="Why do LLMs hallucinate?" category="Concepts" level="Junior">
-    They are trained to produce likely continuations of text, not to check facts, so when knowledge is missing or uncertain they still generate fluent, plausible content. They have no reliable internal signal of what they do not know, and training often rewards answering over abstaining. Outdated data, ambiguous prompts and sampling randomness add to it.
+    - They are trained to produce likely continuations of text, not to check facts, so when knowledge is missing or uncertain they still generate fluent, plausible content.
+    - They have no reliable internal signal of what they do not know, and training often rewards answering over abstaining.
+    - Outdated data, ambiguous prompts and sampling randomness add to it.
   </InterviewQuestion>
   <InterviewQuestion question="What is the difference between factuality and faithfulness?" category="Concepts" level="Mid">
-    Factuality is whether a statement is true in the real world. Faithfulness is whether it is supported by the context the model was given, such as retrieved documents. A RAG answer can be faithful to an outdated document yet not factual, or factual but unsupported by the sources, so both need checking.
+    - Factuality is whether a statement is true in the real world.
+    - Faithfulness is whether it is supported by the context the model was given, such as retrieved documents.
+    - A RAG answer can be faithful to an outdated document yet not factual, or factual but unsupported by the sources, so both need checking.
   </InterviewQuestion>
   <InterviewQuestion question="Does setting temperature to zero stop hallucinations?" category="Failure modes" level="Junior">
-    No. Lower temperature makes outputs more deterministic and can reduce some random errors, but the most likely continuation can still be wrong. Hallucination comes from missing or wrong knowledge, which needs grounding, abstention and verification.
+    - No. Lower temperature makes outputs more deterministic and can reduce some random errors, but the most likely continuation can still be wrong.
+    - Hallucination comes from missing or wrong knowledge, which needs grounding, abstention and verification.
   </InterviewQuestion>
   <InterviewQuestion question="How would you measure hallucination rate?" category="Evaluation" level="Mid">
-    Build a test set with questions and source documents, including unanswerable ones. Break answers into claims and check each against the sources, using human labels for a calibration set and an NLI model or LLM judge at scale. Report the share of unsupported claims and correct abstentions, and sample production traffic the same way.
+    - Build a test set with questions and source documents, including unanswerable ones.
+    - Break answers into claims and check each against the sources, using human labels for a calibration set and an NLI model or LLM judge at scale.
+    - Report the share of unsupported claims and correct abstentions, and sample production traffic the same way.
   </InterviewQuestion>
   <InterviewQuestion question="How can a model detect its own hallucinations without external data?" category="Concepts" level="Senior">
-    Sampling-based methods compare multiple independent answers: consistent claims are more likely grounded, inconsistent ones likely invented. Chain-of-verification has the model ask and answer verification questions about its own claims. Token probabilities give a weak signal. These help, but checking against real sources remains more reliable.
+    - Sampling-based methods compare multiple independent answers: consistent claims are more likely grounded, inconsistent ones likely invented.
+    - Chain-of-verification has the model ask and answer verification questions about its own claims.
+    - Token probabilities give a weak signal. These help, but checking against real sources remains more reliable.
   </InterviewQuestion>
   <InterviewQuestion question="Design a hallucination-resistant assistant for legal research." category="Architecture" level="Senior">
-    Retrieve from authoritative legal databases with hybrid search and re-ranking, require citations to specific passages for every claim, verify that each cited passage exists and supports the claim, and abstain when sources are insufficient. Show sources prominently, log everything, evaluate on expert-labeled cases including trick questions, and keep a lawyer as the final reviewer.
+    - Retrieve from authoritative legal databases with hybrid search and re-ranking, require citations to specific passages for every claim, verify that each cited passage exists and supports the claim, and abstain when sources are insufficient.
+    - Show sources prominently, log everything, evaluate on expert-labeled cases including trick questions, and keep a lawyer as the final reviewer.
   </InterviewQuestion>
 </InterviewQuestions>

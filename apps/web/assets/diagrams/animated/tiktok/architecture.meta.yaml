@@ -1,0 +1,19 @@
+title: Short-video feed high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, feed and ranking, serving, learning loop
+  and storage. Step 1: the viewer app asks the API gateway for a feed page; the feed service reads followed accounts'
+  newest videos from the video metadata store, and videos play from a CDN that pulls from the blob store. Step 2: a
+  retrieval service finds candidates and a ranker, the solid green accent node, scores them. Step 3: retrieval asks an
+  ANN index of video embeddings; the ranker reads embedding vectors from parameter servers and features from a
+  feature store. Step 4: the app sends batched events to an event collector, which appends them to an event log keyed
+  by viewer; a joiner labels each impression and updates counts in the feature store. Step 5: a trainer learns from
+  the joined examples and syncs parameters to the serving parameter servers every minute. Step 6: a creator uploads
+  through the gateway; the upload service stores renditions in the blob store, and the app plays and prefetches the
+  next two videos from the CDN. Step 7: the ranker drops videos the viewer has seen, using a Bloom filter per viewer.
+  Step 8: a content model embeds each new video and inserts it into the ANN index.
+caption: >-
+  A short-video feed: retrieve candidates, rank them with features and embeddings, play from a CDN with prefetch, and
+  learn from every swipe within minutes.
+tags: [case-studies, tiktok, architecture, recommendation]
+source: original
+created: 2026-11-17

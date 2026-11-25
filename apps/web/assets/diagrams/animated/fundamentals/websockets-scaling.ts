@@ -33,7 +33,7 @@ const spec: DiagramSpec = {
     { id: "async", title: "Pub/sub", tone: "orange", x: 568, y: 210, w: 320, h: 150 },
   ],
   nodes: [
-    { id: "teacher", label: "Teacher", sub: "starts question 3", icon: "browser", x: 100, y: 130, w: 140, h: 58 },
+    { id: "teacher", label: "Teacher", sub: "starts question 3", icon: "browser", x: 100, y: 130, w: 148, h: 58 },
     { id: "students", label: "Students", sub: "30 in room 42", icon: "users", x: 100, y: 280, w: 140, h: 58 },
     {
       id: "lb",
@@ -43,7 +43,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 272,
       y: 205,
-      w: 136,
+      w: 150,
       h: 58,
     },
     {

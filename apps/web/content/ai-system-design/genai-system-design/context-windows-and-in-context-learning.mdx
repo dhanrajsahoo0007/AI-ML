@@ -1,0 +1,278 @@
+---
+title: "Context Windows & In-Context Learning"
+description: "What a context window is, how models learn from examples in the prompt, and why very long contexts degrade."
+icon: book-open
+updated: 2026-11-15
+---
+
+Every LLM system design starts with a budget: how many tokens fit in one call, what they cost, and how well the model uses them.
+
+- Interviewers ask about context windows to see whether you can size a prompt, and about in-context learning to see whether you know when examples in the prompt can replace training.
+
+## Overview
+
+- The **context window** is one shared token budget per call: system prompt, tool definitions, conversation history, retrieved text, the new message **and the model's own output** all count against it.
+- Limits are in **tokens, not words**. For English, one token is about **4 characters or 0.75 words**; code and many other languages need more tokens per word.
+- Longer prompts cost more: price and KV cache grow **linearly** with length, attention compute grows **quadratically**, and the first token arrives later.
+- Models use the **start and end** of a long prompt better than the middle. In "Lost in the Middle", GPT-3.5-Turbo fell from **75.8%** (answer first) to **53.8%** (answer in the middle), below its **56.1%** with no documents at all.
+- **In-context learning** means the model picks up a task from instructions and examples in the prompt, with **no weight updates**. It is sensitive to example choice, order and format, and with 1M-token windows **many-shot** prompts of hundreds or thousands of examples can approach fine-tuning.
+
+<KeyIdea>The context window is one shared token budget that costs more and is used less evenly as it fills, and in-context learning spends that budget to teach a task for one call, with no weight updates.</KeyIdea>
+
+## Mental model
+
+- Think of a chef working at a fixed-size counter.
+- The house rules are pinned at one end, the order tickets pile up beside them, ingredients fetched from the pantry fill the middle, and some space must stay clear to plate the dish.
+- That counter is the context window. A bigger counter holds more, but the chef glances at the ends most often, and a spice jar buried in the middle of a crowded counter gets missed.
+- Now show a new cook three finished plates before service: they copy the style for tonight without any training course.
+- That is in-context learning, and it lasts only as long as the plates stay on the counter.
+
+## Core concepts
+
+1. **The context window.** The maximum number of tokens a model can attend to in one call, counting both what it reads and what it writes.
+   - Chat APIs are stateless: every call re-sends the whole conversation, so the history is part of the budget on every turn.
+   - Anthropic's documentation lists everything that counts: the system prompt, every message (including tool results, images and documents), the tool definitions, and the output, including any thinking tokens.
+
+2. **Tokens, not words.** Models see tokens, sub-word pieces from a fixed vocabulary (see [Tokenization](/ai-system-design/genai-system-design/tokenization)).
+   - OpenAI's rule of thumb for English is about 4 characters or 0.75 words per token, so 100,000 tokens is roughly 75,000 English words.
+   - Code, numbers and many non-English scripts split into more pieces, so always count with the model's own tokenizer before relying on an estimate.
+
+3. **Context length, input limits and output limits.** Input and output share the window, so a 128,000-token window with a 90,000-token prompt leaves at most 38,000 for the answer.
+   - Most APIs also cap output separately. As of November 2026, Anthropic's docs give its current models a 1M-token window with up to 128,000 output tokens per request, and Google's docs give Gemini 3 and 2.5 models a 1M input budget and a 64K output budget.
+   - If the input alone is too long, the request fails; if the output hits the limit, the answer stops mid-way.
+
+4. **Cost and latency grow with length.** Providers price per token, so cost rises linearly with prompt length, and in a chat the whole history is paid for again on every turn. Inside the model, the forward pass costs about
+
+   $$
+   C_{\text{forward}} \approx 2N + 2\, n_{\text{layer}}\, n_{\text{ctx}}\, d_{\text{attn}}
+   $$
+
+- FLOPs per token (Kaplan et al., 2020), where $N$ is the parameter count and the second term is attention over the context.
+- For a standard layout the context term matches the weight term once $n_{\text{ctx}} \approx 12\, d_{\text{model}}$: about 98,000 tokens for $d_{\text{model}} = 8{,}192$.
+- Prefill of the whole prompt therefore grows faster than linearly, which delays the first token.
+- Memory grows too: the 80-layer GQA model on the [efficient attention](/ai-system-design/genai-system-design/efficient-attention) page stores about 0.33 MB of KV cache per token, about 42 GB for one 128,000-token sequence.
+
+5. **In-context learning and few-shot examples.** The GPT-3 paper (Brown et al., 2020) named three settings.
+   - Zero-shot gives only a task description; one-shot adds one worked example; few-shot adds several, "typically set K in the range of 10 to 100" because that is what fit in GPT-3's 2,048-token window.
+   - The 175-billion-parameter model did these tasks with no gradient updates: the examples steer the next-token prediction, and nothing is stored once the prompt is gone.
+
+<AnimatedDiagram
+  spec="animated/llm/ctx-few-shot-anatomy"
+  caption="A few-shot prompt is an instruction, a handful of worked examples in one fixed format, and the new input with its answer left blank; the model fills the blank without any weight update."
+/>
+
+6. **What the examples actually teach.** Min et al. (2022) replaced the correct labels in demonstrations with random ones and found this "barely hurts performance" on classification and multiple-choice tasks across 12 models.
+   - What mattered was that the examples showed the label set, the kind of input to expect and the format.
+   - Larger models behave differently: Wei et al. (2023) showed that large models can follow flipped labels that contradict their prior knowledge, while small models ignore them.
+   - So labels matter more as models grow, and format always matters.
+
+7. **Sensitivity to order and format.** Zhao et al. (2021) found that the prompt format, the chosen examples and their order can move GPT-3's accuracy "from near chance to near state-of-the-art".
+   - They traced it to three biases: towards the label that appears most often (majority label), towards labels near the end of the prompt (recency), and towards tokens common in pretraining.
+   - Lu et al. (2022) showed that order alone can swing results between near state-of-the-art and random guessing, and that a good order for one model does not transfer to another.
+
+8. **Position effects: lost in the middle and recency.** Liu et al. (2023) gave models 20 retrieved passages, one holding the answer, and moved that passage from first to last. Accuracy traced a U shape: high at the start (primacy), high at the end (recency), lowest in the middle.
+
+<AnimatedDiagram
+  spec="animated/llm/ctx-lost-in-middle"
+  caption="Accuracy is highest when the answer is first or last and dips below the no-passages baseline in the middle. Numbers from Liu et al. (2023), Tables 1 and 6."
+/>
+
+<Callout tone="red" title="What breaks">
+  The extended-context versions of the models they tested (such as GPT-3.5-Turbo 16K) scored almost exactly the same as the shorter ones, so a bigger window did not fix the dip. The fix is placement, not size: strongest evidence at the edges, question last.
+</Callout>
+
+9. **Many-shot in-context learning.** Agarwal et al. (2024) used Gemini 1.5 Pro's 1M-token window to test prompts with hundreds to 8,192 examples.
+   - Many-shot prompts beat few-shot prompts across tasks, overrode pretraining biases such as flipped sentiment labels, and came close to full fine-tuning on low-resource translation.
+   - When human-written examples are scarce, model-generated solutions filtered for correctness ("reinforced ICL") or problems without answers ("unsupervised ICL") also worked.
+   - The cost is that every request carries all those examples.
+
+## Architecture
+
+Here is one request to a support assistant, drawn to scale. The application assembles it from several sources, and each part takes its share of the same window.
+
+<AnimatedDiagram
+  spec="animated/llm/ctx-window-budget"
+  caption="Instructions, history, retrieved text, the question and the reserved output all share one budget: here 88,000 tokens of input plus 8,000 reserved for the answer leave 32,000 free."
+/>
+
+How the application fills the window on each call:
+
+1. Put the stable parts first: system prompt, tool definitions and any fixed examples. A stable prefix can be reused with [prompt caching](/ai-system-design/genai-system-design/prompt-caching).
+2. Add the conversation history, trimmed or summarized once it grows (see [context compaction](/ai-system-design/genai-system-design/context-compaction-resets-and-state)).
+3. Add retrieved documents, ranked, with the strongest ones at the edges rather than buried in the middle.
+4. Put the user's question last. Google's long-context guide reports better results with the query at the end of a long prompt.
+5. Reserve room for the output (`max_tokens`, plus thinking if enabled), count tokens, then send. The model prefills the whole input, then decodes the answer one token at a time.
+
+## Technical mechanics
+
+### Why in-context learning works
+
+Nobody has a complete account for frontier models, but three lines of research each explain part of it.
+
+**Induction heads:**
+
+- Olsson et al. (2022) studied attention heads that complete the pattern [A][B] … [A] → [B].
+- In their models the mechanism is a pair of heads: an earlier "previous-token head" tags each token with the one before it, and a later induction head finds where the current token appeared before and copies what came next.
+
+<AnimatedDiagram
+  spec="animated/llm/ctx-induction-head"
+  stepper
+  caption="Two heads work as a pair: an earlier one tags each token with its predecessor, and a later one finds the token that followed the current one last time and copies it. Schematic, after Olsson et al. (2022)."
+/>
+
+- These heads appear in a sudden phase change early in training, roughly 2.5 to 5 billion tokens in.
+- At the same point, the model's in-context learning score (how much lower the loss is at the 500th token of a context than at the 50th) jumps from under 0.15 to about 0.4 nats, then stays flat.
+- The authors give causal evidence for small attention-only models and only correlational evidence for large ones, so treat induction heads as one strong mechanism, not the whole story.
+
+**Implicit Bayesian inference:**
+
+- Xie et al. (2021) argue that pretraining on coherent documents teaches a model to infer the hidden "concept" behind a document.
+- Few-shot examples are evidence that narrows down which concept, and so which task, the prompt is about.
+
+**Learning inside the forward pass:**
+
+- von Oswald et al. (2023) showed that one linear self-attention layer can carry out a step of gradient descent on a regression problem, and that small transformers trained on such tasks learn weights that match.
+- The model "trains" on the examples within its activations, without changing its weights.
+
+The practical reading: ICL is strong at recognizing and copying a task's pattern and format, weaker at learning genuinely new knowledge from a few examples.
+
+### How models reach long contexts
+
+- Three changes moved windows from 2,048 tokens (GPT-3, 2020) to a million and more.
+- Position encodings were made to stretch: rotary embeddings are rescaled (position interpolation, YaRN) and then fine-tuned on long documents, as covered in [positional encodings](/ai-system-design/genai-system-design/positional-encodings).
+- Attention got cheaper in memory: FlashAttention avoids the n-by-n score matrix, and grouped-query attention and paged caches shrink the KV cache, as covered in [efficient attention](/ai-system-design/genai-system-design/efficient-attention).
+- Very long sequences are split across GPUs with ring attention and stored with KV-cache quantization, as covered in [long-context ring attention](/ai-system-design/genai-system-design/long-context-ring-attention-and-kv-quantization).
+- None of these guarantees that the model uses all those tokens well.
+
+### Long-context degradation and context rot
+
+- A window is a hard limit; the usable length is often much shorter.
+- RULER (Hsieh et al., 2024) tested 17 models that all claimed 32K tokens or more.
+- Nearly all scored close to perfect on the simple needle-in-a-haystack test, yet on RULER's harder tasks (several needles, multi-hop tracing, aggregation) only half kept satisfactory performance at 32K.
+- Gemini 1.5 reported over 99% single-needle recall up to at least 10M tokens, and Google's own guide warns that accuracy drops when there are several needles.
+
+- Chroma's "Context Rot" report (Hong et al., July 2025) tested 18 models and found performance getting less reliable as input grew, even on simple tasks.
+- Anthropic's documentation now uses the same name: as token count grows, accuracy and recall degrade.
+
+<Callout tone="red" title="What breaks">
+  Distractors that look like the answer hurt more as length grows, and a focused prompt of about 300 tokens beat the full 113,000-token version of the same LongMemEval questions across the models tested. The lesson for design is to curate the context, not fill it.
+</Callout>
+
+### Long context versus retrieval
+
+- Retrieval-augmented generation ([RAG](/ai-system-design/genai-system-design/rag-fundamentals)) sends only the passages that matter; long context sends everything and lets attention find it.
+- Xu et al. (2023) found that a model with a 4K window plus retrieval matched the same model extended to 16K, at much lower compute, and that retrieval still helped the 32K version.
+- Li et al. (2024) found the reverse on average: with enough budget, long-context prompts beat RAG on their benchmarks, but RAG cost far less.
+- Their Self-Route method tries RAG first and falls back to the full context only when the model says the passages are not enough, cutting cost by 65% for Gemini-1.5-Pro and 39% for GPT-4o at similar quality.
+- Most production systems use both: retrieval to choose, a long window to hold what was chosen.
+
+### In-context learning versus fine-tuning
+
+- Few-shot ICL needs no training run, so it is the fastest way to start.
+- It is not always the cheapest or the best. T-Few (Liu et al., 2022) fine-tuned a small set of extra parameters on an 11-billion-parameter model and scored 72.4% on held-out tasks, against 66.6% for few-shot GPT-3 175B, with over 1,000× fewer FLOPs per prediction.
+- Mosbach et al. (2023) compared the two fairly, with the same models from 125M to 30B parameters, and found that they generalize about equally well out of domain.
+- Many-shot ICL closes much of the remaining gap, but every request pays for the examples again.
+- See [prompt vs RAG vs fine-tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning) for the full decision.
+
+## Trade-offs
+
+<Compare caption="Ways to give a model a task or its knowledge: what each costs per call and when it fits.">
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Zero-shot instruction | Shortest prompt, nothing to curate | Format and edge cases drift | Common tasks a strong model already does well |
+| Few-shot ICL | Fixes format and label set, no training | Sensitive to example choice and order; tokens on every call | Prototypes, changing tasks, small data |
+| Many-shot ICL | Approaches fine-tuning, adapts in minutes | Large prompts, linear cost per call, needs caching | Hundreds of labeled examples and a long-context model |
+| Fine-tuning (full or PEFT) | Cheap per call, behavior baked in | Training pipeline, retraining for changes | Stable task, high volume, strict format or latency |
+| Long context, send everything | Simple, nothing missed by a retriever | Cost, latency, lost in the middle, context rot | One-off analysis of a long document or codebase |
+| Retrieval (RAG) | Small focused prompts, fresh data | Retriever can miss; extra system to run | Large or changing corpora, cost-sensitive traffic |
+
+</Compare>
+
+## Production systems
+
+- GPT-3 (2020) had 175 billion parameters and a 2,048-token window, enough for 10 to 100 few-shot examples.
+- Gemini 1.5 Pro (2024) launched with a public 1M-token window and reported over 99% needle recall up to at least 10M tokens in research tests.
+- Meta's Llama 4 model card lists a 10M-token context for Llama 4 Scout and 1M for Llama 4 Maverick.
+- As of November 2026, Anthropic's docs list a 1M-token window and up to 128,000 output tokens per request for its current Claude models, and 200K for older ones.
+- With all 997 examples of the FLORES development set in its prompt, Gemini 1.5 Pro improved English-to-Bemba translation by 15.3% over a 1-shot prompt (Agarwal et al., 2024).
+
+## Failure modes & pitfalls
+
+- Treating the advertised window as the usable one. Test your own task at your real lengths; benchmarks like RULER show quality dropping well before the limit.
+- Forgetting that output and thinking tokens share the window, so a full prompt leaves the answer cut short.
+- Placing the key instruction or the best document in the middle of a long prompt. Put instructions first, the question last, and strong evidence at the edges.
+- Re-sending a growing chat history with no trimming or caching. If each turn adds k tokens, turn t sends about t·k tokens, so the total cost of a conversation grows with the square of its length.
+- Picking few-shot examples carelessly: unbalanced labels, the same label last every time, or a format that differs from the query.
+- Expecting the model to remember what it "learned" in context. Remove the examples and the behavior goes with them.
+
+## Interview framework
+
+1. Define the window as one shared token budget and list what fills it, including output and thinking.
+2. Size it: convert words to tokens, sum the parts, reserve the output, and estimate cost per call and per conversation.
+3. Explain why long is not free: linear price and KV cache, quadratic attention, slower first token, lost in the middle and context rot.
+4. Define in-context learning, zero-, one- and few-shot, and its sensitivity to order and format; mention induction heads as one known mechanism.
+5. Close with the design choice: curate with retrieval and summaries, cache stable prefixes, and move to many-shot or fine-tuning when examples pile up.
+
+**What interviewers listen for:** token arithmetic with real numbers, knowing that output counts, the U-shaped position effect, and a reasoned choice between long context, retrieval, ICL and fine-tuning.
+
+**Red flags:** "a bigger window will fix it", claiming the model learns permanently from the prompt, or quoting a model's window size without the date or a source.
+
+## Further reading
+
+- [Language Models are Few-Shot Learners (Brown et al., 2020)](https://arxiv.org/abs/2005.14165)
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
+- [In-context Learning and Induction Heads (Olsson et al., 2022)](https://arxiv.org/abs/2209.11895)
+- [Many-Shot In-Context Learning (Agarwal et al., 2024)](https://arxiv.org/abs/2404.11018)
+- [Rethinking the Role of Demonstrations (Min et al., 2022)](https://arxiv.org/abs/2202.12837)
+- [RULER: What's the Real Context Size of Your Long-Context Language Models? (Hsieh et al., 2024)](https://arxiv.org/abs/2404.06654)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What counts against a model's context window?" category="Concepts" level="Junior">
+    - Everything the model reads and writes in one call.
+    - That is the system prompt, tool definitions, the full conversation history (the API is stateless, so it is re-sent every turn), retrieved documents, images, the new user message, and the output, including any thinking tokens.
+    - Many APIs also cap the output separately, so you reserve room for the answer before filling the rest.
+    - Counting with the model's tokenizer, not by words, avoids surprises.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is in-context learning, and how is it different from fine-tuning?" category="Concepts" level="Junior">
+    - In-context learning is when a model performs a task from instructions and examples placed in the prompt, with no change to its weights.
+    - Zero-shot gives only the instruction, one-shot adds one example and few-shot adds several.
+    - Fine-tuning instead updates the weights on training data, so the behavior persists without examples in every prompt.
+    - In-context learning is faster to try and to change; fine-tuning is cheaper per call at high volume and more stable.
+  </InterviewQuestion>
+  <InterviewQuestion question="A model supports 128K tokens but misses facts placed in the middle of long prompts. Why, and what do you do?" category="Failure modes" level="Mid">
+    - Models use the start and end of the context better than the middle; Liu et al. measured a U-shaped curve where GPT-3.5-Turbo dropped from 75.8% with the answer first to 53.8% with it in the middle, below its 56.1% with no documents.
+    - A bigger window does not remove the effect. Send fewer, better passages with a retriever and reranker, put the strongest evidence at the edges and the question at the end, and test accuracy at your real prompt lengths rather than trusting the advertised limit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does a very long prompt slow down the first token and raise cost faster than you might expect?" category="Scaling" level="Mid">
+    - Price is per token, so cost is at least linear in prompt length, and in a chat the whole history is billed again every turn, so a conversation's total grows with the square of its length.
+    - Inside the model, prefill cost per token is about 2N plus an attention term proportional to the context length, so total prefill grows faster than linearly; the attention term matches the weight term near 12 times d_model tokens.
+    - The KV cache also grows linearly, using GPU memory that could serve other requests.
+    - Prompt caching, trimming and retrieval are the usual fixes.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your few-shot classifier's accuracy changes a lot when you reorder the examples. Why, and how do you make it stable?" category="Failure modes" level="Mid">
+    - Few-shot prompts are known to be order-sensitive: models lean towards labels that appear often and labels near the end of the prompt, and a good order for one model does not transfer to another.
+    - Balance the labels, vary which label comes last, keep one exact format, and pick examples similar to the query with retrieval.
+    - Evaluate several orders on a held-out set and report the spread, not one lucky run.
+    - If it stays unstable, calibrate the outputs, add more examples, or fine-tune.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are induction heads, and what do they tell us about in-context learning?" category="Architecture" level="Senior">
+    - An induction head completes the pattern [A][B] … [A] → [B].
+    - It works with an earlier previous-token head that tags each token with the one before it; the induction head then finds where the current token appeared before and copies the token that followed.
+    - Olsson et al. found these heads form in a sudden phase change early in training, at the same time the model's in-context learning score jumps from under 0.15 to about 0.4 nats.
+    - Their evidence is causal in small attention-only models and correlational in large ones, so induction heads explain the copying and pattern-matching part of in-context learning, not all of it.
+  </InterviewQuestion>
+  <InterviewQuestion question="You have 2,000 labeled examples for a classification task. Would you use many-shot prompting, fine-tuning or retrieval of examples?" category="Trade-offs" level="Senior">
+    - It depends on traffic, change rate and latency.
+    - Many-shot prompting with a long-context model can approach fine-tuning and needs no training, but every call carries the examples, so it fits low volume or fast-changing labels, ideally with prompt caching.
+    - Retrieving the 10 to 50 most similar examples per query is a middle ground that keeps prompts small.
+    - At high volume or with strict latency, fine-tuning (often parameter-efficient) is cheaper per call; T-Few beat few-shot GPT-3 with over 1,000 times fewer inference FLOPs.
+    - I would prototype with retrieved few-shot, measure, and fine-tune once the task is stable.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should a 5,000-document knowledge assistant stuff documents into a 1M-token window or use RAG?" category="Architecture" level="Senior">
+    - Usually RAG with a long window as headroom, not one or the other.
+    - Stuffing everything costs the full prompt on every question, slows the first token and suffers from lost-in-the-middle and context rot, while 5,000 documents may not even fit.
+    - Studies differ: long context can win on quality when cost is no object, while retrieval with a short window matched a longer window at much lower compute.
+    - A router like Self-Route tries retrieval first and falls back to a larger context only when the passages are not enough, which cut cost by 39 to 65% at similar quality.
+  </InterviewQuestion>
+</InterviewQuestions>

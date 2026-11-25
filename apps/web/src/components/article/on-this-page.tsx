@@ -96,7 +96,7 @@ export function OnThisPage({ headings }: { headings: DocHeading[] }) {
   const jump = useJump(setActive);
   if (headings.length < 2) return null;
   return (
-    <nav aria-label="On this page" className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pb-6">
+    <nav aria-label="On this page" className="sticky top-24 max-h-[calc(100dvh-7rem)] overflow-y-auto pb-6">
       <div className="mb-3 text-sm font-semibold text-ink">On this page</div>
       <TocList headings={headings} active={active} onJump={jump} />
     </nav>

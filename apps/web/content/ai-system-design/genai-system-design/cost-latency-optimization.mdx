@@ -1,151 +1,276 @@
 ---
 title: Cost and Latency Optimization
 description: Practical ways to make LLM applications cheaper and faster, including routing and cascades, caching, prompt trimming, batching, distillation and quantization.
+updated: 2026-11-15
 ---
 
-"Your LLM feature costs too much and feels slow. What do you do?" This page is the playbook, ordered roughly from easiest to most involved, with how to measure that quality did not drop.
+"Your LLM feature costs too much and feels slow.
 
-## TL;DR
+- What do you do?" Interviewers ask it to see whether you measure before you cut, order the fixes by effort, and prove quality held.
+- This page is the hub: it orders the levers and shows how they combine; each lever has its own page, linked below.
 
-- Measure first: **cost per successful task** and latency by step, not just total spend.
-- Biggest easy wins: **shorter prompts and outputs**, **prompt (prefix) caching**, **streaming**, and **parallel calls**.
-- **Route** easy requests to small models and hard ones to large models, or **cascade** from small to large on low confidence.
-- **Cache** exact and semantically similar responses where answers are reusable.
-- For high volume, **fine-tune or distill** a small model; for self-hosting, **quantize** and use an efficient serving engine.
-- Guard every change with an **evaluation set** so savings do not cost quality.
+## Overview
 
-## The idea in plain English
+- Measure first: **cost per successful task** and latency by step, not total spend. A task can make several calls, so a call-level price hides the real bill.
+- **Output tokens cost about 5× input tokens** on Anthropic's price list (as of November 2026), yet input is usually most of the tokens. Brightpost's answer is **90 % input tokens and 64 % of the bill**.
+- Pull levers **cheapest change first**: shorter prompts, prompt caching, a smaller model or router, batching, quantisation, then fine-tuning or distillation.
+- On Brightpost's refund task, the first three levers take an illustrative **\$0.0207 to \$0.0062 (70 % lower)** with no training and no new hardware.
+- A **cache** skips the model, a **router** keeps easy work on a cheap model, and a **verifier** catches the cheap model's misses before the customer does.
+- Guard every change with an **evaluation set**: a cheaper task that fails more often is not a saving.
 
-Not every question needs your most expensive expert. A front desk answers routine questions, specialists handle tricky ones, and frequently asked questions get a printed sheet. Optimizing LLM cost is building that front desk, routing system and FAQ sheet, while checking customers are still happy.
+## Mental model
+
+- Not every question needs your most expensive expert.
+- A front desk answers routine questions, specialists handle tricky ones, and frequently asked questions get a printed sheet.
+- Optimising LLM cost is building that front desk, routing system and FAQ sheet, while checking customers are still happy.
+- Latency works the same way: most of the wait is the expert thinking, so you shorten what they read, let them start talking early, and avoid asking them twice.
 
 ## Core concepts
 
-1. **Token economics.** Cost is roughly input tokens times input price plus output tokens times output price; output tokens are usually pricier and slower.
+1. **Token economics.** Cost is input tokens times the input price plus output tokens times the output price. Output tokens are pricier and slower to produce. [Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation) turns this into a monthly bill.
 
-2. **Prompt trimming.** Remove redundant instructions and examples, retrieve fewer but better chunks, summarize history.
+2. **Prompt trimming.** Remove redundant instructions and examples, retrieve fewer but better chunks, summarise history. It is the cheapest change and lowers time to first token too.
 
-3. **Output control.** Ask for concise formats, set maximum output length, use structured outputs instead of prose where code consumes the result.
+3. **Output control.** Ask for concise formats, set a maximum output length, and use structured output where code consumes the result.
 
-4. **Prompt caching.** Providers and serving engines can reuse computation for repeated prompt prefixes; put stable content first.
+4. **Prompt caching.** Providers and serving engines reuse the computed prefix of a prompt, so stable content goes first. See [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
 
-5. **Response caching.** Exact-match caches for repeated requests; semantic caches return answers to near-identical questions, with careful thresholds and invalidation.
+5. **Response caching.** Exact-match caches for repeated requests; semantic caches return answers to near-identical questions, with careful thresholds and invalidation. See [Semantic Caching](/ai-system-design/genai-system-design/semantic-caching).
 
-6. **Model routing.** A classifier or rules send each request to the cheapest model likely to succeed.
+6. **Model routing.** A classifier or rules send each request to the cheapest model likely to succeed. See [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks).
 
-7. **Cascades.** Try a small model first; escalate to a larger one when confidence or a verifier check fails.
+7. **Cascades.** Try a small model first and escalate to a larger one when a verifier or confidence check fails.
 
-8. **Distillation and fine-tuning.** Train a small model on a large model's outputs for one task.
+8. **Distillation, fine-tuning and quantisation.** Train a small model on a large model's outputs for one task ([Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models)), or shrink the weights of a model you host ([Quantization & Optimization](/ai-system-design/genai-system-design/quantization-optimization)).
 
-9. **Batching and async.** Use batch APIs or offline batching for non-interactive work at lower prices.
+9. **Batching and async.** Batch APIs and offline batching price non-interactive work lower. See [Batch vs Real-time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference).
 
-10. **Latency tactics.** Streaming, parallel independent calls, speculative decoding, smaller models for intermediate steps, and lower time to first token through shorter prompts and cache hits.
+10. **Latency tactics.** Streaming, parallel independent calls, speculative decoding, smaller models for intermediate steps, and a lower time to first token through shorter prompts and cache hits. See [Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) and [Speculative Decoding](/ai-system-design/genai-system-design/speculative-decoding).
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    REQ["Request"] --> CACHE{"Response cache hit?<br/>(exact or semantic)"}
-    CACHE -->|"Yes"| FAST["Return cached answer"]
-    CACHE -->|"No"| ROUTE["Router: classify difficulty"]:::accent
-    ROUTE -->|"easy"| SMALL["Small / distilled model"]
-    ROUTE -->|"hard"| LARGE["Large model"]
-    SMALL --> CHECK{"Verifier / confidence ok?"}
-    CHECK -->|"No"| LARGE
-    CHECK -->|"Yes"| RESP["Stream response"]
-    LARGE --> RESP
-    RESP --> STORE["Store in cache if reusable"]
-    RESP -.-> METER["Meter tokens, cost,<br/>latency, quality samples"]
-```
+A cache, a router, two models and a verifier turn one expensive path into a cheap path that falls back to the expensive one.
 
-The request path:
+<AnimatedDiagram
+  spec="animated/serving/cost-request-path"
+  stepper
+  caption="Most of the saving comes from what never reaches the large model: a cache hit skips both models, the router keeps the easy 70 % (illustrative) on the cheap one, and the verifier catches the small model’s misses before the customer does."
+/>
 
-1. Check exact and semantic caches.
-2. Route by predicted difficulty to a small or large model.
-3. For the small path, verify output and escalate on failure.
-4. Stream the response; store reusable answers.
-5. Meter cost, latency and sampled quality per route.
+<StepCards>
+  <StepCard n={1} title="A question reaches the response cache">
+    The cache looks for an exact or semantically close past question. Key it by tenant and permission so one customer never gets another's answer.
+  </StepCard>
+  <StepCard n={2} title="A hit returns the stored answer">
+    No model runs, so the call costs a lookup and the answer arrives in a fraction of a model's time.
+  </StepCard>
+  <StepCard n={3} title="A miss goes to the router">
+    The router predicts difficulty from the question, with a small classifier or rules. It is the one component whose mistakes cost quality, not just money.
+  </StepCard>
+  <StepCard n={4} title="The router splits easy from hard">
+    Brightpost's easy questions (opening hours, "where is my parcel") go to the small model; refunds and complaints go to the large one. The 70 / 30 split is illustrative.
+  </StepCard>
+  <StepCard n={5} title="The verifier checks the small model's draft">
+    A rule, a schema check or a small judge decides whether the draft is good enough to send.
+  </StepCard>
+  <StepCard n={6} title="A failed check escalates to the large model">
+    The customer waits for both models, so a verifier that fails too often turns a saving into a delay. Count escalations.
+  </StepCard>
+  <StepCard n={7} title="The answer streams back and is stored">
+    Streaming shows the first words early; reusable answers go into the cache, and tokens, cost, latency and sampled quality are metered per route.
+  </StepCard>
+</StepCards>
 
-## Deep dive
+**The numbers:**
+
+- At illustrative prices (\$2 in and \$10 out per million tokens, the small model a tenth of that), sending 70 % of Brightpost's 200,000 daily requests to the small model cuts the day from \$1,380 to \$510.60, 63 %, before any cache hit.
+- [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) works it through.
+
+<Callout tone="red" title="What breaks">
+  A router that sends a refund to the small model, and a verifier that waves the draft through. Nothing downstream notices, because the small model answers confidently. Measure quality per route on the golden set, not only the blended average.
+</Callout>
+
+## Technical mechanics
 
 ### Where the money goes
 
-```mermaid
-flowchart LR
-    TOTAL["Cost per task"] --> IN["Input tokens<br/>(system prompt, history, retrieved docs)"]
-    TOTAL --> OUT["Output tokens<br/>(often pricier, slower)"]
-    TOTAL --> CALLS["Number of calls<br/>(agents, retries, judges)"]
-    IN --> FIX1["Trim, cache prefixes,<br/>fewer better chunks"]
-    OUT --> FIX2["Concise formats, max tokens,<br/>structured outputs"]
-    CALLS --> FIX3["Workflows over agents,<br/>budgets, cheaper models per step"]:::accent
-```
+Before pulling a lever, find which part of the bill is large. Brightpost's refund task (order 4471, a cracked kettle, £42, over the £30 approval limit) makes three model calls.
 
-### A sizing example
+<AnimatedDiagram
+  spec="animated/serving/cost-per-task"
+  stepper
+  caption="Input tokens are 90 % of the tokens but 64 % of the bill, and a task that makes three calls pays that bill three times. Each part of the bill has a different lever (illustrative prices)."
+/>
 
-Suppose a feature handles 1 million requests a day at 3,000 input and 500 output tokens each. Cutting input to 1,500 tokens with better retrieval halves input cost; routing 70% of requests to a model priced ten times lower cuts most of what remains. Always recompute with your provider's actual prices and verify quality on the evaluation set.
+**How to read it:**
+
+- Step 1 prices one call: orange is input tokens, green is output tokens.
+- Step 2 repeats it for the three calls of the task.
+- Step 3 names the lever for each part of the bill.
+
+**The numbers:**
+
+- One call: 2,200 × \$2 ÷ 1 M = \$0.0044 in, 250 × \$10 ÷ 1 M = \$0.0025 out, \$0.0069 in all.
+- Input is 2,200 of 2,450 tokens (90 %) and \$0.0044 of \$0.0069 (64 %).
+- A day of 200,000 such calls is \$1,380. The task is 3 × \$0.0069 = **\$0.0207**: input \$0.0132, output \$0.0075.
+
+### The latency side of the same levers
+
+Most levers move cost and latency together; a few pull them apart. Batching is the clear case: it halves the price and makes the answer arrive hours later.
+
+| Lever | Cost effect | Latency effect |
+| --- | --- | --- |
+| Shorter prompts | Fewer input tokens | Lower time to first token: prefill is shorter |
+| [Prompt caching](/ai-system-design/genai-system-design/prompt-caching) | Cached input at a fraction of the price | Lower time to first token on long prefixes |
+| [Semantic caching](/ai-system-design/genai-system-design/semantic-caching) | The whole call is skipped | The whole answer is skipped |
+| [Routing](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) | A cheaper model per request | A small model is usually faster per token; an escalation adds a full second call |
+| [Batching](/ai-system-design/genai-system-design/batch-vs-realtime-inference) | 50 % off at the three major providers | Results within hours, not seconds |
+| [Quantisation](/ai-system-design/genai-system-design/quantization-optimization) | Less memory per replica (self-hosted) | Faster decode, which is limited by memory bandwidth |
+| [Speculative decoding](/ai-system-design/genai-system-design/speculative-decoding) | No price change on an API | Lower time per output token, same output |
+| [Streaming](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) | None | The first words show at time to first token, not at the end |
+
+### Worked example: the refund task, cheapest change first
+
+Brightpost's refund task costs \$0.0207 and, with calls one after another, shows the customer its first word late. Which levers move it, in which order? Each rung keeps the ones before it.
+
+<AnimatedDiagram
+  spec="animated/serving/cost-levers-ladder"
+  stepper
+  caption="The first three levers need no training and no new hardware, and together take the refund task from $0.0207 to $0.0062 (illustrative). Batching and quantisation are real savings, but not for this live task; fine-tuning is the ceiling, and it only counts if the evals pass."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Shorter prompts: send fewer chunks">
+    Retrieve 3 chunks, not 5: 200 + 3 × 400 + 15 = 1,415, about 1,400 tokens in. Each call costs 1,400 × \$2 ÷ 1 M + \$0.0025 = \$0.0053; three calls cost **\$0.0159**, 23 % lower. Check that answers still cite the right article on the golden set.
+  </StepCard>
+  <StepCard n={2} title="Prompt caching: pay a tenth to re-read the prefix">
+    All three calls share the same 1,400-token prompt. At Anthropic's multipliers (write 1.25×, read 0.1×; as of November 2026), call 1 writes for 1,400 × \$2.5 ÷ 1 M = \$0.0035 and calls 2 and 3 read for \$0.00028 each. Input falls from \$0.0084 to \$0.0041; the task is **\$0.0116**, 44 % below the start.
+  </StepCard>
+  <StepCard n={3} title="A smaller model for the easy steps">
+    - Calls 1 and 2 are lookups, so they go to the small model at a tenth of the price.
+    - A cache holds one model's computed prefix, so the small model has its own: call 1 writes, call 2 reads.
+    - Call 3 writes the customer's answer on the large model and is not cached, because nothing else reads that prefix there. Total **\$0.0062**, 70 % below the start.
+  </StepCard>
+  <StepCard n={4} title="Batching: only for work that can wait">
+    A customer is waiting, so the refund task cannot go to a batch API. Brightpost's nightly summaries can: \$1,180 a night at list price becomes \$590 ([Batch vs Real-time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference) has the working).
+  </StepCard>
+  <StepCard n={5} title="Quantisation: only for a model you host">
+    If Brightpost self-hosted an 8-billion-parameter model, 4-bit weights are about 4 GB instead of 16 GB (8 × 10⁹ × 0.5 byte), before overhead, so more fits on a GPU. An API customer cannot pull this lever.
+  </StepCard>
+  <StepCard n={6} title="Fine-tune or distil: the ceiling, after the evals">
+    If a model tuned on Brightpost's 5,000 resolved tickets also wrote call 3, the task could cost \$0.0014, 93 % below the start. That number is a ceiling: it counts only if the tuned model passes the 200-ticket golden set.
+  </StepCard>
+</StepCards>
+
+**The latency of the same task:**
+
+- With the shared targets (400 ms to first token, 1,500 ms for a full answer), three calls in a row show the customer a first word at 1,500 + 1,500 + 400 = **3,400 ms** and finish at 4,500 ms. Calls 1 and 2 do not depend on each other, so running them in parallel gives 1,500 + 400 = **1,900 ms** and a finish at 3,000 ms. Parallel calls have a catch: an Anthropic cache entry becomes available only after the first response starts, so two simultaneous calls both pay the full price.
+- Start call 1, wait for its first token, then start call 2.
+
+<Callout tone="red" title="What breaks">
+  Rung 2 on a prefix nobody re-reads. A write costs 1.25× the input price, so a prompt cached once and never hit again costs 25 % more than no caching, and a prompt shorter than the model's minimum (512 to 4,096 tokens, by model) is not cached at all.
+</Callout>
+
+### Prove quality held: cost per successful task
+
+- Price per call hides failures. Divide spend by the tasks that passed.
+- Suppose, illustratively, the original path passes 96 % of the golden set and the cheap path passes 88 %: \$0.0207 ÷ 0.96 = \$0.0216 per success against \$0.0062 ÷ 0.88 = \$0.0070.
+- The cheap path is still 67 % lower, but it fails 12 tasks in 100, not 4.
+- The business decides whether those eight extra failures are acceptable, and what the verifier should do with them.
+- Re-run the golden set after every lever, roll out behind an A/B test or a canary, and track per-route quality in production.
+- [LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals) and [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets) cover the set.
 
 ## Trade-offs
 
-| Technique | Savings | Risk | When to use |
+| Choice | Pros | Cons | When to use |
 | --- | --- | --- | --- |
-| Prompt trimming | Moderate, immediate | Losing needed context | Always first |
-| Prefix caching | Large for long shared prompts | Needs stable prefix layout | Long system prompts or documents |
-| Semantic caching | Large for repetitive traffic | Stale or wrong-user answers | FAQs, public content |
-| Routing / cascades | Large | Misrouting hard requests | Mixed-difficulty traffic |
-| Distillation | Very large at volume | Upfront work, narrower model | Stable, high-volume tasks |
-| Quantization (self-hosted) | Memory and speed | Small accuracy loss | Open-weight serving |
-| Batch APIs | Lower price | Not real-time | Offline jobs |
+| Prompt trimming | Moderate saving, immediate, lowers time to first token | Losing needed context | Always first |
+| Prompt caching | Large for long shared prefixes; lower time to first token | Needs a stable prefix layout; writes cost more than plain input | Long system prompts, documents, multi-call tasks |
+| Semantic caching | Skips the model entirely | Stale or wrong-user answers | FAQs, public content |
+| Routing and cascades | Large when traffic is mixed | Misrouting hard requests; an escalation adds latency | Mixed-difficulty traffic with an evaluation per route |
+| Batch APIs | 50 % lower price | Not real-time | Offline jobs |
+| Quantisation | Memory and speed on hardware you run | Small, task-dependent accuracy loss | Open-weight serving |
+| Distillation or fine-tuning | Very large at volume | Upfront work; narrower model | Stable, high-volume tasks with an eval set |
 
-## Real-world examples
+## Production systems
 
-- FrugalGPT showed LLM cascades can match a top model's accuracy at much lower cost on several benchmarks.
-- RouteLLM trained routers that decide between a strong and a weak model, reducing cost while keeping quality.
-- Major providers offer prompt caching and discounted batch processing.
-- Open-source semantic cache libraries such as GPTCache are used to reuse answers for similar queries.
+- **FrugalGPT (Chen, Zaharia and Zou, 2023).** A cascade with a learned scoring function matched the best single model with up to 98 % lower cost on the benchmarks they tested.
+- **RouteLLM (Ong et al., 2024).** Routers trained on preference data chose between a strong and a weak model and cut cost by more than 2× in some cases without losing response quality.
+- **Prompt caching at the major providers (as of November 2026).** Anthropic bills a cache read at 0.1× the base input price for most models and a 5-minute write at 1.25×; OpenAI caches automatically and discounts cached input by up to 95 %.
+- **Batch APIs.** Anthropic, OpenAI and Gemini all price batch work at 50 % of standard.
+- **Speculative decoding (Leviathan et al., 2022).** A 2×–3× faster T5-XXL with identical outputs.
+- **Used in our case studies:** [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline) · [Yield Root-Cause Assistant on a Fab Knowledge Graph](/genai-system-design/case-studies/kg-semiconductor-case-study) · [Content Moderation System](/genai-system-design/case-studies/content-moderation-system)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Optimizing cost per call while failed tasks and retries rise.
+- Optimising cost per call while failed tasks, retries and escalations rise.
 - Semantic caching across users with different permissions.
 - Routing without measuring quality per route.
-- Agents with no step budget.
+- Agents with no step budget: every extra call repeats the whole prompt bill.
+- Caching a prefix that changes early (a timestamp at the top) or is read once: you pay the write premium and never the discount.
+- Parallel calls that all miss the cache because none has started responding yet.
 
-## How to answer in an interview
+## Interview framework
 
-1. Measure: cost and latency per step and per successful task.
-2. Apply quick wins: trim, cap outputs, cache prefixes, stream, parallelize.
-3. Add routing or cascades with a verifier.
-4. Add response caching where safe.
-5. For scale, distill or fine-tune a small model and optimize serving. Guard every step with evaluations.
+1. Measure: tokens in and out, number of calls, cost and latency per step and per successful task.
+2. Apply the quick wins in order: trim, cap outputs, cache prefixes, stream, parallelise independent calls.
+3. Add routing or a cascade with a verifier, and a response cache where answers are safe to reuse.
+4. At scale, batch what can wait; distil or fine-tune a small model and quantise what you host.
+5. Guard every step with an evaluation and a canary, and report cost per successful task.
 
-**What interviewers listen for:** measurement first and quality guardrails.
+**What interviewers listen for:** measurement first, levers ordered by effort, and quality guardrails with numbers.
 
-**Red flags:** "switch to the cheapest model" without evaluation.
+**Red flags:** "switch to the cheapest model" without an evaluation, or quoting savings per call for a task that makes five calls.
 
 ## Further reading
 
-- [FrugalGPT (Chen et al., 2023)](https://arxiv.org/abs/2305.05176)
+- [FrugalGPT (Chen, Zaharia and Zou, 2023)](https://arxiv.org/abs/2305.05176)
 - [RouteLLM: Learning to Route LLMs with Preference Data (Ong et al., 2024)](https://arxiv.org/abs/2406.18665)
+- [Fast Inference from Transformers via Speculative Decoding (Leviathan, Kalman and Matias, 2022)](https://arxiv.org/abs/2211.17192)
 - [Distilling the Knowledge in a Neural Network (Hinton et al., 2015)](https://arxiv.org/abs/1503.02531)
-- [Fast Inference via Speculative Decoding (Leviathan et al., 2022)](https://arxiv.org/abs/2211.17192)
+- [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing), checked November 2026
 - [GPTCache (GitHub)](https://github.com/zilliztech/GPTCache)
+- Related pages: [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms)
 
 <InterviewQuestions>
   <InterviewQuestion question="What are the quickest ways to cut LLM costs?" category="Concepts" level="Junior">
-    Shorten prompts by removing redundant instructions and sending fewer, better retrieved chunks; cap and simplify outputs; enable prompt caching for shared prefixes; cache repeated answers; and use a smaller model where evaluation shows it is good enough. Measure cost per successful task to confirm the gains.
+    - Shorten prompts by removing redundant instructions and sending fewer, better retrieved chunks; cap and simplify outputs; enable prompt caching for shared prefixes; cache repeated answers; and use a smaller model where evaluation shows it is good enough.
+    - Measure cost per successful task to confirm the gains.
   </InterviewQuestion>
   <InterviewQuestion question="What is an LLM cascade?" category="Concepts" level="Mid">
-    A sequence of models from cheap to expensive: a request goes to the cheapest model first, and a verifier or confidence score decides whether to accept the answer or escalate to the next model. Most easy requests stop early, so average cost drops while hard requests still get a strong model.
+    - A sequence of models from cheap to expensive: a request goes to the cheapest model first, and a verifier or confidence score decides whether to accept the answer or escalate to the next model.
+    - Most easy requests stop early, so average cost drops while hard requests still get a strong model.
+    - The cost is latency on escalations, since the customer waits for both models.
   </InterviewQuestion>
   <InterviewQuestion question="How do you reduce perceived latency in a chat product?" category="Architecture" level="Junior">
-    Stream tokens as they are generated, shorten prompts and use prefix caching to reduce time to first token, run independent steps such as retrieval and classification in parallel, use smaller models for intermediate steps, and show progress for multi-step work.
+    - Stream tokens as they are generated, shorten prompts and use prefix caching to reduce time to first token, run independent steps such as retrieval and classification in parallel, use smaller models for intermediate steps, and show progress for multi-step work.
   </InterviewQuestion>
   <InterviewQuestion question="What are the risks of semantic caching?" category="Failure modes" level="Mid">
-    Returning an answer to a question that is similar but meaningfully different, serving stale answers after source data changes, and leaking one user's answer to another when content depends on permissions or personal data. Use conservative similarity thresholds, per-tenant caches, expiry and invalidation on data changes.
+    - Returning an answer to a question that is similar but meaningfully different, serving stale answers after source data changes, and leaking one user's answer to another when content depends on permissions or personal data.
+    - Use conservative similarity thresholds, per-tenant caches, expiry and invalidation on data changes.
   </InterviewQuestion>
   <InterviewQuestion question="When does distilling into a smaller model make sense?" category="Trade-offs" level="Senior">
-    When a task is well defined, high-volume and stable, and a large model performs it well. Its outputs, reviewed for quality, become training data for a small model that runs far cheaper and faster. It is not worth it for rare or rapidly changing tasks, where routing or prompting is simpler.
+    - When a task is well defined, high-volume and stable, and a large model performs it well.
+    - Its outputs, reviewed for quality, become training data for a small model that runs far cheaper and faster.
+    - It is not worth it for rare or rapidly changing tasks, where routing or prompting is simpler.
+    - Decide with the golden set: the small model must pass it before it takes any traffic.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you make sure cost optimizations don't hurt quality?" category="Evaluation" level="Mid">
-    Run every change against an evaluation set that reflects real traffic, compare quality, cost and latency together, roll out with A/B tests or canaries, and monitor per-route quality in production. Track cost per successful task so cheaper but failing requests do not look like savings.
+  <InterviewQuestion question="How do you make sure cost optimizations don't hurt quality?" category="Trade-offs" level="Mid">
+    - Run every change against an evaluation set that reflects real traffic, compare quality, cost and latency together, roll out with A/B tests or canaries, and monitor per-route quality in production.
+    - Track cost per successful task so cheaper but failing requests do not look like savings.
+  </InterviewQuestion>
+  <InterviewQuestion question="A support task makes three calls of 2,200 tokens in and 250 out, at $2 in and $10 out per million tokens. Which three savings do you try first, and what do they add up to?" category="Scaling" level="Senior">
+    - The task costs 3 × (2,200 × \$2 + 250 × \$10) ÷ 1 M = \$0.0207, 64 % of it input.
+    - First trim the prompt to about 1,400 tokens (three chunks, not five), which gives \$0.0159.
+    - Then cache the shared prompt: with a 1.25× write and 0.1× read, call 1 writes and calls 2 and 3 read, giving \$0.0116.
+    - Then send the two lookup calls to a model a tenth of the price, giving \$0.0062, 70 % below the start.
+    - I would re-run the golden set after each step and report cost per successful task, because every price here is illustrative.
+  </InterviewQuestion>
+  <InterviewQuestion question="You turned on prompt caching and the monthly bill went up. What do you check?" category="Failure modes" level="Senior">
+    - A cache write costs more than plain input (1.25× for a 5-minute entry on Anthropic), so a prefix that is written and rarely read again loses money.
+    - Check that the prefix is stable: a timestamp or user name near the top changes it on every request, so every request writes and none reads.
+    - Check that the prompt reaches the model's minimum cacheable length, since a shorter one is processed without caching.
+    - Check that parallel calls are not all missing because no entry exists until the first response starts, and that traffic returns within the cache lifetime.
+    - The cache hit rate and cached-token counts in the usage fields show which one it is.
   </InterviewQuestion>
 </InterviewQuestions>

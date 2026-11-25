@@ -16,6 +16,7 @@ export const ASSET_TYPES = [
   "animated", // diagrams/animated/*.ts → AnimatedDiagram spec
   "logo", // logos/companies/*.svg → src/lib/company-logos.ts (generated)
   "tech-icon", // logos/tech/<vendor>/*.svg → <TechIcon id>
+  "system-logo", // logos/systems/*.svg → <SystemLogo id> (case-study frontmatter `logo`, hub cards)
   "icon", // icons/*.svg → custom icons beyond lucide
   "download", // downloads/*.{pdf,zip,csv} → <Download id>
 ] as const;
@@ -222,6 +223,7 @@ export function assetTypeOf(relPath: string): AssetType | null {
     if (ext !== "svg") return null;
     // Matched as a path prefix, since the folder name alone is also a section key (no section literals in shared code).
     if (relPath.startsWith("logos/companies/")) return "logo";
+    if (relPath.startsWith("logos/systems/")) return "system-logo";
     return sub === "tech" ? "tech-icon" : null;
   }
   if (group === "icons") return ext === "svg" ? "icon" : null;

@@ -1,0 +1,235 @@
+---
+title: "Query Understanding & Rewriting"
+description: "Turning a messy user question into good retrieval queries: rewriting, expansion, decomposition, HyDE and routing."
+icon: search
+---
+
+A customer types what they would say to a person, not what a search engine needs.
+
+- Query understanding is the step between the chat box and the index: it rewrites, splits, expands or routes the question so that retrieval sees text that looks like the answer.
+- It is the cheapest place to fix a retrieval miss, because nothing in the index has to change.
+
+## Overview
+
+- **Rewriting** turns a chatty question into one or more search queries worded like the documents (multi-query). **Expansion** adds synonyms, spelled-out acronyms and product names.
+- **Decomposition** splits a multi-part or multi-hop question into sub-questions, each retrieved on its own.
+- **HyDE** asks an LLM for a guessed answer and searches with the guess's embedding, because a guess looks more like a document than a question does.
+- **Routing** sends each question to the source that can answer it: vector search, keyword search, SQL, or no retrieval at all.
+- In a chat, **condense the follow-up** into a standalone question first. Every step is an extra model call, so keep only the ones that move recall on your evaluation set.
+
+## Mental model
+
+- Ask a librarian "and what if I don't have them?" and they will look at you, remember what you asked a minute ago, and translate your words into the catalogue's words before they search.
+- They may also say "that's an orders question, ask the front desk", or "do you mean the old card or the new one?".
+- Query understanding gives a RAG system that librarian: it reads the question in context, decides where to look and what to look for, and only then searches.
+
+## Core concepts
+
+- Every figure uses the running example from [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals): Brightpost's help centre of **1,200 articles** (3,600 chunks) and the question "How do I reset my password if I lost my phone?".
+- Plain top-5 vector search finds **2 of the 3** chunks the answer needs.
+
+### Query rewriting and expansion
+
+- A rewriter is an LLM prompt that returns search queries instead of an answer.
+- It removes chat filler, uses the vocabulary of the documents ("two-factor" for "the code on my phone"), spells out acronyms, and often writes several variants.
+- Each variant is searched, and the result lists are merged with reciprocal rank fusion (see [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)).
+- Expansion is the dictionary version of the same idea: add synonyms or product names from a glossary, with no model call.
+
+<AnimatedDiagram
+  spec="animated/rag/query-rewriting"
+  stepper
+  caption="No single rewrite finds every chunk; together they put all three relevant chunks in the top 5."
+/>
+
+**How to read it:**
+
+- Step 1: the LLM writes three queries, each worded the way a help article might be.
+- Step 2 adds a HyDE answer (below). Step 3 runs all four searches and merges the lists; the "found by" column shows that each relevant chunk is found by at least two of them, so no single query has to be perfect.
+
+- **The numbers:** (illustrative): recall@5 goes from 2 ÷ 3 = 0.67 for the question alone to 3 ÷ 3 = 1.0 for the merged list, for one LLM call and four searches instead of one.
+
+<Callout tone="red" title="What breaks">
+  A rewrite can drop the detail that matters: "reset my password" without "lost my phone" brings back the "Change your password" article. Fix: always search with the original question as one of the variants, and keep the rewrite prompt from summarising away conditions.
+</Callout>
+
+### Decomposing multi-part questions
+
+- Some questions hold two questions: "How do I reset my password, and will my saved cards still work?" One search for both gets a top 5 dominated by whichever half has more matching articles.
+- Decomposition asks the LLM to list the sub-questions, retrieves for each, and gives the generator the union.
+- Multi-hop questions are harder because the second sub-question depends on the first answer: "Which team owns the service that failed in last week's incident?" needs the incident's service before it can ask who owns it.
+- Self-ask (Press et al., 2022) prompts the model to write and answer its own follow-up questions, and showed that a search engine can answer those follow-ups.
+- Iterative versions belong to [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag); graph lookups belong to [Knowledge Graph Systems](/ai-system-design/genai-system-design/knowledge-graph-systems).
+
+### HyDE and hypothetical answers
+
+- A short question and a 400-token article sit in different parts of the embedding space, even when one answers the other.
+- HyDE, hypothetical document embeddings (Gao et al., 2022), closes the gap from the question's side: an LLM writes a plausible answer, and that answer is embedded and searched instead of the question.
+
+<AnimatedDiagram
+  spec="animated/rag/hyde"
+  stepper
+  caption="The guess may be wrong in its details; it only has to land in the right neighbourhood."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Searched as typed, the question lands near the wrong articles">
+    The question is embedded and searched as typed. Its vector lands near "Change your password" and "Update your phone number", which share its words but not its problem. This is the plain search that finds 2 of the 3 chunks.
+  </StepCard>
+  <StepCard n={2} title="An LLM writes a hypothetical answer">
+    The LLM is asked to answer the question as a help article would, with no retrieval. It writes three sentences about backup codes and an ID check. Some details may be wrong; the paper says the generated document may contain false details, and that is accepted.
+  </StepCard>
+  <StepCard n={3} title="The answer is embedded, not the question">
+    The guess goes through the same embedding model as the chunks and becomes 1,536 numbers. Because it reads like an article, its vector lands among articles, next to the three chunks the answer needs.
+  </StepCard>
+  <StepCard n={4} title="Search returns the real chunks nearest the answer">
+    The index returns the real chunks nearest the guess. The guess itself is thrown away and never reaches the customer; the generator answers only from the retrieved chunks.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  When the LLM does not know the domain, its guess is confidently wrong and pulls the search towards the wrong articles: a guess about "contact support" lands among contact pages. HyDE also adds a full generation before the first search. Fix: search with both the question and the guess and fuse the lists, and drop HyDE for questions that already look like documents, such as exact codes.
+</Callout>
+
+### Query routing across indexes and tools
+
+- Not every question is a help-centre lookup. "What does error E1234 mean?" needs an exact match on the code, "Where is my order 1042?" needs the orders database, and "Thanks, that worked!" needs no retrieval at all.
+- A router reads the question and picks the route before anything is searched.
+- It can be a small classifier, an LLM call that returns one label from a fixed list, or the tool-choice step of an agent. The Architecture section draws it.
+
+## Architecture
+
+- Query understanding is one layer in front of retrieval, usually in this order: condense the chat into a standalone question, label it (route and intent), rewrite or decompose it for the chosen route, then search.
+- The router is the part that decides the shape of everything after it.
+
+<AnimatedDiagram
+  spec="animated/rag/query-routing"
+  stepper
+  caption="One front door, four back ends: the router decides what a question needs before anything is searched."
+/>
+
+**How to read it:**
+
+- Step 1 is the router: it condenses the chat into a standalone question and gives it one label from a fixed list, so each label has a route, an owner and its own test set.
+- Steps 2 to 5 send one example each. The password question is explained in other words than the articles use, so it goes to vector search.
+- "What does error E1234 mean?" hinges on one exact token that embeddings blur into similar codes, so it goes to BM25 keyword search.
+- "Where is my order 1042?" is a record, not a document, so it becomes a read-only query over that customer's orders (see [Text-to-SQL](/ai-system-design/genai-system-design/text-to-sql-and-structured-data)).
+- "Thanks, that worked!" needs no evidence, so the LLM replies directly and no irrelevant chunks enter the prompt.
+
+**The numbers:**
+
+- (illustrative timings): embedding the question ≈ 20 ms and vector search ≈ 15 ms, against several hundred milliseconds for each LLM call.
+- A router, a condense step and a rewrite run in sequence, so three model calls can add more time than retrieval itself.
+- Use a small, fast model for them, or one call that returns the label and the rewrites together.
+
+## Technical mechanics
+
+### Using conversation history in the query
+
+- In a chat, the second question often has no subject: "And if I don't have backup codes?".
+- Searching it as typed retrieves whatever mentions backup codes.
+- The standard fix is a **condense** step: an LLM reads the last few turns and rewrites the follow-up as a question that stands on its own.
+
+<AnimatedDiagram
+  spec="animated/rag/followup-condense"
+  stepper
+  caption="A follow-up only makes sense with the turn before it, so rewrite it before it reaches search."
+/>
+
+**How to read it:**
+
+- Step 1 is the chat so far; turn 2 leans on turn 1 for "password" and "lost phone".
+- Step 2 searches turn 2 as typed and gets "Set up two-factor sign-in", an article about making backup codes, which is the opposite of the customer's problem.
+- Step 3 has the LLM rewrite turn 2 with turns 1 and 2 in view.
+- Step 4 searches the standalone question and finds "No backup codes: verify your ID", the chunk plain search ranked 7th for the first question.
+- Pass only the last few turns: older ones pull the rewrite towards topics the customer has left.
+- A follow-up that already stands alone should come back unchanged.
+
+### Intent classification and clarifying questions
+
+- Intent is the label the router acts on. Keep the label set small (four to ten), give each label written examples, and include an "unclear" label.
+- When a question is ambiguous ("my code doesn't work": a sign-in code, a discount code or an error code?), asking one clarifying question is cheaper than retrieving for all three readings and answering the wrong one.
+- Ask at most once per turn, and only when the candidate routes would give different answers.
+- Log the labels: a growing share of "unclear" shows where the help centre or the label set has a gap.
+
+### Measuring the gain from each step
+
+- Each step must earn its call. Build a set of real questions, including follow-ups, with the chunks that answer them, and measure recall@k for the original question, then with each step turned on one at a time: condense, rewrite, multi-query, HyDE, decomposition.
+- Keep a step only if it raises recall@k (or answer correctness, see [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)) by more than the noise between runs, and record its added latency.
+- Score the router on its own as a classifier: route accuracy per label, and above all the rate at which a question that needs retrieval is sent to "no retrieval", because that one produces a confident answer with no evidence.
+
+## Trade-offs
+
+| Technique | Helps when | Cost | Watch out for |
+| --- | --- | --- | --- |
+| Condense follow-ups | Any chat interface | One LLM call per turn | Dragging in stale topics from old turns |
+| Multi-query rewriting | Chat wording differs from the documents | One LLM call, k searches | Rewrites drifting from intent |
+| Glossary expansion | Acronyms, product names | Almost none | Expanding to the wrong sense of a word |
+| HyDE | Short or vague questions | A full generation before search | Confidently wrong guesses steering search |
+| Decomposition | Multi-part and multi-hop questions | One search per sub-question | Too many sub-questions for simple asks |
+| Routing | Several sources or tools | A classifier or LLM call | Misroutes, especially to "no retrieval" |
+
+## Production systems
+
+- LlamaIndex's condense-question chat mode rewrites the chat history and the latest message into a standalone question on every turn, then queries the index. Its documentation notes the catch: because every turn goes to the knowledge base, it struggles with meta questions such as "what did I ask earlier?", which is a routing problem.
+- Rewrite-Retrieve-Read (Ma et al., 2023) trains a small rewriter with reinforcement learning, using the reader LLM's results as feedback, and reported gains on open-domain and multiple-choice question answering.
+- Adaptive-RAG (Jeong et al., 2024) trains a small classifier to predict a question's complexity and routes it to no retrieval, single-step retrieval or iterative retrieval.
+- **Used in our case studies:** [AI Answer Engine](/genai-system-design/case-studies/ai-answer-engine)
+
+## Failure modes & pitfalls
+
+- Replacing the original question with a rewrite instead of searching both.
+- Condensing with the entire chat history, so old topics leak into new queries.
+- Using HyDE on exact-match questions (codes, names, IDs), where a guess can only add noise.
+- A router with no "unclear" label, so ambiguous questions are forced into a confident wrong route.
+- Stacking rewrite, HyDE and decomposition without measuring each, so latency grows and nobody knows which step helps.
+
+## Interview framework
+
+1. Name the gap: users write chat, documents are written as articles, and follow-ups lose their subject.
+2. Put a condense step first for chat, then a router with a small fixed label set.
+3. Per route, choose the rewrite: multi-query for vague questions, decomposition for multi-part ones, HyDE for short ones, and none for exact codes.
+4. Always keep the original question as one of the searches and fuse the results.
+5. Measure each step's recall gain and latency on a set that includes follow-ups, and score the router as a classifier.
+
+**What interviewers listen for:** knowing that the cheapest retrieval fix is often on the query side, and a plan to prove each step helps.
+
+**Red flags:** "let the LLM rewrite the question" with no plan for drift, latency or evaluation.
+
+## Further reading
+
+- [Precise Zero-Shot Dense Retrieval without Relevance Labels, HyDE (Gao et al., 2022)](https://arxiv.org/abs/2212.10496)
+- [Query Rewriting for Retrieval-Augmented Large Language Models (Ma et al., 2023)](https://arxiv.org/abs/2305.14283)
+- [Measuring and Narrowing the Compositionality Gap in Language Models, self-ask (Press et al., 2022)](https://arxiv.org/abs/2210.03350)
+- [Adaptive-RAG: Learning to Adapt Retrieval-Augmented LLMs through Question Complexity (Jeong et al., 2024)](https://arxiv.org/abs/2403.14403)
+- [Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods (Cormack, Clarke and Büttcher, 2009)](https://doi.org/10.1145/1571941.1572114)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why rewrite a user's question before retrieval?" category="Concepts" level="Junior">
+    - Users write the way they talk, and documents are written the way authors write, so the question's words and embedding often sit far from the passage that answers it.
+    - A rewrite uses the documents' vocabulary, removes filler and can produce several variants whose results are merged.
+    - It fixes retrieval misses without touching the index.
+    - I would always keep the original question as one of the searches, so a bad rewrite cannot make results worse than the baseline.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does HyDE work and when can it hurt?" category="Concepts" level="Mid">
+    - HyDE asks an LLM to write a hypothetical answer to the question, embeds that answer instead of the question, and returns the real documents nearest to it.
+    - A guessed answer looks more like a document than a short question does, so it lands in the right neighbourhood even if its details are wrong.
+    - It hurts when the model does not know the domain and guesses confidently in the wrong direction, on exact-match questions such as error codes, and on latency, because it adds a full generation before the first search.
+    - Searching with both the question and the guess and fusing the results limits the damage.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle follow-up questions in a chat-over-documents assistant?" category="Architecture" level="Mid">
+    - Add a condense step before retrieval: an LLM reads the last few turns and rewrites the follow-up into a standalone question, which is what gets searched.
+    - Searching "and if I don't have backup codes?" as typed retrieves generic backup-code articles; the condensed question names the password reset and the lost phone.
+    - I would pass only recent turns, have the step return already-standalone questions unchanged, and include follow-ups in the evaluation set so the condense prompt is tested.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design a query router across a vector index, keyword search and a SQL database?" category="Architecture" level="Senior">
+    - I would give the router a small fixed set of labels, each tied to a route: explanatory questions to vector search, exact identifiers such as error codes to keyword search or a hybrid of both, questions about the user's records to a read-only SQL path scoped to that user, small talk to no retrieval, and an "unclear" label that triggers one clarifying question.
+    - The router can be a small classifier or a constrained LLM call, combined with the condense step to save latency.
+    - I would evaluate it as a classifier with per-label accuracy, watch misroutes to "no retrieval" most closely, and fall back to hybrid search when confidence is low.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you prove a query-rewriting step is worth its latency?" category="Evaluation" level="Senior">
+    - Build a labelled set of real questions, including follow-ups and multi-part questions, with the chunks that answer each.
+    - Measure recall at k and answer correctness for the original question, then enable each step on its own: condense, multi-query, HyDE, decomposition.
+    - Keep a step only if its gain is larger than run-to-run noise and worth its added latency and cost, and re-check when the embedding model or corpus changes.
+    - In production, sample rewrites and compare them with the original questions to catch drift.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -18,6 +18,8 @@ const ALLOWED = [
   "lib/cloud-catalog.ts",
   "lib/cloud-data/",
   "lib/db-catalog.ts",
+  "lib/pattern-catalog.ts",
+  "lib/genai-principles.ts",
   // Stream B deletes this route (Copy for LLM is removed, plan §11.10).
   "app/api/markdown/",
 ];

@@ -1,0 +1,627 @@
+---
+title: "Design Google Maps"
+description: "Map tiles from a CDN, fast routes on a graph split into cells, and live traffic from phone reports that changes road weights every 30 s."
+logo: systems/google-maps
+updated: 2026-11-17
+---
+
+Design a maps and navigation service: people pan and zoom a map of the world, ask for a route from A to B, and get an arrival time that reflects the traffic right now.
+The hard parts are a map of billions of tiles, a shortest path across a continent in milliseconds, and road speeds that change every minute without rebuilding the graph.
+
+- Interviewers use this question to see whether you split one product into three systems with different workloads (tiles, routing, traffic) and pick a store and a precomputation for each.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a maps and navigation service like Google Maps: draw the map, find a route from A to B, and give an arrival time that reflects live traffic."
+  level="Senior"
+  minutes={45}
+  bankId="design-maps"
+  tests={[
+    "Splitting the product into tiles, routing and traffic, each with its own workload",
+    "Tile arithmetic and caching: why a static pyramid on a CDN wins",
+    "Shortest paths on a continental graph whose weights change every minute",
+    "A streaming pipeline from location reports to road speeds",
+  ]}
+  clarify={[
+    { q: "Which features are in scope?", a: "The map, driving routes, live-traffic ETAs, turn-by-turn navigation with rerouting." },
+    { q: "How many users?", a: "500 million a day; 20 million navigating at the evening peak." },
+    { q: "Vector or image tiles?", a: "Vector tiles, drawn on the phone; image tiles for old clients are a variant." },
+    { q: "How fresh must traffic be?", a: "A new jam changes routes within 2 minutes." },
+    { q: "Where do location reports come from?", a: "Phones of users who opted in, sent anonymously in batches while moving." },
+    { q: "Does a route need to be the best possible?", a: "No: within a few percent of the fastest, in under a second." },
+  ]}
+  outOfScope={["Place search and nearby search", "Street-level imagery", "Public transit", "Offline maps"]}
+/>
+
+## Overview
+
+- The map is a **pyramid of vector tiles**, cut ahead of time into a **blob store** and served by a **CDN**; the tile version is in the URL, so tiles cache for a year.
+- Routes run on the **road graph held in memory**, split once into **cells**; a query searches its two end cells plus **precomputed shortcuts** between cell borders.
+- Phones send **batched location fixes** every 5 s onto a **report stream**; a **stream processor** matches them to roads and writes a **speed per road segment** each minute.
+- A **customizer** turns changed speeds into new shortcut weights every 30 s, **without touching the cell layout**: live traffic costs seconds, not a rebuild.
+- The **ETA** sums segment times along the path (live speeds near, historical speeds far ahead), then a **learned model** corrects it.
+- **Navigation** keeps a session socket open, checks each position against the route, and **pushes a reroute** when the driver leaves it or a faster one appears.
+
+<Numbers
+  items={[
+    { value: "2.6 M/s", label: "tile requests at peak", hint: "99% answered by the CDN" },
+    { value: "4 M/s", label: "location batches at peak", hint: "20 M drivers ÷ 5 s" },
+    { value: "≈ 7 ms", label: "route search on cells", hint: "plain Dijkstra ≈ 2 s" },
+    { value: "30 s", label: "new road weights", hint: "cell layout unchanged" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Pan and zoom the map", notes: "Any place on Earth, zoom 0 to 21; roads, labels, buildings." },
+    { id: "F2", requirement: "Route from A to B", notes: "Driving; the fastest route plus up to two alternatives." },
+    { id: "F3", requirement: "An ETA with live traffic", notes: "Arrival time from current and expected road speeds." },
+    { id: "F4", requirement: "Navigation with rerouting", notes: "Turn-by-turn; a new route when the driver leaves it or traffic changes." },
+    { id: "F5", requirement: "Ingest location reports", notes: "Anonymous batches from opted-in phones become road speeds." },
+  ]}
+/>
+
+- Out of scope: place search (see [Typeahead](/system-design-case-studies/case-studies/typeahead)) and nearby search (see [Uber Eats](/system-design-case-studies/case-studies/uber-eats), [Tinder](/system-design-case-studies/case-studies/tinder) and [Zillow](/system-design-case-studies/case-studies/zillow)), street imagery, transit, offline maps.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Tile latency", target: "p95 under 100 ms from the nearest edge", why: "Panning must feel instant." },
+    { id: "N2", property: "Route latency", target: "p99 under 1 s end to end; search under 50 ms", why: "The driver is waiting at the wheel." },
+    { id: "N3", property: "Traffic freshness", target: "A new jam changes routes within 2 minutes", why: "A route that ignores a jam is wrong." },
+    { id: "N4", property: "ETA accuracy", target: "Within 10% of the actual time on 90% of trips", why: "Users plan their day on it." },
+    { id: "N5", property: "Availability", target: "99.99% for tiles and routing; navigation survives a server loss", why: "Drivers are mid-journey." },
+    { id: "N6", property: "Privacy", target: "No user id on reports; trip ends trimmed; raw kept 30 days", why: "Location history is sensitive." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Map views", assumption: "500 M users × 10 views a day", result: "5 B views/day" },
+    { quantity: "Tile requests", assumption: "5 B × 15 tiles ÷ 86,400 s; 3 × at peak", result: "≈ 870,000/s average, 2.6 M/s peak" },
+    { quantity: "Tile pyramid", assumption: "Zoom 0 to 16: (4^17 − 1) ÷ 3; 30% hold data", result: "5.7 B tiles, 1.7 B stored" },
+    { quantity: "Tile storage", assumption: "1.7 B × 20 KB per vector tile", result: "≈ 34 TB per map version" },
+    { quantity: "Route requests", assumption: "500 M × 2 routes ÷ 86,400 s; 3 × at peak", result: "≈ 11,600/s average, 35,000/s peak" },
+    { quantity: "Reroute searches", assumption: "1 in 10 of 20 M sessions every 2 minutes", result: "≈ 17,000/s at peak" },
+    { quantity: "Location batches", assumption: "20 M drivers ÷ one batch per 5 s × 100 bytes", result: "4 M/s, 400 MB/s at peak" },
+    { quantity: "Report volume", assumption: "1.6 M/s average × 86,400 s × 100 bytes", result: "≈ 14 TB/day; 420 TB for 30 days" },
+    { quantity: "Road graph", assumption: "500 M nodes, 1 B directed segments × 40 bytes", result: "≈ 40 GB layout; 4 GB per set of weights" },
+    { quantity: "Routing CPU", assumption: "(35,000 + 17,000)/s × 7 ms", result: "≈ 364 cores; double for headroom" },
+  ]}
+  note="Three systems, three shapes: tiles are reads, reports are writes, routing is CPU on an in-memory graph."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Tiles: 2.6 M reads/s, re-cut only when the map changes; reports: 4 M writes/s, never read one by one | Tiles precomputed on a CDN; reports on a log, read only as aggregates |
+| D2 | Peak against average | 3 × at commute peaks; an accident spikes one area | The CDN absorbs map peaks; the stream buffers report bursts; routing sized for peak |
+| D3 | Consistency per operation | Everything may be seconds to minutes stale: tiles for a day, speeds for 2 minutes | No strong consistency anywhere; versions instead of invalidation |
+| D4 | Latency target | A route search under 50 ms on a 500 M-node graph (N2) | Graph in memory, preprocessed into cells; plain Dijkstra (≈ 2 s) is out |
+| D5 | Durability | A lost report is noise; a lost map edit is a wrong map | Reports at-least-once on a log with 24 h retention; map edits in a replicated database |
+| D6 | Ordering | Fixes in time order per device for matching; no global order | Batches carry 5 ordered fixes; windows use event time, not arrival time |
+| D7 | Duplicates | Harmless: a resent batch nudges a median at most | Drop by batch id when cheap; never coordinate for it |
+| D8 | Data size and growth | 34 TB of tiles per version; 14 TB of reports a day; a 44 GB graph | Tiles in a blob store; the graph fits in one server's memory; reports expire |
+| D9 | Fan-out shape | One tile read by millions; one jam touches thousands of routes | Cache tiles at the edge; recompute weights once per cell, not per session |
+| D10 | Contention | Not a driver here: each segment's speed has one writer, the window that owns its cell | Partition reports by cell; no locks |
+| D11 | Geography | Global users; roads and traffic are local | Routing graph per continent; reports processed in their region; CDN everywhere |
+| D12 | Availability and degradation | 99.99% (N5) | Lose live traffic: fall back to historical speeds; lose routing: the phone keeps its route; lose origin: the CDN serves cached tiles |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /tiles/v43/{z}/{x}/{y}.mvt` | Phone | Every pan or zoom, for tiles not in the device cache; served by the CDN |
+| `GET /v1/map/current` | Phone | At start and every 5 minutes: the current tile version and style |
+| `POST /v1/routes` | Phone | Route A→B with alternatives and ETAs |
+| `POST /v1/reports` | Phone (opted in) | Every 5 s while moving: one batch of fixes |
+| `WSS /v1/nav/{session_id}` | Phone | During navigation: positions up, reroutes and ETA updates down |
+
+```http
+POST /v1/routes
+Authorization: Bearer <session>
+{ "from": [38.7223, -9.1393], "to": [52.2297, 21.0122], "depart": "now", "alternatives": 2 }
+
+200 OK
+{ "routes": [ { "route_id": "r_51c2", "polyline": "…", "duration_s": 99840,
+                "eta": "2026-11-18T19:24:00Z", "weights_version": "w_20261117_1012" } ] }
+```
+
+- **Idempotency:** routes and tiles are reads; `POST /v1/reports` carries a `batch_id`, so a resent batch can be dropped.
+- **Errors:** `422` no road near the start or end point; `404` no route (an island); `429` per-device limit on reports and routes.
+- **Versions:** the tile version (`v43`) and the weights version in every response let the client and caches tell old from new without invalidation.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Map source (roads, rules, edits) | Relational database with spatial types (<TechIcon id="oss/postgresql" /> PostgreSQL + PostGIS) | Edits are transactions over related rows; spatial queries for the builder (D5) | Region | Strong | A document store: a road and its junctions change together |
+| Map tiles | Blob store (S3, Cloud Storage) behind a CDN | 34 TB of immutable files, read by key (D1, D8) | Key prefix `v/z/x` | Immutable per version | Rows in a database: 2.6 M reads/s of blobs it is not built for |
+| Road graph (layout, cells) | Files in the blob store, loaded into routing servers' memory | 44 GB read whole at start; queries need nanosecond edge access (D4, D8) | Continent | Immutable per version | A graph database: a network hop per expansion, seconds per route |
+| Live speeds | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | 1 B segments × 8 bytes = 8 GB; rewritten every minute (D3) | Cell | Eventual, ≤ 2 min | A disk-based database: 4 M/s of short-lived values to persist |
+| Report stream | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | 4 M batches/s, replayable, keyed by cell (D1, D2, D5) | Cell | At-least-once | A work queue: no replay to rebuild speeds after a bug |
+| Speed history | Columnar store (<TechIcon id="oss/clickhouse" /> ClickHouse) or Parquet files in the blob store | Scans by segment and hour for profiles and training (D8) | Day, cell | Append-only | A wide-column store: fast point reads we never need, slow scans we do |
+
+```sql
+-- Map source: one row per directed road segment (PostgreSQL + PostGIS), sharded by region.
+CREATE TABLE road_segments (
+  region       int,
+  segment_id   bigint,
+  from_node    bigint,
+  to_node      bigint,
+  geom         geometry(LineString, 4326),
+  length_m     int,
+  road_class   smallint,       -- motorway … residential
+  speed_limit  smallint,
+  rules        jsonb,          -- turn bans, tolls, time-of-day closures
+  map_version  int,            -- the build that last changed it
+  PRIMARY KEY (region, segment_id)
+);
+```
+
+```sql
+-- Speed history (ClickHouse): one row per segment per minute with data.
+CREATE TABLE segment_speeds (
+  day          Date,
+  cell_id      UInt32,
+  segment_id   UInt64,
+  minute       DateTime,
+  median_kmh   UInt8,
+  samples      UInt16
+) ENGINE = MergeTree
+PARTITION BY day
+ORDER BY (cell_id, segment_id, minute);   -- scans by cell and segment
+```
+
+- **Map builder:** reads changed segments by `map_version`, re-cuts the tiles and cells they touch.
+- **Live speeds:** key `speed:{segment_id}` holds `(median_kmh, samples, window_end)`; the customizer reads the changed keys of each cell.
+- **Profiles:** a nightly job groups history by segment and hour of the week (168 slots) for the ETA far ahead and the model's training data.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Map tiles from a CDN (F1)
+
+The smallest design: tiles cut ahead of time, stored as files, served by a CDN.
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={1} caption="Step 1: a map builder cuts tiles from the map database into a blob store; phones read them through a CDN." />
+
+- **Adds:** the map database, the map builder, the blob store, the CDN.
+- **Flow:**
+  1. The map builder reads roads and labels and cuts vector tiles for zoom 0 to 16 into the blob store under `tiles/v43/z/x/y`.
+  2. The phone works out the 15 tiles that cover its screen and asks the CDN for each.
+  3. A CDN miss reads the blob store once; the next million requests for that tile stay at the edge.
+- **Why this and not that:** tiles are 2.6 M reads/s of identical files (D1, D9); rendering each on request would need a fleet of renderers to redo the same work. Vector tiles are smaller than images and the phone restyles them (Deep dive 2).
+- **The gap:** the map shows roads, but nobody can get from A to B.
+
+<PremiumBreak />
+
+### Step 2: Routing on the road graph: plain Dijkstra is too slow (F2)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={2} caption="Step 2: the routing engine holds the whole road graph in memory and runs Dijkstra; a long route takes about 2 seconds." />
+
+- **Adds:** the API gateway and the **routing engine**, with the road graph in memory.
+- **Flow:**
+  1. The phone sends `POST /v1/routes`; the gateway authenticates it.
+  2. The routing engine snaps both points to the nearest road and runs Dijkstra outward from the start.
+  3. A route across a country settles about 20 M nodes × 100 ns ≈ 2 s.
+- **Why this and not that:** the graph (44 GB) fits in one server's memory, so every edge is a memory read, not a query (D4, D8). A graph database would add a network hop to each of 20 M expansions.
+- **The gap:** 2 s of CPU per route × 35,000 routes/s is 70,000 cores, and N2 wants under 50 ms.
+
+### Step 3: Split the graph into cells and precompute shortcuts (F2, N2)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={3} caption="Step 3: the map builder hands the routing engine a graph split into cells with shortcuts between cell borders." />
+
+- **Adds:** the map builder now partitions the graph into 50,000 cells and the routing engine keeps shortcuts between each cell's border nodes.
+- **Flow:**
+  1. Once per map version, the builder splits the road layout into cells of about 10,000 nodes with few roads crossing between them.
+  2. For each cell it records the **boundary nodes**: the ends of roads that leave the cell.
+  3. A query searches the start cell and the end cell in full, and crosses every other cell on its shortcuts: about 70,000 nodes, ≈ 7 ms.
+- **Why this and not that:** the split depends only on the road layout, which changes slowly, so traffic will never force a re-split (Deep dive 1). Contraction hierarchies answer faster but must be rebuilt when weights change (D3, D4).
+- **The gap:** every weight is still a free-flow speed: the route ignores traffic.
+
+### Step 4: Location reports become segment speeds (F5)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={4} caption="Step 4: phones send batched fixes to a report ingest; a traffic processor turns the report stream into a speed per road segment." />
+
+- **Adds:** the report ingest, the **report stream**, the **traffic processor**, live speeds and the speed history.
+- **Flow:**
+  1. While moving, the phone sends a batch of five 1-second fixes every 5 s, with a random trip id and no user id.
+  2. The ingest checks the batch and appends it to the stream keyed by the map cell of its first fix.
+  3. The processor matches fixes to road segments, keeps a 1-minute window per segment, and writes the window's median speed.
+  4. Raw batches also land in the speed history for profiles and training.
+- **Why this and not that:** 4 M writes/s that nobody reads one by one belong on a log, not in a database (D1). Keying by cell puts every report for a road on one processor, so each segment's speed has one writer (D10).
+- **The gap:** routes still use free-flow weights; the speeds exist but nothing reads them.
+
+### Step 5: Live weights without rebuilding, and the ETA (F3, N3)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={5} caption="Step 5: a customizer turns changed speeds into new cell weights every 30 s; the ETA service sums segment times along each path." />
+
+- **Adds:** the **customizer** and the **ETA service**.
+- **Flow:**
+  1. Every 30 s the customizer takes the segments whose speed changed and recomputes the shortcuts of the cells they lie in.
+  2. It ships the new weights, versioned, to every routing server, which swaps them in without a restart.
+  3. For each candidate path, the ETA service sums segment times: live speeds for the first 30 minutes, the historical speed for that hour beyond.
+- **Why this and not that:** recomputing all 50,000 cells takes about 5 s on 100 cores; 10% of cells changing takes 0.5 s (D3, N3). A full rebuild of a contracted graph takes hours (see "How real systems do it").
+- **The gap:** a route is computed once; the driver gets no help when they miss a turn or a jam forms ahead.
+
+### Step 6: A navigation session: reroute and push (F4)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={6} caption="Step 6: the phone holds a session socket; the navigation service checks each position and asks the routing engine for a reroute." />
+
+- **Adds:** the **navigation gateway** (session sockets) and the **navigation service**.
+- **Flow:**
+  1. Starting navigation opens a socket; the phone sends its position every 5 s.
+  2. The service checks the position against the route; more than 30 m off for two fixes means off-route.
+  3. Off-route, or when a segment ahead slows by more than 20%, it asks the routing engine for a new route from the current position.
+  4. If the new route saves more than 2 minutes, it is pushed down the socket; ETA updates go down every minute.
+- **Why this and not that:** a socket gives a reroute in one round trip with no polling (D4); pushes go only to sessions whose route crosses changed cells, about 17,000 searches/s, not 20 M (D9).
+- **The gap:** summed segment times miss what history knows: queues at junctions, the school run, the slowdown that always forms at 17:40.
+
+### Step 7: A learned correction to the ETA (F3, N4)
+
+<AnimatedDiagram spec="animated/google-maps/architecture" step={7} caption="Step 7: an ETA model trained daily on the speed history corrects the summed arrival time." />
+
+- **Adds:** the **ETA model**, trained offline on the history, loaded by the ETA service.
+- **Flow:**
+  1. Nightly, a job trains a model on past trips: the summed ETA, the segments, the hour, live and historical speeds, and the actual arrival time.
+  2. At request time the ETA service passes the route's features to the model and returns its corrected time.
+- **Why this and not that:** a sum assumes today's speeds hold for the whole trip; a model learns how they change (N4). It corrects the ETA only, so a model bug cannot produce an impossible route.
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/google-maps/architecture" stepper caption="Maps and navigation: tiles from a CDN, routes on a graph split into cells, live speeds from a report stream, and new weights every 30 s without rebuilding the graph." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Phone app | Draw tiles, ask for routes, navigate, send location batches |
+| **Edge** | Report ingest, API gateway, navigation gateway, CDN | Accept reports, authenticate, hold sessions, serve tiles |
+| **Routing core** | Routing engine | Shortest paths on cells and shortcuts, with the current weights |
+| **Application services** | ETA service, navigation service | Arrival times; off-route checks, reroutes and pushes |
+| **Async pipeline** | Report stream, traffic processor, customizer, map builder | Reports to speeds, speeds to weights, map data to tiles and cells |
+| **Storage** | Speed history, live speeds, ETA model, map database, blob store | Training data, current speeds, the model, map source, tiles and graph files |
+
+Driving from Lisbon to Warsaw, step by step:
+
+1. The phone loads the tiles for its screen from the CDN; all but one are already at the edge.
+2. `POST /v1/routes`: the routing engine searches the Lisbon cell, crosses Spain, France and Germany on shortcuts, searches the Warsaw cell: three candidate paths in about 10 ms.
+3. The ETA service sums each path's segment times and the model corrects them; the phone shows 27 h 44 min.
+4. Navigation opens a socket; the phone sends its position every 5 s and a report batch every 5 s.
+5. A jam forms near Burgos: within 2 minutes the customizer has new weights, the service finds a route 9 minutes faster and pushes it.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for tiles and routes, a WebSocket for navigation
+
+- **Choice:** REST over HTTPS for tiles, routes and report batches; one WebSocket per navigation session; gRPC between internal services.
+- **Why:** tiles must be plain `GET`s with stable URLs, or the CDN cannot cache them (D1, D9); a route is one request and one answer.
+- **Why not GraphQL:** queries travel as POST bodies, which CDNs do not cache, and the client needs a handful of fixed shapes.
+- **Why not polling for navigation:** 20 M sessions polling every 5 s is 4 M requests/s that mostly answer "no change"; a socket pushes the one reroute that matters (D4).
+- **Why not mobile push notifications for reroutes:** they go through the phone vendor's service with no delivery-time promise, and carry nothing upstream.
+
+### CDN: where almost every map request ends
+
+- **Choice:** a CDN in front of the blob store, caching tiles by versioned URL with a one-year lifetime.
+- **Why:** 2.6 M tile reads/s of identical files, with busy cities read by millions (D1, D2, D9); a 99% hit ratio leaves 26,000 reads/s for the origin.
+- **Why not serve from our own servers:** 2.6 M/s of static files across every continent is the CDN's whole job; we would rebuild it worse.
+- **Why versions, not purges:** a new map version is a new URL, so there is nothing to invalidate across thousands of edges, and a bad build rolls back by pointing at the old version (D3).
+
+### Tile store: a blob store, filled ahead of time
+
+- **Choice:** a blob store (S3, Cloud Storage) holding about 1.7 B tiles per version, 34 TB, keyed `tiles/v/z/x/y`; empty ocean tiles point at one shared file.
+- **Why:** tiles are immutable files read by key, which is exactly what a blob store does cheaply and durably (D8).
+- **Why not render on request:** each tile would be drawn again for every miss, and the renderers would carry the peak; pre-cutting draws each tile once per version (D1).
+- **Why not a database:** blobs of 20 KB at 26,000 origin reads/s cost far more in a database than in a blob store, with no query we need.
+
+### Load balancers: layer 7 for requests, layer 4 for sessions
+
+- **Choice:** an HTTP (layer-7) load balancer for routes and reports, routing by path; a TCP (layer-4) load balancer in front of the navigation gateways.
+- **Why:** route and report calls are short and stateless, so any server can answer, and layer 7 sends `/routes` and `/reports` to separate pools (D12).
+- **Why not layer 7 for the sessions:** 20 M sockets live for hours; a layer-4 balancer passes each connection through once and the gateway keeps it, with no per-message work.
+- **Why not one balancer for both:** a deploy that drains the request pool in seconds would also cut 20 M sockets; separate pools drain sessions slowly (D12).
+- **Algorithm:** least outstanding requests for routes, so a server busy with long searches gets fewer; least connections for sockets.
+
+### Routing engine: an in-memory graph split into cells
+
+- **Choice:** routing servers holding a continent's graph (44 GB) in memory, split into cells with shortcuts between border nodes; weights swapped in every 30 s.
+- **Why:** a search must touch about 70,000 nodes in 7 ms, which only works at memory speed (D4, N2); separating layout from weights lets traffic change weights in seconds (D3, N3).
+- **Why not a graph database (Neo4j):** each step of the search would be a call into the database, and 20 M expansions per long route take seconds.
+- **Why not SQL routing (pgRouting):** plain Dijkstra or A* in the database: the same 2 s per long route, on the store that also takes edits.
+- **Why not contraction hierarchies:** queries are faster still, but new weights mean rebuilding the hierarchy, minutes to hours for a continent (Deep dive 1).
+- **Why not plain A*:** the distance guess helps little once traffic makes a straight line a poor guide to time; it still explores millions of nodes on long routes.
+
+### Report stream: a log keyed by cell
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, partitioned by map cell, 24 h retention.
+- **Why:** 4 M batches/s, bursty, written once and read by the traffic processor and the history writer; keying by cell keeps a road's reports in one partition (D1, D2, D10).
+- **Why not a work queue (SQS, RabbitMQ):** each message goes to one consumer and is deleted; there is no replay to recompute speeds after a processor bug.
+- **Why not write reports straight to a database:** 4 M inserts/s of rows nobody reads one at a time, to be aggregated later anyway.
+- **Why not key by device:** map matching needs a device's fixes in order, but each batch already carries five in order; windows need all reports for a road together.
+
+### Traffic processor: event-time windows
+
+- **Choice:** a stream processor (<TechIcon id="oss/apache-flink" /> Flink) that map-matches fixes and keeps a 1-minute event-time window per segment, with a 15 s allowance for late batches.
+- **Why:** a jam must reach routes within 2 minutes, so speeds are computed continuously, not in batches (N3, D3); event time stops a batch delayed in a tunnel from counting as a jam now (D6).
+- **Why not an hourly batch job:** speeds an hour old miss every jam.
+- **Why not update a segment row per report:** 4 M writes/s to rows hot during rush hour, and a median cannot be updated one value at a time.
+
+### Live speeds: an in-memory key-value store
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, one key per segment, sharded by cell, about 8 GB.
+- **Why:** each segment's speed is rewritten every minute and read by the customizer and the ETA service; it is small and short-lived (D3, D8).
+- **Why not keep speeds only in the processor's memory:** the customizer and the ETA service need them too, and a processor restart would blank the map's traffic.
+- **Why not Cassandra:** durable writes of values that expire in a minute; the history already keeps the record.
+
+### Customizer: weights, not layout
+
+- **Choice:** a parallel job that recomputes the shortcuts of changed cells every 30 s and ships a versioned weight file to every routing server.
+- **Why:** 10% of cells changing costs 0.5 s on 100 cores; the routing engine swaps the file in without dropping a query (N3).
+- **Why not compute weights per query:** every search would read millions of live speeds instead of 50,000 cells' shortcuts.
+
+### Map database and builder: relational with spatial types
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL with PostGIS, sharded by region; a builder that turns each new map version into tiles and graph files.
+- **Why:** an edit changes a road, its junctions and its rules together, in one transaction (D5); spatial indexes find the segments inside a tile.
+- **Why not a document store:** a road and its junctions are related rows that must change together.
+- **Why not serve maps from this database:** it holds the truth; tiles and the graph are read-only copies cut from it, so its load stays small.
+
+### Speed history and the ETA model: columnar, trained offline
+
+- **Choice:** <TechIcon id="oss/clickhouse" /> ClickHouse (or Parquet files in the blob store) for minute speeds and trips; a model trained daily, stored as a file.
+- **Why:** profiles and training scan billions of rows by segment and hour; a columnar store reads only the columns asked for (D8).
+- **Why not a wide-column store:** it is built for point reads by key, and these jobs scan.
+
+## Deep dives
+
+### Fast shortest paths when weights change
+
+- **The problem:** a search must be milliseconds on 500 M nodes, and road weights change every minute.
+- **Plain Dijkstra or A*:** no preprocessing, so new weights apply at once, but a long route settles about 20 M nodes, ≈ 2 s.
+- **Contraction hierarchies:** rank nodes by importance and add shortcuts that skip unimportant ones; queries settle a few hundred nodes, but the ranking depends on the weights, so traffic means a rebuild.
+- **Cells and customization:** split the layout once (metric-independent); per cell, store shortcuts between boundary nodes with the current weights; new speeds re-run only the shortcut step for the cells they touch.
+- **Turn costs and closures:** a banned turn or a closed road is an infinite weight in the next customization; no re-split.
+
+<AnimatedDiagram spec="animated/google-maps/graph-cells" stepper caption="The road layout is split once; live traffic only changes the shortcut weights, and a query searches two cells plus the shortcuts between them." />
+
+<StepCards>
+  <StepCard n={1} title="Split the road layout into cells">
+    The builder cuts the graph into cells with few roads between them. Green nodes sit where a road leaves a cell. The split depends on the layout only, so it changes with the map, not with traffic.
+  </StepCard>
+  <StepCard n={2} title="Shortcuts carry the live weights">
+    For each cell, the customizer computes the best time between every entry and exit boundary node at current speeds. A slow road inside cell 2 changes its shortcuts, never the split.
+  </StepCard>
+  <StepCard n={3} title="A query: two cells and the overlay">
+    The search runs in full inside the start and end cells and crosses every cell in between on one shortcut. That is about 70,000 nodes instead of 20 million.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- Cells: 500 M nodes ÷ 10,000 per cell = 50,000 cells; ~100 boundary nodes each = 5 M boundary nodes.
+- Customizing one cell: ~100 searches × 10,000 nodes = 1 M node visits; all cells = 5 × 10^10 visits ≈ 500 core-seconds, about 5 s on 100 cores.
+- A query: 10,000 + 10,000 + ~50,000 overlay nodes ≈ 70,000 × 100 ns ≈ 7 ms, about 300 × fewer than plain Dijkstra.
+
+<Callout tone="red" title="What breaks">
+  Cells cut badly, with many roads crossing their borders, multiply boundary nodes and shortcuts, and both customization and queries slow down. Cut along rivers, mountains and quiet roads, and alert on boundary nodes per cell.
+</Callout>
+
+### The tile pyramid: arithmetic, caching, versions
+
+- **The pyramid:** zoom 0 is one tile of the world; each zoom splits every tile into four, so zoom z has 4^z tiles, addressed `z/x/y`.
+- **Where to stop:** cut vector tiles to zoom 16; above it the phone draws zoom 16 data larger (overzoom), since vectors stay sharp.
+- **Empty tiles:** about 70% of tiles are ocean or empty land; they share one file, so storage follows the land, not the square.
+- **Caching layers:** the device cache (recent tiles), the CDN (busy places, 99% of the rest), the blob store (the long tail).
+- **Versions:** an edit at one point re-cuts one tile per zoom, 17 in all, under a new version; `GET /v1/map/current` tells phones which version to ask for.
+- **Vector against image tiles:** vectors are smaller, restyle on the phone (dark mode, labels in any language) and rotate cleanly; images cost no drawing on old phones.
+
+<AnimatedDiagram spec="animated/google-maps/tile-pyramid" stepper caption="Each zoom splits every tile into four, so zoom 16 alone is 4.3 billion tiles; one edit re-cuts one tile per zoom under a new version." />
+
+**How to read it:**
+
+- Step 1: zoom 0, 1 and 2 hold 1, 4 and 16 tiles, labelled `z/x/y`.
+- Step 2: the arithmetic at zoom 16, and what 30% of the pyramid costs to store.
+- Step 3: the orange dot is one edited point; the green line under each grid names the one tile re-cut at that zoom.
+
+**The numbers:** 4^16 ≈ 4.3 B; zoom 0 to 16 ≈ 5.7 B; 30% stored ≈ 1.7 B × 20 KB ≈ 34 TB per version. At 2.6 M requests/s and a 99% hit ratio, the origin serves 26,000 reads/s.
+
+<Callout tone="red" title="What breaks">
+  Purging changed tiles from every CDN edge instead of versioning them: the purge reaches edges at different times, so neighbouring tiles from two map versions show a road that stops at a tile border. Version the whole set and switch phones over at once.
+</Callout>
+
+### The traffic pipeline: reports, matching, windowed speeds
+
+- **Batching on the phone:** five 1-second fixes per batch, sent every 5 s; fewer requests, and the fixes arrive in order for matching.
+- **Map matching:** GPS is off by 5 to 20 m, so match each run of fixes to the most likely sequence of connected roads, not the nearest road per fix.
+- **Windows:** a 1-minute tumbling window per segment by event time, closed when the watermark passes its end plus 15 s; the median resists one stopped car.
+- **Duplicates:** the ingest acks after the append; a lost ack means a resent batch, dropped by `batch_id`, and harmless if not (D7).
+- **Sparse roads:** a segment with fewer than 3 samples in a window keeps its historical speed for that hour, so a quiet road at night is not "jammed" by one slow car.
+- **Privacy:** no user id; a random trip id that changes per trip; the first and last 200 m of each trip dropped before the stream (N6).
+
+<AnimatedDiagram spec="animated/google-maps/traffic-pipeline" stepper caption="Fixes become one median speed per road segment each minute; a resent batch is dropped by its id, and a late one only reaches the history." />
+
+<StepCards>
+  <StepCard n={1} title="Fixes become a segment speed">
+    Batch b17 is appended to the stream keyed by its cell and acknowledged. The processor matches it to segment s88, closes the minute's window and writes a median of 24 km/h. The customizer recomputes the cell s88 lies in.
+  </StepCard>
+  <StepCard n={2} title="A duplicate and a late batch">
+    The ack is lost, so the phone resends b17; the processor has seen it and drops the copy. Batch b09 arrives 3 minutes late from a tunnel, after its window closed, so it goes to the history only.
+  </StepCard>
+</StepCards>
+
+The window shape decides what "the speed now" means.
+
+<AnimatedDiagram spec="animated/patterns/stream-windows" caption="The same eight clicks give different answers: tumbling windows count each click once, sliding windows count it up to five times, and sessions follow the shopper’s pauses." />
+
+**How to read it:** tumbling windows give one speed per segment per minute, which is what the customizer wants; sliding windows smooth more but count each report several times.
+
+**The numbers:** 4 M batches/s × 100 bytes = 400 MB/s into the stream; at about 20 MB/s per partition that is 20 partitions minimum, so 256 by cell for headroom and parallelism.
+
+### Worked example: a jam on the A-1 at 17:40
+
+1. 17:40:00: a lorry blocks a lane; cars on segment s88 drop from 100 to 20 km/h.
+2. 17:40:05: the first slow batches reach the stream, 5 s after the fixes.
+3. 17:41:15: the 17:40 window closes (60 s + 15 s allowance); 140 batches give a median of 24 km/h.
+4. 17:41:30: the customizer's 30 s cycle picks up s88; its cell's shortcuts are recomputed in under 1 s and shipped.
+5. 17:41:35: 2,000 sessions whose routes cross that cell are re-searched; 600 get a route 6 minutes faster, pushed down their sockets.
+
+**The numbers:** 5 + 60 + 15 + 30 + 5 = 115 s from the first slow car to a pushed reroute, inside N3's 2 minutes.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Tile delivery | Render on request, pre-cut tiles on a CDN | Pre-cut, versioned tiles on a CDN | D1, D9, N1 | 34 TB per version; edits wait for the next build | Live layers (traffic colours) go in separate small tiles |
+| Tile format | Image tiles, vector tiles | Vector tiles to zoom 16, overzoom above | D8, F1 | Drawing cost on the phone | Most clients cannot draw vectors |
+| Route search | Dijkstra or A*, contraction hierarchies, cells with customization | Cells with customization | D3, D4, N2, N3 | Slower queries than contraction hierarchies | Traffic is ignored, as in a walking router |
+| Graph location | Graph database, SQL, in memory | In memory per continent | D4, D8 | 44 GB per server; a restart reloads it | The graph outgrows one server's memory |
+| Speed computation | Per-report update, hourly batch, windowed stream | 1-minute event-time windows | D3, D6, N3 | A stream job to run; up to 75 s of window delay | Freshness can be an hour, as for historical profiles |
+| Report partitioning | By device, by cell | By cell | D10, D11, F5 | Hot partitions in rush-hour cities | Cells become too hot: split them finer |
+| Report delivery | Exactly-once, at-least-once | At-least-once, drop by batch id | D5, D7 | A rare duplicate in a median | Never: a median shrugs it off |
+| Navigation channel | Polling, push notifications, WebSocket | WebSocket session | D4, D9, F4 | 20 M long-lived connections to hold | Reroutes become rare enough for push notifications |
+| ETA | Sum of segment times, learned correction | Sum, then a learned correction | N4, F3 | A model to train and watch for drift | The sum alone meets N4 |
+| Degradation | Fail routes without traffic, fall back | Historical speeds when live speeds are missing | D12, N5 | ETAs less accurate during an outage | Never: a route without traffic beats no route |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Caching](/system-design/patterns/caching) | CDN and device cache for tiles | 2.6 M identical reads/s |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Tiles and graph files; one shared empty tile | 34 TB of immutable files per version |
+| [Geospatial Indexing](/system-design/patterns/geospatial-indexing) | Tile addresses `z/x/y`, cells for reports | Turning a position into a key |
+| [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) (advanced) | Traffic processor | Reports to one speed per segment per minute |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Graph by continent, reports and speeds by cell | Each road has one owner; regions stay local |
+| [Request Batching, Pipelining and Scatter-Gather](/system-design/patterns/batching-and-pipelining) (advanced) | Five fixes per report batch | 5 × fewer requests from 20 M phones |
+| [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) (advanced) | Navigation gateway | Pushing reroutes to 20 M live sessions |
+| [Idempotency](/system-design/patterns/idempotency) | `batch_id` on reports | A resent batch is dropped |
+| [Materialized Views and Read Projections](/system-design/patterns/materialized-views) (advanced) | Live speeds and cell weights from the stream | Reads served from a view kept fresh by a pipeline |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The report stream, 24 h retention | 4 M location writes/s buffered for the stream processor |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Any navigation app | Tiles on a CDN, cells and customization, reports to speeds | Fewer users: one region, smaller graph |
+| Arrival times in ride hailing | Routing on cells with live weights, learned ETA correction | Driver phones are the report source; ETAs feed pricing and matching |
+| Logistics route planning | The road graph and its weights | Many stops per route (a vehicle routing problem); weights per vehicle type |
+| Delivery-radius calculation | Travel times on the graph | One-to-many searches from a store: an isochrone, cached per hour |
+| Cycling or walking directions | Tiles, cells | A different weight set on the same layout; little live traffic |
+
+## How real systems do it
+
+- **Google Maps Platform documentation (read 2026):** a basic Mercator map tile is 256 × 256 pixels; a pixel coordinate is the world coordinate × 2^zoom; zoom 1 is 4 tiles and zoom 2 is 16.
+- **2011:** Microsoft Research's Customizable Route Planning computes shortest paths on continental road networks with any cost function, supports turn costs and real-time queries, and takes in a new metric in a few seconds.
+- **2015:** Uber's routing engine: building contraction hierarchies for all the world's roads took about 12 hours, and dynamic updates still about 10 minutes; Uber moved to layers of small cells, re-running preprocessing only for the part of the graph traffic changed, and serves hundreds of thousands of ETA requests a second in single-digit milliseconds.
+- **2020:** Google says Maps users drive over 1 billion kilometres a day; Maps combines historical traffic patterns with live conditions, and after the 2020 lockdowns weights the last two to four weeks of history most.
+- **2020:** DeepMind and Google grouped neighbouring road segments with heavy traffic into "supersegments" and used graph neural networks, improving real-time ETA accuracy by up to 50% in cities including Berlin, Jakarta, São Paulo, Sydney, Tokyo and Washington DC.
+- **2021:** a paper on the graph neural network ETA estimator deployed in production at Google Maps reports negative ETA outcomes cut by over 40% in cities like Sydney.
+- **Where this design differs:** Google does not publish how its route search works, so the cells and customization here follow Microsoft Research's published method and Uber's engine; the learned correction follows Google's ETA papers.
+
+## Failure modes & pitfalls
+
+- **Plain Dijkstra on the planet:** routes take seconds and CPU climbs with route length; watch p99 by route distance; cells and shortcuts.
+- **Precomputation that ignores traffic:** contraction hierarchies rebuilt nightly route everyone into the morning jam; compare ETA error at rush hour against night; separate layout from weights.
+- **Purging tiles instead of versioning:** roads stop at tile borders while edges disagree; count mixed-version tile loads; versioned URLs and one switch.
+- **Counting late batches as now:** a tunnel's 3-minute-old fixes look like a jam; watch speed drops with no matching live reports; event-time windows with a watermark.
+- **One slow car on a quiet road:** a single sample turns a night road red; watch segments with fewer than 3 samples; fall back to the historical speed.
+- **Rerouting everyone the same way:** 2,000 drivers sent down one side street jam it; watch speed on suggested detours; spread alternatives and include predicted load in the weights.
+- **Traffic pipeline down:** live speeds go stale; alert on the age of the newest weights; fall back to historical speeds and say so in the ETA.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify features, scale, freshness and privacy; write F1 to F5 and N1 to N6; name tiles, routing and traffic as three systems.
+2. **Minutes 5 to 10:** estimates: 2.6 M tiles/s, 5.7 B tiles, 35,000 routes/s, 4 M reports/s, a 44 GB graph.
+3. **Minutes 10 to 15:** API and data: versioned tile URLs, the routes call, report batches; where each kind of data lives.
+4. **Minutes 15 to 25:** Steps 1 to 3: tiles on a CDN, Dijkstra and why it fails, cells and shortcuts.
+5. **Minutes 25 to 35:** Steps 4 to 7: reports to speeds, weights every 30 s, navigation sessions, the learned ETA.
+6. **Minutes 35 to 45:** one deep dive: routing with changing weights, the tile pyramid, or the traffic pipeline; failure modes.
+
+**What interviewers listen for:**
+
+- **Mid:** tiles addressed by `z/x/y` on a CDN, the graph in memory, reports through a queue, an ETA from segment speeds.
+- **Senior:** why plain Dijkstra fails and what preprocessing survives live traffic, event-time windows and map matching, versioned tiles, rerouting over a socket.
+- **Staff:** separating layout from weights as the central idea, degradation to historical speeds, privacy of location data, rerouting that does not create the next jam.
+
+**Red flags:**
+
+- Drawing the map from database rows per request.
+- "Run Dijkstra" with no cost estimate; precomputation rebuilt for every traffic change.
+- Storing every location report in a database.
+
+## Further reading
+
+- [Map and tile coordinates](https://developers.google.com/maps/documentation/javascript/coordinates) (Google Maps Platform documentation)
+- [Customizable Route Planning](https://www.microsoft.com/en-us/research/publication/customizable-route-planning/) (Microsoft Research, 2011)
+- [ETA Phone Home: How Uber Engineers an Efficient Route](https://www.uber.com/blog/engineering-routing-engine/) (Uber Engineering, 2015)
+- [Google Maps 101: how AI helps predict traffic and determine routes](https://blog.google/products/maps/google-maps-101-how-ai-helps-predict-traffic-and-determine-routes/) (Google, 2020)
+- [Traffic prediction with advanced graph neural networks](https://deepmind.google/discover/blog/traffic-prediction-with-advanced-graph-neural-networks/) (DeepMind, 2020)
+- [ETA Prediction with Graph Neural Networks in Google Maps](https://arxiv.org/abs/2108.11482) (arXiv, 2021)
+- Related pages: [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Zillow](/system-design-case-studies/case-studies/zillow) · [Typeahead](/system-design-case-studies/case-studies/typeahead) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing) · [CDN](/system-design/fundamentals/cdn)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is the map cut into tiles, and how do you serve them cheaply?" category="Concepts" level="Mid">
+  - Tiles turn an endless map into a fixed set of small files addressed `z/x/y`; a screen needs about 15 of them.
+  - Two users looking at the same city ask for the same files, so a CDN answers about 99% of 2.6 M requests/s.
+  - Cut them ahead of time into a blob store and put the version in the URL, so they cache for a year and need no purge.
+  </InterviewQuestion>
+  <InterviewQuestion question="A route across a continent must come back in under a second. How do you search such a large graph?" category="Architecture" level="Senior">
+  - Hold the graph in memory (about 44 GB) on routing servers; any network hop per edge is too slow.
+  - Plain Dijkstra settles about 20 M nodes on a long route, ≈ 2 s: too slow at 35,000 routes/s.
+  - Split the graph into cells once and precompute shortcuts between cell borders; a query searches two cells and the shortcuts, about 70,000 nodes, ≈ 7 ms.
+  </InterviewQuestion>
+  <InterviewQuestion question="Traffic changes every minute. How do you keep fast routing when the weights change?" category="Trade-offs" level="Senior">
+  - Separate what depends on the road layout (the split into cells) from what depends on speeds (the shortcut weights).
+  - Recompute only the shortcuts of the cells whose speeds changed: about 0.5 s on 100 cores every 30 s.
+  - Contraction hierarchies query faster but rank nodes by weight, so live traffic means a rebuild of minutes to hours.
+  - Closures and banned turns become infinite weights in the next customization, with no re-split.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you turn raw GPS pings from phones into live traffic speeds?" category="Architecture" level="Senior">
+  - Phones send batches of five fixes every 5 s onto a log keyed by map cell: 4 M batches/s at peak.
+  - A stream processor matches each run of fixes to the most likely connected roads, since GPS is off by 5 to 20 m.
+  - Per segment, a 1-minute event-time window takes the median speed; late batches go to the history, not the live speed.
+  - Segments with too few samples keep their historical speed for that hour.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the estimated arrival time stay accurate during a two-hour drive?" category="Concepts" level="Mid">
+  - Use live speeds for the next 30 minutes and the historical speed for that hour of the week beyond, since live speeds will have changed by the time you get there.
+  - A model trained on past trips corrects the summed time for queues, junctions and patterns the sum misses.
+  - The navigation session re-sums the remaining route every minute and pushes the new ETA.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you use vector tiles or image tiles?" category="Trade-offs" level="Mid">
+  - Vector tiles: smaller, restyled on the phone (dark mode, label language), sharp when rotated, and cut only to zoom 16.
+  - Image tiles: no drawing on the phone, so better for very old devices, but every style and zoom is another set of files.
+  - Choose vectors for the main app; keep an image set only if a client cannot draw.
+  </InterviewQuestion>
+  <InterviewQuestion question="A road changes. How do you update the map without stale tiles stuck in the CDN?" category="Scaling" level="Mid">
+  - Re-cut only the tiles the edit touches: one per zoom, 17 for zoom 0 to 16.
+  - Publish them under a new version in the URL, and tell phones the current version from a small, short-cached call.
+  - Never purge edges one by one: they update at different times and neighbouring tiles disagree.
+  </InterviewQuestion>
+  <InterviewQuestion question="The driver misses a turn. What happens?" category="Architecture" level="Mid">
+  - The phone sends its position over the session socket every 5 s; two fixes more than 30 m off the route mean off-route.
+  - The navigation service asks the routing engine for a route from the current position: one search, ≈ 7 ms.
+  - The new route goes down the same socket; the phone keeps the old one until it arrives, so a slow server never leaves the driver without directions.
+  </InterviewQuestion>
+  <InterviewQuestion question="The traffic pipeline stops. What do users see?" category="Failure modes" level="Senior">
+  - Live speeds stop updating; alert on the age of the newest weights, not on errors.
+  - Fall back to historical speeds for that hour of the week: routes and ETAs stay sensible, only less precise.
+  - Tiles and routing keep working, because they do not depend on the pipeline; the log keeps reports for 24 h, so the processor catches up after a fix.
+  </InterviewQuestion>
+  <InterviewQuestion question="If you send every driver around a jam down the same side street, you create a new jam. What do you do?" category="Trade-offs" level="Senior">
+  - Spread drivers across alternatives whose ETAs are within a few percent, instead of sending all to the single best.
+  - Count the reroutes already sent onto each segment and add the expected load to its weight in the next customization.
+  - Watch speeds on suggested detours; a detour that slows quickly is the signal to stop sending drivers there.
+  </InterviewQuestion>
+</InterviewQuestions>

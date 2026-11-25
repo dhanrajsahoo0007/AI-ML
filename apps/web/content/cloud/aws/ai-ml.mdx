@@ -55,6 +55,25 @@ The stepper stops at the model call. The support chatbot adds what happens aroun
 - **Bedrock Agents** is the older, built-in way to let a model call your APIs. **AgentCore** runs agents written in any framework, with a session per user, memory, a tool gateway and an identity service for acting on a signed-in user's behalf.
 - **Money still moves only through Step Functions.** The refund tool runs under an IAM role scoped to one customer, and refunds over £30 wait for the support agent. A guardrail is a smoke alarm, not a lock.
 
+## A RAG assistant on AWS
+
+This is the same retrieval-augmented generation (RAG) pipeline as on [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with each role played by an AWS service. Switch the Services toggle to compare clouds.
+
+<AnimatedDiagram
+  spec="animated/rag/pipeline"
+  cloud="aws"
+  stepper
+  caption="On AWS, Bedrock Knowledge Bases do the parsing, chunking and retrieval; your code only builds the prompt and calls the model."
+/>
+
+**How to read it.** The top lane runs when documents change: files in S3 are synced into a Bedrock Knowledge Base, which parses and chunks them, embeds each chunk with Titan Text Embeddings V2 and writes the vectors to a vector store such as OpenSearch Serverless or S3 Vectors. The bottom lane runs per question: your API (Lambda or ECS) asks the Knowledge Base to retrieve the nearest chunks, builds the prompt and calls a model on Bedrock, with Guardrails checking the input and the output.
+
+**The numbers** (the running example): 1,200 help articles become 3,600 chunks and about 22 MB of raw vectors at 1,536 dimensions; each answer sends a prompt of about 2,200 tokens.
+
+<Callout tone="red" title="What breaks">
+  The sync is not instant. An article edited in S3 is not in answers until the Knowledge Base's next ingestion job finishes, so schedule or trigger syncs on change and watch the job's failures.
+</Callout>
+
 ## Services
 
 ### Amazon Bedrock
@@ -77,9 +96,9 @@ The stepper stops at the model call. The support chatbot adds what happens aroun
 
 ## Where this shows up in system design
 
-- **[ChatGPT](/system-design/case-studies/chatgpt)-style assistants:** streaming responses from Bedrock over SSE or WebSockets; conversations in DynamoDB; per-user token quotas.
+- **[ChatGPT](/system-design-case-studies/case-studies/chatgpt)-style assistants:** streaming responses from Bedrock over SSE or WebSockets; conversations in DynamoDB; per-user token quotas.
 - **RAG and agents:** the [GenAI system design](/ai-system-design) articles map directly onto Knowledge Bases, AgentCore and Guardrails.
-- **Recommendations and ranking ([TikTok](/system-design/case-studies/tiktok), [YouTube](/system-design/case-studies/youtube)):** models trained on SageMaker AI, features from the data lake, real-time scoring on endpoints.
+- **Recommendations and ranking ([TikTok](/system-design-case-studies/case-studies/tiktok), [YouTube](/system-design-case-studies/case-studies/youtube)):** models trained on SageMaker AI, features from the data lake, real-time scoring on endpoints.
 - **Media understanding:** Rekognition, Transcribe and Textract for moderation, captions and document extraction.
 
 ## Common mistakes

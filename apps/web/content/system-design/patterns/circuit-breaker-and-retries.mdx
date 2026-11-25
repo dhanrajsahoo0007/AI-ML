@@ -1,90 +1,253 @@
 ---
 title: "Circuit Breaker, Retries and Timeouts"
 description: "Surviving failing dependencies: timeouts, exponential backoff with jitter, circuit breakers and bulkheads."
+icon: siren
+updated: 2026-11-16
 ---
 
-In a system of many services, something is always slow or down. These patterns stop one failure from becoming an outage.
+In a system of many services, something is always slow or down. Timeouts, retries and circuit breakers stop one slow dependency from holding every thread and turning into an outage.
 
-## TL;DR
+- Interviewers ask about failing dependencies to see whether you bound every remote call in time, retry without multiplying the load, and say what the caller does while the dependency is gone.
 
-- Always set **timeouts**; an unbounded wait ties up threads.
-- **Retry** only idempotent calls, with **exponential backoff and jitter** and a cap.
-- A **circuit breaker** stops calling a failing dependency, then probes for recovery.
-- **Bulkheads** isolate resources so one dependency cannot starve others.
-- Provide a **fallback** or degrade gracefully.
+## Overview
 
-## The idea in plain English
+- Always set **timeouts**: an unbounded wait ties up a thread for as long as the dependency hangs.
+- **Retry** only idempotent calls, with **exponential backoff and jitter** and a cap on attempts.
+- Retry at **one layer** and inside a **retry budget**: three tries at each of three layers is 27 calls on the failing service.
+- A **circuit breaker** stops calling a failing dependency, fails fast, then probes for recovery.
+- **Bulkheads** isolate resources so one dependency cannot starve the others.
+- Provide a **fallback** or degrade gracefully, decided per feature before the outage.
 
-A fuse trips when current is too high so the house does not burn. A circuit breaker trips when a dependency keeps failing so your service does not pile up waiting.
+## Mental model
+
+- A fuse trips when the current is too high so the house does not burn; a circuit breaker trips when a dependency keeps failing so your service does not pile up waiting.
+- Phoning a shop that does not answer: hang up after a minute, wait longer before each new try, and pick a random moment so the whole queue of callers does not redial together.
+- After five dead calls you stop phoning for an hour, then try once: if someone answers, you go back to calling as normal.
+- Mapped back: the minute is the timeout, the growing random wait is backoff with jitter, the hour is the open state, and the single call is the half-open trial.
 
 ## Core concepts
 
-1. **Timeouts.** Shorter than the caller's own deadline; propagate deadlines downstream.
-2. **Retries with backoff and jitter.** Delay doubles each attempt with randomness to avoid synchronized retries.
-3. **Retry budget.** Limit retries to a fraction of traffic to avoid retry storms.
-4. **Circuit states.** Closed (normal), open (fail fast), half-open (trial calls).
-5. **Bulkhead.** Separate thread or connection pools per dependency.
-6. **Fallbacks.** Cached data, default value, or a reduced feature.
+- The running example is Brightpost's checkout calling its card provider: **300 orders/s** at the sale peak, spread over **40 app servers**, so 7.5 payment calls a second on each.
+- The provider normally answers in **100 ms** (illustrative); each server keeps a pool of **20 threads** for it (illustrative).
 
-## Architecture
+### Timeouts and deadlines
 
-```mermaid
-stateDiagram-v2
-    [*] --> Closed
-    Closed --> Open: failure rate over threshold
-    Open --> HalfOpen: after cool-down
-    HalfOpen --> Closed: trial calls succeed
-    HalfOpen --> Open: trial call fails
-```
-
-## Deep dive
+- A **timeout** bounds how long a caller waits for one call; set it shorter than the caller's own deadline.
+- Pick it from the dependency's latency: AWS chooses an acceptable false-timeout rate, such as 0.1 %, and uses that percentile (p99.9) of the downstream latency.
+- **Deadline propagation:** pass the time left down the call chain, so every hop works to one absolute deadline instead of inventing its own.
+- A timeout longer than the user's patience protects nothing: the user has left, and the thread is still held.
 
 ### Retry storms
 
-If every layer retries three times, a failure multiplies load by 27 at the bottom. Retry at one layer, use budgets, and honour `Retry-After`.
+- A **retry** hides a brief failure, but every retry is extra load on a service that may be failing because of load.
+- Retries at several layers multiply: if every layer retries three times, a failure multiplies the load by 27 at the bottom.
 
-### Graceful degradation
+One shopper's payment passes through three services before it reaches the provider.
 
-Recommendation service down? Show popular items from cache. Decide fallbacks in advance per feature.
+<AnimatedDiagram spec="animated/patterns/cb-retry-storm" stepper caption="Three tries at each of three layers multiply to 27 calls on the provider; retrying at one layer sends it 3." />
+
+**How to read it:**
+
+- The squares under each box are the calls that box receives for one payment.
+- Step 1: every layer tries three times, so each hop triples the calls.
+- Step 2: only payments, the layer right above the provider, retries.
+
+**The numbers:**
+
+- Every layer retrying: 3 × 3 × 3 = 27 calls on the provider for one payment.
+- At 300 payments a second that is 8,100 calls a second on a provider that was already failing at 300.
+- One layer retrying: 3 calls per payment, 900 a second at worst.
+
+<Callout tone="red" title="What breaks">
+  AWS's Builders' Library works the same sum for five layers: three retries at each make 243 times the load on the database, which is then unlikely ever to recover.
+</Callout>
+
+<PremiumBreak />
+
+### Retry budgets
+
+- **Per request:** Google's SRE book allows at most three attempts per request, then passes the error up.
+- **Per client:** retry only while retries are under 10 % of requests; Google reports this cuts worst-case growth from nearly 3× to about 1.1×.
+- **Per process:** a server-wide cap, such as the SRE book's example of 60 retries a minute.
+- **Token bucket:** AWS lets calls retry while tokens last, then at a fixed rate once they run out.
+- **Listen to the server:** honour `Retry-After`, and never retry an "overloaded; don't retry" answer.
+
+### Circuit states
+
+- **Closed** (normal): calls pass and the breaker counts their results.
+- **Open** (fail fast): after too many failures the breaker rejects calls at once, without contacting the dependency.
+- **Half-open** (trial calls): after a wait, a few calls go through; success closes the breaker, failure opens it again.
+
+### Bulkheads and fallbacks
+
+- **Bulkhead:** separate thread or connection pools per dependency, so a slow provider fills only its own pool. Shuffle sharding and cells: [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture).
+- **Fallbacks:** cached data, a default value, or a reduced feature, decided per feature in advance.
+- Recommendation service down? Show popular items from cache.
+- Deadlines across a call tree, hedged requests and brownouts: [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation).
+
+## Architecture
+
+A breaker sits in checkout, around every call to the card provider, and moves between three states.
+
+<AnimatedDiagram spec="animated/patterns/cb-states" stepper caption="Closed counts failures, open fails fast without touching the provider, and half-open lets a few trial calls decide which way to go." />
+
+<StepCards>
+  <StepCard n={1} title="Closed: calls pass, results counted">
+    Every call goes to the card provider, and the breaker records whether it succeeded. Resilience4j's default window is the last 100 calls. A slow provider still holds a thread for every call until it answers.
+  </StepCard>
+  <StepCard n={2} title="Open: fail fast">
+    When 50 % or more of the window has failed, the breaker trips. Calls now fail at once with an error and the fallback runs, so no thread waits on the provider. The provider gets no traffic while it recovers.
+  </StepCard>
+  <StepCard n={3} title="Half-open: a few trial calls">
+    After a wait (60 s by default), the breaker lets 10 trial calls through. Every other call still fails fast. The trials decide what happens next.
+  </StepCard>
+  <StepCard n={4} title="Trials pass: closed again">
+    If the trials succeed, the breaker closes and traffic flows again. If they fail, it opens for another wait. Shoppers never queue behind a dead provider.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### Backoff and jitter
+
+- **Exponential backoff:** the delay doubles with each attempt, up to a cap.
+- **Jitter:** add randomness to the delay so clients that failed together do not retry together.
+- **Full jitter:** wait a random time between 0 and the backoff; the AWS SDKs use `random(0, 1) × min(20 s, base × 2^retry)`.
+
+Ten checkout servers see the provider fail at once and retry three times each, first without jitter and then with full jitter.
+
+<AnimatedDiagram spec="animated/patterns/cb-backoff-jitter" stepper caption="Without jitter every client retries in the same instant; full jitter spreads the same retries so no slot exceeds what the provider can take." />
+
+**How to read it:**
+
+- Each square is one retry, stacked by the 25 ms slot it lands in.
+- The dashed line is what the provider can serve in a slot.
+- Red stacks are synchronised retries; green squares are the same retries with full jitter.
+
+**The numbers:**
+
+- Ten clients, 100 ms base delay, doubling: without jitter all ten retry at 100, 300 and 700 ms.
+- Each spike is 10 calls in one slot against capacity for 6 (illustrative: 240 calls a second).
+- With full jitter the same 30 retries land at most 5 to a slot, and most slots get 1 or 2.
+- Marc Brooker's simulation on the AWS Architecture Blog found that jitter more than halved the calls compared with backoff alone.
+
+### What the breaker counts
+
+- Count timeouts and server errors as failures; a `400` caused by the caller's own bad input says nothing about the dependency's health.
+- Count **slow calls** too: Resilience4j can trip on the share of calls slower than a set duration, not only on errors.
+- **Count-based window:** the last N calls. **Time-based window:** the calls in the last N seconds, kept as one bucket per second.
+- Set a **minimum number of calls** before the rate counts: with 2 calls, one failure is already 50 %.
+- Breakers usually live in each process, so 40 app servers trip one by one; Envoy's limits are likewise enforced by each proxy without coordination.
+
+### Worked example: the payment provider slows from 100 ms to 5 s
+
+Follow one app server through the four states of the Architecture figure, at 7.5 payment calls a second.
+
+1. **Closed, healthy.** Calls take 100 ms, so less than one thread is busy on average. The 20-thread pool is nearly idle.
+2. **The provider slows to 5 s.** Without a timeout, each call holds a thread for 5 s and the pool fills in under 3 s; then every checkout waits. With a 1 s timeout, a call holds a thread for at most 1 s, and the pool keeps room.
+3. **Open.** The breaker counts the 1 s timeouts as failures and trips. Calls fail in under 1 ms, checkout keeps the kettle's 10-minute hold, and the shopper is asked to try paying again in a minute.
+4. **Half-open, then closed.** After 60 s, 10 trial calls go through. If the provider is back at 100 ms they pass and the breaker closes; if it still takes 5 s they time out and it opens again.
+
+**The numbers:**
+
+- Threads in use = calls a second × seconds each call holds a thread (Little's law).
+- Healthy: 7.5 × 0.1 = 0.75 threads per server, 30 across the fleet.
+- Slow, no timeout: 7.5 × 5 = 37.5 threads needed against a pool of 20; full after 20 ÷ 7.5 = 2.7 s.
+- Fleet-wide: 300 × 5 = 1,500 threads wanted against 40 × 20 = 800.
+- Slow, 1 s timeout: 7.5 × 1 = 7.5 threads per server, which fits the pool.
+- Slow, 1 s timeout and 3 tries each: 7.5 × 3 = 22.5 threads, over the pool again, and three times the load on the provider.
+- Trip time: Resilience4j's default minimum of 100 calls takes 100 ÷ 7.5 = 13 s to collect on one server.
+- Open for 60 s: 7.5 × 60 = 450 calls per server fail fast instead of holding a thread for 1 s each.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Aggressive retries | Hides blips | Amplifies outages |
-| Low threshold breaker | Fast protection | False trips |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Aggressive retries | Hides blips | Amplifies outages | Rarely; only with a budget |
+| Retry at one layer | Load on the dependency stays bounded | Upper layers see the raw error | Default for any call chain |
+| Short timeout | Threads freed fast | Times out healthy slow calls | Calls with a tight p99.9 |
+| Long timeout | Fewer false timeouts | Threads held, users waiting | Slow batch calls off the request path |
+| Low-threshold breaker | Fast protection | False trips | Dependencies with a cheap fallback |
+| High-threshold breaker | Few false trips | Slow to react | No fallback, so a trip hurts |
 
-## Real-world examples
+## Production systems
 
-- Dependencies between services: [Uber Eats](/system-design/case-studies/uber-eats), [Netflix](/system-design/case-studies/netflix).
-- Payment provider calls: [Kindle Payments](/system-design/case-studies/kindle-payments).
-- Crawlers backing off failing hosts: [Web Crawler](/system-design/case-studies/web-crawler).
+- **Resilience4j**: states CLOSED, OPEN and HALF_OPEN, plus METRICS_ONLY, DISABLED and FORCED_OPEN; defaults of 50 % failure rate over the last 100 calls, a 60 s open wait and 10 half-open calls; an open breaker throws `CallNotPermittedException`.
+- **Netflix Hystrix**: the library that made breakers common is in maintenance mode; Netflix says new projects use Resilience4j and adaptive concurrency limits instead.
+- **Envoy**: per-cluster limits on connections, pending requests, requests and active retries, enforced by each proxy without coordination; its docs recommend retry budgets over a fixed retry limit.
+- **AWS SDKs**: standard retry mode makes 3 attempts by default, with full jitter, a 20 s cap on any one delay and a 500-token retry quota (as of November 2026).
+- **Used in our case studies:** [Rate Limiter](/system-design-case-studies/case-studies/rate-limiter) · [ChatGPT](/system-design-case-studies/case-studies/chatgpt) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Netflix](/system-design-case-studies/case-studies/netflix) · [Kindle Payments](/system-design-case-studies/case-studies/kindle-payments) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Retrying non-idempotent calls.
-- Retries without jitter.
-- No fallback when the circuit is open.
-- Timeouts longer than the user's patience.
+- **Retrying non-idempotent calls.** A retried charge bills the shopper twice. Retry only with an [idempotency key](/system-design/patterns/idempotency).
+- **Retries without jitter.** Clients retry in step and knock the recovering service over again. Use full jitter.
+- **Retrying at every layer.** Load grows as the product of the tries. Retry at one layer, inside a budget.
+- **No fallback when the circuit is open.** The breaker turns a slow error into a fast one and nothing more. Decide the fallback per feature in advance.
+- **Timeouts longer than the user's patience.** Threads stay held for answers nobody reads. Derive timeouts from the deadline and p99.9 latency.
+- **A breaker nobody has seen trip.** AWS warns that breakers add modal behaviour that is hard to test. Force it open in a game day (Resilience4j has a FORCED_OPEN state) and check the fallback.
 
-## How to answer in an interview
+## Interview framework
 
-For each remote call, state timeout, retry policy, breaker and fallback, and mention idempotency.
+1. List every remote call on the request path and the deadline the user gives you.
+2. For each remote call, state timeout, retry policy, breaker and fallback, and mention idempotency.
+3. Say which single layer retries, how many tries, and the budget that caps them.
+4. Walk the breaker through closed, open and half-open with numbers: window, threshold, wait.
+5. Show the thread arithmetic: calls a second × seconds held, with and without the timeout.
 
-## Related patterns
+**What interviewers listen for:** a timeout on every call, retries at one layer under a budget, and a fallback that the shopper actually sees.
 
-[Idempotency](/system-design/patterns/idempotency) · [Back Pressure](/system-design/patterns/back-pressure) · [Load Balancing](/system-design/patterns/load-balancing)
+**Red flags:** "retry three times" at every layer with no jitter, or a breaker with no answer to "and then what does the user see?"
 
 ## Further reading
 
 - [Timeouts, retries and backoff with jitter (AWS Builders' Library)](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
+- [Exponential backoff and jitter (AWS Architecture Blog)](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
 - [Circuit Breaker (Martin Fowler)](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [Addressing cascading failures (Google SRE Book)](https://sre.google/sre-book/addressing-cascading-failures/)
+- [CircuitBreaker (Resilience4j docs)](https://resilience4j.readme.io/docs/circuitbreaker)
+- Related pages: [Idempotency](/system-design/patterns/idempotency) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Load Balancing](/system-design/patterns/load-balancing) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) · [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why add jitter to backoff?" category="Reliability" level="Mid">
-    Without it, many clients retry at the same instants and re-overload the recovering service; randomness spreads the retries out.
+  <InterviewQuestion question="Why add jitter to backoff?" category="Failure modes" level="Mid">
+    - Without it, many clients retry at the same instants and re-overload the recovering service.
+    - Randomness spreads the retries out, so each moment sees only a few of them.
+    - Full jitter waits a random time between 0 and the backoff; AWS found jitter more than halved the calls.
   </InterviewQuestion>
   <InterviewQuestion question="Describe the circuit breaker states." category="Concepts" level="Junior">
-    Closed passes calls; open rejects them immediately after too many failures; half-open lets a few trial calls through and closes if they succeed.
+    - Closed passes calls and counts failures.
+    - Open rejects calls immediately after too many failures, so no thread waits on the dependency.
+    - Half-open lets a few trial calls through after a wait, and closes if they succeed or opens again if they fail.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is it unsafe to retry a call?" category="Concepts" level="Junior">
+    - When the call has a side effect and the server cannot recognise a repeat, such as a charge without an idempotency key.
+    - When the error is permanent: a `400` will fail the same way every time.
+    - When the server says it is overloaded and not to retry, or sends `Retry-After`.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose a timeout for a downstream call?" category="Concepts" level="Mid">
+    - Start from the user's deadline and give each hop a share of it, passing the time left down the chain.
+    - Pick an acceptable false-timeout rate, such as 0.1 %, and set the timeout at that percentile (p99.9) of the dependency's latency.
+    - Check the thread arithmetic: calls a second × timeout must fit the pool.
+  </InterviewQuestion>
+  <InterviewQuestion question="Three services in a chain each try a failing call three times. How many calls reach the bottom, and how do you fix it?" category="Scaling" level="Senior">
+    - 3 × 3 × 3 = 27 calls for one user request, on a service that is already failing.
+    - Retry at one layer only, the one right above the failing service.
+    - Cap retries with a budget, such as retries under 10 % of requests, and have an overloaded service say "don't retry".
+  </InterviewQuestion>
+  <InterviewQuestion question="Your card provider slows from 100 ms to 5 seconds at peak. Walk through what happens to checkout." category="Failure modes" level="Senior">
+    - At 7.5 calls a second per server, threads in use go from 0.75 to 37.5; a 20-thread pool is full in under 3 s.
+    - A 1 s timeout caps it at 7.5 threads, but every payment now fails after 1 s.
+    - The breaker counts the timeouts, opens, and fails fast; checkout keeps the 10-minute hold and asks the shopper to try again.
+    - After the wait, half-open trials decide whether to close.
+  </InterviewQuestion>
+  <InterviewQuestion question="Circuit breaker or retry budget: what does each protect?" category="Trade-offs" level="Senior">
+    - A retry budget caps extra load on a dependency that is partly failing; most calls still go through.
+    - A breaker stops all calls to a dependency that is mostly failing, so callers stop waiting and the dependency can recover.
+    - Use both: the budget for blips, the breaker for outages, and a fallback behind the breaker.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should the caller do while the circuit is open?" category="Architecture" level="Mid">
+    - Run a fallback chosen in advance: cached data, a default, or a reduced feature.
+    - For a payment, keep the order or hold and ask the user to retry, rather than failing the whole page.
+    - Log the state change and alert, so operators know the dependency is down.
   </InterviewQuestion>
 </InterviewQuestions>

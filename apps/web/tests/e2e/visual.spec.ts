@@ -45,8 +45,11 @@ for (const vp of VIEWPORTS) {
           });
 
           if (p.diagram) {
-            // The first build-time Mermaid SVG, in the theme being tested.
-            const diagram = page.locator("article svg[aria-roledescription]:visible").first();
+            // The first diagram of the article, in the theme being tested: a build-time Mermaid SVG or an
+            // <AnimatedDiagram> (svg.dg), whichever comes first on the page.
+            const diagram = page
+              .locator("article svg[aria-roledescription]:visible, article figure svg.dg:visible")
+              .first();
             await diagram.scrollIntoViewIfNeeded();
             // The diagram is taller than the viewport, so the sticky site header would land on it at a scroll
             // offset that varies; hide it for this shot.

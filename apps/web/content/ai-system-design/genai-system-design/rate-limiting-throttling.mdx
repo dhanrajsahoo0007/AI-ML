@@ -1,0 +1,308 @@
+---
+title: Rate Limiting & Throttling
+description: Protecting inference infrastructure with principled limits, queues, and degradation strategies under overload.
+updated: 2026-11-15
+---
+
+A model call costs seconds of GPU time and thousands of tokens, so one request is not one unit of load the way it is for a web API.
+
+- Interviewers ask about rate limiting for LLMs to see whether you count tokens as well as requests, know the limits you inherit from a provider, and can say what you would switch off first when the model is overloaded.
+
+## Overview
+
+- **Limit tokens, not just requests.** A request that carries 150,000 tokens carries about 68 times the tokens of a typical 2,200-token one. Providers meter **requests per minute (RPM)**, **input tokens per minute** and **output tokens per minute**; hit any one and you get a **429**.
+- **Input and output cost differently.** Input is processed in one parallel pass; output is generated one token at a time. Providers count them separately, and some count the `max_tokens` you ask for, not what you use.
+- **You inherit limits.** Your provider's limit is shared by every team on your key. A gateway splits it per team, per user and per tenant, so one runaway script cannot take the rest down.
+- **A 429 is a message.** Obey `retry-after`, add jitter, back off when there is none, and **never retry** a spent monthly cap.
+- **Under overload, shed in a planned order:** batch jobs, optional retrieval, long outputs, then the free tier. Cap queue depth, or latency and memory grow without bound.
+- The general algorithms (token bucket, sliding window) live on [Rate Limiting](/system-design/patterns/rate-limiting); this page covers what changes for LLMs.
+
+## Mental model
+
+- Picture a coffee shop with one espresso machine.
+- The barista can pull 40 shots an hour. A rule of "one order per customer per minute" sounds fair until someone orders 30 flat whites for the office: it is one order, and it blocks the machine for 45 minutes.
+- A fair shop counts shots, not orders, keeps a shorter queue for the free-sample table, and when the line goes out of the door it stops making the fancy drinks first.
+- LLM rate limiting is that shop: the machine is the GPU, the shots are tokens, and the limit has to count the thing that is actually scarce.
+
+## Core concepts
+
+1. **Request limit.** The number of calls a minute. It protects the gateway and the provider's front door, and it is the only limit a classic API gateway knows about.
+2. **Token limit.** The number of tokens a minute. It tracks GPU work much better, because prefill time grows with input length and decode time with output length. A key with a generous RPM can still be starved on tokens.
+3. **Input against output tokens.** Output tokens take longer per token than input tokens (the model generates them one at a time), so providers meter them on separate budgets. Anthropic reports input and output separately. OpenAI counts the larger of your `max_tokens` and an estimate of the prompt (see Technical mechanics).
+4. **Concurrency limit.** How many requests run at once. A model server holds a bounded number of sequences in a batch (vLLM calls it `max_num_seqs`), and each streaming call holds a slot for its whole answer. Concurrency is the limit that Little's law connects to latency: slots in use = arrival rate × time in system.
+5. **Token bucket.** A bucket of capacity *B* refills at a steady rate; each request takes tokens from it. It allows a burst up to *B* and an average of the refill rate. Anthropic says its API uses it, so capacity refills continuously rather than resetting on the minute.
+6. **Limits you inherit.** Your organisation has limits per model and tier at the provider. Everything you build sits underneath them, so your per-team limits must add up to less than the provider's, with room for retries.
+7. **Per-tenant fairness.** Split capacity by team, user or customer, with a weight each, so a heavy tenant cannot take another's share. Free tiers get lower sustained rates than enterprise contracts.
+8. **Backpressure and shedding.** When capacity is short, say so early and cheaply: a fast 429 with `retry-after`, or a refusal based on queue wait time, not an accepted request that times out later.
+9. **Graceful degradation.** Spend less per request before refusing any: fewer retrieved passages, shorter answers, a smaller model.
+10. **Queue-based load levelling.** Park work that can wait in a queue and process it at a steady rate. This changes the product: the caller gets a result later, by polling or a webhook.
+
+## Architecture
+
+Limits sit in layers. Each layer says no for a different reason, and the one nearest the customer should know the most.
+
+<AnimatedDiagram
+  spec="animated/cloud/limit-layers"
+  stepper
+  caption="Three ways a cloud says no: account quotas, API rate limits, and what one resource can serve. A model provider adds its own layer on top of these."
+/>
+
+**How to read it:**
+
+- The outer ring is how much of a thing your account may hold, the middle ring how fast you may ask, and the inner ring what a single resource can deliver.
+- For an LLM app, the provider's per-model token limit plays the middle role, and the GPU's batch slots play the inner one.
+- The figure comes from the cloud section, which explains each ring; here, notice that a limit at an outer ring does not protect the inner one.
+
+Brightpost enforces limits at three places, nearest the customer first:
+
+1. **The edge** (API gateway): per-IP and per-user request limits, to stop abuse early and cheaply.
+2. **The LLM gateway** (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)): per-key request and token limits, daily budgets, and the retry and fallback policy.
+3. **The model server or sidecar:** a cap on queue depth and concurrent sequences, which sees real GPU load that the layers above cannot.
+
+Each layer returns the same error shape and logs which stage refused, so an operator can tell a gateway 429 from a provider 429.
+
+## Technical mechanics
+
+### Two buckets: requests and tokens
+
+A key has at least two buckets, and either can empty first. Which one does depends on the average request size.
+
+<AnimatedDiagram
+  spec="animated/serving/ratelimit-two-buckets"
+  stepper
+  caption="One support key with an illustrative limit of 1,000 requests and 2,000,000 tokens a minute. Five long prompts barely move the first bucket and overflow the second."
+/>
+
+<StepCards>
+  <StepCard n={1} title="A normal peak minute fits both">
+    Brightpost's peak is 12 requests a second, so 12 × 60 = 720 requests, 72 % of the request limit. Each carries 2,200 tokens in and 250 out: 720 × 2,200 = 1,584,000 in and 720 × 250 = 180,000 out, 1,764,000 in all, 88 % of the token limit.
+  </StepCard>
+  <StepCard n={2} title="Five long prompts: requests fine, tokens over">
+    Five customers paste a long order history, 150,000 tokens each. Requests go to 725 (72.5 %). Tokens go up by 5 × (150,000 + 250) = 751,250, to 2,515,250: 515,250 over. Every customer on the key now sees 429s, though only five requests were unusual.
+  </StepCard>
+  <StepCard n={3} title="Cap the prompt and the minute fits again">
+    A gateway cap of 32,000 tokens per prompt turns the five into 5 × (32,000 + 250) = 161,250 tokens. The minute is 1,925,250, 96 % of the limit. Tight, but it fits. The gateway trims each history to the newest 32,000 tokens (or asks the customer to shorten it) instead of letting five requests break everyone.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The ratio decides which bucket binds. This key allows 2,000,000 ÷ 1,000 = 2,000 tokens per request on average.
+- Brightpost's request is 2,450 tokens, so tokens bind first, at 2,000,000 ÷ 2,450 ≈ 816 requests a minute, not 1,000.
+- The limits are illustrative values a gateway might set.
+
+- Count tokens before you send. A tokeniser run in the gateway gives the input size; for output you only have an upper bound, the `max_tokens` the caller asked for.
+- Reserve input plus that bound at admission and refund the difference when the call ends: with `max_tokens` of 1,024, Brightpost reserves 2,200 + 1,024 = 3,224 and refunds 3,224 − 2,450 = 774.
+- Set `max_tokens` close to the real answer length, or the reservation starves other callers.
+
+### Limits you inherit from a provider
+
+- Your provider enforces its own limits on your organisation, and your gateway sits underneath them.
+- As of 15 November 2026, Anthropic's rate-limit page lists RPM, input tokens per minute (ITPM) and output tokens per minute (OTPM) per model and tier; for Claude Sonnet 5.5 on the Build tier that is 10,000 RPM, 5,000,000 ITPM and 1,000,000 OTPM.
+- At Brightpost's 2,200 input tokens, ITPM binds at 5,000,000 ÷ 2,200 ≈ 2,273 requests a minute, a quarter of the RPM. Three details matter in design:
+
+- **Cached tokens.** Anthropic counts `cache_read_input_tokens` as free for ITPM; only uncached input and cache writes count. If 1,000 of Brightpost's 2,200 tokens are a cached prefix, 1,200 count, and the same ITPM allows 5,000,000 ÷ 1,200 ≈ 4,167 requests a minute. See [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching).
+- **Output budgets.** Anthropic evaluates OTPM as tokens are produced and says `max_tokens` does not count. OpenAI's guide says its limit uses the larger of `max_tokens` and an estimate of your request. Read the provider's rule before choosing your reservation policy.
+- **Ramp limits.** Anthropic also caps how fast usage may grow, so a sudden jump can draw a 429 while you are still under ITPM and OTPM. Start bulk jobs low and spread them out.
+
+- Split the provider's limit across your teams with workspaces or gateway keys, and keep the sum below it.
+- See [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) for what to do when one provider's budget is gone.
+
+### What a 429 carries
+
+The response says which limit you hit and when to come back. This is Anthropic's Messages API (header names checked against its rate-limit docs on 15 November 2026; the values are illustrative):
+
+```http
+HTTP/1.1 429 Too Many Requests
+retry-after: 4
+anthropic-ratelimit-requests-limit: 10000
+anthropic-ratelimit-requests-remaining: 8000
+anthropic-ratelimit-input-tokens-limit: 5000000
+anthropic-ratelimit-input-tokens-remaining: 0
+anthropic-ratelimit-input-tokens-reset: 2026-11-15T10:00:04Z
+anthropic-ratelimit-output-tokens-limit: 1000000
+anthropic-ratelimit-output-tokens-remaining: 612000
+
+{ "type": "error", "error": { "type": "rate_limit_error", "message": "..." } }
+```
+
+- Here input tokens ran out while requests and output had room, which is the two-bucket case from the figure.
+- OpenAI sends the same facts as `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens` and `x-ratelimit-reset-tokens` (and the `-requests` forms).
+- A gateway should read these headers on every success, not only on failures, to slow down before the wall.
+
+### Retry, back off, or stop
+
+<AnimatedDiagram
+  spec="animated/serving/ratelimit-backoff"
+  stepper
+  caption="Four cases of a 429. Timings are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The bucket is empty">
+    The provider refuses with 429 and `retry-after: 4`. It is a fast, honest refusal, so the call is safe to retry.
+  </StepCard>
+  <StepCard n={2} title="Wait as told, plus jitter">
+    The worker waits the 4 seconds, plus a random extra of up to a second. Without the extra, every worker given the same `retry-after` would come back at the same instant and refuse itself again.
+  </StepCard>
+  <StepCard n={3} title="No retry-after: back off">
+    With no header, wait a random time up to 1 s, then up to 2 s, then 4 s (exponential backoff with jitter), and cap the attempts and the total wait. OpenAI also warns that failed requests count towards your limit, so a tight loop makes things worse.
+  </StepCard>
+  <StepCard n={4} title="A spent cap: stop">
+    Anthropic returns a 429 when an organisation reaches its monthly spend cap, with `error_code: enforced_spend_limit_reached` and no `retry-after`. Retrying fails until the cap resets. Stop, fall back or alert a person.
+  </StepCard>
+</StepCards>
+
+- If your client library and your gateway both retry, retries multiply: three tries at each of two layers is nine calls.
+- Retry at one layer. The backoff idea itself is covered in the cloud section's [Quotas and retries](/cloud/resilience/quotas-and-retries).
+
+### Per-tenant fairness
+
+A single token bucket on a shared key is first come, first served: the heaviest caller wins. Fairness needs a bucket per tenant and a scheduler that divides capacity by weight.
+
+- **Per-user and per-tenant limits** express entitlements: a free tier gets a lower sustained rate and smaller bursts than an enterprise contract.
+- **Weighted fair queuing** serves each class in proportion to its weight, so background jobs still progress. Add **aging**, which promotes work that has waited long, and a guaranteed minimum slice. Watch p99 wait time per class: low-priority starvation can hide behind healthy premium numbers.
+- **Cap the queue.** An unbounded queue turns an overload into minutes of latency while memory grows. Reject when the wait would exceed a threshold, not when the queue is full.
+- **Meter by tokens.** Fairness measured in requests lets a tenant with huge prompts take a larger share. Research on LLM serving fairness (for example the Virtual Token Counter work) weights service by tokens for this reason.
+- **Align internal budgets.** Embedding services and vector databases also need limits. Otherwise one tenant fans a request out into many internal calls and walks round the edge limits.
+
+### Backpressure and load shedding
+
+- When the model server cannot accept more work, it should say so predictably.
+- Fast rejection with `retry-after`, shedding on queue wait time, and a circuit breaker for a failing dependency (see [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)) all push the signal upstream.
+- The autoscaler is slower than a spike, so shedding covers the gap: see [Load Balancing & Autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling).
+
+Decide the order before the incident. Shed the work whose absence hurts least.
+
+<AnimatedDiagram
+  spec="animated/serving/ratelimit-shed-order"
+  stepper
+  caption="Each rung says what a customer sees and what it frees. The policy is illustrative; the arithmetic is from the Brightpost numbers."
+/>
+
+**How to read it:**
+
+- Work down the left column as load grows. Orange boxes are what customers notice, blue boxes are the capacity you recover.
+- Red marks the one rung where a user is refused.
+
+**The numbers:**
+
+- Today a request is about 2,200 in + 250 out = 2,450 tokens.
+- Keeping 2 retrieved chunks instead of 5 gives 200 + 2 × 400 + 15 = 1,015 in, so 1,265 tokens, 48 % less.
+- Capping the answer at 150 tokens gives 1,165 and saves 100 × 4.4 ms = 440 ms of decode per answer.
+- At 720 requests a minute that is 720 × 1,165 = 838,800 tokens, against 1,764,000.
+
+- Queue-based load levelling suits what can wait, such as nightly summaries: park the jobs and process them at a steady rate.
+- See [Batch vs Real-Time Inference](/ai-system-design/genai-system-design/batch-vs-realtime-inference).
+- It only works if clients accept an answer later, by polling or a webhook.
+
+### Try a token bucket
+
+The widget below uses requests per second, but a token limit has the same shape: the bucket holds tokens, and a big prompt takes many at once. Raise the burst and watch rejections appear once the bucket is empty.
+
+<RateLimiterSim algorithm="token-bucket" limit={5} bucketSize={10} steadyRps={3} burst={20} />
+
+### Worked example: sale day on the support key
+
+On sale day Brightpost peaks at 12 requests a second. The support key has the limits from the first figure: 1,000 requests and 2,000,000 tokens a minute.
+
+1. A normal minute uses 72 % of the request bucket and 88 % of the token bucket (1,764,000 of 2,000,000).
+2. Five long order histories arrive. The gateway counts tokens before sending: 150,000 is over the 32,000 per-prompt cap, so it trims each history to 32,000 tokens (the five then cost 161,250, as in step 3 of the figure). Without the cap, the token bucket would overflow by 515,250 and every customer would see a 429.
+3. The labs team's script starts a loop. Its own key has a 30 M daily budget and its own per-minute limit, so it spends its own bucket and not support's.
+4. The provider starts returning 429s with `retry-after: 4`. The gateway waits as told with jitter, retries once, then falls back (see [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway)). The queue wait climbs, so the model server begins shedding: batch paused, retrieval cut to 2 chunks, answers capped at 150 tokens. Tokens a minute fall to 838,800.
+5. Only if the wait is still over target does it refuse free-tier chat with a 429 and `retry-after`, while paid customers are served.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Request limit only | Simple; cheap to enforce | Blind to token size; one long prompt breaks it | Fixed-size calls, such as embeddings of short text |
+| Token limit (input and output) | Tracks GPU work and cost | Needs token counting; output size unknown in advance | Any shared chat or completion key |
+| Reserve `max_tokens`, then refund | Safe against surprise output | Starves others if `max_tokens` is set too high | Providers that count it, and tight limits |
+| Per-tenant buckets with fair queuing | Isolates tenants; supports tiers | More state; needs a shared store | Multi-team or multi-customer platforms |
+| Fast 429 with `retry-after` | Cheap; clients can slow down | Clients must behave; retry storms if they do not | Interactive traffic at the edge |
+| Queue and process later | Smooths spikes; keeps GPUs busy | Answers arrive later; needs polling or a webhook | Batch, back-office and summarisation work |
+| Degrade before refusing | Keeps service up for everyone | Answers get thinner | The first response to overload |
+
+## Production systems
+
+- **Anthropic's API** limits requests, input tokens and output tokens per minute for each model class and tier, uses a token bucket, and does not count cached input reads against ITPM (documentation read 15 November 2026).
+- **OpenAI's API** limits requests and tokens per minute (and per day) at organisation and project level. It bases the token limit on the larger of `max_tokens` and an estimate of the prompt, so a large `max_tokens` reserves capacity (guide read 15 November 2026).
+- **Anthropic workspaces** let an organisation set lower limits per workspace, so one project cannot use the whole organisation's budget; organisation limits still apply on top.
+- **Anthropic's Message Batches API** has its own request-rate limit and a separate cap on batch requests in the queue, which is why batch work does not compete with interactive traffic for the same bucket.
+- **Used in our case studies:** [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway) · [ChatGPT-Style Chat Service](/genai-system-design/case-studies/chatgpt-style-chat-service)
+
+## Failure modes & pitfalls
+
+- Limiting requests only, then discovering that a few huge prompts drain the token budget.
+- Ignoring `retry-after`, or retrying with no jitter, so every worker returns at once.
+- Retrying a spent monthly cap. It never succeeds and buries the real problem.
+- Retrying at both the client library and the gateway, which multiplies calls.
+- A shared key for every team, so one runaway script rate-limits support.
+- An unbounded queue, which hides overload as slow answers until memory runs out.
+- Per-team limits that add up to more than the provider's limit, so the provider rejects you before your own gateway does.
+
+## Interview framework
+
+1. Start with what is scarce: GPU time, measured in tokens, with input and output costing differently. A request limit alone is the wrong unit.
+2. Describe the buckets: requests, input tokens and output tokens per key, a token bucket for each, and a concurrency cap at the model server.
+3. Place the layers: edge for abuse, gateway for per-team and per-tenant limits and budgets, model server for real queue depth.
+4. Cover the failure path: `retry-after`, jitter, one retry layer, no retries on a spent cap, then fallback.
+5. Finish with the degradation order and fairness: shed batch first, then optional work, then free users, with weighted queues so no class starves.
+
+**What interviewers listen for:** tokens as the unit, input against output, the inherited provider limit, a per-tenant story, and a planned shed order.
+
+**Red flags:** "just add a rate limiter at the gateway" with requests as the only unit, retrying every 429 the same way, or an unbounded queue.
+
+## Further reading
+
+- [Rate limits (Anthropic API documentation)](https://platform.claude.com/docs/en/api/rate-limits)
+- [Rate limits guide (OpenAI API documentation)](https://developers.openai.com/api/docs/guides/rate-limits)
+- [RFC 9110, section 10.2.3: Retry-After](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3) and [RFC 6585, section 4: 429 Too Many Requests](https://www.rfc-editor.org/rfc/rfc6585#section-4)
+- [Exponential Backoff and Jitter (AWS Architecture Blog)](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
+- [Fairness in Serving Large Language Models (Sheng et al., 2023)](https://arxiv.org/abs/2401.00588)
+- Related pages: [Rate Limiting](/system-design/patterns/rate-limiting) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks) · [Load Balancing & Autoscaling](/ai-system-design/genai-system-design/load-balancing-autoscaling)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Compare token bucket and sliding window rate limiting for a public inference API." category="Concepts" level="Mid">
+    - A token bucket tolerates short bursts up to its capacity while enforcing an average refill rate, which feels responsive for people who send a few messages in a row.
+    - A sliding window tracks usage across recent sub-windows, which avoids the reset spike of a coarse fixed window and gives fairer enforcement at a higher storage cost.
+    - For an LLM API, the unit matters more than the algorithm: both can count tokens instead of requests.
+    - Many gateways combine the two ideas or use approximate counters at large scale.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should rate limits be enforced in a system with an API gateway, a BFF, and a GPU model server?" category="Architecture" level="Mid">
+    - Enforce coarse commercial and abuse limits at the edge gateway, so bad traffic is rejected cheaply.
+    - Enforce auth-aware limits, budgets and token limits where tenant identity is trusted, which is the BFF or the LLM gateway.
+    - Enforce final capacity limits at the model server or a sidecar, where you can see the real queue depth and the number of running sequences.
+    - Each layer needs the same error contract and telemetry, so operators can see which stage refused a request.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you prevent priority queues from starving low-priority work entirely?" category="Scaling" level="Senior">
+    - Use weighted fair queuing or a guaranteed minimum slice so background jobs still progress, and cap the high-priority queue depth to avoid memory blow-ups.
+    - Add aging, which occasionally promotes work that has waited long.
+    - Monitor p99 wait time per class, and alert when low-priority starvation breaks its own target even if premium traffic looks healthy.
+    - For LLMs, weight by tokens rather than requests, or a tenant with huge prompts takes a larger share.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is a requests-per-minute limit not enough for an LLM API?" category="Concepts" level="Junior">
+    - Requests differ enormously in cost. A 150,000-token prompt carries about 68 times the tokens of a 2,200-token one, yet counts as one request.
+    - A key can sit under its request limit and still exhaust its token budget, which is what providers meter.
+    - A good limit counts input and output tokens separately, because output tokens are generated one at a time and cost more time per token.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your provider counts max_tokens against your limit. How do you admit requests without wasting capacity?" category="Trade-offs" level="Mid">
+    - Count the input tokens with a tokeniser, then reserve input plus the requested `max_tokens` at admission, and refund the unused part when the response finishes.
+    - With `max_tokens` of 1,024 and a 2,450-token actual request you reserve 3,224 and refund 774.
+    - The cost is that a generous `max_tokens` starves other callers while the request runs, so set it near the real answer length per route.
+    - Check the provider's rule first: some providers count only the tokens actually produced.
+  </InterviewQuestion>
+  <InterviewQuestion question="Provider A returns 429 for your whole organisation. What should the gateway do, and what must it not do?" category="Failure modes" level="Senior">
+    - Read the response before reacting. If it carries `retry-after`, wait that long plus jitter, retry once, and then fall back to another provider or a smaller model.
+    - If there is no header, back off exponentially with jitter and cap attempts.
+    - If the error is a spent monthly cap, do not retry at all: fail fast, fall back and alert a person, because every retry will fail.
+    - Retry at one layer only, or nested retries multiply the load on a provider that is already refusing you.
+  </InterviewQuestion>
+  <InterviewQuestion question="Three teams share one provider key. How do you stop one team from using everyone's capacity?" category="Scaling" level="Senior">
+    - Put a gateway in front and give each team its own key with its own per-minute request and token limits and a daily budget, held in a shared store so every gateway replica sees the same counts.
+    - Make the sum of team limits smaller than the provider's limit, leaving room for retries, or the provider rejects you first.
+    - Reserve a floor for the interactive team, and let batch teams use leftover capacity at low priority.
+    - Alert on the share of 429s per team, so you can tell a runaway script from real growth.
+  </InterviewQuestion>
+</InterviewQuestions>

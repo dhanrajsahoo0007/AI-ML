@@ -1,0 +1,666 @@
+---
+title: "Design WhatsApp"
+description: "End-to-end encrypted chat for billions: a store-and-forward server that never reads messages, per-device keys, sender keys and offline queues."
+logo: systems/whatsapp
+updated: 2026-11-17
+---
+
+Design an end-to-end encrypted messenger: one-to-one and group chat, photos, receipts and several devices per account, for two billion people whose phones are often offline.
+The hard part is that the server must never read a message, so it cannot keep history, search it or fan it out the usual way.
+
+- Interviewers use this question to see whether you can say what end-to-end encryption takes away from the server, and rebuild delivery, groups and multi-device on top of what is left.
+- The shared chat parts (sockets, routing, push) are on [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger); this page spends its depth on what encryption changes.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design WhatsApp: end-to-end encrypted messaging for two billion users. The server must not be able to read a message, and phones are often offline."
+  level="Senior"
+  minutes={45}
+  bankId="design-a-chat-app"
+  tests={[
+    "What end-to-end encryption removes from the server, and what replaces it",
+    "Store and forward: nothing lost until delivered, then deleted",
+    "Groups and several devices when only phones hold the keys",
+    "Holding hundreds of millions of connections on few machines",
+  ]}
+  clarify={[
+    { q: "Does the server ever see message text?", a: "Never: it sees who sends to which device, when, and an opaque ciphertext." },
+    { q: "Do we keep chat history on the server?", a: "No: messages live on devices; the server keeps only what is not yet delivered." },
+    { q: "How long do we keep an undelivered message?", a: "Up to 30 days, then it is deleted." },
+    { q: "How many devices per account?", a: "One phone plus up to 4 linked devices (laptop, web, tablet)." },
+    { q: "How big are groups?", a: "Up to 1,000 members; most have fewer than 20." },
+    { q: "What scale?", a: "2 billion users, 1 billion daily, 40 messages each a day." },
+  ]}
+  outOfScope={["Voice and video calls", "Encrypted backups", "Status (stories)", "Payments", "Spam and abuse systems"]}
+/>
+
+## Overview
+
+- Every device keeps **one encrypted TCP connection** to a **chat server**; a dense connection tier holds about **1 million connections per host**.
+- Phones encrypt with keys only they hold; the server stores **public keys** and a batch of **one-time prekeys** per device, so a sender can start a session while the recipient is offline.
+- The server is a **store-and-forward queue**, not a system of record: it appends ciphertext to a **mailbox per device**, acks the sender once two of three replicas have it, and **deletes it when the device acks**, or after **30 days**.
+- One-to-one messages are encrypted **once per device** on the sender's phone (**client fan-out**); groups use a **sender key**, so the phone uploads one ciphertext and the server copies it to every member device.
+- Media is encrypted on the phone with a fresh key, uploaded to a **blob store** and served by a **CDN**; the key travels inside the message.
+- Receipts are small encrypted messages on the same path; the server cannot tell a receipt from a reply.
+
+<Numbers
+  items={[
+    { value: "1.4M/s", label: "messages at peak", hint: "3 × the 463K/s average" },
+    { value: "7.8M/s", label: "mailbox appends at peak", hint: "5.6 device copies a message" },
+    { value: "36 TB", label: "all message data on the server", hint: "undelivered only, 3 replicas" },
+    { value: "1,000", label: "chat servers", hint: "500M connections, 1M each, 2 × headroom" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "One-to-one encrypted messages", notes: "Only the two people's devices can read them." },
+    { id: "F2", requirement: "Offline delivery", notes: "A message to a phone that is off waits up to 30 days, then is deleted." },
+    { id: "F3", requirement: "Groups", notes: "Up to 1,000 members, still end-to-end encrypted." },
+    { id: "F4", requirement: "Several devices per account", notes: "A phone plus up to 4 linked devices; each sees every message." },
+    { id: "F5", requirement: "Encrypted media", notes: "Photos, video, voice notes and files, encrypted on the phone." },
+    { id: "F6", requirement: "Receipts", notes: "Sent (one tick), delivered (two ticks) and read." },
+  ]}
+/>
+
+- Out of scope: voice and video calls, encrypted backups, status, payments, spam and abuse systems.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Privacy", target: "The server can read 0 bytes of message content; private keys never leave devices", why: "The product promise; a breach of the server leaks no messages." },
+    { id: "N2", property: "Latency", target: "p99 under 300 ms phone to online phone, same region", why: "Chat feels broken above a few hundred milliseconds." },
+    { id: "N3", property: "Durability", target: "No message that got one tick is lost before delivery or the 30-day expiry", why: "One tick means the server has it." },
+    { id: "N4", property: "Ordering", target: "Each sender's messages arrive in the order sent", why: "Out-of-order replies change meaning." },
+    { id: "N5", property: "Scale", target: "500 million connections and 1.4 million messages/s at peak", why: "Drives the density of the connection tier." },
+    { id: "N6", property: "Availability", target: "99.99% for send and receive", why: "Many people's main way to talk." },
+    { id: "N7", property: "Efficiency", target: "One connection per device, frames of a few hundred bytes", why: "Battery and mobile data, often on slow networks." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+
+<EstimateTable
+  rows={[
+    { quantity: "Messages a day", assumption: "1 B daily users × 40 messages", result: "40 B messages/day" },
+    { quantity: "Message rate", assumption: "40 B ÷ 86,400 s; peak 3 ×", result: "≈ 463K/s average, ≈ 1.4M/s peak" },
+    { quantity: "Devices", assumption: "2 B users × 1.5 devices", result: "3 B devices with keys" },
+    { quantity: "Copies per one-to-one message", assumption: "Recipient's 1.5 devices + sender's 0.5 other devices", result: "2 ciphertexts" },
+    { quantity: "Copies per group message", assumption: "10 members: 9 × 1.5 devices + sender's 0.5", result: "14 mailbox entries" },
+    { quantity: "Copies on average", assumption: "70% one-to-one × 2 + 30% group × 14", result: "5.6 per message: 224 B a day, 2.6M/s average, 7.8M/s peak" },
+    { quantity: "Mailbox traffic", assumption: "224 B copies × 300 bytes", result: "67 TB/day written, and the same deleted" },
+    { quantity: "Mailbox backlog", assumption: "10% of copies wait 6 h on average; 0.5% wait the full 30 days", result: "1.7 TB + 10 TB ≈ 12 TB; 36 TB with 3 replicas" },
+    { quantity: "If the server kept history", assumption: "40 B × 300 bytes × 365 days × 3 replicas", result: "≈ 13 PB a year, growing forever" },
+    { quantity: "Connections", assumption: "500 M devices online at peak ÷ 1 M per host", result: "500 hosts, 1,000 with 2 × headroom" },
+    { quantity: "Keepalives", assumption: "500 M ÷ one ping per 240 s", result: "≈ 2.1M/s, answered in memory" },
+    { quantity: "Prekeys", assumption: "3 B devices × 100 one-time prekeys × 32 bytes", result: "≈ 10 TB of public keys" },
+    { quantity: "Media", assumption: "5% of messages × 200 KB, uploaded once", result: "≈ 400 TB/day of encrypted blobs" },
+  ]}
+  note="The server keeps terabytes, not petabytes: the queue empties as fast as it fills. Connections and copies are the scarce resources."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Each mailbox entry is written once and read once by one device, then deleted: 1 to 1 | A queue, not a database; no cache in front of it, because nothing is read twice |
+| D2 | Peak against average | 1.4M/s at peak against 463K/s (3 ×); a midnight festival spike is higher for minutes | Mailbox headroom; delivery may lag under a spike, since the queue absorbs it |
+| D3 | Consistency per operation | A mailbox append is strong per device; a one-time prekey is handed out once; the routing registry and device lists may lag seconds | Replicated append before the ack; an atomic take for prekeys; caches only for routing |
+| D4 | Latency target | p99 300 ms phone to online phone (N2) | Deliver straight from the chat server's memory; the replicated append is the only wait |
+| D5 | Durability | Recovery point zero for acked messages until delivered, then deleted (N3) | Ack after 2 of 3 replicas; delete only on the device's ack |
+| D6 | Ordering | Per sender device, per recipient device; no global order, no order across chats | A FIFO mailbox per device plus the sender's ratchet counter; no sequencer |
+| D7 | Duplicates | Annoying, and a duplicate cannot even be decrypted twice | A sender-made `msg_id`; idempotent append; the phone acks a known id without showing it |
+| D8 | Data size and growth | The distinctive driver: only undelivered ciphertext, about 12 TB, flat over time | No history store; a 30-day expiry; storage sized by backlog, not by years |
+| D9 | Fan-out shape | Per device: 2 copies for a one-to-one message, 14 for a 10-member group, 1,500 for the largest group | Client fan-out for pairwise sessions; server copies one sender-key ciphertext for groups |
+| D10 | Contention | Low: only one-time prekeys, which two senders must never both receive | One atomic take per prekey; nothing else locks |
+| D11 | Geography | Users everywhere; mobile networks with long round trips | Chat servers near users; a device's mailbox in one home region |
+| D12 | Availability and degradation | 99.99% (N6); under stress delay push, receipts and media before messages | Separate paths for media and push; refuse new connections before dropping appends |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `send` frame | Sender device | Every message: `msg_id`, recipient or group, one ciphertext per device (or one sender-key ciphertext) |
+| `ack` frame from the server | Chat server | Once the mailbox has every copy on 2 of 3 replicas: the one tick |
+| `deliver` frame | Chat server | Each mailbox entry, oldest first, while the device is connected |
+| `ack` frame from the device | Recipient device | After the device has stored the message: the server deletes the entry |
+| `GET /v1/keys/bundles` | Sender device | Before the first message to a device it has no session with |
+| `POST /v1/keys/prekeys` | Every device | At registration, and whenever fewer than 20 one-time prekeys are left |
+| `POST /v1/media/upload-url` | Sender device | Before uploading an encrypted file |
+| `ping` frame | Every device | After 240 s idle, to keep the connection and the mobile network's mapping alive |
+
+- Frames travel over the device's one encrypted connection; the key and media calls are request and response on the same connection, shown as HTTP for clarity.
+- A receipt is a normal encrypted `send` from the recipient; the server routes it like any message.
+
+```http
+GET /v1/keys/bundles?account=ben
+
+200 OK
+{ "devices": [
+    { "device": "ben:0", "identity_key": "…", "signed_prekey": { "id": 9, "key": "…", "sig": "…" },
+      "one_time_prekey": { "id": 17, "key": "…" } },
+    { "device": "ben:3", "identity_key": "…", "signed_prekey": { "id": 4, "key": "…", "sig": "…" },
+      "one_time_prekey": null } ],
+  "device_list_sig": "…" }
+```
+
+- **Idempotency:** the sender's device makes `msg_id` before sending and reuses it on every retry; the append is idempotent on `(device_id, msg_id)`.
+- **No pagination of history:** there is none on the server. A reconnecting device drains its mailbox in pages of 100 entries, oldest first, acking each page.
+- **Errors:** `stale_devices` when the copies in a `send` do not match the account's current devices (the sender re-fetches the list and encrypts for the missing ones); `one_time_prekey: null` when a device has run out, so the session starts from the signed prekey alone; `slow_down` with a wait time when a client floods.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Mailbox entries (undelivered ciphertext) | Replicated key-value store on an LSM engine (<TechIcon id="oss/rocksdb" /> RocksDB per node) | 7.8M appends and deletes a second at peak, short-lived, 36 TB in all (D1, D5, D8) | `device_id` | Strong per device: append on 2 of 3 | A Kafka-style log: no delete of one message, and 3 B devices cannot each own a partition |
+| Public keys and one-time prekeys | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL), sharded | Each prekey taken exactly once (D3, D10); 10 TB (D8) | `account_id` | Strong | A cache: a prekey handed out twice, or lost in a restart |
+| Accounts, devices, group members | Relational database, sharded | Membership changes touch several rows at once; read on every group send (D3, D9) | `account_id`, `group_id` | Strong; member lists cached for seconds | A wide-column store: no multi-row transactions for membership |
+| Routing registry | In-memory key-value store (<TechIcon id="oss/redis" /> Redis) | Written on connect, read on every delivery, worthless after a minute (D4, D12) | `device_id` | Eventual, with a TTL | The account database: millions of writes a second for data that expires |
+| Encrypted media | Blob store + CDN | 400 TB/day of opaque bytes, read by up to 1,500 devices (D8, D9) | Random object key | Read after write | Chat servers: they would carry 400 TB/day |
+| Message history | None on the server: each device keeps its own (SQLite) | The server cannot read it and keeps nothing after delivery (N1, D8) | n/a | n/a | A server history store: it needs plaintext or keys on the server |
+
+Each device's mailbox is one ordered partition of a key-value store:
+
+```sql
+-- Mailbox: one FIFO queue per device. An entry lives until the device acks it, at most 30 days.
+CREATE TABLE mailbox (
+  device_id   bigint,      -- partition: one device's queue on one replica set
+  seq         bigint,      -- per-device order, assigned on append
+  msg_id      bytea,       -- sender-made id: the append is idempotent on (device_id, msg_id)
+  sender      text,        -- 'ana:0': routing metadata the server can see
+  ciphertext  bytea,       -- about 300 bytes; the server cannot decrypt it
+  expires_at  timestamp,   -- append time + 30 days
+  PRIMARY KEY (device_id, seq)
+);
+```
+
+```sql
+CREATE TABLE device_keys (
+  account_id bigint, device_id int,
+  identity_key bytea,                              -- public half only
+  signed_prekey_id int, signed_prekey bytea, signed_prekey_sig bytea,
+  PRIMARY KEY (account_id, device_id)              -- shard by account_id
+);
+CREATE TABLE one_time_prekeys (
+  account_id bigint, device_id int, key_id int, public_key bytea,   -- 32 bytes
+  PRIMARY KEY (account_id, device_id, key_id)
+);
+-- Hand out one prekey exactly once, even when many senders ask at the same moment.
+DELETE FROM one_time_prekeys WHERE (account_id, device_id, key_id) = (
+  SELECT account_id, device_id, key_id FROM one_time_prekeys
+  WHERE account_id = $1 AND device_id = $2
+  ORDER BY key_id LIMIT 1 FOR UPDATE SKIP LOCKED)
+RETURNING key_id, public_key;
+```
+
+- **Mailbox:** append at the tail; read the head in `seq` order on reconnect; delete by `(device_id, seq)` on ack; drop anything past `expires_at`.
+- **Keys:** one bundle per device of an account; take one one-time prekey with the `DELETE … RETURNING` above; a device uploads a new batch of 100 when fewer than 20 are left.
+- **Groups:** read the member list, then each member's devices, on every group send; cache both for a few seconds, and invalidate on a membership change.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+
+### Step 1: Two phones, one chat server (F1)
+
+The smallest design: both phones hold a connection to one chat server, which passes bytes from one to the other.
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={1} caption="Step 1: Ana’s phone and Ben’s phone each hold one TCP connection through a layer-4 load balancer to a chat server." />
+
+- **Adds:** one encrypted TCP connection per phone, a layer-4 load balancer, a chat server.
+- **Flow:**
+  1. Ana's phone sends a `send` frame over its connection.
+  2. The chat server finds Ben's connection in its own memory and writes a `deliver` frame to it.
+  3. Ben's phone acks; the server acks Ana.
+- **Why this and not that:** a connection that stays open lets the server push a message the moment it arrives (D4, N2); polling from 500 million devices would be billions of empty requests and seconds of delay (N7).
+- **The gap:** with 1,000 chat servers, Ana and Ben are almost never on the same one.
+
+<PremiumBreak />
+
+### Step 2: Many chat servers and a routing registry (N5)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={2} caption="Step 2: a routing registry maps each device to the chat server that holds its connection." />
+
+- **Adds:** the **routing registry**, `device → chat server`, written when a connection opens and refreshed by keepalives with a TTL.
+- **Flow:**
+  1. Ana's chat server looks up Ben's device in the registry.
+  2. It forwards the frame to Ben's chat server, which writes it to his connection.
+- **Why this and not that:** this is the same registry as on [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) (Step 2 there); a broadcast to every server per message would cost 1,000 sends for one delivery.
+- **What is different here:** the registry is keyed by **device**, not user, because every device gets its own ciphertext (Step 6).
+- **The gap:** if Ben's phone is off, there is nothing to deliver to, and the chat server holds the message only in memory.
+
+### Step 3: The offline queue: store ciphertext, delete on ack (F2, N3)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={3} caption="Step 3: the chat server appends ciphertext to the device’s mailbox, acks the sender, and the push notifier wakes an offline phone." />
+
+- **Adds:** the **offline queue** (a mailbox per device in a replicated **mailbox store**), the **push notifier**, and APNs / FCM; the full loop with a lost ack is in Deep dive 2.
+- **Flow:**
+  1. The chat server appends the message to Ben's mailbox; once 2 of 3 replicas have it, it acks Ana: **one tick**.
+  2. If Ben is connected, it delivers at once; if not, the push notifier sends a wake-up with **no message content**.
+  3. When Ben's phone acks, the entry is deleted; an entry nobody acks is deleted after 30 days (F2).
+- **Why this and not that:**
+  - Every message goes through the mailbox, even for an online phone, so a chat server crash between ack and delivery loses nothing (D5).
+  - The server keeps the message only until it is delivered, so it is a queue, not a history store; that is what keeps storage at about 12 TB instead of 13 PB a year (D8).
+- **The gap:** the server can still read every message. Encryption must happen on the phones, and Ben's phone is off when Ana wants to start.
+
+### Step 4: End-to-end encryption with prekeys (F1, N1)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={4} caption="Step 4: phones fetch each other’s public keys from the key service; one-time prekeys let a session start while the recipient is offline." />
+
+- **Adds:** the **key service** and the **key store** of public keys: per device, an identity key, a signed prekey and a batch of 100 one-time prekeys.
+- **Flow:**
+  1. At registration, Ben's phone uploads its public keys; the private halves never leave the phone.
+  2. Ana's phone fetches Ben's key bundle; the key service hands out one one-time prekey and deletes it.
+  3. Ana's phone derives a session key from her keys and Ben's, encrypts, and sends the ciphertext with a setup header.
+  4. When Ben's phone comes online it derives the same key from the header and its private keys.
+- **Why this and not that:** a key exchange needs both sides online; prekeys stored ahead of time let Ana start while Ben's phone is off (F2). The server only ever holds public keys, so a breach reveals no message (N1).
+- **The gap:** in a group of 256, Ana's phone would encrypt and upload every message 384 times.
+
+### Step 5: Groups with sender keys (F3)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={5} caption="Step 5: a group message arrives as one sender-key ciphertext; the group fan-out writes one mailbox entry per member device." />
+
+- **Adds:** the **group fan-out** and the **account DB** of members and their devices.
+- **Flow:**
+  1. The first time Ana writes to the group, her phone sends her **sender key** to every member device over the pairwise sessions of Step 4.
+  2. Each message is then encrypted once with the sender key and uploaded once.
+  3. The group fan-out reads the member devices and appends one copy per device to the offline queue.
+  4. When a member leaves, every remaining member makes a new sender key and sends it pairwise again.
+- **Why this and not that:** one encryption and 300 bytes uploaded per message instead of 384 (D9, N7). The server makes the copies, but every copy is the same ciphertext it cannot read (N1).
+- **The gap:** Ben now uses a laptop and the web as well as his phone; each has its own keys.
+
+One ciphertext for the group, the key sent pairwise, once:
+
+<AnimatedDiagram spec="animated/whatsapp/sender-keys" stepper caption="With a sender key the phone encrypts and uploads a group message once and the server makes the copies; the key itself travels pairwise, once." />
+
+**How to read it:** step 1 is pairwise encryption, a copy per device from the phone; step 2 is the sender key, sent pairwise once (dashed), then one ciphertext per message.
+
+**The numbers:**
+
+- 256 members × 1.5 devices = 384 devices; pairwise is 384 × 300 B = 115,200 B ≈ 115 KB up per message, against 300 B with a sender key.
+- The server's work is 384 mailbox entries either way.
+
+### Step 6: Several devices: a key per device, client fan-out (F4)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={6} caption="Step 6: Ben’s linked laptop and web client get their own copies; Ana’s phone now sends a copy per device." />
+
+- **Adds:** Ben's **linked devices**; the key service also returns each account's **signed device list**. Ana's single `send` becomes "a copy per device".
+- **Flow:**
+  1. Ana's phone fetches Ben's device list and a key bundle per device.
+  2. It encrypts the message once per device: each of Ben's devices, and each of Ana's own other devices, so her laptop shows the message too.
+  3. The chat server checks that the copies match the current device list (`stale_devices` if not) and appends one entry per device.
+- **Why this and not that:** a shared account key copied to every device would leave the phone, and one lost laptop would expose every chat. A key per device keeps every private key on the device that made it (N1); the cost is 2 copies per one-to-one message instead of 1 (D9).
+- **The gap:** a 200 KB photo cannot be encrypted and sent 4 times inside the message path.
+
+<AnimatedDiagram spec="animated/whatsapp/device-fanout" stepper caption="With a key per device, the sender’s phone encrypts one copy for every device of the recipient and every other device of its own account." />
+
+**How to read it:**
+
+- Step 1 is one phone each; step 2 is the same message after Ben links a laptop and a web client and Ana links a laptop.
+- Each row is one pairwise session, one ciphertext and one mailbox entry.
+
+**The numbers:** 3 of Ben's devices + 1 of Ana's = 4 copies of 300 B = 1.2 KB up. With 1.5 devices per user on average, a one-to-one message costs 1.5 + 0.5 = 2 copies.
+
+### Step 7: Encrypted media (F5)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={7} caption="Step 7: the phone encrypts the file with a fresh key and uploads it to the blob store; the key travels inside the message, and devices download through the CDN." />
+
+- **Adds:** the **media service** (upload URLs), the **blob store** and the **CDN**.
+- **Flow:**
+  1. Ana's phone encrypts the photo with a fresh random key and asks the media service for an upload URL.
+  2. It uploads the encrypted file to the blob store.
+  3. It sends a normal encrypted message holding the file's key, a hash of the encrypted file and its location.
+  4. Each recipient device downloads the encrypted file through the CDN, checks the hash and decrypts it.
+- **Why this and not that:** the file is uploaded once and every recipient fetches the same bytes, so the CDN caches it like any file (D9). Only the 32-byte key is encrypted per device; encrypting the file per device would upload it 4 times or 384 times.
+- **The gap:** Ana cannot see whether Ben got the message or read it.
+
+### Step 8: Receipts (F6)
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" step={8} caption="Step 8: delivered and read receipts travel back to Ana as small encrypted messages on the same path." />
+
+- **Adds:** nothing new: a receipt is a message.
+- **Flow:**
+  1. One tick: the server's ack after the append (Step 3).
+  2. Two ticks: Ben's phone stores the message and sends an encrypted "delivered" receipt to Ana's devices.
+  3. Read: Ben opens the chat and his phone sends a "read" receipt the same way.
+- **Why this and not that:** an encrypted receipt tells the server no more than any other small message, and it is queued like one, so it survives Ana being offline (D5). A server-side read flag per message per member would be a new store for data the server can do without (D8).
+- **Under stress:** receipts are delayed before messages (D12).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/whatsapp/architecture" stepper caption="End-to-end encrypted messaging: the server forwards ciphertext it cannot read, keeps it only until each device acknowledges it, and hands out the public keys that let phones encrypt for each other." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Phones and linked devices; APNs / FCM (external) | Hold every private key, encrypt and decrypt, keep history; wake an offline phone |
+| **Edge** | Layer-4 load balancer, CDN | Spread long-lived connections; serve encrypted media near users |
+| **Real-time messaging** | Chat servers, routing registry | Hold 1M connections each; find the server that holds a device |
+| **Application services** | Key service, media service | Public keys and one-time prekeys; upload URLs for encrypted files |
+| **Async pipeline** | Offline queue, group fan-out, push notifier | Store and forward per device; copy one group ciphertext per device; wake offline phones |
+| **Storage** | Mailbox store, account DB, key store, blob store | Undelivered ciphertext; devices and groups; public keys; encrypted media |
+
+Ana sends a message to Ben, who has a phone and a laptop, step by step:
+
+1. Ana's phone has a session with each of Ben's devices (or fetches key bundles and starts them, Step 4).
+2. It encrypts the message twice for Ben's devices and once for her own laptop, and sends one `send` frame with `msg_id` and three ciphertexts.
+3. The chat server checks the copies against the device lists and appends three entries to three mailboxes; 2 of 3 replicas confirm and Ana sees **one tick**.
+4. The routing registry says Ben's phone is on chat server 412; that server delivers the entry, and the phone acks: the entry is deleted.
+5. Ben's laptop is asleep: its entry waits, the push notifier wakes it, and it drains its mailbox when it connects.
+6. Ben's phone sends an encrypted "delivered" receipt to Ana's devices: **two ticks**.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: one encrypted TCP connection with a binary protocol
+
+- **Choice:** one long-lived TCP connection per device, encrypted with a Noise-style handshake, carrying small binary frames (`send`, `ack`, `deliver`, `ping`); key and media calls use the same connection. Linked web clients use a WebSocket carrying the same frames.
+- **Why:** the server must push the moment a message arrives (D4, N2), and a phone on a slow network pays for every round trip and every header byte (N7). Frames are a few hundred bytes, so framing overhead matters.
+- **Why not REST and polling:** 500 M devices polling every few seconds is billions of empty requests and seconds of delay.
+- **Why not WebSockets on phones:** they work, but add an HTTP upgrade and per-frame headers for nothing; the native app controls both ends and needs no browser compatibility.
+- **Why not MQTT:** its topics and broker-side queues duplicate what the per-device mailbox already does, and its delivery levels do not replace an ack after the device has stored the message.
+- **Why not TLS:** TLS 1.3 also works; a Noise-style handshake with the server's known public key needs no certificate chain, resumes in fewer round trips, and authenticates the device with a key pair, so the server stores no password.
+
+### Load balancer: layer 4
+
+- **Choice:** a layer-4 (TCP) load balancer in front of the chat servers, least connections, with health checks.
+- **Why:** a connection lives for hours and its bytes are encrypted end to end, so the balancer only needs to pick a server once and pass bytes (N5).
+- **Why not layer 7:** it would have to terminate the encryption to read frames, and there is nothing in a frame worth routing on; a frame for any device can arrive on any server.
+- **Why least connections:** open connections, not requests, are the load on a chat server. Connections last hours, so round robin leaves a server added after a deploy nearly empty while the old ones stay full.
+
+### Chat servers: a dense connection tier
+
+- **Choice:** servers that hold about 1 M connections each, one lightweight process (an actor, or a green thread) per connection, on a runtime built for that (Erlang/BEAM, or async Go or Rust).
+- **Why:** 500 M connections at peak; at 1 M per host that is 1,000 hosts with headroom instead of 10,000 at 100 K (N5, Deep dive 3). They hold no durable state, so a crash costs reconnects, never messages (D5).
+- **Why not an OS thread per connection:** each thread reserves megabytes of stack, so 1 M threads do not fit in a host's memory.
+- **Why not a managed WebSocket service:** priced per connection-minute; 500 M always-on connections cost far more than running the fleet.
+
+### Routing registry: an in-memory key-value store (Redis)
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, `route:{device_id} → chat server`, written on connect, refreshed by keepalives, TTL 10 minutes.
+- **Why:** read on every delivery and every group copy, worthless once the device disconnects; losing it costs a lookup miss, after which the message waits in the mailbox (D3, D12).
+- **Why not etcd or ZooKeeper:** built for small, strongly consistent configuration, not millions of writes a second (see [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination)).
+- **Why not hash the device to a fixed server:** the load balancer picks a server before it knows the device, and every server failure would remap a slice of devices at once.
+- **Why not broadcast to all chat servers:** 1,000 sends to deliver one message.
+
+### Offline queue and mailbox store: a replicated LSM key-value store per device
+
+- **Choice:** a key-value store partitioned by `device_id`, three replicas, on an LSM engine (<TechIcon id="oss/rocksdb" /> RocksDB per node); keys `(device_id, seq)`, append on 2 of 3 before the ack, delete on the device's ack, 30-day TTL.
+- **Why:** each entry is written once, read once and deleted (D1), at 7.8 M appends a second at peak (D2), and must survive a node loss until delivered (D5). An LSM engine turns appends and deletes into sequential writes, and TTL compaction drops expired entries without a sweeper (D8).
+- **Why not a Kafka-style log:** retention is by time per partition, so one delivered message cannot be deleted; 3 B devices cannot each own a partition, and sharing one means a reconnecting device scans other devices' messages.
+- **Why not Cassandra:** a queue that deletes everything it writes fills partitions with tombstones, and reading the head of a mailbox scans them; usable only with careful compaction and TTL tuning.
+- **Why not RabbitMQ or SQS:** a queue per device is 3 B queues; these systems are built for thousands of queues with many messages, not billions with a few.
+- **Why not memory only (Redis):** the backlog is 36 TB with replicas, and an acked message must survive a power loss; memory for a 30-day tail costs far more than SSD.
+- **Why not a relational database:** 7.8 M inserts and deletes a second churn B-tree pages and vacuum; nothing here needs joins or transactions.
+
+### Key service and key store: a sharded relational database
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL sharded by `account_id`: a row per device for identity and signed prekeys, a row per one-time prekey, taken with `DELETE … RETURNING` and `SKIP LOCKED`.
+- **Why:** a one-time prekey must go to exactly one sender (D3, D10); two senders racing for Ben's keys each take a different row without waiting. 10 TB fits a few dozen shards (D8).
+- **Why not Redis with `LPOP`:** atomic, but a restart that loses a write could hand a prekey out twice or lose a batch, and the store of every device's keys is not data to keep in memory only.
+- **Why not Cassandra or DynamoDB:** a take-exactly-once needs a conditional delete; Cassandra's lightweight transactions run consensus per take, and DynamoDB's conditional delete works but needs the key id read first, so racing senders retry.
+- **Signed device lists:** the primary phone signs the list of linked devices; senders check the signature, so the server cannot add a device of its own.
+
+### Account DB: a sharded relational database
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL, sharded by `account_id` (devices) and `group_id` (members), member lists cached for seconds in the group fan-out.
+- **Why:** adding a member or linking a device changes several rows at once, and support needs ad hoc queries (D3); the data is small.
+- **Why not a wide-column store:** no multi-row transactions for membership changes.
+- **Why the cache can lag:** a removed member's devices can still get a copy for a few seconds, but they cannot read it after the remaining members rotate their sender keys.
+
+### Group fan-out: server-side copies of one ciphertext
+
+- **Choice:** a worker that takes one sender-key ciphertext, reads the member devices and appends one mailbox entry per device.
+- **Why:** with sender keys the copies are identical, so the server can make them without reading them; the phone uploads 300 B instead of 115 KB (D9, N7).
+- **Why not client fan-out for groups:** 384 uploads per message from a phone on mobile data.
+- **Why not one group log that members read:** the server would keep group history, which breaks the 30-day, delete-on-ack promise (D8) and grows forever.
+
+### Blob store and CDN: encrypted media, one copy for everyone
+
+- **Choice:** an object store for encrypted files under random keys, uploaded with pre-signed URLs and deleted after 30 days; a CDN in front for downloads.
+- **Why:** 400 TB a day of large, immutable files (D8). One encrypted file serves every recipient, so the CDN caches it like any file: a photo to 384 devices is one upload and at most one origin fetch per edge location (D9).
+- **Why not encrypt the file per recipient:** n uploads of 200 KB, and nothing for the CDN to share.
+- **Why not through the chat servers:** they would carry 400 TB a day on connections sized for 300-byte frames.
+
+### Push: APNs and FCM, with no content
+
+- **Choice:** the push notifier sends a wake-up with no message text to APNs (Apple) or FCM (Google).
+- **Why:** the only way to wake a suspended app on iOS and Android (F2). The app then connects and drains its mailbox over its own encrypted connection.
+- **Why not put the message in the push:** the text would pass through Apple's or Google's servers; sending ciphertext there is possible but adds a second delivery path to dedupe.
+
+### Message ids: made on the sender's device
+
+- **Choice:** `msg_id` is 16 random bytes made by the sending device before it sends.
+- **Why:** the sender must know the id to retry, and the recipient must recognise a duplicate it cannot decrypt (D7). No order is needed from the id: order comes from the mailbox `seq` (D6).
+- **Why not Snowflake ids from the server:** a retry before the ack arrives would get a second id; and the server needs no global time order.
+- **Why not a counter per conversation:** it needs a coordinator per chat, which the server, holding no history, does not have.
+
+## Deep dives
+
+### What encryption removes from the server, and how keys reach an offline phone
+
+- **What the server can no longer do**, compared with [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger):
+  - **History, sync and search:** no message store; each device indexes its own messages, and a new linked device gets recent history from the phone, encrypted end to end.
+  - **Fan-out of one-to-one messages:** the server cannot copy plaintext to each device, so the sender's phone encrypts once per device (Step 6).
+  - **Content features:** link previews, spam checks on text and a server sequencer move to the device, to metadata, or go away.
+- **What the server still sees:** who sends to which device, when, and how big the ciphertext is. The design keeps that metadata small: no content in push, no read flags on the server.
+- **How keys reach an offline phone:** every device uploads public **prekeys** in advance; a sender fetches a bundle and starts the session alone.
+  - **Identity key:** long-lived; its fingerprint is what two people compare to check each other.
+  - **Signed prekey:** medium-term, signed by the identity key, rotated periodically.
+  - **One-time prekeys:** a batch of 100, each handed out once and deleted from the server; the device tops up when few are left.
+- **When one-time prekeys run out:** the session starts from the signed prekey alone. It still works, but the first messages lose some of the protection the one-time key adds, so the device should top up as soon as it connects.
+
+<AnimatedDiagram spec="animated/whatsapp/prekey-session" stepper caption="Prekeys on the server let Ana start a session while Ben’s phone is off; each one-time prekey is handed out once and deleted." />
+
+**How to read it:** step 1 is Ana fetching Ben's bundle and sending m1 while his phone is off; step 2 is Ben connecting, deriving the same key from the setup header and decrypting.
+
+**The numbers:**
+
+- 100 one-time prekeys × 32 bytes = 3.2 KB per device; 3 B devices hold about 10 TB of public keys.
+- A device that starts 2 new sessions a day uses 100 prekeys in 50 days, so a top-up at fewer than 20 left is rare.
+
+<Callout tone="red" title="What breaks">
+  If the key service returned a key of its own instead of Ben's, Ana would encrypt to the server. The defence is outside the server: Ana and Ben can compare identity-key fingerprints, and each phone shows a warning when a contact's key changes.
+</Callout>
+
+### Store and forward: acks, redelivery and a 30-day expiry
+
+- **One tick means stored:** the chat server acks the sender only after the append is on 2 of 3 mailbox replicas (D5). A crash before that sends no ack, and the sender retries with the same `msg_id`.
+- **Idempotent append:** the mailbox keeps `(device_id, msg_id)`, so a retry of an already stored copy returns the first ack instead of a second entry (D7).
+- **Deliver oldest first:** a reconnecting device reads its mailbox in `seq` order, in pages of 100, so each sender's messages arrive in the order sent (D6, N4).
+- **Delete on the device's ack, not on send:** the device acks after it has stored the message; until then the entry stays, so a lost connection only means a second delivery.
+- **Duplicates on the device:** a redelivered ciphertext cannot be decrypted twice, because its message key was deleted after first use. The phone must recognise the `msg_id`, ack it and drop it.
+- **Expiry:** each entry carries `expires_at = append + 30 days`; compaction drops expired entries, so no sweeper runs per message. The sender keeps one tick forever for a message that expired.
+
+<AnimatedDiagram spec="animated/whatsapp/offline-queue" stepper caption="The server keeps ciphertext only until the device acks it; a lost ack means a second delivery, which the phone drops by message id." />
+
+**How to read it:** step 1 stores a91 for an offline phone and wakes it; step 2 delivers and deletes it on Ben's ack; step 3 loses the ack for a92, so a92 arrives twice and is shown once.
+
+**The numbers:** 224 B copies a day pass through the mailboxes, but at any moment only about 39 billion are waiting: 5.6 B for devices offline a few hours and 33.6 B in the 30-day tail, 12 TB in all.
+
+<Callout tone="red" title="What breaks">
+  A phone that fails to decrypt a duplicate and never acks it gets the same entry on every reconnect, forever, until it expires. Ack by `msg_id` before trying to decrypt, and count redeliveries per device so the loop shows up on a dashboard.
+</Callout>
+
+### A million connections per host
+
+- **Memory is the limit, not CPU:** an idle connection costs memory and almost no CPU, so the budget is memory ÷ connections: 48 KB each fits 1 M connections in 48 GB of a 128 GB host.
+- **A lightweight process per connection:** a few kilobytes each in an actor runtime (Erlang/BEAM) or a green thread (Go); an OS thread reserves megabytes of stack.
+- **Socket buffers:** cap them at a few tens of kilobytes; messages are 300 bytes, and large default buffers would take most of the host.
+- **Kernel limits:** raise the open-file limit above 1 M per process and size the connection-tracking tables, or the host stops accepting connections long before memory runs out.
+- **Keepalives:** one ping per 240 s idle keeps mobile network mappings open: 2.1 M pings a second across the fleet, answered in memory with no store write.
+- **The cost of density:** one host failing drops 1 M phones at once.
+  - Clients wait a random 0 to 30 s before reconnecting: 1 M ÷ 30 s ≈ 33,000 connects a second, about 33 per surviving host per second.
+  - Deploys drain a host gradually over minutes instead of closing every connection at once.
+  - The handshake must be cheap, which is one reason for a resumable Noise-style handshake.
+
+<AnimatedDiagram spec="animated/whatsapp/connection-budget" stepper caption="At 48 KB a connection one host holds a million phones, so 500 million connections need 1,000 hosts with headroom instead of 10,000." />
+
+**How to read it:** step 1 is one host's memory split by what each connection costs; step 2 is the fleet for 500 M connections at two densities.
+
+**The numbers:**
+
+- 1 M × (32 KB buffers + 8 KB process + 8 KB session state) = 48 GB; with 16 GB for the OS, 64 GB is left for bursts and reconnect storms.
+- 500 M ÷ 1 M = 500 hosts, 1,000 with 2 × headroom; at 100 K a host it would be 10,000.
+
+<Callout tone="red" title="What breaks">
+  Without jitter, a dead host's 1 M phones reconnect in the same second and the handshake load takes down the next host, which sends 2 M phones to the rest. Random backoff on the client and a cap on accepts per second on the server stop the cascade.
+</Callout>
+
+### Worked example: a photo to a 10-member family group
+
+Ana sends a photo to her family group: 10 members with 15 devices, 2 of them Ana's; 3 devices are offline.
+
+1. **Media:** Ana's phone encrypts the 200 KB photo with a fresh key and uploads it once to the blob store.
+2. **Sender key:** Ana already sent her sender key to the 14 other devices when she first wrote to the group (14 pairwise messages, once).
+3. **Message:** one 300-byte ciphertext with the photo's key, hash and location goes to the chat server.
+4. **Fan-out:** the group fan-out appends 14 mailbox entries: 14 × 300 B = 4.2 KB (12.6 KB with 3 replicas), then Ana gets one tick.
+5. **Delivery:** 11 online devices get the entry within 300 ms, ack, and their entries are deleted; 3 offline devices get a wake-up and their entries wait.
+6. **Download:** 14 devices fetch the same encrypted 200 KB through the CDN: 2.8 MB served, about one origin fetch per edge location.
+7. **Receipts:** each of the 13 other people's devices sends a "delivered" receipt to Ana's 2 devices: 26 small entries.
+
+**The numbers:** Ana's phone uploads 200 KB + 300 B; without sender keys it would upload 200 KB + 14 × 300 B, and without one shared media key it would upload 14 × 200 KB = 2.8 MB.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Who can read messages | Server-readable, end to end | End to end, keys only on devices | N1, D8 | Server search, history, content-based spam checks, server previews | Never for personal chats |
+| What the server stores | History store, queue only | Queue only: delete on ack, 30-day expiry | D8, D5, N3 | No server history: a new device gets history from the phone | Encrypted cloud history becomes a product requirement |
+| Group encryption | Pairwise per member, sender key | Sender key, rotated when a member leaves | D9, F3, N7 | A rekey to every device on each leave; a stolen sender key reads the group until the next rotation | Groups are tiny (2 or 3), where pairwise is simpler |
+| Multi-device | One shared account key, a key per device | A key per device, client fan-out | N1, F4, D9 | 2 copies per one-to-one message; device lists must be exact | Accounts average far more than 5 devices |
+| Starting a session offline | Wait until both are online, prekeys on the server | Prekeys: 100 one-time + a signed prekey | F2, D3, D10 | 10 TB of keys; an atomic take per prekey | Never: phones are often off |
+| Mailbox store | Kafka-style log, wide-column, LSM key-value per device | LSM key-value keyed by `device_id` | D1, D5, D8 | A store tuned for a delete-heavy queue | The backlog grows far past the 30-day tail |
+| When to ack the sender | On receipt, after the replicated append, after delivery | After 2 of 3 replicas | D5, D4, N3 | A few milliseconds on every send | Never: one tick must mean stored |
+| Ordering | A sequencer per group, FIFO per device | FIFO per device + the sender's ratchet counter | D6, N4 | Two members may see two senders' messages interleaved differently | The product needs identical group order for everyone |
+| Connection density | 100K per host, 1M per host | 1M per host on a lightweight-process runtime | N5, D12 | A host failure drops 1M phones at once | Reconnect storms hurt more than hosts cost |
+| Media encryption | Per recipient, one key per file | One key per file, key inside the message | D8, D9, F5 | Anyone with the URL can fetch ciphertext (useless without the key) | Never |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) (advanced) | Chat servers, routing registry, keepalives | 500M connections need routing, keepalives and safe reconnects |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The offline queue, a mailbox per device | Store and forward until each device acks |
+| [Fan-out: Push vs Pull](/system-design/patterns/fan-out) | Client fan-out per device; server copies of a sender-key ciphertext | One message becomes a copy per device |
+| [Idempotency](/system-design/patterns/idempotency) | `msg_id` on append and on the device | Retries and redeliveries must not show a message twice |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | `msg_id` made on the sender's device | The id must exist before the first send, with no coordinator |
+| [Service Discovery and Coordination Services](/system-design/patterns/service-discovery-and-coordination) | Routing registry `device → chat server` | Find the server holding a device, with entries that expire |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | One-time prekeys taken with `SKIP LOCKED` | Two senders must never get the same prekey |
+| [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) | Encrypted media in the blob store, served by the CDN | 400 TB a day must bypass the chat servers |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Mailboxes by `device_id`, keys and accounts by `account_id` | Spread 7.8M appends a second and 10 TB of keys |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| A messenger that also hides who is talking from the server | Prekeys, sender keys, a queue that deletes on delivery | The envelope hides the sender too, so abuse controls must work without knowing who sent what |
+| An encrypted chat that also keeps history on the server | End-to-end sessions, a key per device, client fan-out | An encrypted history store on top, with keys held by the users' devices, not the server |
+| Commands to IoT devices that are often offline | A mailbox per device, ack then delete, expiry, a wake-up push | The device is the only reader; commands carry a deadline instead of 30 days |
+| A server-readable chat app | Connections, routing, push, receipts | A history store, server fan-out and search come back (see [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger)) |
+
+## How real systems do it
+
+- **2012:** WhatsApp's engineering blog showed one FreeBSD server running Erlang with over 2 million TCP connections open (24 cores, about 100 GB of memory).
+- **2014:** a WhatsApp talk at Erlang Factory described a server fleet of hundreds of nodes and over 8,000 cores, passing over 70 million Erlang messages a second.
+- **2016:** Signal announced that WhatsApp had finished rolling out the Signal Protocol on every client, covering chats, group chats, attachments, voice notes and voice calls, for over a billion monthly users.
+- **2021:** Meta Engineering's multi-device post: each device has its own identity key, the sending client encrypts a message once per device, a phone can link up to four other devices, and messages are not kept on the server after delivery.
+- **WhatsApp encryption overview (version of 2026):** one-time prekeys are removed from the server once fetched; a group sender key goes to each member device over pairwise sessions, then each message is one ciphertext that the server fans out; members clear their sender keys when someone leaves; media is encrypted with a random key, uploaded to a blob store, and the key and hash travel in the message; clients reach the chat servers over Noise Pipes.
+- **WhatsApp privacy policy (read 2026):** delivered messages are deleted from the servers; an undelivered message is kept encrypted for up to 30 days, then deleted.
+- **Where this design differs:** WhatsApp does not publish its storage, routing or queue internals, so the mailbox store, the routing registry and every estimate here are this page's choices; the encryption flow and the 30-day rule follow the sources above.
+
+## Failure modes & pitfalls
+
+- **Ack before the append is replicated:** a mailbox node dies and a message with one tick is gone; watch under-replicated appends; ack only after 2 of 3.
+- **A duplicate the phone cannot decrypt:** the device never acks it and gets it on every reconnect; count redeliveries per device; ack by `msg_id` first, then decrypt.
+- **One-time prekeys run out:** a phone off for weeks while many people message it; sessions start without a one-time key; alert on devices below 20 and top up on connect.
+- **Stale device list:** a linked device misses messages, or a removed one still gets them; compare each `send` against the signed list and return `stale_devices`.
+- **Reconnect storm:** a dead host's 1M phones reconnect at once; watch accepts per second; client jitter and a server-side accept cap.
+- **Tombstones in the mailbox store:** delete-heavy partitions slow down reads of the head; watch read latency per mailbox; tune compaction and let the TTL drop old entries.
+- **Content in push notifications:** message text passes through Apple and Google; review push payloads; wake only, then fetch over the device's own connection.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify what the server may see, history, the 30-day rule, devices and group size; write F1 to F6 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 463K/s average, 1.4M/s peak, 5.6 copies a message, 12 TB of backlog against 13 PB a year of history, 1,000 hosts.
+3. **Minutes 10 to 15:** API frames, the mailbox table and the key tables; say what the server can and cannot read.
+4. **Minutes 15 to 25:** Steps 1 to 4: connection, routing (borrow Messenger's), the offline queue, prekeys.
+5. **Minutes 25 to 35:** Steps 5 to 8: sender keys, a key per device, encrypted media, receipts.
+6. **Minutes 35 to 45:** one deep dive the interviewer picks: what encryption removes, store and forward, or a million connections per host.
+
+**What interviewers listen for:**
+
+- **Mid:** one long-lived connection, store and forward with push, delete on delivery, a client-made message id.
+- **Senior:** prekeys for offline session setup, sender keys against pairwise for groups, ack after the replicated append, a key per device with client fan-out.
+- **Staff:** what metadata the server still sees, rekeying on member removal, prekey exhaustion, the blast radius of a 1M-connection host, what degrades first.
+
+**Red flags:** a server history store in an encrypted design; a shared account key on every device; content in push; ordering by phone clocks.
+
+## Further reading
+
+- [1 million is so 2011](https://blog.whatsapp.com/1-million-is-so-2011) (WhatsApp blog, 2012)
+- [That's 'Billion' with a 'B': Scaling to the Next Level at WhatsApp](https://www.erlang-factory.com/sfbay2014/rick-reed) (Erlang Factory talk abstract, 2014)
+- [WhatsApp's Signal Protocol integration is now complete](https://signal.org/blog/whatsapp-complete/) (Signal, 2016)
+- [How WhatsApp enables multi-device capability](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) (Meta Engineering, 2021)
+- [WhatsApp Encryption Overview](https://www.whatsapp.com/security/WhatsApp-Security-Whitepaper.pdf) (technical white paper, version of 2026)
+- [WhatsApp Privacy Policy](https://www.whatsapp.com/legal/privacy-policy) (read 2026)
+- Related pages: [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Idempotency](/system-design/patterns/idempotency)
+
+<InterviewQuestions>
+  <InterviewQuestion question="The server cannot read messages. How does a message still reach a phone that is switched off?" category="Concepts" level="Mid">
+  - The chat server appends the ciphertext to a mailbox for each of the recipient's devices, on 2 of 3 replicas, and acks the sender: one tick.
+  - A push notification with no content wakes the phone; it connects and drains its mailbox oldest first.
+  - Each entry is deleted when the device acks it, or after 30 days; the server never needs to read it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid losing a message if the server crashes after acknowledging the sender?" category="Failure modes" level="Senior">
+  - Ack only after the replicated append: the message is on 2 of 3 mailbox replicas before the sender sees one tick.
+  - A crash before the append completes sends no ack, so the sender retries with the same `msg_id`, and the append is idempotent.
+  - Delete only on the recipient device's ack, so a crash between append and delivery only delays delivery.
+  </InterviewQuestion>
+  <InterviewQuestion question="How can Ana start an encrypted chat with Ben while Ben's phone is off?" category="Architecture" level="Senior">
+  - Ben's phone uploaded public prekeys in advance: an identity key, a signed prekey and 100 one-time prekeys.
+  - Ana fetches a bundle per device; the key service hands out one one-time prekey and deletes it, so no two senders get the same one.
+  - Ana derives the session key alone and sends the first message with a setup header; Ben derives the same key when he connects.
+  - If the one-time prekeys ran out, the session starts from the signed prekey alone, with slightly weaker protection for the first messages.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use sender keys for groups instead of encrypting each message for every member?" category="Trade-offs" level="Senior">
+  - Pairwise means one encryption and one upload per member device: 384 copies, about 115 KB, per message in a 256-member group.
+  - With a sender key the phone encrypts once and uploads 300 bytes; the server copies the same ciphertext to every device without reading it.
+  - The cost: the sender key goes to every device pairwise once, and must be replaced whenever a member leaves.
+  </InterviewQuestion>
+  <InterviewQuestion question="A member is removed from a group while a message is in flight. Should they get it, and how do you enforce that?" category="Failure modes" level="Senior">
+  - The group fan-out stops appending copies for the removed member's devices as soon as the membership change commits; a copy appended a moment before may still arrive.
+  - Every remaining member makes a new sender key and sends it pairwise to the remaining devices only.
+  - Messages after the change use the new keys, so even a copy that slipped through a stale member cache cannot be decrypted by the removed member.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the same account stay in sync on a phone and a laptop when the server keeps no history?" category="Architecture" level="Mid">
+  - Each device has its own identity key and its own mailbox.
+  - The sender encrypts every message once per device, including its own other devices, so the laptop also sees what the phone sends.
+  - A newly linked device gets recent history from the phone, encrypted end to end, not from the server.
+  </InterviewQuestion>
+  <InterviewQuestion question="What delivery guarantee do you give, and how are retries handled?" category="Concepts" level="Mid">
+  - At least once from the server to each device: an entry stays until the device acks it, so a lost ack means a second delivery.
+  - The device drops the duplicate by `msg_id` and acks it; it cannot decrypt it twice anyway.
+  - Each sender's messages arrive in order because each device's mailbox is read oldest first.
+  - Nothing is kept past 30 days: a device away longer misses those messages.
+  </InterviewQuestion>
+  <InterviewQuestion question="How many connections can one chat server hold, and what limits it?" category="Scaling" level="Senior">
+  - Memory per connection: at 48 KB each, 1 M connections take 48 GB of a 128 GB host.
+  - That needs a lightweight process per connection, small socket buffers and kernel limits raised above 1 M open files.
+  - 500 M connections then need 1,000 hosts with headroom instead of 10,000 at 100 K each.
+  - The price is blast radius: a dead host drops 1 M phones, so clients reconnect with jitter and servers cap accepts per second.
+  </InterviewQuestion>
+  <InterviewQuestion question="What would change if groups grew to 100,000 members?" category="Scaling" level="Senior">
+  - The upload stays one ciphertext, but the server appends 150,000 mailbox copies per message, most for people who never open the group.
+  - Every member who leaves forces a new sender key to about 150,000 devices; with daily churn that never stops.
+  - Large broadcast groups need a different design: one-way channels where members read a shared log, with a different trust model than a private group.
+  </InterviewQuestion>
+</InterviewQuestions>

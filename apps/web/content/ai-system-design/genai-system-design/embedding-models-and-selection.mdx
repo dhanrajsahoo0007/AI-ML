@@ -1,0 +1,226 @@
+---
+title: "Embedding Models & Selection"
+description: "How to choose an embedding model for retrieval: model types, benchmarks, dimensions, languages, cost and domain fit."
+icon: target
+---
+
+The embedding model decides which chunks count as "near" a question, so it sets the ceiling for everything after it: a chunk it ranks 200th never reaches a reranker that reads the top 100, let alone the prompt.
+
+- This page covers the kinds of retrieval model, how they are trained, how to read leaderboards, and how to choose one with your own data.
+
+## Overview
+
+- **Bi-encoders** turn each text into one vector; they are cheap and are what most vector databases store. **Late interaction** (ColBERT) keeps one vector per token and scores with MaxSim. **Learned sparse** models (SPLADE) give a weight per word and use an inverted index.
+- Retrieval models are trained **contrastively**: pull a question and its answer together, push other passages away. **Hard negatives** carry most of the learning.
+- **MTEB** averages many tasks; for RAG read the retrieval scores, and treat a 2-point gap as smaller than the gap between public data and yours.
+- Dimensions, input length and price per token set the running cost: Brightpost's 3,600 chunks are 22 MB of vectors at 1,536 dimensions and 44 MB at 3,072.
+- Choose with **your own labelled questions**: recall@5 and nDCG@10 on 100 to 300 real questions beat any leaderboard.
+
+## Mental model
+
+- Think of hiring a librarian. One candidate files every book under a single summary card (a bi-encoder): fast to search, but detail is lost.
+- Another keeps a card for every key word in every book (late interaction): slower and needs a bigger filing cabinet, but notices that "backup code" appears exactly where your question needs it.
+- A third keeps a word index with weights (sparse): perfect for exact codes, weaker on paraphrases.
+- You would not hire from a general quiz score alone; you would hand each candidate twenty real questions from your own shelves.
+
+## Core concepts
+
+The running example: Brightpost's help centre, **3,600 chunks** of 400 tokens, and the question "How do I reset my password if I lost my phone?".
+
+### Bi-encoders, late interaction and sparse models
+
+- A **bi-encoder** encodes the question and each chunk separately into one vector each (1,536 numbers at Brightpost) and compares them with cosine similarity.
+- Chunk vectors are computed once at ingestion, so a question costs one encoding and one index search.
+- The price is compression: a 400-token chunk is squeezed into one point.
+
+- **Late interaction**, introduced by ColBERT (Khattab and Zaharia, 2020), still encodes the two texts separately but keeps one vector per token.
+- The score is a sum of maximum similarities: each question token finds its best match among the chunk's tokens.
+
+<AnimatedDiagram
+  spec="animated/rag/late-interaction"
+  stepper
+  caption="Each question word finds its own best match in the chunk; the score is the sum of those best matches."
+/>
+
+**How to read it:**
+
+- Step 1 compares every question token with every chunk token; darker cells are closer.
+- Step 2 keeps the best cell in each row, the MaxSim: "reset" finds "reset" (0.92), "phone" finds "phone" (0.94).
+- Step 3 adds the six maxima. Filler words such as "how" and "if" find weak matches and add little. All similarities here are illustrative.
+
+**The numbers:**
+
+- 0.35 + 0.92 + 0.95 + 0.30 + 0.90 + 0.94 = **4.36**.
+- The bi-encoder gives the same chunk one cosine, 0.77, on a different scale; each score is compared only with other chunks' scores from the same model.
+- Storage is the cost: ColBERT stores 128 dimensions per token at 2 bytes each in its end-to-end setting, so a 400-token chunk takes 400 × 128 × 2 = 102,400 bytes instead of 6,144, about **17 times more** (369 MB instead of 22 MB for 3,600 chunks).
+
+- **Learned sparse** models such as SPLADE (Formal et al., 2021) output a weight for each word in the vocabulary, most of them zero, and search with an inverted index like BM25.
+- They keep exact-term matching, which helps with the keyword question "What does error E1234 mean?", and learn to add related words.
+- **Cross-encoders** read the question and chunk together; they are rerankers, not embedding models (see [Advanced RAG](/ai-system-design/genai-system-design/advanced-rag)).
+
+### Reading MTEB and other leaderboards
+
+- MTEB, the Massive Text Embedding Benchmark (Muennighoff et al., 2022), launched with 8 task types, 58 datasets and 112 languages, and found that "no particular text embedding method dominates across all tasks".
+- Its headline average mixes classification, clustering, retrieval and more, so for RAG read the **retrieval** columns.
+- Three cautions: the datasets are public, so models may have trained on them; scores are averages over domains unlike yours; and the leaderboard keeps adding tasks and models, so compare candidates on the same task set.
+
+**The numbers:**
+
+- OpenAI's guide lists an MTEB average of 62.3% for text-embedding-3-small (1,536 dimensions) and 64.6% for text-embedding-3-large (3,072).
+- That is 2.3 points for twice the storage: 3,600 × 3,072 × 4 bytes = 44 MB instead of 22 MB.
+- Whether the 2.3 points show up on Brightpost's questions is something only Brightpost's evaluation can answer.
+
+### Dimensions, context length and cost
+
+- **Dimensions** set the index size: bytes per vector = dimensions × 4 in float32. Some models can be shortened (see [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)).
+- **Context length** is the longest input the model reads; anything longer is cut off, often silently. e5-base-v2 reads 512 tokens; OpenAI's text-embedding-3 models read 8,192. Brightpost's 400-token chunks fit both; its 1,100-token articles would be cut at 512 on the smaller model.
+- **Cost** is per token for hosted APIs and per GPU hour when self-hosted. A full Brightpost run is 1.44 million tokens; at a price of P per million tokens it costs 1.44 × P, and each question adds about 15 tokens.
+
+### Multilingual and domain-specific models
+
+- A multilingual model maps "reset my password" and "réinitialiser mon mot de passe" to nearby points because it was trained on text in both languages; an English-only model places them far apart.
+- Domain vocabulary is the other gap: product codes, legal terms and internal names are split into meaningless pieces by a general tokenizer.
+- Start with a general model, measure, and fine-tune only when evaluation shows domain misses ([Fine-Tuning Embeddings & Rerankers](/ai-system-design/genai-system-design/fine-tuning-embeddings-and-rerankers)).
+- Many models are also **asymmetric**: E5 expects "query: " and "passage: " prefixes, and Cohere's API asks for `search_query` or `search_document`. Mixing them up quietly lowers recall.
+
+## Architecture
+
+- An embedding model is a Transformer encoder, a pooling step that turns token vectors into one vector, and usually a normalisation to length 1.
+- What makes it a retrieval model is the training: pairs of questions and passages, and a contrastive loss.
+
+<AnimatedDiagram
+  spec="animated/rag/contrastive-training"
+  stepper
+  caption="Easy negatives teach almost nothing; the near miss is where the loss, and the learning, comes from."
+/>
+
+**How to read it:**
+
+- Step 1 is one training example in today's space: the anchor (the question), the positive (the chunk that answers it) and negatives.
+- "Change your password" is a hard negative: it shares the word "password" and the topic but does not help someone without their phone, and today it sits closest (0.82, rank 1 in vector search).
+- Step 2 is the loss at work: it pulls the positive in and pushes the hard negative out, while the far-away easy negatives barely move.
+- Step 3 is the space after training on many such examples: the answer is nearest.
+
+**The numbers:**
+
+- The loss is a softmax over the scores divided by a temperature (0.05 here, illustrative).
+- Before: 0.77 / 0.05 = 15.4 for the positive against 16.4 for the hard negative, so the positive gets 27% of the probability and the loss is −ln 0.27 = **1.31**.
+- After (0.85 against 0.60): 99%, loss **0.01**.
+- With the two easy negatives alone the loss would already be 0.0001: nothing to learn, which is why training mines hard negatives.
+
+<Callout tone="red" title="What breaks">
+  A mined "negative" that actually answers the question (a duplicate article, a reworded copy) is a false negative: training pushes a right answer away. Deduplicate before mining, and drop candidates that score almost as high as the positive or that an LLM judge marks as relevant.
+</Callout>
+
+## Technical mechanics
+
+### Evaluating on your own data
+
+- Collect 100 to 300 real questions from search logs or support tickets, and label the chunks that answer each one.
+- Run every candidate model over the same chunks and compute recall@5 and nDCG@10 ([RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation)).
+- Brightpost's current model reaches recall@5 = 0.67 on the main question (2 of its 3 relevant chunks); a candidate has to beat that on the whole set, not on one example.
+- Record latency per question and cost per million tokens beside each score, and pick the cheapest model within a point or two of the best.
+
+### Changing embedding models and re-indexing
+
+- Vectors from two models live in different spaces, so a question embedded by the new model cannot be compared with chunks embedded by the old one.
+- Changing models means re-embedding all 3,600 chunks (1.44 million tokens) into a new index while the old one keeps serving, comparing the two on real questions, then switching.
+- [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline) draws the migration step by step.
+- Store the model name and version with every vector so a mismatch is caught, not guessed.
+
+### Hosted versus self-hosted embeddings
+
+- A hosted API needs no GPUs and charges per token, but text leaves your network, rate limits cap throughput, and a model the provider retires forces a full re-embed on their schedule.
+- A self-hosted open model keeps data in your region and turns cost into GPU hours, but you own batching, scaling and upgrades, and you must check the licence.
+- Question-time latency matters too: a network hop to an API sits on every search, while a local model shares a machine with the rest of the query path.
+
+## Trade-offs
+
+<Compare
+  columns={["", "Bi-encoder (dense)", "Late interaction", "Learned sparse"]}
+  rows={[
+    ["Vectors per chunk", "1", "1 per token (400)", "1 sparse vector, mostly zeros"],
+    ["Storage for 3,600 chunks", "22 MB (1,536 × 4 bytes)", "≈ 369 MB (128 dims × 2 bytes per token)", "Grows with non-zero words per chunk"],
+    ["Index", "Vector index (HNSW, IVF)", "Multi-vector index", "Inverted index"],
+    ["Exact codes such as E1234", "Often missed", "Token-level match helps", "Matched as a term"],
+    ["Paraphrases", "Strong", "Strong", "Weaker; relies on learned expansion"],
+    ["Query cost", "1 comparison per chunk", "Query tokens × chunk tokens per candidate", "Posting-list lookups"],
+  ]}
+  caption="Three kinds of retrieval model on Brightpost's corpus; storage figures use the running example."
+/>
+
+| Decision | Option A | Option B | Guidance |
+| --- | --- | --- | --- |
+| Hosted vs self-hosted | No GPUs, per-token price | Data stays in your region | Hosted to start; self-host for residency or steady high volume |
+| Bigger vs smaller model | A few points higher on MTEB | Half the storage and latency | Measure on your questions; keep the cheaper one if within a point or two |
+| General vs domain model | Works everywhere | Better on your vocabulary | Fine-tune only after evaluation shows domain misses |
+
+## Production systems
+
+- OpenAI's text-embedding-3-small and -large return 1,536 and 3,072 dimensions, read up to 8,192 tokens, can be shortened with a `dimensions` setting, and return vectors normalised to length 1.
+- Cohere's embed API requires an `input_type` for v3 and later models: `search_document` for chunks, `search_query` for questions.
+- E5 (Wang et al., 2022) is an open model trained contrastively on weakly supervised pairs; e5-base-v2 has 768 dimensions, reads 512 tokens and expects "query: " and "passage: " prefixes.
+- ColBERT stored the MS MARCO passage collection in 154 GiB at 128 dimensions and 2 bytes per dimension; its smallest setting, 24 dimensions, needed 27 GiB and lost about one point of MRR@10 against its largest (286 GiB).
+- **Used in our case studies:** [Clinical Knowledge-Graph Assistant](/genai-system-design/case-studies/kg-healthcare-case-study)
+
+## Failure modes & pitfalls
+
+- Choosing from the MTEB headline average instead of retrieval scores, and never testing on your own questions.
+- Forgetting query and passage prefixes, or the `input_type`, on asymmetric models.
+- Chunks longer than the model's input limit, cut off without a warning.
+- Mixing vectors from two models or versions in one index.
+- Mining hard negatives without deduplicating, which trains on false negatives.
+
+## Interview framework
+
+1. Name the three kinds of model (bi-encoder, late interaction, sparse) and where a cross-encoder fits instead.
+2. Explain contrastive training and why hard negatives matter.
+3. Say how you would read MTEB: retrieval columns, the same task set, then your own evaluation.
+4. Size the choice: dimensions to index bytes, input length to chunk size, tokens to cost.
+5. Describe the evaluation set, the metrics, and the plan for changing models later.
+
+**What interviewers listen for:** a selection process driven by your own labelled questions, with storage and cost worked out.
+
+**Red flags:** "use the top model on the leaderboard" with no evaluation and no plan for re-indexing.
+
+## Further reading
+
+- [ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT (Khattab and Zaharia, 2020)](https://arxiv.org/abs/2004.12832)
+- [MTEB: Massive Text Embedding Benchmark (Muennighoff et al., 2022)](https://arxiv.org/abs/2210.07316)
+- [SPLADE: Sparse Lexical and Expansion Model for First Stage Ranking (Formal et al., 2021)](https://arxiv.org/abs/2107.05720)
+- [Text Embeddings by Weakly-Supervised Contrastive Pre-training (Wang et al., 2022)](https://arxiv.org/abs/2212.03533)
+- [Dense Passage Retrieval for Open-Domain QA (Karpukhin et al., 2020)](https://arxiv.org/abs/2004.04906)
+- [OpenAI embeddings guide](https://developers.openai.com/api/docs/guides/embeddings)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you choose an embedding model for a new RAG system?" category="Model Selection" level="Mid">
+    - Shortlist a few models by their retrieval scores on MTEB, language support, input length, dimensions, price and licence.
+    - Then build a labelled set of 100 to 300 real questions with the chunks that answer them, embed the corpus with each candidate and compare recall at 5 and nDCG at 10.
+    - Weigh the results against index size, question latency and cost, and pick the cheapest model within a point or two of the best.
+    - Record the model version with every vector so a later change is planned, not discovered.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is late interaction, and when is it worth its storage cost?" category="Concepts" level="Senior">
+    - Late interaction, as in ColBERT, encodes the question and the document separately but keeps one vector per token.
+    - The score sums, over question tokens, the best similarity with any document token.
+    - It matches fine details that one pooled vector blurs, which helps on long or technical passages.
+    - The cost is storage and compute: one vector per token is roughly 17 times the storage of a single 1,536-dimension float vector for a 400-token chunk at ColBERT's 128 dimensions and 2 bytes.
+    - It is worth it when evaluation shows a clear recall gain, or as a reranking stage over a short candidate list.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is the MTEB average a poor way to pick a retrieval model on its own?" category="Model Selection" level="Mid">
+    - The average mixes task types such as classification and clustering that RAG does not use, so read the retrieval scores instead.
+    - The datasets are public and may have been seen in training, and their domains differ from yours.
+    - Small gaps of one or two points often vanish or reverse on your own data.
+    - Use the leaderboard to shortlist and your own labelled questions to decide.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a hard negative, and how do you mine one safely?" category="Concepts" level="Junior">
+    - A hard negative is a passage that looks relevant to a question but does not answer it, such as "Change your password" for someone who lost their phone.
+    - Training on it teaches the fine distinctions that decide the top of a ranking, while random passages are too easy to teach much.
+    - Mine them by retrieving the top results with the current model or BM25 and removing the true answers.
+    - Deduplicate first and drop near-copies of the positive, otherwise you train the model to push correct answers away.
+  </InterviewQuestion>
+  <InterviewQuestion question="Hosted embedding API or self-hosted model: how do you decide?" category="Trade-offs" level="Senior">
+    - Hosted APIs remove GPU operations and charge per token, which suits small or spiky volumes, but text leaves your network, rate limits cap backfills and the provider can retire a model and force a re-embed.
+    - Self-hosting keeps data in your region and turns cost into GPU hours, which wins at steady high volume, but you own batching, scaling, upgrades and licence checks.
+    - Compare total cost for a full re-embed plus daily traffic, latency on the query path, and data-residency rules, then decide.
+  </InterviewQuestion>
+</InterviewQuestions>

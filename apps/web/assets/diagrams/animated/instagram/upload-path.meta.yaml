@@ -1,0 +1,16 @@
+title: "Upload a photo: signed URL, resize off the request path, safe retries"
+alt: >-
+  A sequence diagram with six lanes: the app in orange, the post service and resize worker in teal, the posts
+  database and blob store in violet, and the resize queue in grey. Step 1: the app creates a post with key k7; the
+  post service inserts a pending row and returns the post id with a signed upload URL; the app puts the 2 MB original
+  into the blob store, which sends an object-created event to the resize queue; a worker writes four sizes, marks the
+  post ready and acknowledges the job. Step 2: a worker crashes after two of four sizes, shown by a red arrow; 60
+  seconds later the queue hands the same job to a worker, which writes all four sizes under the same keys and marks
+  the post ready again, changing nothing. Step 3: the app retries the create call with key k7 and gets back the same
+  post id and URL.
+caption: >-
+  The photo never passes through our servers, the resize runs after the response, and every retry lands on the same
+  keys: a crash or a timeout never makes a second post.
+tags: [case-studies, instagram, blob-storage, idempotency]
+source: original
+created: 2026-11-17

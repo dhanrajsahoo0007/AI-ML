@@ -159,14 +159,14 @@ function AssetFigure({ asset, caption, minWidth, step, stepper }: { asset: Asset
       );
     case "image":
       return (
-        <figure className="my-8">
+        <figure className="my-8 max-w-[960px]">
           <Picture asset={asset} alt={alt} />
           {text && <Caption>{text}</Caption>}
         </figure>
       );
     default:
       return (
-        <figure className="my-8">
+        <figure className="my-8 max-w-[960px]">
           <InlineSvg asset={asset} alt={alt} className="rounded-xl border border-hairline bg-paper p-4 sm:p-6" />
           {text && <Caption>{text}</Caption>}
         </figure>
@@ -205,12 +205,12 @@ export function Img({
       <InlineSvg asset={asset} alt={altText} />
     );
   return text ? (
-    <figure className="my-8">
+    <figure className="my-8 max-w-[960px]">
       {body}
       <Caption>{text}</Caption>
     </figure>
   ) : (
-    <div className="my-6">{body}</div>
+    <div className="my-6 max-w-[960px]">{body}</div>
   );
 }
 

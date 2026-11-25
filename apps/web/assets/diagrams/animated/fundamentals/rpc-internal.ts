@@ -19,8 +19,8 @@ const spec: DiagramSpec = {
     { id: "services", title: "Internal services", tone: "teal", x: 550, y: 40, w: 310, h: 280 },
   ],
   nodes: [
-    { id: "phone", label: "Mobile app", sub: "public client", icon: "phone", tone: "neutral", x: 95, y: 130 },
-    { id: "browser", label: "Browser", sub: "public client", icon: "browser", tone: "neutral", x: 95, y: 240 },
+    { id: "phone", label: "Mobile app", sub: "public client", icon: "phone", tone: "neutral", x: 95, y: 130, w: 130 },
+    { id: "browser", label: "Browser", sub: "public client", icon: "browser", tone: "neutral", x: 95, y: 240, w: 124 },
     { id: "gateway", label: "API gateway", sub: "REST + JSON", icon: "gateway", tone: "blue", x: 270, y: 185, w: 140 },
     {
       id: "checkout",

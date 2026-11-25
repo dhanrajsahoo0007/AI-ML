@@ -1,98 +1,243 @@
 ---
 title: "Message Queues and Pub/Sub"
 description: "Decoupling producers and consumers with queues and topics: delivery guarantees, ordering, retries and dead letters."
+icon: radio
+updated: 2026-11-16
 ---
 
 Queues turn spikes into smooth work and let services fail independently. They are the backbone of asynchronous designs.
 
-## TL;DR
+- Interviewers ask about queues to see whether you can say what each message is promised (lost, repeated or in order) and what your consumer does about it.
 
-- A **queue** delivers each message to one consumer; **pub/sub** delivers it to every subscriber.
+## Overview
+
+- A **queue** delivers each message to one consumer; **pub/sub** (a topic) delivers it to every subscriber group.
 - Producers and consumers scale and fail independently; the queue absorbs bursts.
-- Delivery is **at-most-once**, **at-least-once** or (with effort) **effectively exactly-once**.
-- Ordering is usually guaranteed only **within a partition**.
-- Use **retries with backoff**, a **dead-letter queue**, and **idempotent consumers**.
+- Delivery is **at most once**, **at least once** or **effectively once**: at least once plus a consumer that can take a repeat.
+- Ordering is usually guaranteed only **within a partition**, so the **partition key** decides what stays in order.
+- Use **retries with backoff**, a **dead-letter queue** and **idempotent consumers**.
+- Large payloads travel as a **claim check**: the file goes to object storage and the message carries a pointer.
 
-## The idea in plain English
+## Mental model
 
-A restaurant ticket rail: waiters add tickets, cooks take them as they have capacity. The waiter does not wait for the dish, and a busy night just means a longer rail.
+- Think of a restaurant ticket rail: waiters add tickets, cooks take them as they have capacity.
+- The waiter does not wait for the dish, and a busy night only means a longer rail.
+- A ticket a cook drops goes back on the rail, so a dish can be cooked twice unless someone checks the ticket number.
+- The broker is the rail, the producer is the waiter, and each consumer is a cook.
 
 ## Core concepts
 
-1. **Producer, broker, consumer.** The broker stores messages durably until acknowledged.
-2. **Queue vs topic.** Competing consumers share a queue; each subscriber group gets its own copy of a topic.
-3. **Partitions.** A topic is split into ordered logs; the partition key preserves per-key order and sets parallelism.
-4. **Acknowledgements.** Consumers ack after processing; unacked messages are redelivered.
-5. **Delivery semantics.** At-least-once is the practical default; pair it with [idempotency](/system-design/patterns/idempotency).
-6. **Dead-letter queue.** Messages that keep failing are parked for inspection.
-7. **Log vs queue brokers.** Log-based (Kafka) retain and replay; queue-based (SQS, RabbitMQ) delete on ack.
+- The running example is Brightpost's checkout on sale day: **300 order events/s** at peak, each keyed by its order id, read by fulfilment, payments, email and analytics.
+
+### Producer, broker, consumer
+
+- The **broker** stores messages durably until a consumer **acknowledges** them.
+- Consumers ack after processing; an unacked message is delivered again.
+- **Queue brokers** (SQS, RabbitMQ) delete a message once it is acked.
+- **Log brokers** (Kafka) keep messages for a retention period and let each reader track its own position, so a new reader can replay history.
+
+### Queue or topic
+
+- **Competing consumers** share one queue: each message goes to one of them, so adding workers adds throughput.
+- A **topic** gives each **subscriber group** its own copy of the stream; inside a group the members share the work again.
+- Kafka does both with one primitive: a topic read by one group is a queue, and read by several groups it is pub/sub.
+
+<AnimatedDiagram spec="animated/patterns/mq-queue-vs-topic" caption="A queue hands each message to one worker, so workers share the load; a topic gives every subscriber group its own copy." />
+
+**How to read it:**
+
+- Left: three email jobs, three workers, one job each. The queue spreads work.
+- Right: three order events, three groups, every event to every group. The topic copies the stream.
+
+**The numbers:**
+
+- 300 order events/s on a topic read by 4 groups (fulfilment, payments, email, analytics) is 1,200 deliveries a second, with one write.
+- The same 300/s on a queue read by 10 workers is about 30 messages a second per worker.
+
+<PremiumBreak />
+
+### Delivery guarantees
+
+- **At most once:** ack (or commit the offset) before processing. A crash loses the message; nothing is repeated.
+- **At least once:** process, then ack. A crash before the ack delivers the message again. This is the practical default.
+- **Exactly once** is not on offer end to end: the network can always lose the ack. What you can build is an **effectively-once effect**.
+- **Effectively once = at least once + an idempotent consumer:** store the message id with the result in one transaction, and skip an id already seen (see [Idempotency](/system-design/patterns/idempotency)).
+- Inside Kafka, the **idempotent producer** stops retries from writing duplicates, and **transactions** make read, process and write between topics atomic. Neither covers a side effect outside Kafka, such as an email.
+
+<AnimatedDiagram spec="animated/patterns/mq-redelivery" stepper caption="At-least-once means a crash before the ack delivers the message again: the idempotent check absorbs the repeat, and the dead-letter queue catches what never succeeds." />
+
+<StepCards>
+  <StepCard n={1} title="A lost ack: redelivered, skipped">
+    Worker A reserves stock for order 4471 and crashes before it deletes the message. After the 30 s visibility timeout the queue gives it to worker B, and the database sees message id m1 again and skips it.
+  </StepCard>
+  <StepCard n={2} title="A poison message: dead-lettered">
+    A message that cannot be parsed fails on every receive. After five receives the queue moves it to the dead-letter queue, so it stops taking workers' time.
+  </StepCard>
+</StepCards>
+
+### Dead letters
+
+- A **poison message** fails every time: bad data, a bug, a missing record.
+- A **dead-letter queue (DLQ)** takes it after N failed receives (SQS: `maxReceiveCount` in the redrive policy).
+- In a partitioned log there is no per-message redelivery: a poison record blocks its partition until the consumer skips it, so the consumer writes it to a dead-letter topic and moves on.
+- Alert on DLQ depth, fix the cause, then **redrive** the messages back to the source queue.
+
+### Ordering per key
+
+- A partition is an ordered log, and one consumer per group reads it, so order holds **per partition**.
+- Choose the **partition key** so that everything that must stay in order shares it: the order id for an order's events, the account id for a balance.
+- Across partitions there is no order. Two orders' events interleave freely, which is what lets them run in parallel.
+- SQS FIFO queues do the same with a **message group id**: while one message of a group is in flight, the next one waits.
+- A retry that goes to the back of the queue breaks order for its key. Retry in place, or park the whole key.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    P1["Producer"] --> T[("Topic<br/>partitions 0..N")]
-    P2["Producer"] --> T
-    T --> CG1["Consumer group A<br/>(billing)"]
-    T --> CG2["Consumer group B<br/>(analytics)"]
-    CG1 -. "repeated failure" .-> DLQ[("Dead-letter queue")]
-```
+The Brightpost orders topic, read by one consumer group, built up one part at a time.
 
-## Deep dive
+<AnimatedDiagram spec="animated/patterns/mq-partitions-groups" stepper caption="The key picks the partition, the group gives each partition one owner, and a dead consumer's partitions wait for the rebalance." />
 
-### Outbox pattern
+<StepCards>
+  <StepCard n={1} title="Key by order id: 6 partitions">
+    Checkout hashes each order id to one of 6 partitions, so 300 events a second become about 50 per partition, and every event of one order lands in the same partition, in order.
+  </StepCard>
+  <StepCard n={2} title="A consumer group of 3">
+    The fulfilment group has 3 consumers. Each partition has exactly one owner in the group, so each consumer reads 2 partitions, about 100 events a second.
+  </StepCard>
+  <StepCard n={3} title="Commit an offset per partition">
+    After processing, each consumer commits its position in each partition. A consumer that restarts, or takes over a partition, resumes from the last committed offset, so anything after it is read again.
+  </StepCard>
+  <StepCard n={4} title="A consumer stops: rebalance">
+    Consumer 2 stops heartbeating. Nobody reads partitions 2 and 3 until the session timeout passes and the group moves them to consumers 1 and 3. Lag grows for the whole wait.
+  </StepCard>
+</StepCards>
 
-To update a database and publish an event atomically, write the event to an outbox table in the same transaction, and have a relay publish it. This avoids losing events or publishing ones for rolled-back changes.
+## Technical mechanics
 
-### Back pressure
+### Partitions set the parallelism
 
-If consumers fall behind, lag grows. Scale consumers, cap queue depth, or shed load; see [Back Pressure](/system-design/patterns/back-pressure).
+- A group can use at most one consumer per partition. With 6 partitions, a seventh consumer sits idle.
+- Pick the partition count for the peak you expect, with room: adding partitions later changes which partition a key hashes to.
+- A **hot key** (one celebrity, one flash-sale product) puts one partition over its limit however many partitions there are (see [Hot Keys, Skew and Request Coalescing](/system-design/patterns/hot-keys-and-coalescing)).
+
+### Large payloads: the claim check
+
+- Brokers are built for many small messages: SQS takes up to 1 MiB a message, and Kafka's default limit is about 1 MB.
+- **Claim check:** write the payload (a 50 MB export, a video) to object storage first, then publish a message with its key and a content hash.
+- The consumer fetches the payload with the key and checks the hash.
+- The payload write and the publish are not atomic: publish only after the upload succeeds, and give the store a lifecycle rule that deletes payloads after the message retention.
+
+### Publishing reliably: the outbox
+
+- Writing to the database and then publishing can lose the event (crash between the two) or publish one for a rolled-back change.
+- Write the event to an **outbox table** in the same transaction, and let a relay or CDC publish it.
+- Full treatment: [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc).
+
+### Lag and back pressure
+
+- **Consumer lag** is the number of messages written but not yet processed: the first metric to alert on.
+- If consumers fall behind, scale them (up to the partition count), cap queue depth or shed load (see [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)).
+
+### Worked example: a consumer dies at 12:00
+
+Follow the four steps of the Architecture figure on sale day, with each consumer able to process 150 events/s (illustrative).
+
+1. 300 order events/s, keyed by order id, spread over 6 partitions.
+2. 3 consumers own 2 partitions each and run at 100 of their 150 events/s.
+3. Each commits its offsets as it goes.
+4. Consumer 2 stops; partitions 2 and 3 wait for the 45 s session timeout, then move to consumers 1 and 3.
+
+**The numbers:**
+
+- Per partition: 300 ÷ 6 = 50 events/s. Per consumer: 2 × 50 = 100 events/s, 67 % of its capacity.
+- Lag built during the timeout: 2 partitions × 50 events/s × 45 s = 4,500 events.
+- After the rebalance, 2 consumers read 3 partitions each: 150 events/s each, exactly their capacity. Inflow equals outflow, so the 4,500 never drain.
+- Start a replacement: 3 × 150 = 450 events/s against 300 in, so lag drains at 150/s and is gone in 4,500 ÷ 150 = 30 s.
+- The lesson: keep spare capacity per consumer, or a single failure turns into lag that only grows.
 
 ## Trade-offs
 
-| Choice | Gain | Cost |
-|---|---|---|
-| Async via queue | Decoupling, burst absorption | Eventual consistency, harder debugging |
-| Strict ordering | Predictable processing | Limits parallelism |
-| Exactly-once | No duplicates | Complexity, throughput cost |
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Async via a queue | Decoupling, bursts absorbed | Eventual consistency, harder debugging | Work the user need not wait for |
+| Queue broker (SQS, RabbitMQ) | Per-message ack, retry and DLQ | No replay once acked | Task queues, jobs |
+| Log broker (Kafka) | Replay, many groups, high throughput | Order and retry per partition, not per message | Event streams, many readers |
+| Strict ordering | Predictable processing per key | Parallelism capped by keys and partitions | Events of one order or account |
+| Exactly-once effects | No duplicate effects | An idempotency store or transactions; slower | Money, stock, anything counted |
 
-## Real-world examples
+## Production systems
 
-- Designing the broker itself: [Distributed Message Queue](/system-design/case-studies/distributed-message-queue).
-- Fan-out of posts and notifications: [Twitter](/system-design/case-studies/twitter), [Instagram](/system-design/case-studies/instagram).
-- Crawl frontier and processing stages: [Web Crawler](/system-design/case-studies/web-crawler).
-- Video transcoding pipelines: [YouTube](/system-design/case-studies/youtube), [TikTok](/system-design/case-studies/tiktok).
-- Payments and orders: [Uber Eats](/system-design/case-studies/uber-eats), [Kindle Payments](/system-design/case-studies/kindle-payments).
-- Export jobs: [User Data Export](/system-design/case-studies/user-data-export).
+- **Apache Kafka** (as of November 2026): a partition is consumed by exactly one consumer in each group; the idempotent producer (since 0.11, on by default since 3.0) filters retried duplicates with producer ids and sequence numbers; transactions give exactly-once read-process-write between Kafka topics.
+- **Amazon SQS**: the visibility timeout defaults to 30 s and can be extended up to 12 hours; an undeleted message becomes visible again; a redrive policy moves a message to a DLQ after `maxReceiveCount` receives.
+- **Amazon SQS message size**: raised from 256 KiB to 1 MiB in August 2025; the Extended Client Library stores larger payloads (up to 2 GB) in S3 and sends a reference, which is a claim check.
+- **SQS FIFO queues**: messages with one message group id are processed in strict order; the next message of the group waits while one is in flight.
+- **Used in our case studies:** [Twitter](/system-design-case-studies/case-studies/twitter) · [Instagram](/system-design-case-studies/case-studies/instagram) · [TikTok](/system-design-case-studies/case-studies/tiktok) · [Uber Eats](/system-design-case-studies/case-studies/uber-eats) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Tinder](/system-design-case-studies/case-studies/tinder) · [Zillow](/system-design-case-studies/case-studies/zillow) · [Dropbox](/system-design-case-studies/case-studies/dropbox) · [YouTube](/system-design-case-studies/case-studies/youtube) · [S3](/system-design-case-studies/case-studies/s3) · [User Data Export](/system-design-case-studies/case-studies/user-data-export) · [Web Crawler](/system-design-case-studies/case-studies/web-crawler) · [Metrics and Logging](/system-design-case-studies/case-studies/metrics-and-logging) · [Distributed Message Queue](/system-design-case-studies/case-studies/distributed-message-queue)
 
-## Common pitfalls
+## Failure modes & pitfalls
 
-- Assuming exactly-once delivery without idempotent handlers.
-- Poison messages blocking a partition.
-- Unbounded queues hiding an overloaded consumer.
-- Using one hot partition key.
+- **Assuming exactly-once delivery.** Handlers run twice after a lost ack. Make every consumer idempotent.
+- **Poison messages blocking a partition.** One bad record stalls everything behind it. Send it to a dead-letter topic after N tries.
+- **Unbounded queues hiding an overloaded consumer.** Lag grows for hours before anyone looks. Alert on lag and its rate of change.
+- **One hot partition key.** One partition at its limit while the rest idle. Pick a key with many values, or split the hot key.
+- **A visibility timeout shorter than the work.** The message reappears mid-processing and two workers do it. Set the timeout above the slowest run, or extend it with a heartbeat.
+- **Retrying to the back of the queue for ordered keys.** The retry overtakes later events. Retry in place or park the key.
 
-## How to answer in an interview
+## Interview framework
 
-Say what must be synchronous and what can be async, choose queue or topic, state delivery semantics and ordering needs, and cover retries, DLQ and lag monitoring.
+1. Say what must be synchronous and what can be asynchronous, and why.
+2. Choose queue or topic, and the broker type (per-message queue or replayable log).
+3. State the delivery guarantee and how the consumer makes repeats harmless.
+4. Name the partition key and what stays in order; size partitions for the peak.
+5. Cover retries, the dead-letter queue, lag alerts and what happens when a consumer dies.
 
-## Related patterns
+**What interviewers listen for:** "at least once plus an idempotent consumer", and a partition key chosen for the order the business needs.
 
-[Idempotency](/system-design/patterns/idempotency) · [Back Pressure](/system-design/patterns/back-pressure) · [Saga](/system-design/patterns/saga) · [Fan-out](/system-design/patterns/fan-out)
+**Red flags:** "Kafka gives exactly-once, so duplicates cannot happen", or a queue with no plan for poison messages.
 
 ## Further reading
 
+- [Kafka design: message delivery semantics (Apache Kafka docs)](https://kafka.apache.org/documentation/#semantics)
+- [Amazon SQS visibility timeout (AWS docs)](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
+- [Claim Check pattern (Azure Architecture Center)](https://learn.microsoft.com/en-us/azure/architecture/patterns/claim-check)
 - [Kafka: a Distributed Messaging System for Log Processing](https://notes.stephenholiday.com/Kafka.pdf)
 - [Transactional Outbox pattern (microservices.io)](https://microservices.io/patterns/data/transactional-outbox.html)
+- Related pages: [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) · [Idempotency](/system-design/patterns/idempotency) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) · [Fan-out](/system-design/patterns/fan-out) · [Stream Processing and Windowed Aggregation](/system-design/patterns/stream-processing-and-windowing)
 
 <InterviewQuestions>
   <InterviewQuestion question="Can you get exactly-once delivery?" category="Concepts" level="Senior">
-    Not strictly over an unreliable network. In practice you use at-least-once delivery plus idempotent processing or transactional writes to get an effectively-once outcome.
+    - Not strictly over an unreliable network: the ack can always be lost, so the broker must either redeliver or risk losing the message.
+    - In practice you use at-least-once delivery plus idempotent processing: store the message id with the result in one transaction and skip ids already seen.
+    - Inside Kafka, the idempotent producer and transactions give exactly-once between topics, but not for side effects outside Kafka such as an email or a payment.
   </InterviewQuestion>
-  <InterviewQuestion question="How is ordering preserved?" category="Design" level="Mid">
-    Route related messages to the same partition with a key; order is guaranteed within a partition, and one consumer per partition processes it sequentially.
+  <InterviewQuestion question="How is ordering preserved?" category="Architecture" level="Mid">
+    - Route related messages to the same partition with a key, such as the order id.
+    - Order is guaranteed within a partition, and one consumer per group processes it sequentially.
+    - There is no order across partitions, which is what allows them to run in parallel.
   </InterviewQuestion>
-  <InterviewQuestion question="What is a dead-letter queue?" category="Reliability" level="Junior">
-    A holding queue for messages that failed after the allowed retries, so they stop blocking the main flow and can be examined or replayed.
+  <InterviewQuestion question="What is a dead-letter queue?" category="Failure modes" level="Junior">
+    - A holding queue for messages that failed after the allowed retries.
+    - It stops a poison message from blocking the main flow or wasting workers.
+    - Messages there can be examined, fixed and replayed (redriven) to the source queue; alert on its depth.
+  </InterviewQuestion>
+  <InterviewQuestion question="When do you use a queue, and when a topic?" category="Concepts" level="Junior">
+    - A queue when each message is a task for one worker, such as sending one email: workers share the load.
+    - A topic when several services each need every event, such as payments, email and analytics all reading "order placed".
+    - Kafka covers both: one consumer group reading a topic behaves like a queue, several groups make it pub/sub.
+  </InterviewQuestion>
+  <InterviewQuestion question="Six partitions, three consumers, and one consumer dies at peak. What happens to lag?" category="Scaling" level="Senior">
+    - Its two partitions go unread until the session timeout (45 s by default in Kafka) triggers a rebalance: at 50 events/s each, that is 4,500 events of lag.
+    - After the rebalance two consumers read three partitions each; if that equals their capacity, lag never drains.
+    - Run consumers with headroom, and start a replacement: with 150/s spare, 4,500 events drain in 30 s.
+    - At most six consumers help, because each partition has one owner per group.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you send a 50 MB export file through a queue?" category="Architecture" level="Mid">
+    - Do not put it in the message: SQS takes up to 1 MiB and Kafka's default limit is about 1 MB.
+    - Upload the file to object storage first, then publish a small message with its key and a content hash (the claim check).
+    - The consumer downloads by key and verifies the hash.
+    - Publish only after the upload succeeds, and expire the stored files with a lifecycle rule after the message retention.
+  </InterviewQuestion>
+  <InterviewQuestion question="A consumer charges a card and then crashes before acking. What stops a double charge?" category="Failure modes" level="Senior">
+    - The broker will redeliver, so the charge itself must be idempotent.
+    - Pass an idempotency key derived from the message (such as the order id) to the payment provider, which returns the first result for a repeat.
+    - Record the message id as processed in the same transaction as any local state change, and check it before doing the work.
   </InterviewQuestion>
 </InterviewQuestions>

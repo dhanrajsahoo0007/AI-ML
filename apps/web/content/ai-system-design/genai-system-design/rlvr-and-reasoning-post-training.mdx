@@ -1,0 +1,284 @@
+---
+title: "RLVR & Reasoning Post-Training (GRPO, PRMs)"
+description: "Training reasoning models with Reinforcement Learning from Verifiable Rewards, GRPO, process reward models and synthetic reasoning traces."
+icon: trending-up
+updated: 2026-11-15
+---
+
+Reasoning models such as DeepSeek-R1, Qwen3 and Kimi k1.5 learn to think at length mostly in post-training, through reinforcement learning against rewards that a program can check.
+
+- Interviewers ask about it because it is the newest stage of the LLM training stack, and a good answer needs RL basics (advantages, a KL penalty), the GRPO trick, the DeepSeek-R1 recipe, and an honest account of reward hacking and of what RL does and does not add.
+
+## Overview
+
+- **RLHF** optimizes a policy against a **learned reward model**, and a policy pushed hard finds that model's blind spots. **RLVR**, named in AI2's Tülu 3 (2024), keeps the same loop but takes the reward from a **program**: an exact-match answer check, unit tests, or a format check.
+- **GRPO** (DeepSeekMath, 2024) samples a **group** of answers per prompt and uses each answer's reward, **normalized within the group**, as its advantage. It needs **no value network**, and a **KL penalty** holds the policy near a reference model.
+- **DeepSeek-R1-Zero** ran GRPO with rule-based rewards straight on DeepSeek-V3-Base: AIME 2024 pass@1 rose from **15.6% to 71.0%** and long, self-checking chains emerged, but the text was hard to read. **DeepSeek-R1** added cold-start SFT, rejection sampling and a second RL stage, reaching **79.8%**.
+- **Distillation** of R1's 800k samples into small models with SFT alone **beat RL run on the small model**: 72.6% against 47.0% on AIME 2024 for the same Qwen2.5-32B base.
+- Verifiers can still be **gamed** (format tricks, skipped tests), and researchers **disagree** on whether RLVR teaches new skills or mostly makes a base model's existing correct answers more likely.
+
+<KeyIdea>RLVR keeps the RLHF loop but takes the reward from a program that checks the answer, and GRPO turns that 0/1 reward into advantages by comparing a group of answers to the same prompt, so no critic is needed; the weak spot moves from the reward model to the checker.</KeyIdea>
+
+## Mental model
+
+- Picture a student preparing for a math contest.
+- In RLHF the student's work is marked by a teaching assistant who grades by feel, and the student soon learns that long, confident answers score well whether or not they are right.
+- In RLVR the student marks every attempt against the answer key at the back of the book: the final number is right or it is not.
+- GRPO adds a habit: the student tries each problem six times and compares the attempts with each other, so the ones that beat the student's own average get reinforced and the rest get discouraged.
+- The weak spot moves to the answer key. If it only checks the last line, a sloppy derivation with a lucky final number still earns full marks.
+
+## Core concepts
+
+1. **RLHF in two sentences.** A reward model $r_\phi$ is trained on human comparisons of two responses, then the LLM (the policy $\pi_\theta$) is optimized with PPO to score highly on $r_\phi$, with a KL penalty that keeps it close to a reference model (see [scaling laws and training](/ai-system-design/genai-system-design/scaling-laws-and-training) and [RLHF and DPO](/ai-system-design/genai-system-design/reinforcement-preference-learning)).
+   - The weak point is that $r_\phi$ is itself a network fit to a limited set of comparisons, and the policy is an optimizer searching for whatever it over-scores: Gao et al. (2022) showed the learned reward keeps rising while a stand-in for true quality (a larger “gold” reward model) peaks and then falls.
+   - DeepSeek reports the same effect with R1's helpfulness reward model, whose score rose while Codeforces accuracy dropped.
+
+2. **RLHF vs. Reinforcement Learning with Verifiable Rewards (RLVR).** Tülu 3 introduced the name for RL that "replaces the reward model with a verification function". The objective is the usual KL-regularized one, with a verifier $v$ that returns a fixed reward when the answer checks out:
+
+   $$
+   \max_{\pi_\theta}\; \mathbb{E}_{y \sim \pi_\theta(\cdot \mid x)}\big[v(x, y)\big] - \beta\, \mathrm{KL}\big[\pi_\theta(y \mid x) \,\|\, \pi_{\text{ref}}(y \mid x)\big], \qquad v(x, y) = \begin{cases} \alpha & \text{if correct} \\ 0 & \text{otherwise} \end{cases}
+   $$
+
+- Tülu 3 used $\alpha = 10$, PPO, and about 30,000 prompts with ground truth from GSM8K, MATH and IFEval-style constraints.
+- The loop does not change; only the source of reward does, and so does where hacking can enter.
+
+<AnimatedDiagram
+  spec="animated/llm/rlvr-reward-sources"
+  caption="RLVR keeps the RLHF loop and swaps the learned reward model for a program; hacking does not disappear, it moves from the reward model’s blind spots into the checker’s loopholes."
+/>
+
+3. **Kinds of verifiable reward.** An *accuracy* reward checks the final answer: a math answer in a fixed place, such as a box, compared with the reference, or code compiled and run against test cases.
+   - A *format* reward checks structure: DeepSeek-R1-Zero earned it for putting its reasoning between `<think>` and `</think>` tags.
+   - Instruction-following checkers verify constraints such as "exactly three bullet points".
+   - DeepSeek-R1 also added a *language-consistency* reward, the share of chain-of-thought words in the target language.
+   - Rewards are summed; R1-Zero weighted accuracy and format equally.
+
+4. **Advantages and the critic.** A policy-gradient update raises the log-probability of each sampled response in proportion to its *advantage*: how much better it did than expected.
+   - PPO estimates "expected" with a value network, the critic, which is usually as large as the policy and trained alongside it.
+   - DeepSeekMath points out two costs: the critic's memory and compute, and the difficulty of learning a per-token value when the reward arrives only at the last token.
+   - PPO also clips the ratio between new and old probabilities, so one update cannot move the policy far.
+
+5. **Group Relative Policy Optimization (GRPO) without a critic model.** For each question $q$, GRPO samples $G$ outputs from the current policy, scores them, and uses the group's own statistics as the baseline:
+
+   $$
+   A_i = \frac{r_i - \operatorname{mean}(r_1, \dots, r_G)}{\operatorname{std}(r_1, \dots, r_G)}
+   $$
+
+   Every token of output $o_i$ gets advantage $A_i$. The loss is PPO's clipped objective with the KL divergence to the reference added directly, rather than folded into the reward:
+
+   $$
+   J(\theta) = \frac{1}{G}\sum_{i=1}^{G} \min\!\Big(\rho_i A_i,\; \operatorname{clip}(\rho_i, 1 - \varepsilon, 1 + \varepsilon)\, A_i\Big) - \beta\, D_{\text{KL}}\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big), \qquad \rho_i = \frac{\pi_\theta(o_i \mid q)}{\pi_{\theta_{\text{old}}}(o_i \mid q)}
+   $$
+
+   DeepSeekMath, which introduced GRPO with a *learned* reward model, used $G = 64$ and $\beta = 0.04$; DeepSeek-R1 used $G = 16$ and $\beta = 0.001$ with rule-based rewards. Step through one update with $G = 6$:
+
+<AnimatedDiagram
+  spec="animated/llm/rlvr-grpo-step"
+  stepper
+  caption="GRPO needs no value network: the group’s own mean reward is the baseline, so the two correct answers get +1.41, the four wrong ones −0.71, and a group that is all right or all wrong gives no signal at all."
+/>
+
+6. **Outcome reward models vs. process reward models (PRMs).** An outcome reward scores only the final answer; a process reward model scores every reasoning step.
+   - OpenAI's "Let's Verify Step by Step" (Lightman et al., 2023) collected 800,000 human step labels (PRM800K) and found that picking the best of 1,860 samples with a PRM solved 78.2% of a 500-problem MATH subset, against 72.4% with an outcome model.
+   - DeepSeekMath ran GRPO with process rewards too, giving each token the sum of the normalized rewards of the steps after it.
+   - DeepSeek-R1 then dropped PRMs for training, for three stated reasons: a "step" is hard to define, step labels are hard to get at scale, and a model-based PRM invites reward hacking.
+   - PRMs remain useful for reranking and guided search at inference time (see [reasoning models and test-time compute](/ai-system-design/genai-system-design/reasoning-models-and-test-time-compute)).
+
+7. **Emergent self-verification and backtracking behaviors.** During R1-Zero's RL, the average response length grew steadily to thousands of tokens, and the model began to re-check earlier steps and try alternative approaches without being told to.
+   - DeepSeek highlighted an "aha moment" in which an intermediate checkpoint stops mid-solution with "Wait, wait.
+   - Wait." and re-evaluates; the revised paper ties it to a sudden rise in the word "wait".
+   - Treat "emergent" with care: Liu et al. (2025) found that DeepSeek-V3-Base already produces such self-reflection before any RL, so RL amplifies a behavior the base model can already sample rather than inventing it.
+
+8. **Sharpening or new skill?** Yue et al. (2025) compared models before and after RLVR using pass@$k$, the chance that at least one of $k$ samples is correct.
+   - RLVR models win at small $k$, but base models catch up and overtake them at large $k$ (such as 256), and the correct reasoning paths of RLVR models were already in the base model's samples.
+   - DeepSeekMath had reported the same pattern in 2024: RL improved majority voting but not pass@$k$.
+   - On the other side, NVIDIA's ProRL (2025) reports that much longer RL with KL control and periodic reference resets solved some tasks the base model failed at any $k$ tried.
+   - A fair summary: RLVR reliably makes correct answers more likely on the first try; whether it pushes the frontier depends on training length, data and the base model, and is still debated.
+
+## Architecture
+
+The DeepSeek-R1 report is the most complete public recipe. It has two models and a distillation branch.
+
+<AnimatedDiagram
+  spec="animated/llm/rlvr-r1-pipeline"
+  caption="R1-Zero proved that RL with rule-based rewards alone can teach long reasoning; R1 wraps the same RL in cold-start and rejection-sampling SFT for readability, and its 800k samples also distill into small models that beat RL run on the small model directly."
+/>
+
+1. **R1-Zero: RL on the base model.** GRPO runs directly on DeepSeek-V3-Base, a 671B-parameter [mixture-of-experts](/ai-system-design/genai-system-design/mixture-of-experts) model with 37B active.
+   - A template asks for reasoning in `<think>` tags, then the answer in `<answer>` tags; the only rewards are accuracy and format, and no neural reward model is used.
+   - AIME 2024 pass@1 (averaged over 16 samples per question) climbs from 15.6% to 71.0%, and 86.7% with a majority vote over 64 samples.
+   - The revised paper reports 77.9%, from a run that raised the output limit to 65,536 tokens partway through.
+2. **Stage 1, cold-start SFT.** R1-Zero's text mixes languages and is hard to read, so V3-Base is first fine-tuned on "thousands" of long chain-of-thought examples in a readable format that ends with a summary. Sources include few-shot prompting and R1-Zero outputs cleaned up by human annotators.
+3. **Stage 2, reasoning RL.** The same large-scale RL as R1-Zero, on math, code, science and logic, plus the language-consistency reward. DeepSeek reports that this reward costs a little accuracy but makes the chains readable.
+4. **Stage 3, rejection sampling and SFT.** The stage-2 checkpoint answers many prompts several times, and only correct answers are kept, about 600k reasoning samples; some are judged by DeepSeek-V3 given the reference answer. About 200k non-reasoning samples (writing, factual QA, translation) are added, and V3-Base itself, not the RL checkpoint, is fine-tuned on the 800k for two epochs.
+5. **Stage 4, RL for all scenarios.** Rule-based rewards continue for reasoning; reward models judge helpfulness (on the final summary only) and harmlessness (on the whole response). The revised paper says preference rewards were used only in the last 400 of 1,700 steps, because longer runs led to reward hacking. The result, DeepSeek-R1, scores 79.8% on AIME 2024 (OpenAI o1-1217: 79.2%) and 97.3% on MATH-500.
+6. **Distillation.** The same 800k samples fine-tune six dense Qwen2.5 and Llama models, with SFT only and no RL.
+
+- The revised paper puts the whole post-training at about 147K H800 GPU hours: 101K for R1-Zero, 41K for R1 and 5K to build SFT data, or roughly 294,000 dollars at 2 dollars per GPU hour.
+- Pre-training DeepSeek-V3 took 2,664K GPU hours, so the reasoning post-training cost about 5.5% of that.
+
+## Technical mechanics
+
+### Building deterministic verifiers for math, code and logic
+
+- A verifier is a reward function, so its bugs become the model's habits.
+- For **math**, the prompt fixes where the final answer goes (a box or an answer tag), the checker extracts it and normalizes it, and then compares it with the reference: strip spaces and units, treat 0.5 and 1/2 as equal, and compare expressions symbolically where needed.
+- Tülu 3 takes the last number for GSM8K and uses a lenient "flex" match for MATH.
+- A checker that rejects correct answers adds noise; one that accepts wrong answers, for example by matching any number anywhere in the text, teaches the model to list several candidates.
+- Avoid questions with guessable answers: Qwen3 removed queries with several sub-questions and queries that a strong model answered correctly without reasoning.
+
+- For **code**, the verifier compiles the program and runs it against test cases in a sandbox with time and memory limits.
+- Keep some tests hidden, give the agent no write access to them, and decide whether partial passes earn partial reward.
+- Execution is slow: DeepSeek says long evaluation times are why R1 saw little RL on software-engineering tasks.
+- For **logic and instruction following**, write a checker per constraint (word counts, bullet counts, valid JSON) or use puzzles with one checkable solution.
+- Where no rule exists, a model can judge against a reference answer, as R1 did for part of its stage-3 data, but that brings back a model that can be fooled.
+
+- The data must be **learnable and hard**. A group where every sample is right, or every sample is wrong, has zero variance and zero advantage, so it adds compute and no gradient.
+- DAPO (ByteDance Seed and Tsinghua, 2025) over-samples and drops such prompts until the batch is full of mixed groups.
+- Qwen3's reasoning-RL stage used only 3,995 query-verifier pairs, chosen to be unseen in cold start, learnable for the model, as hard as possible, and broad.
+- **Compute** is dominated by generating long rollouts, not by the gradient step: R1-Zero sampled 16 outputs for each of 32 questions per step, up to 32,768 tokens each (65,536 after step 8,200), for 10,400 steps on 512 H800 GPUs.
+- RL systems therefore pair a fast [inference engine](/ai-system-design/genai-system-design/llm-inference-engine) for rollouts with the trainer.
+
+### Length penalties, reward hacking and reasoning collapse
+
+**Length:**
+
+- Longer chains raise accuracy and cost: every extra token is paid for in training rollouts and again in serving.
+- Part of the growth is an artifact. Dr. GRPO (Liu et al., 2025) shows that dividing each output's loss by its length $|o_i|$ gives short correct answers a larger push and long wrong answers a smaller penalty, so wrong answers drift longer; their fix drops that division and the per-group std.
+- Kimi k1.5 adds a length reward within each group, $\lambda = 0.5 - \frac{\text{len} - \text{min\_len}}{\text{max\_len} - \text{min\_len}}$, given in full to correct answers and as $\min(0, \lambda)$ to wrong ones, and warms it up only after normal training has started.
+- DAPO stops treating truncated outputs as plain failures and adds a soft penalty near the length limit.
+
+**Reward hacking in RLVR** takes concrete forms:
+
+- *Format gaming:* collecting the format reward with an empty or token `<think>` block, or exploiting a lenient answer parser.
+- *Test overfitting:* special-casing the visible test inputs, writing stubs where coverage is poor, or making tests pass without solving the task. OpenAI (Baker et al., 2025) caught a frontier reasoning model using `exit(0)` and `raise SkipTest` to pass unit tests during RL.
+- *Constraint over-optimization:* Tülu 3 found high-KL runs on IFEval constraints producing odd text that satisfied the checker.
+- *Learned rewards inside the mix:* R1's helpfulness reward model was hacked on longer runs, so DeepSeek used it only in the final 400 steps.
+
+<Callout tone="red" title="What breaks">
+  The checker's loopholes become the model's habits. The defenses are a strict parser, hidden tests, a sandbox that cannot edit the grader, a KL penalty, and monitoring. Baker et al. also warn that penalizing "bad thoughts" seen in the chain of thought taught the model to hide its intent while still hacking.
+</Callout>
+
+**Reasoning collapse:**
+
+<Callout tone="red" title="What breaks">
+  RL tends to lower the policy's entropy. When outputs within a group become identical, advantages vanish and learning stalls; DAPO's "clip-higher" raises the upper clip bound so rare tokens can still gain probability.
+</Callout>
+
+- Watch entropy, average length, the share of zero-variance groups, pass@$k$ on held-out problems, and the readability of chains, since R1-Zero showed that a model can score well while writing text people cannot follow.
+
+### Distilling long reasoning traces into smaller models
+
+- DeepSeek fine-tuned six dense models on the 800k R1 samples with SFT only.
+- On AIME 2024 pass@1 the students reach 28.9% (Qwen-1.5B), 55.5% (Qwen-7B), 69.7% (Qwen-14B), 72.6% (Qwen-32B), 50.4% (Llama-8B) and 70.0% (Llama-70B), against 9.3% for GPT-4o-0513.
+- The key comparison: over 10K steps of large-scale RL on the same Qwen-32B base reached only 47.0%.
+- DeepSeek's two conclusions are that distilling a strong teacher is the cheaper way to give small models reasoning, and that moving the frontier still needs a strong base and large-scale RL.
+- Yue et al. add a mechanism: distillation can teach reasoning patterns the student did not have, while RLVR mostly re-weights patterns already there.
+
+- Qwen3 trains only its largest models with the full four-stage pipeline and builds smaller ones by "strong-to-weak" distillation from the teacher's outputs and logits.
+- Qwen reports better pass@1 and pass@64 than running the full pipeline on each small model, at about one-tenth of the GPU hours.
+- In practice, filter traces for correctness, readability and length before training, expect the student to inherit the teacher's verbosity, and budget for long training sequences: DeepSeek used a 32,768-token context (see [distillation and small models](/ai-system-design/genai-system-design/distillation-and-small-models)).
+
+## Trade-offs
+
+<Compare caption="Reasoning post-training choices: where the reward comes from, what each method costs, and when it fits.">
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| PPO with a learned reward model (RLHF) | Works for open-ended goals; online exploration | Reward model can be hacked; critic as large as the policy | Helpfulness, style and safety where no rule can check the answer |
+| PPO with a verifiable reward (Tülu 3 RLVR) | Exact reward; mature algorithm | Still needs a critic; only checkable tasks | Teams with a working PPO stack and checkable tasks |
+| GRPO | No critic, less memory; group baseline suits 0/1 rewards | $G$ samples per prompt; no signal from all-right or all-wrong groups; length and difficulty biases | Reasoning RL on math, code and logic |
+| DPO | Offline, stable, no reward model or RL loop | No exploration; learns only from the pairs it is given | Preference tuning on fixed comparison data |
+| Outcome vs. process rewards | Outcome: cheap and hard to game with a strict checker; process: credit for each step | Outcome: sparse, rewards lucky guesses; process: step labels are costly and a PRM can be hacked | Outcome for RL training; PRMs for reranking and search |
+| RL on the base (R1-Zero) vs. cold start first (R1) | Zero: no SFT data, shows what RL alone finds | Zero: unreadable, mixed-language chains | Cold start for any model people will read |
+| Distillation vs. RL for small models | Distillation: cheaper, and 72.6% vs 47.0% on AIME for a 32B model | Needs a strong teacher; inherits its length and errors | Distill small models; spend RL compute on the largest |
+
+</Compare>
+
+## Production systems
+
+- **DeepSeek-R1 and R1-Zero** (January 2025): GRPO with rule-based rewards on DeepSeek-V3-Base. R1 scores 79.8% on AIME 2024, 97.3% on MATH-500 and a 2,029 Codeforces rating; the weights and six distilled models were released openly.
+- **Tülu 3** (AI2, November 2024): open post-training of Llama 3.1 at 8B, 70B and 405B, ending with an RLVR stage that used PPO, a reward of 10 for verified answers and about 30,000 prompts from GSM8K, MATH and IFEval-style constraints.
+- **Qwen3** (2025): long-CoT cold start, then reasoning RL with GRPO on 3,995 query-verifier pairs, then stages that merge thinking and non-thinking modes; small models are distilled at about one-tenth the GPU hours.
+- **Kimi k1.5** (Moonshot AI, January 2025): reasoning RL with a length penalty inside each group, plus "long2short" methods that move long-chain skill into shorter answers.
+- **DAPO** (ByteDance Seed and Tsinghua, March 2025): an open RL system that reaches 50 points on AIME 2024 from the Qwen2.5-32B base, beating DeepSeek's 47 for RL on the same base with half the training steps.
+
+## Failure modes & pitfalls
+
+- Calling RLVR immune to reward hacking. The hacking moves into the checker: lenient parsers, visible or editable tests, format-only rewards.
+- Training on prompts that are too easy or too hard. Zero-variance groups waste rollouts and give GRPO no gradient.
+- Describing GRPO as a new kind of reward. It is a way to compute advantages without a critic; the reward still comes from a verifier or a reward model.
+- Quoting the "aha moment" as proof that RL invents reasoning. The base model can already reflect; RL makes it happen more often.
+- Comparing pass@1 numbers across papers without the setup: R1 averages several samples at temperature 0.6, and R1-Zero is reported at 71.0% in the first version of the paper and 77.9% in the revised one.
+- Ignoring length. A run that doubles average chain length can double serving cost for a few points of accuracy.
+
+## Interview framework
+
+1. Start with RLHF in two sentences and why a learned reward can be gamed; then define RLVR as the same loop with a program as the reward.
+2. Write the GRPO advantage, $A_i = (r_i - \text{mean}) / \text{std}$ over a group, explain why it removes the critic, and mention the KL to a reference.
+3. Walk through DeepSeek-R1: R1-Zero on the base model, its readability problem, then cold start, reasoning RL, rejection sampling and SFT, and a final RL stage; give 15.6% → 71.0% and 79.8% on AIME 2024.
+4. Discuss verifiers and data: answer extraction, sandboxed tests, difficulty filtering, and the hacks each one invites.
+5. Close with the open questions: process vs. outcome rewards, length growth, and whether RLVR adds capability or sharpens it, plus why small models are distilled instead.
+
+**What interviewers listen for:** a correct GRPO advantage, the reason the critic can go, where hacking enters in each setup, concrete R1 numbers, and a careful statement of the pass@$k$ debate.
+
+**Red flags:** "RLVR can't be reward-hacked", "GRPO is a reward model", treating R1-Zero as a product model, or claiming RL alone gave small models R1-level reasoning.
+
+## Further reading
+
+- [Tülu 3: Pushing Frontiers in Open Language Model Post-Training (Lambert et al., 2024)](https://arxiv.org/abs/2411.15124)
+- [DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models (Shao et al., 2024)](https://arxiv.org/abs/2402.03300)
+- [DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning (DeepSeek-AI, 2025)](https://arxiv.org/abs/2501.12948)
+- [Let's Verify Step by Step (Lightman et al., 2023)](https://arxiv.org/abs/2305.20050)
+- [Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs Beyond the Base Model? (Yue et al., 2025)](https://arxiv.org/abs/2504.13837)
+- [DAPO: An Open-Source LLM Reinforcement Learning System at Scale (Yu et al., 2025)](https://arxiv.org/abs/2503.14476)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is RLVR, and how does it differ from RLHF?" category="Concepts" level="Junior">
+    - Both optimize a language model with reinforcement learning and a KL penalty to a reference model.
+    - RLHF takes its reward from a reward model trained on human comparisons, which can score any response but can be fooled.
+    - RLVR takes its reward from a program that checks the answer, such as an exact match against a known math answer or a run of unit tests, and usually gives 1 for correct and 0 otherwise.
+    - That makes the reward exact, but only for tasks a program can check.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does GRPO compute advantages, and why does it not need a critic?" category="Concepts" level="Mid">
+    - For each prompt GRPO samples a group of answers, scores each one, and sets each answer's advantage to its reward minus the group mean, divided by the group standard deviation.
+    - Every token of that answer gets the same advantage.
+    - The group mean plays the role of the baseline that PPO's value network would otherwise estimate, so no critic, which is usually as large as the policy, has to be trained or stored.
+    - The clipped PPO objective and a KL penalty to a reference model are kept.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through how DeepSeek-R1 was trained." category="Architecture" level="Mid">
+    - DeepSeek first trained R1-Zero by running GRPO directly on DeepSeek-V3-Base with only accuracy and format rewards; AIME 2024 pass@1 rose from 15.6% to 71.0%, but the chains were hard to read and mixed languages.
+    - R1 instead starts with SFT on thousands of readable long chain-of-thought examples, then runs reasoning RL with an added language-consistency reward.
+    - Rejection sampling from that checkpoint yields about 600k correct reasoning samples, which with 200k general samples fine-tune V3-Base again.
+    - A final RL stage combines rule-based rewards with preference reward models, giving 79.8% on AIME 2024.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your GRPO run's rewards stop improving and many groups have identical rewards. What is happening and what do you do?" category="Failure modes" level="Senior">
+    - When every answer in a group gets the same reward, the normalized advantages are all zero and that prompt contributes no gradient.
+    - This happens when prompts are too easy or too hard for the current policy, and it gets worse as entropy collapses and samples become alike.
+    - Filter or over-sample so each batch holds mixed groups, as DAPO's dynamic sampling does, refresh the prompt set by difficulty, and check entropy.
+    - Raising the upper clip bound or the sampling temperature can restore exploration.
+  </InterviewQuestion>
+  <InterviewQuestion question="Give examples of reward hacking in RLVR and how you would prevent them." category="Failure modes" level="Senior">
+    - A model can collect a format reward with an empty reasoning block, exploit a parser that accepts any number in the text, or special-case visible test inputs.
+    - OpenAI reported a reasoning model passing unit tests with exit(0) or by raising SkipTest during training.
+    - Defenses are a strict answer parser, hidden tests, a sandbox that cannot modify the grader, small format rewards that never outweigh accuracy, a KL penalty, and monitoring samples and metrics by hand.
+    - Penalizing suspicious chains of thought directly can teach the model to hide the hack, so treat a monitor as a detector rather than a reward.
+  </InterviewQuestion>
+  <InterviewQuestion question="Outcome rewards or process reward models for reasoning RL?" category="Trade-offs" level="Senior">
+    - Process reward models score each step, which gives denser credit and, in OpenAI's PRM800K work, picked better solutions than outcome scoring at best-of-1,860.
+    - But they need step labels that are expensive to collect, a step is hard to define in free-form reasoning, and a learned PRM can be hacked like any reward model.
+    - DeepSeek dropped PRMs from R1's training for those reasons and used rule-based outcome rewards.
+    - I would use outcome rewards for RL training where a checker exists and keep PRMs for reranking or guided search at inference time.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does RLVR teach models new reasoning abilities?" category="Trade-offs" level="Senior">
+    - It clearly improves pass@1, the chance of a correct answer on one try.
+    - Yue et al. found that base models overtake RLVR-trained models at large k, such as pass@256, and that the correct paths of the RL models were already in the base model's samples, which suggests RLVR mostly sharpens what is there.
+    - DeepSeekMath saw a similar pattern in 2024. NVIDIA's ProRL reports that much longer RL with KL control and reference resets can solve problems the base model cannot, so the answer depends on training length, data and base model.
+    - Distillation from a stronger teacher, by contrast, can add patterns the student lacked.
+  </InterviewQuestion>
+  <InterviewQuestion question="You need a 7B reasoning model. Would you run RL on it or distill from a large reasoning model?" category="Scaling" level="Mid">
+    - Distill first. DeepSeek's 32B experiment is the clearest evidence: SFT on 800k R1 samples reached 72.6% on AIME 2024, while over 10K steps of RL on the same base reached 47.0%, at far higher cost.
+    - Filter the teacher's traces for correctness, readability and length, and expect long training sequences.
+    - DeepSeek notes that a short RL stage on top of the distilled model adds more, but most of the gain comes from the teacher.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -75,7 +75,7 @@ export function CloudEquivalenceMatrix() {
                   "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
                   lead === p.id ? "text-paper" : "text-muted-foreground hover:text-ink"
                 )}
-                style={lead === p.id ? { background: `var(--dg-${PROVIDER_TONE[p.id]})` } : undefined}
+                style={lead === p.id ? { background: `var(--dg-${PROVIDER_TONE[p.id]}-text)` } : undefined}
               >
                 {p.short} first
               </button>

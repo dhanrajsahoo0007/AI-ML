@@ -1,0 +1,668 @@
+---
+title: "Design ChatGPT"
+description: "A chat assistant that streams answers token by token on a fixed GPU fleet: streaming, admission, token limits and conversation history."
+logo: companies/openai
+updated: 2026-11-17
+---
+
+Design a chat assistant: a user types a prompt and the answer streams back word by word, for 100 million people a day, on a fleet of GPUs that cannot grow in minutes.
+The hard parts are the GPUs as the one scarce resource, an answer that holds a connection open for 10 to 60 seconds, and a history that every device reads.
+
+- Interviewers use this question to see whether you treat GPU capacity like any other scarce resource (meter it, queue it, prioritise it) and keep the rest of the system classic.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a chat assistant like ChatGPT. It streams its answer word by word to hundreds of millions of users, on a limited fleet of GPUs."
+  level="Senior"
+  minutes={45}
+  bankId="design-llm-chat"
+  tests={[
+    "Treating GPUs as the scarce resource: admit, queue, prioritise",
+    "Streaming a long answer, resuming it and cancelling it",
+    "Separate stores for read-heavy metadata and write-heavy messages",
+    "Degrading on purpose when demand passes capacity",
+  ]}
+  clarify={[
+    { q: "How many users, and how often?", a: "100 million a day, 10 prompts each: 1 billion prompts a day." },
+    { q: "How long is an answer?", a: "500 tokens on average, streamed at about 50 tokens a second: 10 s." },
+    { q: "Do we build the model and its serving engine?", a: "No: we run a given model on GPU replicas; engine internals are out of scope." },
+    { q: "Free and paid plans?", a: "Yes: limits per plan counted in tokens; paid users go first under load." },
+    { q: "Is history synced across devices?", a: "Yes: every conversation is listed and resumable on any device." },
+    { q: "Can we add GPUs for a spike?", a: "Not in minutes: the fleet is fixed for the day." },
+  ]}
+  outOfScope={["Training and fine-tuning", "Tools, browsing and code execution", "File and image uploads", "Voice"]}
+/>
+
+## Overview
+
+- The chat service streams each answer as **server-sent events**: numbered events on one HTTP response, so a dropped connection resumes from the last event id.
+- A **router with a priority queue** sits in front of the GPU fleet; it admits work at the rate the fleet can start and gives each prompt a **slot in a continuous batch**.
+- **Limits are counted in tokens** per user and plan; under load paid users go first and free overflow goes to a **smaller model**.
+- **Moderation** checks the prompt before it reaches a GPU and the answer while it streams.
+- Conversation **metadata** lives in **one relational primary with read replicas** behind a cache; **message bodies**, the write-heavy part, live in a **sharded wide-column store**.
+- **Stop** sends a cancel all the way to the model server, so a stopped answer frees its GPU slot within a second.
+
+<Numbers
+  items={[
+    { value: "35,000/s", label: "prompts at peak", hint: "3 × the 11,600/s average" },
+    { value: "350,000", label: "open streams at peak", hint: "35,000/s × 10 s" },
+    { value: "32,000/s", label: "prompts the fleet can start", hint: "5,000 replicas × 64 slots ÷ 10 s" },
+    { value: "70,000/s", label: "message writes at peak", hint: "kept off the primary" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Send a prompt and stream the answer", notes: "Words appear as they are generated." },
+    { id: "F2", requirement: "Store, list and resume conversations", notes: "A sidebar of conversations; open one and continue it." },
+    { id: "F3", requirement: "Stop and regenerate", notes: "Stop mid-answer; ask for another answer to the same prompt." },
+    { id: "F4", requirement: "Usage limits per plan", notes: "Free and paid plans, counted in tokens over a time window." },
+    { id: "F5", requirement: "Moderation", notes: "Block unsafe prompts; stop unsafe answers while they stream." },
+    { id: "F6", requirement: "History on every device", notes: "A conversation started on the phone continues on the laptop." },
+  ]}
+/>
+
+- Out of scope: training, tools and code execution, file uploads, voice.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Time to first token", target: "p50 under 0.5 s, p99 under 2 s while the fleet has room", why: "A blank screen feels broken." },
+    { id: "N2", property: "Token pace", target: "At least 30 tokens/s per stream", why: "Faster than people read." },
+    { id: "N3", property: "Availability", target: "99.9% for sending; 99.95% for reading history", why: "History must load even when GPUs are short." },
+    { id: "N4", property: "Durability", target: "0 acknowledged prompts lost; a finished answer is stored before it is marked complete", why: "A lost conversation is lost work." },
+    { id: "N5", property: "Peak load", target: "35,000 prompts/s; 350,000 open streams", why: "Sized from the estimates." },
+    { id: "N6", property: "GPU use", target: "At least 80% of batch slots busy at peak", why: "GPUs are most of the cost." },
+    { id: "N7", property: "Cancel", target: "A stopped answer frees its slot within 1 s", why: "Every token after stop is wasted GPU time." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Round numbers chosen to size the system; real figures appear only under "How real systems do it".
+- A **token** is about 4 bytes of English text; a **replica** is one copy of the model on the GPUs of one server; a **slot** is one stream in a replica's batch.
+
+<EstimateTable
+  rows={[
+    { quantity: "Prompts", assumption: "100,000,000 daily users × 10 prompts", result: "1,000,000,000 a day ≈ 11,600/s" },
+    { quantity: "Peak prompts", assumption: "3 × the average (evening, launches)", result: "≈ 35,000/s" },
+    { quantity: "Answer time", assumption: "500 tokens at 50 tokens/s", result: "10 s on one slot" },
+    { quantity: "Open streams at peak", assumption: "35,000/s × 10 s (Little's law)", result: "350,000" },
+    { quantity: "Fleet", assumption: "5,000 replicas × 64 slots = 320,000 slots ÷ 10 s", result: "32,000 prompts/s can start" },
+    { quantity: "Excess at peak", assumption: "35,000 − 32,000", result: "3,000 prompts/s: 9% too many" },
+    { quantity: "Metadata reads", assumption: "10 per prompt (user, plan, conversation, list) × 35,000/s", result: "350,000/s at peak" },
+    { quantity: "Metadata writes", assumption: "New conversations, titles, settings: 3,000/s × 3", result: "≈ 9,000/s at peak" },
+    { quantity: "Message writes", assumption: "2 messages per prompt × 35,000/s", result: "70,000/s at peak" },
+    { quantity: "Message bytes", assumption: "400 B prompt + 2,000 B answer = 2.4 KB × 1,000,000,000", result: "2.4 TB a day ≈ 0.9 PB a year" },
+    { quantity: "Stream buffers", assumption: "350,000 streams × 2 KB", result: "700 MB in memory" },
+  ]}
+  note="The data is ordinary; the GPUs are the bottleneck."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Metadata: 350,000 reads/s against 9,000 writes/s, about 40 to 1. Messages: 70,000 writes/s against 35,000 history reads/s | Metadata on one primary with replicas and a cache; messages in a store that scales writes |
+| D2 | Peak against average | 3 × daily; a launch can bring far more, and GPUs cannot follow | Admission and a queue, not autoscaling, absorb the peak |
+| D3 | Consistency per operation | The prompt the user sent: read-your-writes. The sidebar: 1 s stale is fine. Limits: a few seconds of drift is fine | Primary only for the write path; replicas and counters for the rest |
+| D4 | Latency target | First token p99 under 2 s (N1), then 30+ tokens/s for 10 to 60 s | Streaming; nothing slow between the prompt and the GPU |
+| D5 | Durability | The user's prompt must survive; a half-written answer may be regenerated | Write the prompt before generating; buffer the answer in memory; store it on completion |
+| D6 | Ordering | Within one conversation; regenerate makes branches, not a line | Time-ordered message ids and a `parent_id`; no global order |
+| D7 | Duplicates | Harmful: a retried prompt costs a second generation and counts twice against the limit | A client request id, deduplicated before the queue |
+| D8 | Data size and growth | 2.4 KB per turn, 0.9 PB a year; recent conversations are hot | Messages in a horizontally scaled store; old partitions cold |
+| D9 | Fan-out shape | Not a driver here: one user, one stream; other devices pull history when opened | No push fan-out; a plain list read |
+| D10 | Contention | GPUs: 350,000 streams want 320,000 slots at peak | A router that meters, queues and prioritises; limits in tokens |
+| D11 | Geography | Users everywhere; GPUs where capacity exists | Route a prompt to any region with free slots: 100 ms of network against a 10 s answer |
+| D12 | Availability and degradation | 99.9% to send; under stress queue first, then a smaller model for free users, then shed free traffic | Priority lanes and an overflow fleet; history stays readable |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/conversations` | App | New chat; returns `conversation_id` |
+| `GET /v1/conversations?cursor=` | App | The sidebar, newest first, 20 a page |
+| `GET /v1/conversations/{id}/messages?cursor=` | App | Open a conversation on any device |
+| `POST /v1/conversations/{id}/messages` | App | Send a prompt; the response is the event stream |
+| `GET /v1/responses/{id}/stream` | App | Resume after a drop, with `Last-Event-ID` |
+| `POST /v1/responses/{id}/cancel` | App | Stop |
+| `POST /v1/messages/{id}/regenerate` | App | Another answer to the same prompt |
+
+Sending a prompt returns `text/event-stream`: numbered, typed events on one response.
+
+```http
+POST /v1/conversations/c_81/messages
+Accept: text/event-stream
+Idempotency-Key: 6f0c2a…
+{ "parent_id": "m_17", "content": "Explain back pressure", "model": "large" }
+
+200 OK
+Content-Type: text/event-stream
+
+id: 1
+event: response.created
+data: {"response_id": "r_93", "message_id": "m_18"}
+
+id: 2
+event: response.output_text.delta
+data: {"delta": "Back pressure is"}
+
+id: 41
+event: response.completed
+data: {"status": "complete", "usage": {"input_tokens": 2000, "output_tokens": 500}}
+```
+
+- **Idempotency:** `Idempotency-Key` is the client's request id; a retry with the same key attaches to the running response instead of starting a second generation.
+- **Errors:** `429` with `Retry-After` when the token limit is spent; `503` with `Retry-After` when the fleet is full and the plan is shed; `409` when the key is reused with a different body; an `error` event mid-stream when moderation or the model stops the answer.
+- **Pagination:** cursors on the sidebar (`updated_at`, `conversation_id`) and on messages (`message_id`).
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Users, plans, conversation metadata | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL), one primary and replicas | Read-heavy 40 to 1; small rows; transactions for plan changes (D1, D3) | None: unsharded, indexed by `user_id` | Strong on the primary; replicas under 1 s behind | Sharding from day one: every query and endpoint rewritten for write headroom we do not need |
+| Message bodies | Wide-column store (<TechIcon id="oss/apache-cassandra" /> Cassandra) | 70,000 writes/s, 0.9 PB a year, read one conversation at a time (D1, D8) | `conversation_id` | Quorum per partition | The relational primary: 79,000 writes/s on one machine |
+| Hot metadata | In-memory cache (<TechIcon id="oss/redis" /> Redis) | 350,000 reads/s; 90% hits (D1) | key | Seconds stale | Replicas alone: 10 × more replica reads |
+| Usage counters | In-memory store (<TechIcon id="oss/redis" /> Redis) | 70,000 updates/s, short windows (D10) | `user_id` | A few seconds of drift | A counter row per user on the primary: a hot row per heavy user |
+| Stream buffers | In-memory stream per response (<TechIcon id="oss/redis" /> Redis Streams) | 350,000 live, 700 MB, minutes long (D4, D5) | `response_id` | One writer per stream | Writing every token to the database: 17,500,000 token writes/s |
+| Usage events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Billing and analytics need every finished response, once (D5, D7) | `user_id` | Ordered per user | Billing straight from the counters: lost on a cache failure |
+
+```sql
+-- Relational, unsharded: one primary, many replicas
+CREATE TABLE conversations (
+  conversation_id uuid PRIMARY KEY,   -- time-ordered (UUIDv7)
+  user_id         bigint NOT NULL,
+  title           text,               -- written once by a worker after the first answer
+  updated_at      timestamptz,        -- touched at most once a minute (lazy write)
+  archived        boolean DEFAULT false
+);
+CREATE INDEX conv_by_user ON conversations (user_id, updated_at DESC);  -- the sidebar
+```
+
+```sql
+-- Wide-column: partition by conversation, cluster by time-ordered message id
+CREATE TABLE messages (
+  conversation_id uuid,
+  message_id      timeuuid,   -- sorts by time inside the partition
+  parent_id       timeuuid,   -- regenerate adds a sibling with the same parent
+  role            text,       -- 'user' | 'assistant'
+  content         text,
+  status          text,       -- 'complete' | 'stopped' | 'blocked'
+  PRIMARY KEY ((conversation_id), message_id)
+);
+```
+
+- **Sidebar:** `conv_by_user` on a replica behind the cache; 20 newest per page.
+- **Build the context:** read the newest messages of one partition, follow `parent_id` back from the chosen branch; one partition read per prompt.
+- **Append:** the user's message is written before generation starts (N4); the answer is written once, at `completed` or `stopped`.
+- **Resume:** read the stream buffer for `response_id` from `Last-Event-ID`.
+- **Deduplicate:** `SET req:<key> <response_id> NX EX 86400` in Redis before the prompt is queued.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that meets F1 and add a part only when a requirement or a driver forces it.
+- Each figure shows the design after that step; the step's new parts are outlined and the moving dots show its flow.
+- Model serving itself (batching, the KV cache, engines) is covered in [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference); this page treats a model server as a box with a fixed number of slots.
+
+### Step 1: One chat server, one model server, blocking (F1)
+
+The smallest design: the chat service sends the prompt to a model server and waits for the whole answer.
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={1} caption="Step 1: the chat service waits 10 s for the whole answer before the user sees a word." />
+
+- **Adds:** a load balancer, the chat service, model servers, a CDN for the web app's files.
+- **Flow:**
+  1. The app posts the prompt; the load balancer picks a chat server.
+  2. The chat server calls a model server and blocks until all 500 tokens exist.
+  3. The whole answer goes back in one response.
+- **Why this and not that:** it is correct and simple; the model server is the only part that knows how to generate (F1).
+- **The gap:** the user stares at a blank screen for 10 s; N1 asks for the first word in under 2 s.
+
+<PremiumBreak />
+
+### Step 2: Stream the answer as server-sent events (F1, N1)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={2} caption="Step 2: tokens flow back as they are generated, one server-sent event at a time." />
+
+- **Adds:** a token stream from the model server, passed through to the app as **server-sent events** (SSE): a `text/event-stream` response that stays open.
+- **Flow:**
+  1. The model server emits tokens as it generates them.
+  2. The chat service wraps them in numbered `output_text.delta` events and flushes each one.
+  3. The first word appears after queueing plus prefill (reading the prompt): about 0.4 s instead of 10 s.
+- **Why this and not that:** the answer only flows one way, server to client, so SSE is enough; WebSockets add a second protocol for nothing (D4, Deep dive 1).
+- **The gap:** close the tab and the conversation is gone; nothing is stored.
+
+### Step 3: Store the conversations (F2, F6)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={3} caption="Step 3: metadata in a relational database, message bodies in a sharded message store, hot reads from a cache." />
+
+- **Adds:** the **conversation DB** (users, plans, conversation list), the **message store** (prompts and answers), a **cache** for hot metadata.
+- **Flow:**
+  1. The chat service writes the user's message to the message store before generating (N4).
+  2. It reads the conversation's recent messages to build the model's context.
+  3. On completion it writes the answer; the sidebar on any device reads the conversation DB through the cache.
+- **Why this and not that:** two workloads, two stores. Metadata is read 40 times for each write and fits one primary; messages are 70,000 writes/s and 0.9 PB a year, which one primary cannot take (D1, D8, Deep dive 3).
+- **The gap:** at 35,000 prompts/s, one model server per chat server does not exist; GPUs are shared and scarce.
+
+### Step 4: A fleet behind a router, a queue and batching (N5, N6)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={4} caption="Step 4: the router queues each prompt and gives it a slot in a continuous batch on one of 5,000 replicas." />
+
+- **Adds:** the **router + queue**; the direct link from chat service to model server goes away.
+- **Flow:**
+  1. The chat service enqueues the prompt at a router.
+  2. The router picks the replica with the fewest tokens in flight and a free slot; the replica adds the prompt to its running batch on the next step.
+  3. Tokens flow back through the router to the chat service.
+- **Why this and not that:** a replica runs 64 streams at once at nearly the cost of one, so the unit of capacity is a slot, not a server (N6). Round-robin by request ignores that one answer is 50 tokens and another 2,000; [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) covers routing by tokens.
+- **The gap:** at peak 35,000 prompts/s arrive and the fleet can start 32,000; the queue grows by 3,000 every second.
+
+### Step 5: Admission and limits in tokens, per plan (F4, D12)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={5} caption="Step 5: limits count tokens per user and plan; the router admits by priority and records tokens used on a durable log." />
+
+- **Adds:** the **limits** service with counters in the cache; priority lanes in the router; the **usage log** for billing and analytics.
+- **Flow:**
+  1. Before queueing, the chat service asks limits whether the user has tokens left: estimated input plus a typical answer.
+  2. The router serves the paid lane first, then free, and never queues a prompt longer than its plan's maximum wait.
+  3. When the answer ends, the router writes the real token count to the usage log; limits corrects its estimate.
+- **Why this and not that:** a request can cost 100 tokens or 100,000, so counting requests lets one user take a thousand times another's share (D10). Autoscaling cannot help: a new replica needs GPUs that may not exist and minutes to load weights (D2, Deep dive 2).
+- **The gap:** nothing stops an unsafe prompt from reaching a GPU or an unsafe answer from reaching the screen.
+
+### Step 6: Moderation in and out (F5)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={6} caption="Step 6: a classifier checks the prompt before it is queued and the answer in chunks while it streams." />
+
+- **Adds:** the **moderation** service, a fast classifier.
+- **Flow:**
+  1. The prompt is checked before it is queued: a blocked prompt costs no GPU time.
+  2. While the answer streams, every chunk of about 50 tokens is checked; a flagged chunk stops the stream with an `error` event and cancels the generation.
+  3. The finished answer is checked once more in full.
+- **Why this and not that:** checking only at the end shows the user everything first; holding the whole answer until it is checked breaks N1 (D4). Chunks are the middle ground: a few words may show and then be withdrawn.
+- **The gap:** a user who presses stop still burns GPU until the answer ends, and a dropped connection loses the answer.
+
+### Step 7: Stop, resume and cancel (F3, N7)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={7} caption="Step 7: every event also lands in a stream buffer, so a client can resume, and a stop travels all the way to the GPU." />
+
+- **Adds:** the **stream buffer**, one short-lived stream per response; cancel messages on the chat-router-model path.
+- **Flow:**
+  1. The chat service appends each event to the response's buffer as it sends it.
+  2. A dropped client reconnects to any chat server with `Last-Event-ID`; that server replays from the buffer, then goes live.
+  3. Stop sends `cancel` to the router, which tells the model server to drop the stream; the slot is free on the next step.
+- **Why this and not that:** the buffer lives outside the chat server, so a reconnect can land anywhere behind the load balancer. A cancel that stops at the chat server leaves the GPU generating for nobody (N7, D10).
+- **The gap:** one region's GPUs can be full while another's are idle, and free users get nothing when the fleet is full.
+
+### Step 8: Regions and overflow (N3, N5)
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" step={8} caption="Step 8: the router sends overflow to a fleet running a smaller model, in any region with free slots." />
+
+- **Adds:** the **overflow fleet**: replicas of a smaller model, and capacity in other regions.
+- **Flow:**
+  1. When the free lane would wait longer than its maximum, the router sends the prompt to the overflow fleet.
+  2. A prompt may run in any region with free slots; 100 ms of network is small against a 10 s answer (D11).
+  3. Only after both are full does the router return `503` with `Retry-After` to free users.
+- **Why this and not that:** a smaller model runs about 4 × the streams per replica, so 3,000 prompts/s need about 118 replicas instead of 470 (D12).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/chatgpt/architecture" stepper caption="A chat assistant: stream every answer, keep history in two stores, and put a router with a queue and token limits in front of the scarce GPUs." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Web and mobile app | Send prompts, render the stream, resume and stop |
+| **Edge** | CDN, load balancer | Serve the app's files; hold long-lived streams |
+| **Inference** | Router + queue, model servers, overflow fleet | Admit, prioritise and batch; generate tokens |
+| **Application services** | Chat service, limits, moderation | Run the request, count tokens, check content |
+| **Async pipeline** | Usage log | Carry tokens used to billing and analytics |
+| **Storage** | Conversation DB, message store, cache, stream buffer | Metadata, message bodies, hot reads, live streams |
+
+One prompt, step by step:
+
+1. The app posts the prompt with an `Idempotency-Key`; the load balancer picks a chat server and keeps the response open.
+2. The chat server checks the key, the user's token budget and the prompt's moderation result, then writes the user's message.
+3. It reads the conversation's recent messages and enqueues the prompt at the router in the user's lane.
+4. The router gives the prompt a slot on a replica; tokens flow back and out to the app as numbered events, and into the stream buffer.
+5. At the end the chat server writes the answer, sends `response.completed`, and the router records the tokens used on the usage log.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST, with server-sent events for the answer
+
+- **Choice:** REST over HTTPS for every call; sending a prompt returns a `text/event-stream` (SSE) of numbered, typed events; stop is a separate `POST`.
+- **Why:** the answer flows one way for 10 to 60 s (D4); SSE is plain HTTP, passes through proxies and HTTP/2, and has `Last-Event-ID` for resume built into the browser's `EventSource`.
+- **Why not WebSockets:** two-way framing for a one-way stream; every proxy and load balancer must support the upgrade, and resume, ids and auth are ours to build. Worth it only when the client streams too (voice).
+- **Why not long polling:** one request per chunk: 350,000 streams × 5 chunks a second = 1,750,000 requests/s for the same bytes.
+- **Why not gRPC streaming:** browsers cannot speak it without a proxy; fine between our own services.
+- **More:** [Server-Sent Events](/system-design/fundamentals/server-sent-events) and [Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token).
+
+### CDN: the app's files, never the answers
+
+- **Choice:** a CDN serves the web app's scripts, styles and images.
+- **Why:** every app open loads them; the edge answers without touching our region.
+- **Why not cache answers at the edge:** every answer depends on the user's conversation and is personal; a hit rate near zero and a privacy risk. A [semantic cache](/ai-system-design/genai-system-design/semantic-caching) fits shared FAQ-style traffic, not personal chat.
+
+### Load balancer: layer 7, built for long streams
+
+- **Choice:** an HTTP (layer-7) load balancer that terminates TLS, routes by path and passes each event through without buffering; idle timeout above the longest answer, with heartbeat comments every 15 s.
+- **Why:** 350,000 responses stay open for 10 to 60 s (D4); one that buffers turns a 0.4 s first token into a 10 s one (N1).
+- **Why not layer 4:** it cannot route `/messages` and `/conversations` to different pools or add headers; long connections alone do not need it.
+- **Why not sticky sessions:** a resume must work on any chat server, so the state lives in the stream buffer. Least connections spreads open streams evenly.
+
+### Chat service: stateless stream servers
+
+- **Choice:** stateless servers that run the request: deduplicate, check limits and moderation, write the prompt, enqueue, relay tokens, write the answer.
+- **Why:** the cost per stream is a socket and a few kilobytes, so about 2,000 servers hold 350,000 streams (175 each) on cheap CPUs (D2).
+- **Why not call the model from the app:** limits, moderation and history would all move into the client, where anyone can skip them.
+
+### Router and queue: in-memory priority lanes, not a broker
+
+- **Choice:** routers that keep per-plan queues in memory, admit in priority order, and place each prompt on the replica with the fewest tokens in flight.
+- **Why:** GPUs are the contended resource (D10); a prompt waits seconds at most, and the router must know every replica's free slots to place it.
+- **Why not Kafka or SQS as the request queue:** a durable log keeps a prompt the user abandoned 30 s ago and adds a hop to N1. If a router dies, the app retries with the same request id, which is cheaper than persisting 35,000 prompts a second.
+- **Why not autoscaling instead:** a new replica needs free GPUs and minutes to load its weights; the peak arrives in seconds (D2).
+- **Why not round-robin:** answers vary 50 to 2,000 tokens, so equal request counts are unequal work.
+- **More:** [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling), [Load Balancing & Auto-Scaling](/ai-system-design/genai-system-design/load-balancing-autoscaling).
+
+### Model servers: continuous batching on GPU replicas
+
+- **Choice:** replicas of the large model, each running a continuously batched engine with 64 slots.
+- **Why:** batching shares each read of the weights across 64 streams, which is where N6's 80% slot use comes from.
+- **Why not one stream per GPU:** decoding one stream leaves almost all of a GPU's compute idle (it waits on memory).
+- **Why not static batches:** a batch that waits for its longest answer idles every slot that finished early (Deep dive 2).
+- **More:** [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine), [GPU/TPU Resource Management](/ai-system-design/genai-system-design/gpu-tpu-resource-management).
+
+### Limits: token buckets in an in-memory store
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis counters per user and window, keyed by `user_id`; reserve an estimate before queueing, correct with the real count after.
+- **Why:** 70,000 counter updates/s at peak, read on every prompt; a few seconds of drift costs a few hundred tokens (D3, D10).
+- **Why not count requests:** one prompt with a long document costs 100 × a short one; tokens are what the GPU spends (F4).
+- **Why not a counter row in the conversation DB:** every prompt would write the primary, and a heavy user becomes a hot row.
+- **Why not limit at each chat server alone:** 2,000 servers each with a local count let a user take 2,000 × the limit; local limits stay as a fallback when Redis is down.
+
+### Moderation: a classifier before and during the stream
+
+- **Choice:** a fast classifier service: on the prompt before queueing, on 50-token chunks while streaming, and on the full answer at the end.
+- **Why:** a blocked prompt should cost no GPU time, and an unsafe answer should stop within one chunk (F5).
+- **Why not only after completion:** the user has already read it.
+- **Why not hold the answer until checked:** first token moves from 0.4 s to 10 s (N1, D4).
+- **More:** [Guardrails and Safety](/ai-system-design/genai-system-design/guardrails-and-safety), [Content Moderation & Red-Teaming](/ai-system-design/genai-system-design/content-moderation-red-teaming).
+
+### Conversation DB: relational, one primary and many replicas
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL: one primary with a hot standby, read replicas in each region behind connection pools, unsharded.
+- **Why:** 350,000 reads/s against 9,000 writes/s (D1); a cache takes 90% of reads and 12 replicas take the rest at about 2,900/s each. Users, plans and conversations join and change in transactions (D3).
+- **Why not shard from day one:** every query needs a shard key and every cross-user feature a scatter-gather, for write headroom one primary still has.
+- **Why not a document store (MongoDB, DynamoDB):** they would scale writes we do not have; we would give up joins and constraints on plans and billing state.
+
+### Message store: wide-column, partitioned by conversation
+
+- **Choice:** <TechIcon id="oss/apache-cassandra" /> Cassandra (or any wide-column store), partition `conversation_id`, clustering `message_id`.
+- **Why:** 70,000 writes/s and 0.9 PB a year (D1, D8); the only reads are "the newest messages of one conversation", one partition, in order (D6).
+- **Why not the relational primary:** it would take 79,000 writes/s, 9 × its metadata load, on one machine.
+- **Why not sharded PostgreSQL:** it works, but we would run the sharding ourselves for a table that needs no joins.
+
+### Cache: in front of the conversation DB
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis, cache-aside, for users, plans and the first sidebar page; a per-key lock so one reader refills a miss.
+- **Why:** it cuts 350,000 reads/s to 35,000 on the replicas (D1); the sidebar may be 1 s stale (D3).
+- **Why not read replicas alone:** 10 × the replica fleet for the same reads.
+- **Why not a cache inside each chat server:** 2,000 copies to keep fresh; a plan change would take minutes to reach them all.
+
+### Stream buffer: one short stream per response
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis Streams keyed by `response_id`, events appended as they are sent, kept 10 minutes after completion.
+- **Why:** a reconnect lands on any chat server and replays from `Last-Event-ID` (F3); 350,000 buffers are 700 MB (D4).
+- **Why not the database:** 17,500,000 token writes/s for data that matters for a few minutes.
+- **Why not chat-server memory:** a reconnect to another server, or a deploy, loses the answer.
+
+### Usage log: a durable log
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka topic keyed by `user_id`: one event per finished or stopped response with its token counts.
+- **Why:** billing, analytics and limit corrections each need every event, in order per user, and billing can replay after a bug (D5, D7).
+- **Why not a work queue (SQS, RabbitMQ):** one consumer gets each message and it is gone; three readers need it.
+- **Why not bill from the Redis counters:** they drift by design and vanish with a node.
+
+## Deep dives
+
+### The life of a streamed response
+
+- **SSE, not WebSockets:** the answer is one-way; the only client-to-server action mid-stream is stop, which is a normal `POST`. SSE keeps every hop plain HTTP.
+- **Number every event:** `id:` on each event lets a client reconnect with `Last-Event-ID` and get exactly what it missed from the stream buffer.
+- **A drop is not a stop:** a closed connection keeps generating for a 30 s grace period so a reconnect can resume; no reconnect in 30 s, or an explicit stop, cancels.
+- **Every hop must flush:** the load balancer, any proxy and the chat server pass each event on as it arrives; a heartbeat comment every 15 s keeps idle timeouts from closing a slow stream.
+- **Cancel must reach the GPU:** chat server, router, model server; the engine drops the stream from its batch on the next step and the slot refills (N7).
+
+<AnimatedDiagram spec="animated/chatgpt/sse-stream" stepper caption="Numbered events make a dropped stream resumable from the buffer, and a stop only saves GPU time when the cancel reaches the model server." />
+
+**How to read it:**
+
+- Step 1: the app gets `response.created`, then numbered deltas; each event is also appended to the stream buffer.
+- Step 2: event 41 is lost (red); the app reconnects, maybe to another chat server, with `Last-Event-ID: 40` and gets 41 to 57 from the buffer.
+- Step 3: stop at 4.6 s travels chat service, router, model server, which drops the stream after 230 tokens instead of 500.
+
+**The numbers:**
+
+- One stop at 4.6 s: 4.6 × 50 = 230 tokens generated, so 500 − 230 = 270 tokens of decode saved.
+- If 10% of answers are stopped halfway at peak: 35,000 × 10% × 250 = 875,000 tokens/s saved; a replica decodes 64 × 50 = 3,200 tokens/s, so that is about 270 replicas.
+
+<Callout tone="red" title="What breaks">
+  A proxy that buffers responses turns streaming back into a 10-second wait, and a cancel that stops at the chat server leaves the GPU generating for nobody. Measure first-token time at the client, and compare tokens generated with tokens delivered.
+</Callout>
+
+### Capacity: arrivals against GPUs
+
+- **Capacity is slots over time:** 5,000 replicas × 64 slots = 320,000 slots; each answer holds one for 10 s, so the fleet can start 32,000 prompts/s (Little's law).
+- **Batching sets the slot count:** a replica's 64 slots only stay busy if a finished stream's slot refills at once.
+
+The GenAI section's figure shows why continuous batching keeps every slot busy.
+
+<AnimatedDiagram spec="animated/serving/continuous-batching" stepper caption="The static batch idles three slots while it waits for B; the continuous batch fills every slot and finishes six answers in the time the static one finishes four." />
+
+**How to read it:** each row is a slot, each column one decode step; in the lower panel a finished slot takes the next request on the next step.
+
+**The numbers:** 21 of 32 slot-steps busy (66%) static against 32 of 32 continuous; N6's 80% needs continuous batching.
+
+- **When arrivals pass capacity:** the excess queues. One first-come queue makes everyone wait, paid users included.
+- **Priority lanes:** paid first, free after; each lane has a maximum wait, after which the prompt goes to the overflow model or gets `503` with `Retry-After`.
+- **Fairness inside a lane:** cap each free user at one stream at a time, so one script cannot fill the lane.
+- **Why not autoscale:** new GPUs may not exist, and a replica takes minutes to start; capacity is planned per day and the peak is handled by admission ([Capacity Planning & Cost Estimation](/ai-system-design/genai-system-design/capacity-planning-and-cost-estimation)).
+
+<AnimatedDiagram spec="animated/chatgpt/gpu-queue" stepper caption="Arrivals at the peak run 3,000 a second past what the GPUs can start; a single queue makes everyone wait, while priority lanes keep paid users at zero wait and send the overflow to a smaller model." />
+
+**How to read it:**
+
+- Step 1: blue is paid, orange is free; the dashed line is what 5,000 replicas can start each second.
+- Step 2: one first-come queue; the red block is the excess that piles up.
+- Step 3: priority lanes; paid starts at once and the green block is the overflow to a smaller model.
+
+**The numbers:**
+
+- First come: (35,000 − 32,000) × 60 s = 180,000 queued; 180,000 ÷ 32,000/s ≈ 5.6 s added to every first token, against N1's 2 s.
+- Priority: paid 10,500/s wait 0; free on the large model 32,000 − 10,500 = 21,500/s.
+- Overflow: 3,000/s × 10 s = 30,000 streams; at 256 streams per small replica that is about 118 replicas, against 470 of the large model.
+
+<Callout tone="red" title="What breaks">
+  Clients that retry a 503 at once double the arrival rate in the worst minute. Send `Retry-After` with jitter, and deduplicate by request id so a retry never starts a second generation.
+</Callout>
+
+### Scaling the conversation store
+
+- **Reads scale out, writes do not:** a cache and replicas absorb reads; every write still lands on one primary, so the work is keeping writes off it.
+- **Pool connections:** 2,000 chat servers × 20 connections = 40,000; a PostgreSQL server holds a few thousand at most, so poolers in transaction mode hand out about 300 per replica.
+- **Protect the primary from cache misses:** a per-key lock lets one reader refill a missed key while the others wait for the cache.
+- **Lazy writes:** `updated_at` changes at most once a minute per conversation, not per message.
+- **Move the write-heavy table out:** message bodies are 70,000 writes/s; in a sharded store they never touch the primary.
+
+<AnimatedDiagram spec="animated/chatgpt/store-replicas" stepper caption="Reads scale out through a cache and replicas; writes do not, so the one table that writes 70,000 rows a second leaves the primary for a sharded store." />
+
+**How to read it:**
+
+- Step 1 is the read path: 350,000 reads/s, 90% answered by the cache, the rest through pools to 12 replicas.
+- Step 2 is the write path: one primary, a hot standby in sync, and the write-ahead log (WAL) shipped to every replica.
+- Step 3 moves message bodies to the green sharded store.
+
+**The numbers:**
+
+- Replicas: 350,000 × 10% = 35,000 reads/s ÷ 12 ≈ 2,900 reads/s each.
+- Primary: 9,000 writes/s with messages moved out; 79,000 writes/s with them left in.
+- Each new replica adds one more copy of the WAL the primary must send, so replicas cannot grow forever; a relay tier (cascading replication) moves that cost off the primary.
+
+<Callout tone="red" title="What breaks">
+  A feature launch that writes once per streamed token, or a cache outage, can multiply the primary's load in minutes. Rate-limit writes per feature, keep new write-heavy tables out of this database, and watch replica lag.
+</Callout>
+
+### Worked example: one prompt at the evening peak
+
+1. 21:00, peak: a free user sends a 40-token prompt in a conversation with 1,960 tokens of history: 2,000 input tokens.
+2. The key `req:6f0c2a…` is new. Limits reserve 2,000 + 500 = 2,500 tokens; the user has used 41,000 of a 50,000-token window, so it is admitted.
+3. Moderation passes the prompt in about 30 ms; the prompt is written to the message store.
+4. The free lane on the large model is full (21,500/s), so the router sends it to the overflow fleet; queue wait 0.
+5. Prefill reads 2,000 tokens in about 0.3 s; the first token reaches the app at about 0.4 s (N1).
+6. 480 tokens stream at 60 tokens/s on the small model: 8 s; ten 50-token chunks pass moderation as they stream.
+7. The answer is written, `response.completed` is sent, and the usage log gets 2,000 in and 480 out; limits correct the reservation to 41,000 + 2,480 = 43,480.
+
+**The numbers:** the prompt held 1 of 256 slots on a small replica for 8 s: 1/256 of that replica for 8 s, against 1/64 of a large replica for 10 s.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Stream transport | WebSocket, long polling, SSE | SSE over HTTP, numbered events | D4, F1, N1 | No client-to-server messages on the stream; stop is a separate call | The client streams too (voice) |
+| Surge | Autoscale GPUs, admission with priority and overflow | Admission, priority lanes, overflow model | D2, D10, D12, N5 | Free users wait or get a smaller model | Spare GPUs can join in seconds |
+| Metadata store | Shard from day one, one primary with replicas | One primary, replicas, cache | D1, D3, N3 | A write ceiling of one machine; WAL fan-out | Primary writes pass half its ceiling |
+| Message bodies | Same relational DB, wide-column sharded store | Wide-column, partitioned by conversation | D1, D8 | No joins; other lookups need their own tables | Messages need ad hoc queries |
+| Limit unit | Requests, tokens | Tokens: reserve an estimate, correct after | D10, F4 | Two counter updates per prompt | Answers become uniform in length |
+| Cancel | Stop at the chat server, propagate to the GPU | Propagate; a drop gets a 30 s grace period | D10, F3, N7 | Cancel plumbing on every hop | Never |
+| Partial answers | Write tokens to the DB, buffer in memory | Buffer per response; store the final answer | D4, D5 | A crash mid-answer loses it; the user regenerates | Answers become jobs that run for minutes |
+| Duplicates | Accept, deduplicate by request id | Request id key for 24 h | D7, F1 | A key lookup on every prompt | Never: a duplicate is a full generation |
+| Output moderation | After completion, hold until checked, chunks while streaming | Chunks while streaming, full check at the end | F5, D4 | A few words may show and be withdrawn | Policy forbids showing anything unchecked |
+| Inference region | Home region only, any region with free slots | Any region; writes go home | D11, D12 | About 100 ms more on the first token | Residency rules pin users to a region |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | Token limits per user and plan | One prompt can cost 1,000 × another |
+| [Back Pressure and Load Shedding](/system-design/patterns/back-pressure) | Router admission, `503` with `Retry-After` | Arrivals pass GPU capacity by 9% at peak |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) (advanced) | Maximum wait per lane, overflow to a smaller model | A worse answer now beats a timeout |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) (advanced) | Paid and free lanes; separate overflow fleet | Free traffic must not starve paid users |
+| [Load Balancing](/system-design/patterns/load-balancing) | Least connections for streams; fewest tokens in flight for replicas | Requests differ 40 × in cost |
+| [Idempotency](/system-design/patterns/idempotency) | Request id on every prompt | A retry must not start a second generation |
+| [Caching](/system-design/patterns/caching) | Metadata cache with a lock on miss | 350,000 reads/s off the replicas |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Message store by conversation | 70,000 writes/s, 0.9 PB a year |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | UUIDv7 conversation ids, time-ordered message ids | Messages sort by time inside one partition |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | `Retry-After` with jitter; stream idle timeouts | Instant retries double arrivals in the worst minute |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Any assistant app (support bot, coding assistant) | Streaming, router and queue, token limits, history | Retrieval and tools add steps before generation; limits per tenant |
+| A streaming inference API for developers | Router, queue, SSE, limits in tokens | API keys and organisations instead of plans; no history store; a cheaper batch endpoint |
+| A long job that shows progress (video render, CI logs) | SSE with event ids, a resumable buffer, cancel | Jobs run minutes to hours: a durable job store and a workflow engine replace the in-memory buffer |
+| Image generation | Queue, priority lanes, limits per plan | No token stream: progress events, and results in a blob store |
+
+## How real systems do it
+
+- **OpenAI streaming guide (read 2026):** streaming uses server-sent events with typed events, including `response.created`, `response.output_text.delta`, `response.completed` and `error`; the guide also mentions a WebSocket mode, and notes that partial completions are harder to moderate.
+- **OpenAI moderation guide (read 2026):** a free moderation endpoint classifies text and images and returns `flagged`, per-category flags and per-category scores.
+- **2024:** OpenAI's report on the 11 December incident: a new telemetry service made every node run expensive Kubernetes API calls, overwhelming the control plane; DNS-based service discovery failed once node caches expired, and ChatGPT, Sora and the API were down for about four hours.
+- **2026:** OpenAI's account of scaling PostgreSQL for 800 million ChatGPT users: one primary Azure PostgreSQL flexible server with nearly 50 read replicas across regions, a hot standby, and PgBouncer pooling (connection time down from 50 ms to 5 ms).
+- **2026, same post:** shardable, write-heavy workloads moved to sharded systems such as Azure Cosmos DB; new tables are no longer allowed on that PostgreSQL deployment; a cache lock lets one reader refill a missed key; low- and high-priority traffic run on separate instances.
+- **Where this design differs:** OpenAI does not publish how it queues and schedules GPU work, so the router, lanes and overflow here follow the GenAI section's serving pages. The message store here is a wide-column store; OpenAI names Cosmos DB for its sharded workloads.
+
+## Failure modes & pitfalls
+
+- **A proxy buffers the stream:** the first token arrives with the last; compare first-token time at the client with the server's; disable buffering and flush per event on every hop.
+- **Cancel stops at the chat server:** GPUs generate for nobody; watch tokens generated against tokens delivered; propagate cancel to the model server.
+- **Retry storm at the peak:** arrivals double in the worst minute; watch retries per prompt; `Retry-After` with jitter and request-id deduplication.
+- **Cache miss storm:** replicas saturate when the cache restarts; watch hit rate and replica CPU; a lock per key so one reader refills, and warm the cache before taking traffic.
+- **A write spike on the primary:** a launch writes per token or backfills a column; watch primary writes and replica lag; lazy writes, rate-limited backfills, write-heavy tables elsewhere.
+- **Discovery depends on a control plane:** a busy control plane takes DNS and every service with it; watch control-plane load; keep the data plane working from cached addresses and roll out cluster changes in phases.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify scale, answer length, plans, history sync and whether GPUs can grow; write F1 to F6 and N1 to N7.
+2. **Minutes 5 to 10:** estimates: 35,000 prompts/s, 10 s per answer, 350,000 streams, 32,000/s of fleet; say "GPUs are the bottleneck".
+3. **Minutes 10 to 15:** the API with SSE and an idempotency key; the two stores and why.
+4. **Minutes 15 to 25:** Steps 1 to 4: blocking, streaming, history, the router and batching.
+5. **Minutes 25 to 35:** Steps 5 to 8: limits in tokens, priority lanes, moderation, stop and resume, overflow.
+6. **Minutes 35 to 45:** one deep dive: the stream's life, capacity and queueing, or scaling the store; answer the "why not" for each choice.
+
+**What interviewers listen for:**
+
+- **Mid:** streaming instead of blocking, conversations stored, a rate limit per user.
+- **Senior:** SSE against WebSockets with reasons, limits in tokens, a queue with priority instead of autoscaling, cancel reaching the GPU, metadata and messages in different stores.
+- **Staff:** Little's law on slots, what degrades first and for whom, when to shard the primary, resume semantics, regional overflow and its latency cost.
+
+**Red flags:** "autoscale the GPUs" for a spike; limits in requests, not tokens; WebSockets with no reason; every token written to the database; a stop button that only hides the text.
+
+## Further reading
+
+- [Streaming API responses](https://developers.openai.com/api/docs/guides/streaming-responses) (OpenAI documentation, read 2026)
+- [Moderation](https://developers.openai.com/api/docs/guides/moderation) (OpenAI documentation, read 2026)
+- [Incident report: 11 December 2024](https://status.openai.com/incidents/ctrsv3lwd797) (OpenAI status, 2024)
+- [Scaling PostgreSQL to power 800 million ChatGPT users](https://openai.com/index/scaling-postgresql/) (OpenAI, 2026)
+- Related pages: [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) · [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) · [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling) · [Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token) · [Case Study: Enterprise AI Assistant](/genai-system-design/case-studies/conversational-assistant-design) · [Design Facebook Messenger](/system-design-case-studies/case-studies/facebook-messenger) · [Design a Rate Limiter](/system-design-case-studies/case-studies/rate-limiter)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why stream the answer, and why server-sent events rather than WebSockets?" category="Concepts" level="Mid">
+  - A 500-token answer takes 10 s; streaming shows the first words in about 0.4 s, which is what users judge.
+  - The answer flows one way, server to client, so SSE on a plain HTTP response is enough.
+  - SSE passes through proxies and HTTP/2, and numbered events give resume with `Last-Event-ID` for free.
+  - Stop is a separate `POST`; WebSockets earn their cost only when the client streams too, such as voice.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you size the GPU fleet from the traffic?" category="Scaling" level="Senior">
+  - Peak prompts: 1,000,000,000 a day ÷ 86,400 ≈ 11,600/s, × 3 for the peak ≈ 35,000/s.
+  - Each answer holds a batch slot for 500 tokens ÷ 50 tokens/s = 10 s, so 350,000 slots are busy at peak (Little's law).
+  - At 64 slots per replica that is about 5,470 replicas; we plan 5,000 and absorb the last 9% with admission and overflow.
+  - Slots per replica come from batching and memory; the serving pages cover that, the system design only needs the number.
+  </InterviewQuestion>
+  <InterviewQuestion question="Traffic at the peak is higher than the GPUs can serve. What do you do?" category="Scaling" level="Senior">
+  - Do not count on autoscaling: GPUs may not be available and a replica takes minutes to load its weights.
+  - Admit at the rate the fleet can start; queue in lanes by plan, paid first, each lane with a maximum wait.
+  - Send free overflow to a smaller model that runs about 4 × the streams per replica; shed with `503` and `Retry-After` only after that.
+  - Keep history and the rest of the app working; only generation degrades.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why count usage limits in tokens rather than requests?" category="Trade-offs" level="Mid">
+  - A prompt with a long document can cost 1,000 × a short question; GPU time follows tokens, not requests.
+  - Reserve an estimate before queueing (input plus a typical answer), then correct with the real count from the usage log.
+  - Keep counters in an in-memory store keyed by user, with a strict per-server fallback if it fails.
+  </InterviewQuestion>
+  <InterviewQuestion question="The user presses stop. What has to happen, end to end?" category="Architecture" level="Senior">
+  - The app sends `POST /cancel`; the chat service forwards it to the router, which tells the model server to drop the stream.
+  - The engine removes it from the batch on the next step, so the slot refills within a second.
+  - The partial answer is stored with status `stopped`, and the usage log records the tokens actually generated.
+  - If cancel stopped at the chat service, the GPU would finish the answer for nobody: at 10% of answers stopped halfway that is about 270 replicas wasted at peak.
+  </InterviewQuestion>
+  <InterviewQuestion question="The user's connection drops in the middle of an answer. How do they get the rest?" category="Failure modes" level="Senior">
+  - Every event carries an id, and the chat service appends each one to a stream buffer keyed by response id.
+  - The app reconnects with `Last-Event-ID`; any chat server replays the missed events from the buffer and then goes live.
+  - Generation continues through a 30 s grace period, so a short drop costs nothing; no reconnect by then cancels it.
+  - The buffer is outside the chat server, so a deploy or a reconnect to another server still works.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where do you store conversations, and why not one database for everything?" category="Architecture" level="Senior">
+  - Metadata (users, plans, the conversation list) is read about 40 times per write: one relational primary, read replicas and a cache.
+  - Message bodies are 70,000 writes/s and 0.9 PB a year, read one conversation at a time: a wide-column store partitioned by conversation.
+  - Together on the primary they would be 79,000 writes/s on one machine; apart, the primary keeps 9,000.
+  - Shard the metadata only when its own writes approach the primary's ceiling.
+  </InterviewQuestion>
+  <InterviewQuestion question="A client retries a prompt after a timeout. How do you stop it generating twice?" category="Failure modes" level="Mid">
+  - The app sends its own request id as `Idempotency-Key` on every prompt.
+  - The chat service sets the key in Redis with `NX` before queueing; a retry finds it and attaches to the existing response's stream.
+  - A duplicate is harmful here: it costs a full generation and counts twice against the user's limit.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you moderate an answer that is still being generated?" category="Trade-offs" level="Senior">
+  - Check the prompt before it is queued, so a blocked prompt costs no GPU time.
+  - Check the answer in chunks of about 50 tokens as it streams; a flagged chunk ends the stream with an `error` event and cancels generation.
+  - Holding the whole answer until it is checked would push the first token from 0.4 s to 10 s; checking only at the end shows everything first.
+  - The cost of chunks: a few words may show and then be withdrawn; check the full answer once more at the end.
+  </InterviewQuestion>
+</InterviewQuestions>

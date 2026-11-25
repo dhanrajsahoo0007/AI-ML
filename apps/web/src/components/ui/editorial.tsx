@@ -5,7 +5,16 @@ import { cn } from "@/lib/utils";
 // Editorial primitives shared across pages; mirrors dhanraj-portfolio/components/ui.tsx.
 
 export function Container({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn("mx-auto w-full max-w-[1200px] px-4 sm:px-8", className)}>{children}</div>;
+  return (
+    <div
+      className={cn(
+        "mx-auto w-full max-w-[1200px] px-4 sm:px-8 min-[1440px]:max-w-[2400px] min-[1440px]:px-12 min-[1920px]:px-16",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function Eyebrow({

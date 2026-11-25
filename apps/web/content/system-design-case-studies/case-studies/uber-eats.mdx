@@ -1,0 +1,714 @@
+---
+title: "Design Uber Eats"
+description: "Food delivery at city scale: nearby search by delivery time, an order state machine, courier dispatch with atomic claims, and live tracking."
+logo: systems/uber-eats
+updated: 2026-11-17
+---
+
+Design a food delivery app like Uber Eats: customers find nearby restaurants, order and pay, and the restaurant prepares the food.
+A courier is dispatched to pick it up, and everyone watches the order move on a map.
+The hard parts are a firehose of courier GPS updates, matching orders to couriers in seconds, and charging exactly once while three apps change the same order.
+
+- Interviewers use this question to see whether you can split a system by workload: a few precious order writes, a flood of disposable location writes, and read-heavy search, each in the store that fits it.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design a food delivery service like Uber Eats: customers find nearby restaurants, order, and follow the courier live."
+  level="Senior"
+  minutes={45}
+  bankId="design-food-delivery"
+  tests={[
+    "One order changed by three apps, each of which can say no or go silent",
+    "Keeping a flood of courier GPS updates off the order database",
+    "One courier, one order: atomic claims when dispatch workers race",
+    "Exactly one order and one charge over flaky mobile networks",
+  ]}
+  clarify={[
+    { q: "The whole flow, or one part such as search or dispatch?", a: "Browse, order, dispatch and live tracking; payment goes through an outside provider." },
+    { q: "How many orders?", a: "10 million a day from 20 million daily customers; the dinner peak is 5 times the average." },
+    { q: "How many couriers, and how often do they report?", a: "1 million online at peak, each sending a GPS fix every 4 s." },
+    { q: "What does nearby mean?", a: "Restaurants that can deliver to the address within a reasonable time, not a fixed radius." },
+    { q: "When is the card charged?", a: "Authorised when the order is placed, captured on delivery." },
+    { q: "One city or many?", a: "Many cities; an order never crosses a city." },
+  ]}
+  outOfScope={["Ratings and reviews", "Promotions", "Courier payouts", "Search ranking models", "Grocery"]}
+/>
+
+## Overview
+
+- **Search** reads a **search index** of restaurants by map cell and delivery-time bucket; menus come from a cache and the CDN.
+- The **order service** owns a strict **state machine** in a **relational database**; an idempotency key makes `POST /v1/orders` safe to retry.
+- The card is **authorised** when the order is placed and **captured** on delivery, so a rejected order costs nothing.
+- Every status change goes onto an **event bus** keyed by `order_id`; a **notifier** pushes it over a WebSocket, or through APNs and FCM when the app is closed.
+- Couriers send GPS every 4 s to a **location service** that keeps only the latest position in an **in-memory geo index** with a TTL.
+- **Dispatch** offers an order to one courier at a time with a 30 s claim, timed so the courier arrives when the food is ready; the orders database decides the winner.
+
+<Numbers
+  items={[
+    { value: "600/s", label: "orders at the dinner peak", hint: "5 × the 115/s average" },
+    { value: "250K/s", label: "courier location updates", hint: "1M couriers ÷ one fix per 4 s" },
+    { value: "12K/s", label: "searches at peak", hint: "20 to 1 against orders" },
+    { value: "1.4M", label: "deliveries in flight at peak", hint: "600/s × 40 minutes" },
+  ]}
+/>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Browse nearby restaurants", notes: "Open restaurants that deliver to the customer's address, filtered by cuisine; view menus." },
+    { id: "F2", requirement: "Place an order and pay", notes: "Cart to order; the card is authorised when the order is placed and captured on delivery." },
+    { id: "F3", requirement: "Restaurant handles the order", notes: "The restaurant app receives new orders, accepts or rejects them, and marks them ready." },
+    { id: "F4", requirement: "Dispatch a courier", notes: "Offer the delivery to a nearby free courier; reassign if they decline or time out." },
+    { id: "F5", requirement: "Live tracking and ETA", notes: "The customer sees the courier on a map and an updated arrival time." },
+    { id: "F6", requirement: "Status notifications", notes: "Customer, restaurant and courier hear about every status change, even with the app closed." },
+  ]}
+/>
+
+- Out of scope: ratings and reviews, promotions, courier payouts, search ranking models, grocery.
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Latency", target: "Search p99 under 300 ms; status changes reach apps within 1 to 2 s", why: "Customers bounce from slow search; restaurants must see orders at once." },
+    { id: "N2", property: "Availability", target: "99.99% for placing and updating orders", why: "An outage at dinner time means lost orders and cold food." },
+    { id: "N3", property: "Correctness", target: "An order is created and charged exactly once", why: "Retries over bad mobile networks must not double-charge." },
+    { id: "N4", property: "Consistency", target: "Orders and payments strongly consistent; positions, ETAs and search results may be seconds stale", why: "Strictness only where money and state are involved." },
+    { id: "N5", property: "Freshness", target: "Courier positions at most about 5 s old", why: "Dispatch and the map are wrong with older data." },
+    { id: "N6", property: "Scale", target: "Dinner peak about 5 × average; hundreds of thousands of GPS updates a second", why: "Drives an in-memory location tier." },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Assumptions are round numbers chosen to size the system, not real Uber figures.
+
+<EstimateTable
+  rows={[
+    { quantity: "Daily active customers", assumption: "Given", result: "20 million" },
+    { quantity: "Orders a day", assumption: "Given: 10 million ÷ 86,400 s", result: "≈ 115 orders/s average" },
+    { quantity: "Peak order rate", assumption: "5 × average (dinner)", result: "≈ 600 orders/s" },
+    { quantity: "Order status writes", assumption: "600/s × 6 status changes per order", result: "≈ 3,600 conditional updates/s at peak" },
+    { quantity: "Searches", assumption: "10 per active customer a day: 200 million ÷ 86,400 s", result: "≈ 2,300/s average, ≈ 12K/s peak" },
+    { quantity: "Menus", assumption: "1M restaurants × 100 items × 1 KB", result: "≈ 100 GB, fits in a cache" },
+    { quantity: "Couriers online at peak", assumption: "1 million, GPS every 4 s", result: "≈ 250K location updates/s" },
+    { quantity: "Latest positions", assumption: "1M × 100 bytes", result: "≈ 100 MB in memory" },
+    { quantity: "Deliveries in flight at peak", assumption: "600/s × 40 min (2,400 s)", result: "≈ 1.4 million, so a few million live sockets" },
+    { quantity: "Tracking pushes", assumption: "Half of 1.4M on the road, one update per 4 s", result: "≈ 175K pushes/s" },
+    { quantity: "Dispatch claims", assumption: "600/s × 1.5 offers per order", result: "≈ 900 claims/s" },
+    { quantity: "Order storage", assumption: "10M × 2 KB", result: "≈ 20 GB/day, ≈ 7 TB/year" },
+  ]}
+  note="Orders are few but precious; location writes are 400 × the order rate but each one is disposable; search is read-heavy and tolerant of staleness."
+/>
+
+- **Orders are few but precious:** a relational database with transactions handles 600 orders/s easily.
+- **Location writes are 400 × the order rate (250K ÷ 600), but each one is disposable:** they belong in memory, not in the orders database.
+- **Search is read-heavy and tolerant of staleness:** it reads from a dedicated index and caches.
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| D1 | Read to write ratio | Discovery is read-heavy: 12K searches/s against 600 orders/s (20 to 1). Locations are write-heavy: 250K writes/s, and only the latest is ever read | Search from an index and caches; positions in memory, overwritten in place |
+| D2 | Peak against average | Dinner is 5 × the average, and lunch and dinner peaks follow each city's clock | Size for the peak per city; queues absorb bursts of events |
+| D3 | Consistency per operation | Order state, payment and courier assignment strong; menus, search, positions and ETAs eventual (seconds) | Transactions and conditional updates for orders; everything else from copies |
+| D4 | Latency target | Search p99 300 ms; status to apps in 1 to 2 s (N1); a courier has 30 s to answer an offer | A precomputed search index; pushed updates over open sockets |
+| D5 | Durability | An accepted order and its payment are never lost (recovery point zero); a lost position costs one 4 s interval | Orders in a replicated database; positions in a store that may lose data |
+| D6 | Ordering | Per order: its events must arrive in order; no global order | Bus keyed by `order_id` |
+| D7 | Duplicates | A duplicate order or charge is harmful; a duplicate position is harmless (the latest wins); a duplicate push is annoying | Idempotency keys on orders and payments; nothing extra for GPS |
+| D8 | Data size and growth | Orders 20 GB/day; menus 100 GB; positions 100 MB, all hot and none kept | Orders sharded over time; positions only in memory |
+| D9 | Fan-out shape | One to few: each order event goes to three parties; each position goes to one customer | Push per party through one notifier; no broadcast tier |
+| D10 | Contention | One courier, one order: two dispatch workers race for the same courier; restaurant, customer and courier change one order at once | An atomic courier claim; version-checked state changes |
+| D11 | Geography | Many cities; every order stays inside one city | Partition live state by city; a city's failure stays local |
+| D12 | Availability and degradation | 99.99% for orders (N2); under stress drop the tracking rate first, then ETA accuracy, then search extras, never orders | Separate paths for tracking, ETA and search |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `GET /v1/restaurants?lat&lng&cuisine&cursor` | Customer app | Home screen and search |
+| `GET /v1/restaurants/{id}/menu` | Customer app | Opening a restaurant; cached at the CDN |
+| `POST /v1/orders` | Customer app | Checkout, with an `Idempotency-Key` |
+| `GET /v1/orders/{id}`, `POST /v1/orders/{id}/cancel` | Customer app | Order page; cancel before pickup |
+| `POST /v1/restaurant/orders/{id}/accept`, `.../ready` | Restaurant app | Accept the order; food is done |
+| `POST /v1/courier/offers/{id}/accept` | Courier app | Inside the 30 s offer window |
+| `POST /v1/courier/orders/{id}/picked-up`, `.../delivered` | Courier app | At the restaurant; at the door |
+| WebSocket events (table below) | All three apps | Live updates in both directions |
+
+- Customer, restaurant and courier apps each keep one **WebSocket** for live updates; everything else is **HTTPS**.
+
+```http
+GET  /v1/restaurants?lat=..&lng=..&cuisine=..&cursor=..   # nearby, open restaurants
+GET  /v1/restaurants/{id}/menu
+POST /v1/orders                     # Idempotency-Key header; body: restaurant_id, items, address, payment_method_id
+GET  /v1/orders/{id}
+POST /v1/orders/{id}/cancel
+
+POST /v1/restaurant/orders/{id}/accept      # restaurant app
+POST /v1/restaurant/orders/{id}/ready
+
+POST /v1/courier/offers/{id}/accept         # courier app
+POST /v1/courier/orders/{id}/picked-up
+POST /v1/courier/orders/{id}/delivered
+```
+
+| Direction | Event | Payload (key fields) |
+| --- | --- | --- |
+| courier → server | `location` | `lat`, `lng`, `heading`, `ts` every 4 s |
+| server → courier | `delivery_offer` | `order_id`, pickup and drop-off, payout, `expires_at` (≈ 30 s) |
+| server → restaurant | `new_order` | `order_id`, items, notes |
+| server → customer | `order_status` | `order_id`, `status`, `eta` |
+| server → customer | `courier_location` | `lat`, `lng`, `eta`, every few seconds while out for delivery |
+
+- **Idempotency:** the app generates the `Idempotency-Key` per checkout; a retried `POST /v1/orders` returns the order created the first time instead of a second order and a second charge. See [Idempotency](/system-design/patterns/idempotency).
+- **Pagination:** restaurant lists page by an opaque `cursor`.
+- **Errors:** `409` when a state change loses its version check (for example, cancel after pickup); `410` when a courier accepts an offer that has expired; `402` when the card is declined; `429` with `Retry-After` for a flooding client.
+
+## Data model
+
+| Data | Store type | Why this store (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Orders, items, payments | Relational database (<TechIcon id="oss/postgresql" /> PostgreSQL, <TechIcon id="oss/mysql" /> MySQL) | Transactions, a unique idempotency key and version-checked state changes (D3, D5, D7, D10) | `order_id`, once one primary is not enough | Strong | A last-write-wins wide-column store: two state changes can overwrite each other |
+| Restaurants and menus | Relational database + cache + CDN | Read-mostly; 100 GB of menus fits a cache (D1, D8) | `restaurant_id` | Strong at the source; copies seconds stale | Reading menus from the orders database: 12K reads/s beside the order writes |
+| Search documents | Search index (<TechIcon id="oss/elasticsearch" /> Elasticsearch) | Geo, text and filters at 12K queries/s (D1, D4) | Coarse map cell | Eventual, seconds | Geo queries on the restaurants database: they would swamp it |
+| Live positions, offer claims | In-memory store with geo commands (<TechIcon id="oss/redis" /> Redis) | 250K writes/s, worthless after a minute (D1, D5, D8) | City | Eventual; expires by TTL | The orders database: 250K durable writes/s nobody reads |
+| Order events | Durable log (<TechIcon id="oss/apache-kafka" /> Kafka) | Several consumers, in order per order (D6, D9) | `order_id` | Ordered per order | The order service calling every consumer itself |
+
+Orders and restaurants are relational; prices are copied into each order because menus change later.
+
+```sql
+CREATE TABLE restaurants (
+  id            BIGINT PRIMARY KEY,
+  name          VARCHAR(200),
+  lat           DOUBLE PRECISION,
+  lng           DOUBLE PRECISION,
+  cuisine       VARCHAR(50),
+  is_open       BOOLEAN,
+  prep_minutes  INT                        -- feeds dispatch timing
+);
+
+CREATE TABLE menu_items (
+  id             BIGINT PRIMARY KEY,
+  restaurant_id  BIGINT REFERENCES restaurants(id),
+  name           VARCHAR(200),
+  price_cents    INT,
+  available      BOOLEAN
+);
+
+CREATE TABLE orders (
+  id               BIGINT PRIMARY KEY,       -- Snowflake id; the shard key
+  customer_id      BIGINT,
+  restaurant_id    BIGINT REFERENCES restaurants(id),
+  courier_id       BIGINT,                   -- null until dispatched
+  status           VARCHAR(20),              -- PLACED, ACCEPTED, READY, COURIER_ASSIGNED, PICKED_UP, DELIVERED, CANCELLED
+  ready_at         TIMESTAMP,                -- set by the restaurant; READY and COURIER_ASSIGNED come in either order
+  total_cents      INT,
+  address          TEXT,
+  idempotency_key  VARCHAR(64) UNIQUE,       -- makes POST /orders safe to retry
+  version          INT,                      -- optimistic locking for status changes
+  created_at       TIMESTAMP,
+  updated_at       TIMESTAMP
+);
+
+CREATE TABLE order_items (
+  order_id      BIGINT REFERENCES orders(id),
+  menu_item_id  BIGINT REFERENCES menu_items(id),
+  quantity      INT,
+  price_cents   INT,                         -- copied: menu prices change later
+  PRIMARY KEY (order_id, menu_item_id)
+);
+
+CREATE TABLE payments (
+  id            BIGINT PRIMARY KEY,
+  order_id      BIGINT REFERENCES orders(id),
+  status        VARCHAR(20),                 -- AUTHORIZED, CAPTURED, REFUNDED, FAILED
+  provider_ref  VARCHAR(100),
+  amount_cents  INT
+);
+```
+
+Live state sits in the in-memory store, split by city.
+
+| Key (in-memory store) | Value | TTL |
+| --- | --- | --- |
+| `couriers:free:{city}` | geo set: `GEOADD` courier id at lng/lat | members removed when busy or stale |
+| `courier:{id}` | latest position, status, current order | ≈ 30 s, refreshed by each GPS update |
+| `claim:{courier_id}` | the order whose offer this courier holds (`SET NX`) | 30 s, the offer window |
+| `offer:{order_id}` | the courier currently holding this order's offer | ≈ 30 s, the offer window |
+
+- **Orders:** read by id (order page); found by `idempotency_key` (a retried checkout); changed by `UPDATE … WHERE id = ? AND version = ?` (every status change).
+- **Restaurants and menus:** menu by `restaurant_id`, from the cache; every change is copied to the search index.
+- **Search documents:** the lists for one (cell, delivery-time bucket), filtered by open and cuisine (Deep dive 1).
+- **Live state:** free couriers within a radius of a restaurant; one courier's latest position; one claim per courier.
+
+## Building the architecture, step by step
+
+- We start with the smallest design that satisfies F1 and add components only when a requirement forces us to.
+- Each figure shows the design after that step; the step's new parts are outlined, the moving dots show its flow, and parts added earlier are faded.
+
+### Step 1: Browse nearby restaurants (F1)
+
+The smallest design: two read-only services behind a gateway.
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" step={1} caption="Step 1: the API gateway routes searches to the search index and menu reads to the restaurants database." />
+
+- **Adds:** the **API gateway**, the **search service** with its **search index**, the **restaurant service** with the **restaurants DB**.
+- **Flow:**
+  1. The customer app calls the API gateway, which authenticates and rate-limits.
+  2. The search service asks the search index for open restaurants within delivery range of the address, filtered by cuisine.
+  3. The restaurant service serves menus, hours and prices from the restaurants DB.
+  4. Changes are copied into the search index asynchronously, so a new menu item shows up in search a few seconds later.
+- **Why this and not that:**
+  - Restaurants are indexed by location (a geohash, the index's built-in geo type, or hexagonal cells), so "near me" is a range lookup, not a scan of a million rows. See [Geospatial Indexing](/system-design/patterns/geospatial-indexing).
+  - The restaurants DB is the source of truth, but geo-plus-text queries at about 12K/s would swamp it (D1). The index is a read-optimised copy, and slight staleness is fine (N4).
+  - Menus (about 100 GB) are cached at the service and the CDN.
+- **The gap:** customers can look but not buy.
+
+<PremiumBreak />
+
+### Step 2: Place an order and pay (F2)
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" step={2} caption="Step 2: the order service authorises the card through the payment service and writes the order as PLACED." />
+
+- **Adds:** the **order service** (the heart of the system), the **payment service**, the **orders DB**.
+- **Flow:** `POST /v1/orders` reaches the order service, which in one request:
+  1. Checks `idempotency_key`; a retry returns the existing order.
+  2. Validates items and prices against the menu, copying prices into `order_items`.
+  3. Asks the payment service to **authorise** the card (reserve the money). The card is **captured** only on delivery, so a cancelled order costs nothing.
+  4. Writes the order as `PLACED` to the orders DB in one transaction, and returns the order id.
+- **Why this and not that:**
+  - **Authorise, then capture:** it avoids charging for food that never arrives. If the restaurant rejects the order, the order service voids the authorisation instead of issuing a refund (D5, N3).
+  - Order and payment together are a small [saga](/system-design/patterns/saga): every step has an undo.
+  - **Relational:** about 600 orders/s at peak is easy for a sharded relational database, and orders need transactions, unique constraints and joins (D3, D7).
+- **The gap:** the order is stored, but the restaurant does not know about it.
+
+### Step 3: Restaurant accepts, everyone hears about it (F3, F6)
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" step={3} caption="Step 3: order events go onto a bus keyed by order id; the notifier pushes them through the socket gateway or APNs and FCM." />
+
+- **Adds:** the **event bus**, the **notifier**, the **socket gateway** (the tier that holds every app's WebSocket), the **restaurant app**.
+- **Flow:**
+  1. Every status change becomes an event (`OrderPlaced`, `OrderAccepted`, `OrderReady`, …) on the event bus, keyed by `order_id` so one order's events stay in order (D6).
+  2. The event is written to an outbox table in the same transaction as the status change, then relayed to the bus, so a crash between the two cannot lose it.
+  3. The notifier consumes the events and decides who to tell: through the socket gateway if the app has a live socket, otherwise by push notification through **APNs / FCM**.
+  4. The restaurant app gets `new_order`, then calls `accept` and `ready` through the API gateway; the customer app gets `order_status` for every change.
+  5. Each call moves the order's state machine forward with an optimistic-lock `version` check, so two conflicting updates cannot both win (D10).
+- **Why this and not that:** a bus instead of the order service calling everyone keeps the order service small and fast. New consumers (dispatch, analytics, fraud) subscribe without changing it, and a slow notifier never blocks an order. See [Message Queues and Pub/Sub](/system-design/patterns/message-queues).
+- **The gap:** the food will be ready, but no one is coming to collect it.
+
+### Step 4: Dispatch a courier (F4)
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" step={4} caption="Step 4: couriers stream GPS into an in-memory geo index; dispatch finds nearby free couriers and offers the job." />
+
+- **Adds:** the **courier app**, the **location service**, the **dispatch service**, the in-memory **geo index**.
+- **Flow:**
+  1. Each courier app sends its position every 4 s over its socket: about 250K updates/s at peak.
+  2. The location service keeps only the latest one: `GEOADD couriers:free:{city}` in the geo index, plus `courier:{id}` with a short TTL so a courier who goes silent drops out. Nothing touches the orders DB.
+  3. Dispatch consumes `OrderAccepted` from the bus, timed so the courier arrives about when the food is ready (Deep dive 2).
+  4. It asks the location service for free couriers within a few kilometres of the restaurant and ranks them by distance and ETA.
+  5. It claims the best one with `SET claim:{courier_id} {order_id} NX EX 30` and publishes a `delivery_offer`, which reaches the courier through the notifier and the socket gateway.
+  6. If the courier accepts, the order becomes `COURIER_ASSIGNED`; if they decline or 30 s pass, dispatch tries the next courier.
+- **Why this and not that:**
+  - **In memory:** positions change every 4 s and are worthless a minute later. Writing 250K/s to a durable database would cost a lot to store data nobody reads (D1, D8). If the geo index restarts, it refills within one GPS interval (D5).
+  - **The `NX` claim:** two dispatch workers can pick the same courier for two orders. The atomic claim makes one of them lose cleanly and try someone else (D10).
+- **The gap:** the customer still cannot see where the courier is or when the food will arrive.
+
+The radius lookup itself, shown on the pattern page: index each point by cell, read the nine cells around the search point, then check exact distance.
+
+<AnimatedDiagram spec="animated/patterns/geo-nearby-query" stepper caption="The index cuts 200 distance checks to 17; the exact check after it keeps the answer right, and widening covers an empty area." />
+
+**How to read it:** the shopper is the restaurant here and the pick-up points are free couriers; step 3 is the `GEOSEARCH` dispatch runs, step 5 is widening the radius when nobody is free.
+
+### Step 5: Live tracking and ETA (F5)
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" step={5} caption="Step 5: positions of couriers on a delivery flow through the bus to the customer; the ETA service recomputes arrival times." />
+
+- **Adds:** the **ETA service**; the location service also publishes to the bus.
+- **Flow:**
+  1. While an order is out for delivery, the location service publishes the courier's position to the event bus, keyed by `order_id`.
+  2. The notifier forwards it to that order's customer as `courier_location` every few seconds.
+  3. The ETA service recomputes arrival time from the road graph and live traffic. The location service calls it when the courier moves meaningfully, not on every ping.
+- **Why this and not that:** the location service does not know which gateway server holds the customer's socket; the notifier already does. Reusing one push path keeps a single place to handle offline apps, throttling and fan-out to several devices (D9, D12).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/uber-eats/architecture" stepper caption="Uber Eats architecture: browse, order and pay, notify, dispatch, track. Use the numbers to replay the build." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Customer, restaurant and courier apps | Keep one WebSocket open, retry with idempotency keys, send GPS (courier) |
+| **Edge** | API gateway, socket gateway | Authenticate and rate limit REST calls; hold millions of WebSockets |
+| **Application services** | Search, restaurant, payment services | Discovery, menus, card authorisation and capture |
+| **Ordering & dispatch** | Order, dispatch, location, ETA services | Order state machine, courier matching, live positions, arrival times |
+| **Async pipeline** | Event bus, notifier | Ordered order events; push to sockets or APNs / FCM |
+| **Storage** | Search index, restaurants DB, orders DB, geo index | Read-optimised search, menus, transactional orders, live courier positions |
+
+An order, end to end:
+
+1. The customer searches; the search service returns nearby open restaurants from the search index.
+2. `POST /v1/orders` with an idempotency key: the order service authorises the card and writes the order as `PLACED`.
+3. `OrderPlaced` goes on the event bus; the notifier pushes `new_order` to the restaurant app, which accepts.
+4. On `OrderAccepted`, dispatch queries the location service for nearby free couriers and offers the job to the best one.
+5. The courier accepts, picks up and drives; their GPS updates flow through the location service to the customer's map, with ETAs from the ETA service.
+6. On `DELIVERED`, the order service captures the payment and the notifier tells everyone.
+
+## Component choices and why
+
+- Every box in the final diagram: what we picked, why this workload needs it, and why the usual alternatives lose here.
+- Driver ids (D1 to D12) refer to the table in "Estimates and decision drivers"; requirement ids (F, N) to the requirement tables.
+
+### API style: REST for actions, one WebSocket per app for live updates
+
+- **Choice:** REST over HTTPS for search, menus, checkout and every state change; one WebSocket per app for offers, new orders, status and positions.
+- **Why:** a state change is a request that must succeed or fail with a clear answer, and REST GETs cache at the CDN (D1). Live updates must reach the restaurant in 1 to 2 s (N1, D4) and the courier must answer within 30 s.
+- **Why not polling:** 1.4M customers in flight polling every 4 s is 350K requests/s, almost all returning "no change"; a restaurant polling every 10 s sees new orders up to 10 s late.
+- **Why not Server-Sent Events:** fine for the customer's one-way stream, but the courier sends GPS upstream every 4 s; one WebSocket serves all three apps with one protocol.
+- **Why not GraphQL:** a few fixed screens, and queries sent as POST bodies are hard to cache at the CDN, where menu reads must land.
+- **Why not gRPC to the apps:** browsers and many restaurant tablets need a proxy for it; it fits the internal service-to-service calls instead.
+
+### Load balancer: layer 7 for REST, layer 4 for sockets
+
+- **Choice:** a layer-7 (HTTP) load balancer behind the API gateway; a layer-4 (TCP) load balancer in front of the socket gateway.
+- **Why layer 7 for REST:** it routes by path (`/restaurants` to search, `/orders` to the order service), so a search surge cannot starve checkout (D12), and it retries an idempotent GET on another node.
+- **Why layer 4 for sockets:** a WebSocket lives for the whole delivery; the balancer only passes bytes and keeps the connection on one server.
+- **Why not layer 7 for sockets:** it would parse every frame of millions of long-lived connections for no routing benefit.
+- **Why not DNS round robin alone:** clients cache the answer, so a dead or overloaded server keeps getting traffic for minutes.
+- **Algorithm:** least outstanding requests for REST; least connections for sockets, because open connections are the load on a gateway server.
+
+### API gateway: one front door for REST
+
+- **Choice:** authentication, per-user rate limits and routing for every REST call from the three apps.
+- **Why:** one place to check tokens and throttle a misbehaving client before it reaches the order service (N2).
+- **Why not on the socket path:** the socket gateway checks the token once when the socket opens; a gateway hop per GPS fix would add work to 250K messages/s for nothing.
+
+### Socket gateway: a stateful tier sized by connections
+
+- **Choice:** a fleet that holds every app's WebSocket and nothing durable; the notifier knows which server holds which app.
+- **Why:** 1.4M deliveries in flight means a few million live sockets (customer, courier, restaurant tablets); keeping them off the services lets those deploy and scale freely (D9).
+- **Why not sockets inside each service:** the order, dispatch and location services would each need to know where every app is connected.
+- **Why not a managed WebSocket service:** these bill per connection-minute, and couriers stay connected for whole shifts; at a few million always-on sockets a self-run fleet costs less.
+
+### CDN and menu cache
+
+- **Choice:** a CDN for images and menus (short TTL); a <TechIcon id="oss/redis" /> Redis cache-aside in front of the restaurants DB for menus, hours and prices.
+- **Why:** 100 GB of menus fits a cache, a popular restaurant's menu is read thousands of times between edits, and seconds of staleness are allowed (D1, N4).
+- **Why not read the restaurants DB every time:** menu reads would grow with search traffic, 12K/s at peak.
+- **Why not cache prices for checkout:** the order service re-reads prices from the restaurants DB at checkout and copies them into `order_items`, so a stale cache can never set the charge.
+
+### Search index: a search engine with geo and text (Elasticsearch)
+
+- **Choice:** <TechIcon id="oss/elasticsearch" /> Elasticsearch (or OpenSearch), documents per restaurant per map cell and delivery-time bucket, sharded by coarse cell (Deep dive 1).
+- **Why:** each query combines where (cells), when (open now), what (cuisine, dish text) and a ranking, at 12K/s with a 300 ms p99 (D1, D4).
+- **Why not PostGIS on the restaurants DB:** it answers geo queries well, but 12K/s of geo-plus-text queries would compete with menu edits on the source of truth; it fits a single city.
+- **Why not Redis GEO:** fast radius queries, but no text search, no filters beyond distance and no ranking.
+- **Why not a plain radius:** a restaurant 2 km away across a river can be 30 minutes away; the index stores delivery time, not distance.
+
+### Restaurants DB: relational (PostgreSQL)
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL for restaurants, menus and items, with read replicas behind the cache.
+- **Why:** small (100 GB), edited by restaurant tools, and joined with orders by id; one relational store keeps edits simple (D8).
+- **Why not a document store (MongoDB):** a menu as one document works too; relational wins here because items are referenced by `order_items` and edited one at a time.
+
+### Orders DB: relational with transactions, sharded by order id
+
+- **Choice:** <TechIcon id="oss/postgresql" /> PostgreSQL or <TechIcon id="oss/mysql" /> MySQL; orders, items, payments and the outbox in one database; sharded by `order_id` once one primary is not enough.
+- **Why:** every status change is a version-checked update, the idempotency key needs a unique constraint, and the outbox row must commit with the change (D3, D7, D10). 3,600 updates/s at peak fits a few shards.
+- **Why not Cassandra:** its writes are last-write-wins and it has no transaction across rows, so two apps changing one order can overwrite each other and an assignment touching two rows is not atomic (see How real systems do it).
+- **Why not Redis as the system of record:** fast and atomic per key, but an acknowledged order must survive a node loss with recovery point zero (D5).
+- **Why not a globally distributed SQL database (Spanner, CockroachDB):** the right next step when one city outgrows a primary or the business needs several regions writing; until then, a sharded relational database is cheaper and well understood.
+
+### Payment: an outside provider, authorise then capture
+
+- **Choice:** a payment provider called with the order's idempotency key: authorise at checkout, capture on `DELIVERED`, void on cancel.
+- **Why:** card data never touches our systems, and a rejected or cancelled order costs nothing (D5, D7, N3).
+- **Why not charge at checkout:** a rejection would need a refund, which takes days to reach the customer.
+
+### Event bus: a Kafka-style log keyed by order id
+
+- **Choice:** <TechIcon id="oss/apache-kafka" /> Kafka, one topic keyed by `order_id`, filled from the orders DB's outbox.
+- **Why:** one order's events in order (D6); dispatch, the notifier, analytics and fraud each read every event at their own pace (D9); a consumer that was down catches up by replaying (D5).
+- **Why not a work queue (RabbitMQ, SQS):** each message goes to one consumer and is deleted; four consumers would need four queues and nothing could be replayed.
+- **Why not Redis pub/sub:** delivery is at most once, so a notifier restart would lose `new_order` for every order placed meanwhile.
+- **Why the outbox:** publishing after the commit loses the event if the service crashes in between; publishing before it announces an order that may never commit.
+
+### Geo index: an in-memory store with geo commands (Redis)
+
+- **Choice:** <TechIcon id="oss/redis" /> Redis per city: a geo set of free couriers, a key per courier with a 30 s TTL, and the offer claims.
+- **Why:** 250K writes/s, only the latest value matters, and a lost value is replaced in 4 s (D1, D5, D8); 100 MB fits in memory many times over.
+- **Why not the orders DB:** durable, replicated writes for data that is worthless in a minute, competing with order writes.
+- **Why not the search index:** it makes a write searchable only after a refresh, about a second later, and indexing 250K updates/s is heavy work for a store built for reads.
+- **Why not hexagonal cells here as well:** dispatch only needs "free couriers within 3 km", then ranks a handful by road ETA; a radius query on a geo set is enough.
+
+### Notifier and push: one path to every app
+
+- **Choice:** a notifier that consumes the bus and sends through the socket gateway, or through APNs and FCM when the app has no live socket.
+- **Why:** F6 requires notifications with the app closed, and the platform push services are the only way to wake an app in the background.
+- **Why not push straight from each service:** every service would need the socket map, throttling and offline handling; one notifier owns them.
+
+### ETA service: route, then correct
+
+- **Choice:** a routing engine sums travel times along the best path on the road graph with live traffic; a model then corrects that estimate.
+- **Why:** the customer's ETA and dispatch's ranking both need road time, not straight-line distance (F5, D4).
+- **Why not straight-line distance:** rivers, one-way streets and traffic make it wrong exactly where it matters.
+- **Why not a model alone:** the routing engine already knows the road network; the model only has to learn the error.
+- **Degrade:** if the service is slow, fall back to distance-based estimates (D12).
+
+### Ids: Snowflake-style 64-bit order ids
+
+- **Choice:** time-sortable 64-bit ids made in each order service instance from time, instance id and a counter.
+- **Why:** unique without coordination at 600/s, sortable by time for "my orders", and a good shard key that spreads writes.
+- **Why not a database sequence:** a sequence per shard collides across shards; one global sequence is a bottleneck and a single point of failure.
+
+## Deep dives
+
+### "Nearby" means delivery time, not distance
+
+- **Distance lies.** A restaurant 2 km away across a river, or behind a one-way system, can take longer than one 4 km away on a main road.
+- **Cells, not points.** Cover the city with hexagonal cells. A hexagon has six neighbours, all at the same distance from its centre; a square has four at one distance and four more at another, so square grids bend "the next ring out".
+- **Index by reach, in buckets.** For each restaurant, the routing engine computes the delivery minutes to every cell it can serve; the index stores one entry per (cell, bucket): 0 to 15, 15 to 30, 30 to 45 minutes.
+- **Query by the customer's cell.** Turn the address into its cell, read the three bucket lists in parallel, filter by open and cuisine, then rank. Each list is one term lookup, not a geometry test.
+- **Shard by coarse cell.** A search shard owns a large cell; a restaurant whose reach crosses into a neighbouring shard is indexed in both (a buffer zone), so a customer near the edge still finds it.
+- **Keep reach fresh.** Recompute a restaurant's reach every 15 minutes for traffic, and at once when it changes its prep time or delivery area.
+
+<AnimatedDiagram spec="animated/uber-eats/hex-search" stepper caption="A cell across the river is close in metres but far in minutes; search reads lists by cell and delivery-time bucket, and edge stores live in both shards." />
+
+**How to read it:**
+
+- Step 1: R is the restaurant; each number is minutes to deliver to that cell. Cells across the river are one ring away but 12 minutes slower, so they fall into the blue 15 to 30 bucket.
+- Step 2: customer C lives in a 22-minute cell; the three lists for that cell are read in parallel and R appears in the 15 to 30 list.
+- Step 3: the dashed shard edge runs one cell border west of R; R's reach crosses it, so R is written to shard A and shard B.
+
+**The numbers:**
+
+- In the figure, 31 of 37 cells are within 30 minutes of R: 13 in the 0 to 15 bucket and 18 in the 15 to 30 bucket.
+- 1M restaurants × about 30 cells each = 30M index entries; at 200 bytes each that is 6 GB per copy, which trades cheap storage for one term lookup per bucket.
+- Recomputing every restaurant every 15 minutes is 1M ÷ 900 s ≈ 1,100 routing jobs/s, off the query path.
+- If 10% of restaurants sit within reach of a shard edge, the buffer zone grows the index by about 10%.
+
+Why not a geohash grid: its cells are rectangles, and two neighbours can share no prefix at all.
+
+<AnimatedDiagram spec="animated/patterns/geo-geohash-grid" stepper caption="Nearby cells usually share a prefix, but not always: 140 m apart across the meridian, gcpvp and u10j0 share none." />
+
+**How to read it:** step 2 is the nine-cell read a geohash search needs; step 3 is the edge where a prefix search misses the closer cell, the same edge problem the buffer zone solves for shards.
+
+### Dispatch: one courier, one order, at the right moment
+
+- **Find candidates:** `GEOSEARCH` the city's free couriers within 3 km of the restaurant, then rank the handful by road ETA to the restaurant, not straight-line distance.
+- **Time the offer:** send the first offer at `ready_at − courier travel time − 1 minute of slack`, so the courier neither waits at the counter nor lets the food go cold.
+- **Claim before offering:** `SET claim:{courier_id} {order_id} NX EX 30`. A worker that gets nil moves to its next candidate; the 30 s expiry frees a courier who never answers (D10).
+- **One offer at a time, 30 s each:** no answer means the claim expires and the next courier is claimed.
+- **The orders DB decides:** an accept runs `UPDATE orders SET courier_id = :c, status = 'COURIER_ASSIGNED' … WHERE id = :o AND courier_id IS NULL`. One row changed means assigned; 0 rows means someone else got it (D3).
+- **Why two steps:** the claim in memory is a cheap filter at 900 claims/s; the conditional update commits with the order state and its outbox event, which the in-memory store cannot do.
+
+<AnimatedDiagram spec="animated/uber-eats/dispatch-offer" stepper caption="A short claim stops two orders taking one courier; the conditional update in the orders DB decides who really got the order." />
+
+<StepCards>
+  <StepCard n={1} title="Offer, no answer, next courier">
+    Dispatch finds A at 1.1 km and B at 1.8 km, claims A and offers order 7. A does not answer in 30 s, so the claim expires; dispatch claims B, B accepts, and the conditional update sets courier B on the order.
+  </StepCard>
+  <StepCard n={2} title="Two orders want courier B">
+    Another worker tries to claim B for order 9 and gets nil because B is taken. It claims C instead, so no courier ever holds two offers.
+  </StepCard>
+  <StepCard n={3} title="A late accept loses">
+    A taps accept at 34 s. The update finds courier B already on order 7, changes 0 rows, and A is told the offer expired.
+  </StepCard>
+</StepCards>
+
+**The numbers:** 600 orders/s × 1.5 offers per order = 900 claims/s, under 0.4% of the 250K position writes/s the same store already takes.
+
+<Callout tone="red" title="What breaks">
+  An accept that arrives after the claim expired can win an order while the courier already holds another offer. Reject every accept after `expires_at` with `410`, and show the courier a 25 s countdown against the server's 30 s.
+</Callout>
+
+### The order state machine across three apps
+
+- **One owner:** only the order service changes an order; the three apps send requests and receive events.
+- **Allowed moves only:** each request names the move (`accept`, `ready`, `picked-up`), and the service checks it against the current state and `version` in one statement (D10).
+- **Two parts in parallel:** the kitchen (accepted to ready) and the courier (accepted to courier assigned) finish in either order; `PICKED_UP` needs both `ready_at` and `courier_id` set.
+- **A timer on every waiting state:** 5 minutes for the restaurant to accept, else cancel; 10 minutes without a courier, widen the radius, then raise the payout, then offer the customer a cancel. Timers live in a durable scheduler, not in a process's memory. See [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling).
+- **An undo for each step:** cancel before pickup voids the card authorisation; a cancel after pickup is a refund and a support case, not a state move.
+
+<AnimatedDiagram spec="animated/uber-eats/order-states" stepper caption="Food and courier move in parallel and meet at pickup; every cancel before pickup voids the card hold instead of refunding." />
+
+**How to read it:**
+
+- Teal moves are the restaurant's, blue the courier's; the dotted group holds the two parts that may finish in either order.
+- Step 2 adds the red cancel paths; each one triggers the void of the authorisation.
+
+**The numbers:** 6 status changes per order × 600 orders/s = 3,600 conditional updates/s at peak, plus about 2 live timers per order: 1,200 new timers/s.
+
+Every move is one conditional statement:
+
+```sql
+-- The restaurant marks the food ready: allowed from ACCEPTED or COURIER_ASSIGNED, at the version it read.
+UPDATE orders
+SET ready_at = now(),
+    status   = CASE WHEN status = 'ACCEPTED' THEN 'READY' ELSE status END,
+    version  = version + 1
+WHERE id = :order_id
+  AND version = :version
+  AND status IN ('ACCEPTED', 'COURIER_ASSIGNED');
+-- 0 rows: another app changed the order first; re-read it and decide again.
+```
+
+### Worked example: one dinner order
+
+1. **19:00:** a customer in a 22-minute cell searches; three bucket lists are read in parallel and 12 restaurants come back in 120 ms.
+2. **19:01:** `POST /v1/orders` with key `k1`; the card is authorised for \$24 and the order is `PLACED`. The app times out and retries with `k1`: the same order comes back.
+3. **19:02:** the restaurant accepts with a 15-minute prep time, so `ready_at` is 19:17.
+4. **19:10:** the nearest free couriers are 6 minutes away, so dispatch sends the first offer at 19:17 − 6 − 1 = 19:10. Courier A ignores it; at 19:10:30 courier B is claimed and accepts.
+5. **19:16:30:** B arrives; the food is ready at 19:17 and the order is `PICKED_UP`.
+6. **19:31:** B delivers; the order is `DELIVERED` and the \$24 is captured.
+
+**The numbers:**
+
+- About 6 status events × 3 parties = 18 pushes, plus 14 minutes on the road at one position every 4 s = 210 position pushes to one customer.
+- B waits 30 seconds at the counter instead of the 9 minutes an offer at 19:02 would have cost.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Fulfilment store | Availability-first wide-column store with a cache; relational with transactions; distributed SQL | Relational with transactions, sharded by `order_id` | D3, D10, N3, N4 | Write scale per shard; manual resharding | A city outgrows one primary, or several regions must write: distributed SQL |
+| What "nearby" means | Fixed radius, geohash cells, hexagonal cells with delivery-time buckets | Hexagonal cells and delivery-time buckets | D1, D4, F1, N1 | A bigger index and a reach job to run | A small market where a radius in PostGIS is good enough |
+| Courier positions | Orders DB, time-series store, in-memory store with a TTL | In-memory store with a TTL | D1, D5, D8, N5 | No position history | Disputes need trails: sample positions into a time-series store |
+| Live updates | Polling, Server-Sent Events, WebSocket plus push | One WebSocket per app plus APNs and FCM | D4, D9, F6, N1 | A stateful gateway tier | Tablets behind proxies that block sockets: add long polling |
+| Courier claim | Lock in the orders DB, in-memory `SET NX`, both | In-memory claim, then a conditional update in the orders DB | D3, D10, F4 | Two stores to reason about | Claims become rare enough to run in the database alone |
+| Dispatch timing | At placement, at accept, timed to food readiness | Timed to food readiness | D2, F4 | Risk of no free courier at the right moment | Prep-time estimates are poor for a restaurant: offer at accept |
+| Payment | Charge at checkout, authorise then capture | Authorise at checkout, capture on delivery | D5, D7, N3 | Authorisations expire after some days | Scheduled orders placed far ahead: authorise later |
+| Events | Direct calls, a bus with publish after commit, a bus fed by an outbox | Bus keyed by `order_id`, fed by an outbox | D5, D6, D9 | An outbox relay to run | Never while an event must match a committed change |
+| ETA | Straight-line distance, routing only, routing plus a correction | Routing plus a correction | D4, F5 | A model to train and serve | The model is down: routing only |
+
+## Patterns used
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Geospatial Indexing](/system-design/patterns/geospatial-indexing) | Search by cell and bucket; the courier geo set | "Near me" must be a lookup, not a scan |
+| [Concurrency Control, Locking and Reservations](/system-design/patterns/concurrency-and-locking) (advanced) | Courier claims, version-checked state changes | One courier, one order; three apps change one order |
+| [Saga and Distributed Transactions](/system-design/patterns/saga) | Authorise, accept, capture or void | The payment provider cannot join our transaction |
+| [Durable Workflows and Distributed Job Scheduling](/system-design/patterns/workflows-and-job-scheduling) (advanced) | Timers on every waiting state; timed offers | A timeout must fire even after a crash |
+| [Real-Time Connection Gateways and Presence](/system-design/patterns/realtime-gateways-and-presence) (advanced) | Socket gateway, courier TTL keys | A few million live sockets; silent couriers must drop out |
+| [Message Queues and Pub/Sub](/system-design/patterns/message-queues) | The event bus | Ordered events per order for several consumers |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) (advanced) | Order events | An event must match a committed change |
+| [Caching](/system-design/patterns/caching) | Menus at the CDN and in Redis | 12K searches/s lead to menu reads |
+| [Idempotency](/system-design/patterns/idempotency) | `POST /v1/orders`, payment calls | A retry must never create a second order or charge |
+| [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) | Calls to payment and ETA | A slow dependency must not stall checkout |
+| [Unique ID Generation](/system-design/patterns/unique-id-generation) | Order ids | Sortable ids without a central counter |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | Orders by `order_id`, live state by city, search by coarse cell | Each workload spread by its own key |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Ride hailing | Location service, geo index, claims and offers, ETA | Match in seconds and there is no kitchen: no readiness timing, and the rider waits on the map |
+| Grocery delivery | Order state machine, dispatch, tracking, payment | 100,000 items per store, stock that runs out, substitutions, and one order may come from several stores |
+| Parcel couriers | Tracking, ETA, notifications | Routes planned in batches hours ahead; dispatch is an optimisation over many stops, not one offer at a time |
+| Home services (cleaners, repairs) | Offers with a timeout, an atomic claim, payment | Booked by time slot in advance; matching by skill as well as place |
+
+## How real systems do it
+
+- **2018:** Uber's H3 grid has 16 resolutions; each finer cell has about one seventh of its parent's area, and a hexagon has one distance from its centre to every neighbour. Uber uses it to optimise pricing and dispatch.
+- **2018:** Uber Eats used historical trip states per restaurant to time dispatch so that delivery partners "arrive just when the food is ready".
+- **2021:** Uber's fulfilment platform rewrite: the 2014 stack on Cassandra, Redis and Ringpop prioritised availability over consistency, multi-entity writes were not atomic, and concurrent writes could overwrite each other. The new platform runs on Spanner with statecharts and one read-write transaction per business action, for over a million concurrent users.
+- **2022:** DeepETA: the routing engine's ETA is corrected by a model that predicts the residual, which must answer within a few milliseconds; it is Uber's highest-QPS model.
+- **2025:** Uber Eats search shards by H3 hexagons, indexes documents near hex edges in several hexagons, and stores each restaurant once per delivery-time range; the time-range index cut query latency by 50%, while delivery range grew from about 10 to 15 minutes to close to an hour.
+- **Where this design differs:** we keep orders in a sharded relational database, not Spanner. It gives the same atomic, version-checked state changes for one region; distributed SQL is the move when several regions must write the same orders.
+
+## Failure modes & pitfalls
+
+- **Positions in the orders DB:** 250K writes/s crowd out 600 orders/s; watch orders DB write latency at dinner; keep positions in memory with a TTL.
+- **Last-write-wins on order state:** a cancel and an accept both "succeed"; count orders whose event history has an impossible move; version-checked updates on a transactional store.
+- **Two orders, one courier:** a courier gets two pickups at once; alert on couriers with two active orders; atomic claim plus the conditional update.
+- **Event published outside the transaction:** a restaurant never hears about an order, or hears about one that was rolled back; compare `PLACED` orders with `new_order` pushes; use the outbox.
+- **Lost timers:** an order waits for ever for a restaurant that went offline; watch the oldest order in each waiting state; timers in a durable scheduler.
+- **Radius search across a river:** customers see restaurants that cannot deliver in time; watch the gap between quoted and actual delivery time; index by delivery-time bucket.
+- **Dinner spike on the ETA model:** p99 search and tracking latency climb; watch ETA latency; fall back to routing-only or distance estimates (D12).
+
+## Interview framework
+
+1. **Minutes 0 to 5:** clarify scope, scale, what nearby means and when the card is charged; write F1 to F6 and N1 to N6.
+2. **Minutes 5 to 10:** estimates: 115 orders/s average, 600 at peak, 250K location writes/s, 12K searches/s; say what each number forces.
+3. **Minutes 10 to 15:** API (REST plus one WebSocket per app) and the orders table with its idempotency key and `version`.
+4. **Minutes 15 to 30:** Steps 1 to 4: search, order and pay, events and notifications, dispatch; say the gap that forces each part.
+5. **Minutes 30 to 38:** Step 5, tracking and ETA; then the state machine with its timers and undo steps.
+6. **Minutes 38 to 45:** one deep dive the interviewer picks: delivery-time search, dispatch races or the state machine.
+
+**What interviewers listen for:**
+
+- **Mid:** separate stores for orders, search and positions; an idempotency key on checkout; WebSockets for live updates.
+- **Senior:** authorise then capture, an atomic courier claim with the database as the final word, version-checked state changes, an outbox, dispatch timed to readiness.
+- **Staff:** delivery time instead of distance, shard edges, availability-first against consistency-first stacks, what degrades first at dinner, city-level isolation.
+
+**Red flags:**
+
+- Writing every GPS fix to the orders database.
+- Charging the card at checkout.
+- "Lock the courier in Redis" with nothing in the database.
+- A single `status` column that cannot express ready and assigned in either order.
+
+## Further reading
+
+- [H3: Uber's Hexagonal Hierarchical Spatial Index](https://www.uber.com/blog/h3/) (Uber Engineering, 2018)
+- [How Trip Inferences and Machine Learning Optimize Delivery Times on Uber Eats](https://www.uber.com/blog/uber-eats-trip-optimization/) (Uber Engineering, 2018)
+- [Uber’s Fulfillment Platform: Ground-up Re-architecture to Accelerate Uber’s Go/Get Strategy](https://www.uber.com/en-CA/blog/fulfillment-platform-rearchitecture/) (Uber Engineering, 2021)
+- [DeepETA: How Uber Predicts Arrival Times Using Deep Learning](https://www.uber.com/en-US/blog/deepeta-how-uber-predicts-arrival-times/) (Uber Engineering, 2022)
+- [Optimizing Search Systems: Balancing Speed, Relevance, and Scalability](https://www.infoq.com/articles/optimizing-search-systems) (InfoQ, 2025)
+- Related pages: [Tinder](/system-design-case-studies/case-studies/tinder) · [Google Maps](/system-design-case-studies/case-studies/google-maps) · [Ticketmaster](/system-design-case-studies/case-studies/ticketmaster) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing) · [Saga and Distributed Transactions](/system-design/patterns/saga)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you find nearby available couriers quickly?" category="Architecture" level="Mid">
+  - Keep only each courier's latest position in an in-memory geo index (Redis GEO, or geohash or H3 cells), split by city.
+  - Dispatch runs a radius query around the restaurant, then ranks the few candidates by road ETA rather than straight-line distance.
+  - Couriers who stop sending GPS expire through a short TTL.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make sure a customer is charged only once?" category="Failure modes" level="Mid">
+  - The app sends an idempotency key with POST /orders, and the orders table has a unique constraint on it, so a retry returns the original order.
+  - The payment provider call carries the same key.
+  - The card is authorised at order time and captured once on delivery.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why not store every courier GPS update in the main database?" category="Trade-offs" level="Mid">
+  - At about 250K updates per second, almost all of which are superseded four seconds later, a durable write per update is expensive and nobody reads the old values.
+  - Keep the latest position in memory with a short TTL.
+  - If history is needed for disputes, sample it into cheap time-series storage asynchronously.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two dispatch workers pick the same courier for different orders. How do you prevent a double assignment?" category="Failure modes" level="Senior">
+  - Claim the courier atomically before sending the offer, for example SET courier-offer key NX with a 30 second expiry, or a conditional update on the courier's status.
+  - The loser of the race sees the claim fail and moves to its next candidate.
+  - The expiry frees the courier if the offer is never answered.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens if the restaurant rejects an order after the card was authorised?" category="Architecture" level="Senior">
+  - Treat order placement as a saga: each step has a compensating action.
+  - A rejection moves the order to CANCELLED and triggers the compensation for payment, which voids the authorisation rather than refunding a captured charge.
+  - Every step is idempotent, so the saga can be retried safely after a crash.
+  </InterviewQuestion>
+  <InterviewQuestion question="Estimate the QPS for this system from 10 million orders a day and 1 million couriers." category="Concepts" level="Mid">
+  - Orders: 10 million ÷ 86,400 s ≈ 115/s; dinner at 5 × is about 600/s, and 6 status changes each is 3,600 updates/s.
+  - Searches: 20 million customers × 10 a day ÷ 86,400 ≈ 2,300/s, about 12K/s at peak.
+  - Locations: 1 million couriers ÷ one fix per 4 s = 250K writes/s, 400 × the order rate.
+  - Say what it forces: orders in a transactional database, search in an index, positions in memory.
+  </InterviewQuestion>
+  <InterviewQuestion question="A customer edits the same cart on a phone and a laptop. What happens at checkout?" category="Failure modes" level="Mid">
+  - Keep the cart on the server, one per customer and restaurant, with a `version`; every edit is a conditional update, so a stale device gets a conflict and reloads.
+  - Derive the checkout's idempotency key from the cart id and its version, so both devices checking out the same cart create one order.
+  - The order copies items and prices from the cart at that version; later edits cannot change a placed order.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why index restaurants by delivery time instead of distance?" category="Architecture" level="Senior">
+  - A restaurant across a river or a ring road can be close in metres and far in minutes; customers care about minutes.
+  - Precompute, per restaurant, the hexagonal cells it reaches in each time bucket, and query by the customer's cell.
+  - Each bucket is one term lookup, read in parallel, so the 300 ms p99 holds at 12K searches/s.
+  - Index restaurants near a shard edge in both shards so a customer at the edge still sees them.
+  </InterviewQuestion>
+  <InterviewQuestion question="When should dispatch offer the order to a courier?" category="Trade-offs" level="Senior">
+  - Not at placement: the courier waits at the counter for the whole prep time, and the fleet runs short at dinner.
+  - Aim for arrival when the food is ready: offer at the ready time minus the courier's travel time minus a minute of slack.
+  - The cost is risk: if prep estimates are poor or no courier is free then, the food waits; fall back to offering at accept for that restaurant.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does the design change for grocery delivery?" category="Scaling" level="Senior">
+  - A store has up to 100,000 items instead of a few dozen, so the catalogue and search index grow, and items run out between order and pickup.
+  - The state machine gains picking and substitution states, with the customer asked to approve a substitute.
+  - One order can come from several stores, so dispatch plans one courier through several pickups.
+  - Location, tracking, payment and notifications stay the same.
+  </InterviewQuestion>
+</InterviewQuestions>

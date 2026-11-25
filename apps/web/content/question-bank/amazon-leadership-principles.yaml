@@ -6,36 +6,37 @@
   subcategory: customer-ownership
   companies:
     - Amazon
+  signals:
+    - lp-customer-obsession
   topics:
     - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
     - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
   a: |-
-    **What the Bar Raiser is testing.** Amazon's first Leadership Principle—*Customer Obsession*—is easy to claim when customer needs and engineering convenience align. Interviewers test whether you still advocate for the customer when doing so costs your team extra engineering effort or delays an internal milestone.
+    **What it tests.** Amazon's Leadership Principle **Customer Obsession**. In plain words: you start from what the customer needs and work back to the engineering. The interviewer checks whether you still spoke for the customer when it cost your team time. At senior level you must bring numbers and a third option that still ships.
 
-    <KeyIdea>
-    Strong *Customer Obsession* stories start with a quantified customer pain point (latency, silent data loss, confusing failure modes, or billing surprises), show the tempting internal shortcut, and prove how you found a third path that protected the user without derailing delivery.
-    </KeyIdea>
+    **How to shape the answer.**
 
-    **How to structure your answer (STAR+L):**
+    - **Situation and task.** Name the shortcut, the deadline behind it, and how many customers it would hurt.
+    - **Action.** Say how you measured the harm, who you showed it to, and the cheaper path you designed.
+    - **Result.** Give the customer outcome and the engineering cost, both as numbers.
+    - **Learning.** Say what check you added so the team sees customer impact before work starts.
 
-    - **Situation & Task:** Name the service, the user segment affected, and the pressure that created the shortcut (e.g., migrating an API before a quarterly freeze by breaking backward compatibility for 4% of long-tail SDK callers).
-    - **Action:** Show how you quantified the user impact using telemetry or support tickets, brought that evidence to the team, and designed a lightweight compatibility shim or phased deprecation so the team still hit its core deadline without breaking customer integrations.
-    - **Result:** State the measurable customer outcome (zero migration pages/escalations, retention of the affected cohort) alongside the engineering cost.
-    - **Learning:** What guardrail or design-review checklist item you added so user-facing regressions are surfaced before implementation starts.
+    **A strong answer sounds like this.** "We had to move our orders API to a new version before a quarter-end freeze. The fast way was to drop the old date format. I grouped 30 days of gateway logs by client version: 4 percent of callers, about 310 merchants, still sent it. I showed the team and the product manager, and proposed a small adapter that translated old requests. It cost 6 extra engineer days and we still made the freeze. No integration failed at cutover. I then added a 'who calls this' query to our design review template."
 
-    **Red flags to avoid.** Painting your teammates or PM as "not caring about customers." Frame the tension around competing constraints, not villains.
+    **Watch out for.** Presenting teammates or the product manager as people who did not care about customers, a claim of harm with no number behind it, and a fix that made the team miss its date.
   followUps:
     - q: How did you quantify the customer impact before raising the objection?
       level: Senior
-      companies: [Amazon]
       a: |-
-        Explain the exact query or trace you ran—such as grouping 30 days of gateway logs by client SDK version and mapping those callers to revenue or critical workflows—so the trade-off was debated with numbers rather than opinions.
+        Describe the exact query or trace you ran, for example 30 days of gateway logs grouped by client version. Then say how you tied those callers to revenue or to important workflows. The interviewer wants to hear that you gathered the numbers before you objected, so the debate was about evidence.
     - q: What would you have done if your manager still overruled you because of the deadline?
       level: Senior
-      companies: [Amazon]
       a: |-
-        Show the transition from *Customer Obsession* to *Have Backbone; Disagree and Commit*: once the risk is documented in writing and the decision owner explicitly accepts it, commit fully to executing the chosen path while adding monitoring and a fast rollback runbook to bound customer blast radius.
-
+        Say that you would put the risk in writing and ask the decision owner to accept it openly. Then you commit fully to the chosen path. Add what you would do to limit the harm: monitoring on the affected customers, a rollback plan, and a date to remove the shortcut.
+    - q: What did protecting those customers cost, and who agreed to pay it?
+      level: Senior
+      a: |-
+        Give the cost in engineer days or in a feature that moved, and name who agreed to it. The interviewer checks that you treated the cost as real and did not hide it. If something slipped, say what it was and who you told.
 - id: lp-ownership-outside-service-boundary
   q: Describe a time you diagnosed and fixed a problem that lived outside your team's codebase or charter because it was blocking a larger outcome.
   level: Mid
@@ -43,50 +44,76 @@
   subcategory: customer-ownership
   companies:
     - Amazon
+  signals:
+    - lp-ownership
   topics:
     - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+    - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
   a: |-
-    **What the Bar Raiser is testing.** *Ownership* ("never say 'that's not my job'") tests whether you treat your service boundary as an API contract or as an excuse to ignore systemic failures.
+    **What it tests.** Amazon's Leadership Principle **Ownership**. In plain words: you act for the whole company, and your team's boundary is no reason to leave a larger problem alone. The interviewer checks how far you followed the problem, and whether you respected the team that owns the code. At mid level the hard part is doing the legwork yourself and still going through their review.
 
-    | Signal | Weak Ownership ("My boundary") | Strong Ownership ("End-to-end outcome") |
-    | --- | --- | --- |
-    | Diagnosis | Stops at "the upstream service returned HTTP 500" | Traces the request ID into the upstream repo, identifies the N+1 query or connection pool exhaustion |
-    | Action | Files a ticket and waits two sprints | Opens a draft PR with reproduction tests in the upstream repo and pairs with their on-call to land it safely |
-    | Follow-through | Closes the incident once the immediate fire stops | Adds contract tests and synthetic alerts across the boundary |
+    **How to shape the answer.**
 
-    **Watch out for.** "Cowboy ownership"—deploying changes to another team's system without their review. True ownership pairs initiative (doing the legwork and writing the patch) with respect for the owning team's review and operational norms.
+    - **Situation and task.** Say what was blocked, who was affected, and why the cause sat in another team's system.
+    - **Action.** Say how you traced it into their code, what proof you built, and how you landed the fix with their reviewer.
+    - **Result.** Give the effect as a number.
+    - **Learning.** Say what you added across the boundary, such as a contract test.
+
+    **A strong answer sounds like this.** "Our mobile app was logging out about 1,900 users a day, and the ticket had no owner for three weeks. The trace showed the identity team's refresh service rejecting valid tokens. I read their code and found a clock check with no tolerance. I wrote a failing test, opened a draft change in their repository, and asked their on-call engineer to review it. She cut my tolerance from 2 minutes to 30 seconds and deployed it. Logouts fell to about 40 a day. I then added a contract test to our build."
+
+    **Watch out for.** Stopping at a ticket, changing another team's system without their review, and leaving nothing in place to catch the problem next time.
   followUps:
     - q: How did you get the other team to review your fix when their sprint was already full?
       level: Mid
-      companies: [Amazon]
       a: |-
-        Explain how you lowered their cognitive load to near zero: isolating a minimal diff, attaching benchmark before/after numbers, writing the unit and integration tests yourself, and offering to shadow the deployment window.
-
+        Show that you made the review cheap for them. You sent a small change, wrote the tests yourself, attached before and after numbers, and offered to be present for the deployment. Say who you asked and how long it took. Pressure through managers is the weak answer.
+    - q: Why did you not file a ticket and wait for the owning team?
+      level: Mid
+      a: |-
+        Give the cost of waiting as a number: users affected each day, or a launch date at risk. Then say that you still told the owning team at the start. The interviewer checks that the impact drove you to act, and that you did not go around the owners.
+    - q: What would you have done if the owning team had rejected your fix?
+      level: Mid
+      a: |-
+        Say that the code is theirs, so their decision stands. You would ask what they would accept, share the evidence again, and agree a date for their own fix. If the impact stayed high, you would raise it with both managers, with the numbers.
 - id: lp-bias-for-action-two-way-door
-  q: Tell me about a time you had to make an important technical decision quickly with less than 70% of the data you wished you had.
+  q: Tell me about a time you had to make an important technical decision quickly, without all the data you wanted.
   level: Senior
   category: amazon-leadership-principles
   subcategory: action-results-standards
   companies:
     - Amazon
+  signals:
+    - lp-bias-for-action
   topics:
     - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
     - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+    - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
   a: |-
-    **What the Bar Raiser is testing.** Amazon distinguishes between **one-way doors** (irreversible or very expensive to undo, such as public API schemas, cryptographic key hierarchies, or cross-region data partitioning) and **two-way doors** (reversible within minutes or days behind a feature flag or shadow queue). *Bias for Action* tests whether you recognize two-way doors—or convert a one-way door into a two-way door—and move instead of falling into analysis paralysis.
+    **What it tests.** Amazon's Leadership Principle **Bias for Action**. In plain words: speed matters, many decisions can be undone, and those do not need long study. The interviewer checks that you could tell a reversible decision from a permanent one. At senior level you must make a risky decision reversible and name the signal that would undo it.
 
-    **Key elements of a strong answer:**
+    **How to shape the answer.**
 
-    1. **The uncertainty and the cost of waiting:** Explain what data was missing and why waiting two weeks to gather it carried a real cost.
-    2. **Making the decision reversible:** Show the engineering mechanism (feature flag, dual-write with dark reads, canary cohort, or adapter interface) that bounded the downside if your hypothesis proved wrong.
-    3. **The trigger metric:** Name the exact threshold you watched in production that would trigger an automatic rollback or pivot.
+    - **Situation and task.** Say what you had to decide, which data was missing, and what waiting would have cost.
+    - **Action.** Say how you made it reversible, for example with a feature flag or a small first group. Name the rollback threshold.
+    - **Result.** Say what happened, including any part where your assumption was wrong.
+    - **Learning.** Say how your team now makes fast decisions.
+
+    **A strong answer sounds like this.** "Our message queue cluster was at 86 percent disk, nine days before our biggest sale. A capacity study needed two weeks of data. I decided in one day to move our three largest topics to tiered storage, one at a time, each behind a switch we could reverse in 10 minutes. My rollback trigger was consumer delay above 30 seconds. One topic crossed it on day two, and we moved it back in 8 minutes. The other two held, and disk fell to 64 percent. My team now writes the trigger down before any urgent change."
+
+    **Watch out for.** A quick decision with no thinking behind it, no stated way back, and no cost of waiting, which makes speed look like impatience.
   followUps:
     - q: What was the worst-case blast radius if your assumption turned out to be wrong?
       level: Senior
-      companies: [Amazon]
       a: |-
-        State the concrete cap—for example, "at most 1% of non-mutating read traffic for 15 minutes, with automatic circuit-breaking back to the legacy path if p99 exceeded 120 ms."
-
+        Give a concrete limit: how many users or requests, for how long, and what would have stopped it. For example, one topic delayed for at most 10 minutes before the switch back. If you cannot state the limit, the decision sounds like a gamble.
+    - q: What data were you missing, and what would it have cost to wait for it?
+      level: Senior
+      a: |-
+        Name the missing data and how long it would have taken to get. Then give the cost of that wait in dates, money or customer impact. The interviewer checks that you compared the two costs, and that speed was a choice you can explain.
+    - q: How would you have decided if the change could not be undone?
+      level: Senior
+      a: |-
+        Say that you would slow down. You would get more data, ask one or two experienced people to attack the plan, and look for a reversible first step to split off. Knowing when speed is the wrong choice is part of this principle.
 - id: lp-dive-deep-metric-anomaly
   q: Tell me about a time when high-level dashboards looked healthy, but you noticed an anomaly in the details that uncovered a serious bug or architectural flaw.
   level: Senior
@@ -94,23 +121,37 @@
   subcategory: dive-deep-judgment
   companies:
     - Amazon
+  signals:
+    - lp-dive-deep
   topics:
     - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+    - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
   a: |-
-    **What the Bar Raiser is testing.** *Dive Deep* requires leaders to stay connected to the details and be skeptical when metrics and anecdotes disagree. Averages and p50s hide localized failures.
+    **What it tests.** Amazon's Leadership Principle **Dive Deep**. In plain words: you stay close to the details, and you become doubtful when the numbers and the stories from people disagree. Averages hide failures that hit one group. The interviewer wants the investigation step by step. At senior level the fix must also change what the team measures.
 
-    **How to walk through the investigation:**
+    **How to shape the answer.**
 
-    - **The discrepancy:** Contrast the green top-line metric (e.g., 99.95% overall HTTP 200 rate) with the faint signal that caught your eye (a customer anecdote, a slight dip in retry-adjusted conversion, or an unusual p99.9 tail on one availability zone).
-    - **Peeling the layers:** Walk through the exact diagnostic chain—slicing histograms by tenant/region/payload size, inspecting raw structured logs, reproducing with a flamegraph or packet capture—until you hit the root cause in code or state.
-    - **Systemic fix:** Show both the code fix and the observability change (replacing averaged gauges with sliced SLO burn-rate alerts) so no one needs heroics next time.
+    - **Situation and task.** Give the healthy top-line number and the small signal that did not fit.
+    - **Action.** Walk through each step: how you cut the data, what you ruled out, and where you found the cause.
+    - **Result.** Give the size of the bug, how long it had run, and what you repaired.
+    - **Learning.** Say what check you added so the next person does not need luck.
+
+    **A strong answer sounds like this.** "Our pipeline dashboard showed 99.9 percent of daily jobs succeeding. A finance analyst mentioned that refunds for one country looked low. I compared source and warehouse totals by country and day. One country was missing about 3 percent of refunds. A join cut off at midnight in the wrong time zone, so late records were dropped. It had run for five weeks. I fixed the join, reloaded 41,000 rows, and added a per-country comparison that alerts above a 0.5 percent gap. Six other pipelines now use that check."
+
+    **Watch out for.** Jumping from symptom to fix with no steps between, a root cause that someone else found, and a code fix with no change to monitoring.
   followUps:
     - q: Why didn't your existing alerts catch that failure mode?
       level: Mid
-      companies: [Amazon]
       a: |-
-        Explain the structural blind spot in the alert—such as aggregating success rates across high-volume health checks and low-volume checkout calls, or measuring HTTP status codes when the response body returned a soft error.
-
+        Explain the blind spot in the alert itself. For example, it added all countries into one total, so a 3 percent loss in a small country did not move it. Or it counted successful jobs and never compared the output with the source. Then say what you changed.
+    - q: What made you look closer when the dashboard was green?
+      level: Senior
+      a: |-
+        Say what the signal was and why you trusted it: a remark from a user, one odd row, a number that was too smooth. The interviewer wants to hear a habit, such as reading one raw sample each week. A habit is stronger evidence than a lucky moment.
+    - q: How did you know you had reached the root cause?
+      level: Senior
+      a: |-
+        Say how you proved it. You reproduced the fault on purpose, you predicted which records would be missing and then checked, or the gap closed to zero after the fix. A cause you cannot reproduce is still a guess.
 - id: lp-have-backbone-disagree-and-commit
   q: Tell me about a time you strongly disagreed with a technical or product decision made by your manager or a senior engineer. How did you handle it, and what happened?
   level: Senior
@@ -118,26 +159,37 @@
   subcategory: backbone-trust
   companies:
     - Amazon
+  signals:
+    - lp-have-backbone
   topics:
     - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+    - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
   a: |-
-    **What the Bar Raiser is testing.** *Have Backbone; Disagree and Commit* has two halves, and candidates often only prepare the first. Interviewers want to see **principled, evidence-backed dissent** before the decision is finalized, and **genuine, ungrudging ownership** once the call is made—especially in a story where the final decision did *not* go your way.
+    **What it tests.** Amazon's Leadership Principle **Have Backbone; Disagree and Commit**. In plain words: you challenge a decision you believe is wrong, with respect and evidence, even when that is uncomfortable. Once the decision is made, you back it fully. At senior level the strongest story is one where you lost the argument and then made the other plan succeed.
 
-    <Tabs title="Both halves of Disagree and Commit">
-    <Tab label="When you convinced them">
-    Show how you moved the debate from opinions to a 1-page trade-off doc or benchmark spike, addressed the other person's core constraint directly, and gave them an easy off-ramp without public embarrassment.
-    </Tab>
-    <Tab label="When you were overruled (strongest signal)">
-    Show that you stated your concern clearly with data, listened to why leadership weighed another constraint higher (such as time-to-market or contractual commitments), and then took ownership of making their chosen architecture succeed—without saying "I told you so" when friction appeared.
-    </Tab>
-    </Tabs>
+    **How to shape the answer.**
+
+    - **Situation and task.** State the decision, who made it, and why you disagreed. Give their reasoning fairly.
+    - **Action.** Say what evidence you brought before the decision was final, then what you did to make the chosen plan work.
+    - **Result.** Give the outcome, and say who was right.
+    - **Learning.** Say how you now decide when to stop arguing.
+
+    **A strong answer sounds like this.** "My manager decided to launch our new recommendation model to all users at once, to meet a campaign date. I wanted two weeks at 10 percent of traffic. I wrote one page: twice before, an offline gain of 3 percent had disappeared online. She explained that the date was in a signed contract, and chose the full launch. I said I still disagreed and would make it work. I built a one-step rollback and a daily check on clicks, and presented the plan to my team as ours. Clicks rose 1.8 percent. My risk estimate was too high."
+
+    **Watch out for.** A story where the other person was simply foolish, agreeing in the meeting and complaining afterwards, and saying "I told you so" when the plan hit trouble.
   followUps:
     - q: Give me an example where you disagreed, were overruled, and had to commit to a plan you still thought was suboptimal.
       level: Senior
-      companies: [Amazon]
       a: |-
-        Walk through a real decision where you lost the vote, explain the concrete engineering steps you took to mitigate the risks of the chosen path (extra load tests, runbooks, or feature flags), and describe how you explained the decision to junior teammates as "our decision" rather than "management's decision."
-
+        Use a real decision that you lost. Name the steps you took to lower the risk of the chosen plan, such as extra load tests, a runbook or a feature flag. Say how you presented it to junior teammates as the team's decision, with no blame for the people who decided.
+    - q: What would have made you escalate instead of committing?
+      level: Senior
+      a: |-
+        Give a clear line: harm to customers that cannot be undone, a legal or safety problem, or new facts the decision maker had not seen. Below that line you commit. Say that you would tell your manager first that you were going to raise it higher.
+    - q: Looking back, who was right?
+      level: Senior
+      a: |-
+        Answer plainly. If they were right, say what you had weighed wrongly. If you were right, say it without pride and give the cost. The interviewer listens for whether you can judge your own position fairly after the result is known.
 - id: lp-invent-and-simplify-frugality
   q: Describe a time you replaced a complex, expensive, or over-engineered design with a significantly simpler one under tight resource constraints.
   level: Senior
@@ -145,33 +197,74 @@
   subcategory: invent-think-big-frugality
   companies:
     - Amazon
+  signals:
+    - lp-invent-and-simplify
+    - lp-frugality
   topics:
     - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
     - /behavioral/amazon-leadership-principles/frugality-and-curiosity
   a: |-
-    **What the Bar Raiser is testing.** *Invent and Simplify* and *Frugality* ("constraints breed resourcefulness, self-sufficiency, and invention") test whether your instinct when facing a new problem is to add infrastructure (new microservice, new distributed cache, new queue) or to question the problem assumptions and remove moving parts.
+    **What it tests.** Amazon's Leadership Principle **Invent and Simplify**, with Frugality beside it. In plain words: look for the simpler way to meet the need, and treat a tight budget as a reason to remove parts. The interviewer checks whether your first move is to add infrastructure or to question the assumptions. At senior level the simpler design must be yours and adopted by others.
 
-    **Structure of a high-signal answer:**
+    **How to shape the answer.**
 
-    - **The proposed complexity:** Describe the initial multi-service or high-cost proposal and why it seemed necessary at first glance.
-    - **The constraint & insight:** Identify the invariant or workload property (e.g., read-to-write ratio, bounded cardinality, idempotency window, or pre-computation during off-peak hours) that let you collapse three moving parts into one.
-    - **Quantified savings:** State the reduction in monthly cloud spend, on-call pages, p99 latency, and lines of code maintained.
+    - **Situation and task.** Describe the complex or costly design, why it seemed needed, and the limit you faced.
+    - **Action.** Name the workload property that made the complexity unnecessary, such as few writes or small data. Say how you proved it.
+    - **Result.** Give the savings in cost, alerts or latency.
+    - **Learning.** Say what you now ask before adding a component.
 
+    **A strong answer sounds like this.** "Our team planned a new search cluster and a streaming pipeline so sellers could filter their orders. The estimate was three engineers for a quarter and 9,000 dollars a month. We had two engineers. I read the query logs and saw that 96 percent of filters used the same four fields, and no seller had more than 50,000 orders. I proposed two indexes on the existing database, and tested them with the largest seller's data against our 300 millisecond target. We shipped in five weeks at no new monthly cost. Free-text search was left out, and sellers still ask for it."
+
+    **Watch out for.** A design that was simple only because the problem was small, and savings with no numbers.
+  followUps:
+    - q: What does the simpler design not handle, and when would you revisit it?
+      level: Senior
+      a: |-
+        Name the limit plainly: a data size, a query type or a growth rate. Give the signal you watch and the threshold. Knowing where a simple design ends is part of having chosen it on purpose.
+    - q: How did you convince people who had already planned the complex version?
+      level: Senior
+      a: |-
+        Say what evidence you showed, such as query logs and a test at production size, and which concern you had to answer. Mention anyone who stayed doubtful and how you agreed a way to check after launch.
+    - q: How did you calculate the savings?
+      level: Senior
+      a: |-
+        Break the number down: monthly infrastructure cost, engineer weeks and on-call load, before and after. Say which figures are measured and which are estimates. Be ready to defend each one.
 - id: lp-hire-develop-broad-responsibility
   q: Tell me about a time you raised the engineering bar on your team through mentorship, hiring calibration, or fixing a systemic operational risk.
   level: Senior
   category: amazon-leadership-principles
   subcategory: people-curiosity-responsibility
-  companies:
-    - Amazon
+  signals:
+    - lp-hire-and-develop-the-best
   topics:
     - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
     - /behavioral/amazon-leadership-principles/broad-responsibility-at-scale
   a: |-
-    **What the Bar Raiser is testing.** At L5 (Senior SDE) and L6 (Principal SDE / SDM), individual code output is no longer enough. *Hire and Develop the Best*, *Strive to be Earth's Best Employer*, and *Success and Scale Bring Broad Responsibility* test whether your presence makes the surrounding engineers sharper, safer, and more autonomous.
+    **What it tests.** The Leadership Principle **Hire and Develop the Best**. In plain words: you raise the standard of the people around you through who you hire, how you coach and what you leave behind. At senior level your own output is not enough. The interviewer wants a repeatable practice that kept working without you.
 
-    Focus on **mechanisms over good intentions**: Amazon culture distrusts "we tried to be more careful" and rewards repeatable mechanisms (shadow-to-reverse-shadow mentorship plans, PR review rubrics, automated chaos/canary gates, and accessibility/privacy budgets).
+    **How to shape the answer.**
 
+    - **Situation and task.** Describe the gap you saw: weak reviews, uneven hiring decisions or a repeated operational risk. Give a number.
+    - **Action.** Describe the practice you set up, such as a staged mentoring plan, a review guide or an automated release check. Say how the team adopted it.
+    - **Result.** Show the change in other people's work.
+    - **Learning.** Say what you would set up sooner.
+
+    **A strong answer sounds like this.** "On our mobile team of eight, only two of us reviewed risky changes, and three releases in one quarter needed a hotfix. I wrote a one-page review guide with the six checks we two always made. I paired with four engineers on their first five reviews each, first leading and then only watching. Within four months, six people were approving risky changes, and hotfixes dropped from three a quarter to one. One of those engineers now runs the release process. Our interview questions still vary too much between interviewers, and that is my next piece of work."
+
+    **Watch out for.** Good intentions with no practice behind them, mentoring described as answering questions, and results that are only your own output.
+  followUps:
+    - q: How do you know the improvement did not depend on you?
+      level: Senior
+      a: |-
+        Give evidence from a period when you were away or had moved on: the practice still ran, someone else owned it, the numbers held. If it faded, say why and what you changed to make it last.
+    - q: Tell me about one person who grew because of this.
+      level: Senior
+      a: |-
+        Give their starting point, what you did with them and where they are now. Give them the credit for the work. Be specific about your part: the stretch task you chose, the feedback you gave and how often you met.
+    - q: What did you do about someone who did not meet the new standard?
+      level: Senior
+      a: |-
+        Describe a direct, private conversation with examples, the support you offered and a time frame. Say what happened in the end, good or bad. The interviewer checks that raising a standard included the uncomfortable part.
 - id: lp-customer-obsession-unasked-need
   q: Tell me about a time you anticipated a customer or developer pain point they hadn't explicitly asked for yet, and built a solution for it.
   level: Senior
@@ -179,20 +272,36 @@
   subcategory: customer-ownership
   companies:
     - Amazon
+  signals:
+    - lp-customer-obsession
   topics:
     - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
   a: |-
-    **What the Bar Raiser is testing.** Amazon's *Customer Obsession* note explicitly says: *" Leaders start with the customer and work backwards... they don't just listen to customers, they also invent on their behalf."* Customers rarely ask for a better retry-after header or a deterministic dry-run mode—they just complain that integrations feel brittle.
+    **What it tests.** Amazon's Leadership Principle **Customer Obsession**. In plain words: you start from the customer and work back, and you also invent for them. Customers rarely ask for the thing that would help most. The interviewer checks how you found a need nobody had stated. At senior level you must prove that people used it.
 
-    - **How you spotted the latent pain:** Show the forensic signal (e.g., inspecting failed API onboarding logs, shadowing developer support channels, or noticing that 35% of tenants wrote custom polling loops around your webhook).
-    - **The invention:** Explain the small, high-leverage primitive you built (such as an idempotency replay endpoint or an interactive webhook debugger) and its adoption curve.
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who the customers or developers were, and what signal showed the hidden problem.
+    - **Action.** Say how you confirmed the need with a few of them, what small thing you built, and what you left out.
+    - **Result.** Give adoption and one outcome number. Include who did not adopt it.
+    - **Learning.** Say how you now look for needs that nobody reports.
+
+    **A strong answer sounds like this.** "I look after our design system, which 14 product teams use. A code search showed that 9 teams had written their own wrapper around our date picker to handle time zones. Nobody had reported it. I talked to three of them and saw the same workaround each time. I added time zone support to the component and wrote a script that removed the wrappers. In six weeks, 7 of the 9 teams switched and deleted about 2,100 lines. Date bugs fell from 11 a month to 3. Two teams kept their wrappers for an old calendar feature."
+
+    **Watch out for.** Building something you found interesting and calling it a customer need, no evidence of the problem before you built, and no adoption number after.
   followUps:
     - q: How did you validate that your invention solved the real problem rather than becoming unused scope creep?
       level: Senior
-      companies: [Amazon]
       a: |-
-        State the adoption and support-deflection metrics you tracked in the first 30 days—for example, 62% of new tenant integrations adopting the dry-run flag and onboarding ticket volume falling by half.
-
+        Give the adoption and outcome numbers you tracked in the first 30 days, and the target you set before launch. For example, 7 of 9 teams switched and date bugs fell by about two thirds. Say what you would have removed if nobody had used it.
+    - q: How did you find the time to build something nobody had requested?
+      level: Senior
+      a: |-
+        Say how you made the case: the evidence you showed, the size of the first version, and what you delayed to make room. A week of work with a clear check at the end is easier to approve than an open project. Do not say you built it in secret.
+    - q: What did you choose to leave out of the first version?
+      level: Senior
+      a: |-
+        Name one or two features you cut, and why. The interviewer checks that you solved the common case first and kept the work small. Say how you would know when a cut feature has become worth building.
 - id: lp-ownership-long-term-value-over-short-term
   q: Describe a time you sacrificed a short-term team win or easy metric boost to protect long-term system health or company value.
   level: Senior
@@ -200,13 +309,36 @@
   subcategory: customer-ownership
   companies:
     - Amazon
+  signals:
+    - lp-ownership
   topics:
     - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
   a: |-
-    **What the Bar Raiser is testing.** *Ownership* states: *"They think long term and don't sacrifice long-term value for short-term results."*
+    **What it tests.** Amazon's Leadership Principle **Ownership**. In plain words: you act for the whole company and for the long term, and you do not trade lasting value for a quick result. The interviewer wants a case where a shortcut would have made your numbers look good now and caused harm later. At senior level you must show how you priced that harm and won agreement.
 
-    Pick an episode where shipping a quick hack would have made your current quarter look green while creating a ticking time bomb (such as hardcoding tenant-specific routing rules in the hot path, or training a recommender on clickbait engagement that eroded 30-day retention). Show how you quantified the 6-month cost of the shortcut and got buy-in for the durable path.
+    **How to shape the answer.**
 
+    - **Situation and task.** Describe the tempting shortcut and the short-term gain it offered.
+    - **Action.** Say how you estimated the later cost in numbers, who you took it to and what you proposed in its place.
+    - **Result.** Give both the short-term metric and the long-term one.
+    - **Learning.** Say how you check for this kind of trade now.
+
+    **A strong answer sounds like this.** "I led ranking for our content feed. A model trained on clicks raised click rate by 5 percent in a test, and our quarterly goal was clicks. I looked at the same test users after 30 days. Their return rate was 2 percent lower, because the model favoured misleading titles. I took both numbers to my director and proposed that we optimise for reads of at least 30 seconds. That model raised clicks by only 1.5 percent, so we missed the quarterly target. Over the next two quarters, 30-day retention rose 1.8 percent, and the group changed its goal metric."
+
+    **Watch out for.** A shortcut nobody really wanted, a long-term cost you assert without measuring, and hiding the price your team paid.
+  followUps:
+    - q: How did you estimate the long-term cost?
+      level: Senior
+      a: |-
+        Give the method and the data: a longer look at test users, a past incident, or a count of maintenance hours. State the uncertainty as a range. An honest range persuades better than one confident number.
+    - q: How did your team react to missing the short-term goal?
+      level: Senior
+      a: |-
+        Be direct about the cost to them: a missed target and perhaps a weaker review cycle. Say how you explained the decision and made the long-term result visible. Owning the decision includes owning its effect on your people.
+    - q: When is the shortcut the right call?
+      level: Senior
+      a: |-
+        Say it can be: when the cost is small, the change is easy to reverse, or the deadline is real. Give a short example where you took the quick path, recorded the debt and paid it back by a set date.
 - id: lp-deliver-results-major-midflight-blocker
   q: Tell me about a time when a key dependency, partner team, or technical assumption failed halfway through a critical project, and you still delivered results.
   level: Mid
@@ -214,14 +346,36 @@
   subcategory: action-results-standards
   companies:
     - Amazon
+  signals:
+    - lp-deliver-results
   topics:
     - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
   a: |-
-    **What the Bar Raiser is testing.** *Deliver Results* (*"rise to the occasion and never settle"*) tests whether you treat an external blocker as an excuse to miss your milestone or as an engineering constraint to route around.
+    **What it tests.** Amazon's Leadership Principle **Deliver Results**. In plain words: you focus on what matters most for the business and deliver it on time and at the right quality, even after setbacks. The interviewer checks whether a failed dependency became an excuse or a problem you solved. At mid level the plan to get around it should be your own.
 
-    1. **The blocker:** Name the exact dependency failure (e.g., the platform team's new streaming bus slipped by 6 weeks, or a third-party LLM API hit rate-limit ceilings).
-    2. **The decoupling shim:** Show how you built a thin interface/adapter backed by an existing boring technology (e.g., Postgres `SKIP LOCKED` queue or local batching) so your launch stayed on schedule and could swap in the upstream dependency later with a 50-line config change.
+    **How to shape the answer.**
 
+    - **Situation and task.** Name the project, the date and what failed halfway.
+    - **Action.** Say how fast you told people and which options you weighed. Describe the workaround, often a thin interface over something simple you already had.
+    - **Result.** Say whether you met the date, and what it cost.
+    - **Learning.** Say how you plan for dependencies now.
+
+    **A strong answer sounds like this.** "I was building a notification service for a product launch eight weeks away. In week four the platform team told us their new message queue would be six weeks late. I told my lead the same day, with three options. I chose to put a small interface in front of the queue and back it with a jobs table in our existing database, which could handle our 200 messages a second. It took me six days. We launched on the planned date. Two months later I switched to the real queue with a 60 line change. The table did need one manual cleanup in its first week."
+
+    **Watch out for.** Overtime as the whole answer, blaming the other team, and hiding what the workaround cost.
+  followUps:
+    - q: What did you give up to hit the date?
+      level: Mid
+      a: |-
+        Name it: a feature you cut, extra operational work, or debt you had to repay later. Say who agreed to it. The interviewer trusts a delivery story more when it includes the price that was paid.
+    - q: How did you tell stakeholders about the blocker?
+      level: Mid
+      a: |-
+        Say you raised it the day you knew, with the impact, the options and your recommendation. Say how often you updated them afterwards. Late or vague news is the mistake this question looks for.
+    - q: What would you have done if the workaround had not been fast enough?
+      level: Mid
+      a: |-
+        Describe your next option and the point at which you would have asked to move the date or cut scope. Show that you had set a decision date. Delivering results includes saying early when a date is at risk.
 - id: lp-highest-standards-refusing-to-ship-defect
   q: Tell me about a time you insisted on holding a launch or rejecting a design because the quality, reliability, or operational readiness was not high enough.
   level: Senior
@@ -229,34 +383,71 @@
   subcategory: action-results-standards
   companies:
     - Amazon
+  signals:
+    - lp-highest-standards
   topics:
     - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
   a: |-
-    **What the Bar Raiser is testing.** *Insist on the Highest Standards* tests whether you can spot when a flaw is not "cosmetic tech debt" but an unacceptable defect (silent data corruption, missing rollback path, unthrottled fan-out, or missing audit logs)—and whether you fix it constructively rather than acting as a gatekeeper who only says no.
+    **What it tests.** Amazon's Leadership Principle **Insist on the Highest Standards**. In plain words: you hold a high bar for quality and you do not pass a defect down the line. The interviewer checks that you can tell a flaw that can wait from one that must stop a launch. At senior level, saying no is half the job. You must also help close the gap.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what was about to ship, when, and the exact gap.
+    - **Action.** Say how you separated blocking items from the rest, what evidence you showed, and what you fixed yourself.
+    - **Result.** Give the delay you caused and what the fix later prevented.
+    - **Learning.** Say what you changed in the launch process for other teams.
+
+    **A strong answer sounds like this.** "Three days before we launched a notification service, I ran the readiness review. Of 14 open items, I marked 2 as blocking. A load test showed one large customer could send 90,000 messages in a minute and delay everyone else. The database change had no tested way back. I showed both tests to the product manager and asked for one more week. I paired with the service owner on a per-customer limit and a rollback script. We launched 6 days late. In the first month the limit triggered 4 times. Both checks are now on every team's launch checklist."
+
+    **Watch out for.** Blocking a launch over polish, saying no and leaving the fix to others, and hiding what the delay cost.
   followUps:
     - q: How did you make sure you weren't just letting perfectionism block a reversible two-way door launch?
       level: Senior
-      companies: [Amazon]
       a: |-
-        Distinguish between **surface polish** (which can iterate post-launch) and **state invariants** (data integrity, security, and rollback safety, which are one-way doors once production data is corrupted).
-
+        Separate two kinds of problem. Surface polish can be improved after launch, so it should not block. Damage to data, security or the ability to roll back cannot be undone once real customers are affected. Say which kind your items were, and how many you let through.
+    - q: How did the product manager or the business react to the delay?
+      level: Senior
+      a: |-
+        Say what they stood to lose and how you presented the choice: the risk, the evidence and the shortest path to a safe launch. Give their answer honestly, including any frustration. The interviewer checks that you held the line and kept the working relationship.
+    - q: What did you allow to ship even though it was not perfect?
+      level: Senior
+      a: |-
+        Name real items you accepted, with the reason and the follow-up date. This shows judgment about where the bar sits. A candidate who blocks on everything sounds like a gatekeeper, and one who blocks on nothing has no standard.
 - id: lp-are-right-a-lot-disconfirming-evidence
   q: Tell me about a time you actively sought out data or perspectives that proved your own initial technical hypothesis wrong.
   level: Senior
   category: amazon-leadership-principles
   subcategory: dive-deep-judgment
-  companies:
-    - Amazon
+  signals:
+    - lp-are-right-a-lot
   topics:
     - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
   a: |-
-    **What the Bar Raiser is testing.** Amazon's definition of *Are Right, A Lot* is counterintuitive: it does **not** mean you are born with infallible intuition. The official text says: *"They seek diverse perspectives and work to disconfirm their beliefs."*
+    **What it tests.** The Leadership Principle **Are Right, A Lot**. In plain words: good judgment comes from looking for other views and from trying to prove your own belief wrong. It does not mean you are never mistaken. At senior level the interviewer wants to see that you designed the test of your own idea and changed course quickly.
 
-    **Strongest story arc:**
-    - State the architectural belief you held strongly at the start of a project.
-    - Explain the specific experiment, shadow test, or dissenting engineer you consulted specifically to try to **break** your own hypothesis.
-    - Show the data that proved your initial instinct wrong, how fast you pivoted without ego, and the superior result that followed.
+    **How to shape the answer.**
 
+    - **Situation and task.** State the technical belief you held at the start and why it was reasonable.
+    - **Action.** Say what you did on purpose to break it: an experiment, a shadow test, or asking the engineer most likely to disagree.
+    - **Result.** Give the data that proved you wrong, how fast you changed and what the new direction achieved.
+    - **Learning.** Say how you test your ideas now.
+
+    **A strong answer sounds like this.** "As platform lead, I was sure our slow page loads came from the database, and I had a caching layer half designed. Before asking for six weeks of work, I asked the engineer who knew the frontend best to try to prove me wrong, and I added tracing to 1 percent of requests. The database took only 15 percent of the time. Sixty percent was three API calls made one after another. I dropped the cache design that week. We made the calls run in parallel in eight days, and median load time fell from 2.4 seconds to 1.5."
+
+    **Watch out for.** A story where your first idea was right after all, and evidence that reached you by accident.
+  followUps:
+    - q: Why did you hold the first belief?
+      level: Senior
+      a: |-
+        Explain the reasoning fairly: past experience, a similar system or a first reading of the data. Then name the assumption you had not checked. The interviewer wants to see how your judgment works, including where it goes wrong.
+    - q: How long did it take you to admit you were wrong and change course?
+      level: Senior
+      a: |-
+        Give the real time in days, and what you said to the team. If you hesitated, say why. A short gap between seeing the evidence and saying "I was wrong" in public is the signal.
+    - q: How do you test your own ideas now, before you commit a team to them?
+      level: Senior
+      a: |-
+        Describe a habit: writing down what result would change your mind, asking a named sceptic to review, or running the cheapest measurement first. Give one recent case where the habit saved time.
 - id: lp-earn-trust-admitting-blind-spot-early
   q: Tell me about a time you made an architectural or estimation error that affected another team, and how you communicated it to maintain their trust.
   level: Mid
@@ -264,29 +455,72 @@
   subcategory: backbone-trust
   companies:
     - Amazon
+  signals:
+    - lp-earn-trust
   topics:
     - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
   a: |-
-    **What the Bar Raiser is testing.** *Earn Trust* requires leaders to be *"vocally self-critical, even when doing so is awkward or embarrassing."*
+    **What it tests.** Amazon's Leadership Principle **Earn Trust**. In plain words: you listen, speak plainly, treat people with respect, and admit your own mistakes even when that is uncomfortable. The interviewer checks how fast you told the affected team and whether you blamed anything else. At mid level you should also bring a workaround and keep them informed without being chased.
 
-    1. **Speed of disclosure:** Show that you alerted the partner team the moment you verified the bug or slip—not three days later when their integration tests broke.
-    2. **Zero deflection:** State your mistake plainly in first person without blaming ambiguous docs or code reviewers.
-    3. **Remediation + visibility:** Show how you handed them a workaround or compatibility shim plus a live dashboard so they didn't have to chase you for status updates.
+    **How to shape the answer.**
 
+    - **Situation and task.** Name the mistake and the team that depended on it.
+    - **Action.** Say when you knew and when you told them. State the mistake in the first person. Describe the workaround you offered and how you kept them updated.
+    - **Result.** Give the effect on their schedule in days.
+    - **Learning.** Name the practice you changed.
+
+    **A strong answer sounds like this.** "I estimated three weeks to deliver a new events table that the analytics team needed for their quarterly report. In week two I found I had missed a backfill of 18 months of history, which added two weeks. I messaged their lead that afternoon: I got the estimate wrong, I did not count the backfill, and here is the new date. I offered a partial table with the last 90 days by the original date, which covered most of their report. I posted progress in their channel every two days. They published on time, with a note about the older data."
+
+    **Watch out for.** Waiting until the other team finds the problem, softening the mistake into "a miscommunication", and an apology with no workaround.
+  followUps:
+    - q: When exactly did you know, and when did you tell them?
+      level: Mid
+      a: |-
+        Give both times. If there was a gap, explain it honestly, for example a few hours to confirm the facts. A gap of days needs a real reason. The interviewer is measuring the delay between knowing and telling.
+    - q: How did the other team react?
+      level: Mid
+      a: |-
+        Describe the real reaction, including annoyance. Say what you did next and how they treated your later estimates. Trust shows in what they asked of you afterwards, so give one example.
+    - q: What did you change so it does not happen again?
+      level: Mid
+      a: |-
+        Name one specific practice, such as a checklist line for backfills or a review of estimates by someone from the other team. Say whether your team adopted it too. "I am more careful now" is not a change.
 - id: lp-think-big-platform-from-point-requests
   q: Describe a time when you noticed multiple teams solving the same narrow problem and proposed a larger, unified vision.
   level: Senior
   category: amazon-leadership-principles
   subcategory: invent-think-big-frugality
-  companies:
-    - Amazon
+  signals:
+    - lp-think-big
   topics:
     - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+    - /behavioral/leveling-and-tracks/staff-and-principal-behavioral
   a: |-
-    **What the Bar Raiser is testing.** At L6 (Senior SDE / SDM), *Think Big* is the primary differentiator from L5. L5 engineers build great point solutions inside their team; L6 engineers notice horizontal duplication across 3–5 teams and author a 6-page narrative or PR/FAQ that solves the problem once at the platform layer.
+    **What it tests.** The Leadership Principle **Think Big**. In plain words: you set a bold direction and look past the narrow fix for a better way to serve customers. The interviewer wants to see that you noticed the same problem in several teams and proposed one answer for all. At senior level you must pair the large vision with a small first step that proves it.
 
-    Always pair your **3-year North Star** with a **4-week Tenant #0 wedge** so the interviewer sees pragmatic execution alongside vision.
+    **How to shape the answer.**
 
+    - **Situation and task.** Say how you noticed the duplication: how many teams, what each had built and what it cost.
+    - **Action.** Describe the wider proposal, then the first small version with one team as its user.
+    - **Result.** Give adoption and savings so far, and say what remains.
+    - **Learning.** Say what you would change in the rollout.
+
+    **A strong answer sounds like this.** "I noticed that four teams had each written their own code to export customer data for privacy requests. Each had spent about three engineer weeks, and two had missed fields. I wrote a four-page proposal for one export service that every team would register its data with, aiming to cover all 30 data stores in three years. To prove it, I built a first version in five weeks with one team as the only user. Their export went from two days of manual work to 20 minutes. Within a year nine teams had joined. Adoption then stalled, because registering a data store still takes a day."
+
+    **Watch out for.** A grand vision with nothing shipped, and a platform nobody adopted.
+  followUps:
+    - q: How did you choose the first user and the first version?
+      level: Senior
+      a: |-
+        Say why you chose that team: a real deadline, a willing lead or the most common case. Explain what you left out of version one and why. The interviewer wants proof that you can cut a large idea down to a few weeks.
+    - q: How did you get teams to give up their own solutions?
+      level: Senior
+      a: |-
+        Show that you made joining cheaper than staying: migration help, a clear owner and support. Name one team that refused and what you did. Adoption won by value is a stronger story than adoption won by mandate.
+    - q: What part of the vision has not happened, and why?
+      level: Senior
+      a: |-
+        Be exact about the gap and its cause, such as the cost of joining or a missing feature. Say what you would do next. A candidate who admits the unfinished part sounds more credible about the finished part.
 - id: lp-learn-and-be-curious-outside-comfort-zone
   q: Tell me about a time you stepped far outside your primary technical stack or domain to debug a problem or ship a feature.
   level: Mid
@@ -294,22 +528,1814 @@
   subcategory: people-curiosity-responsibility
   companies:
     - Amazon
+  signals:
+    - lp-learn-and-be-curious
   topics:
     - /behavioral/amazon-leadership-principles/frugality-and-curiosity
   a: |-
-    **What the Bar Raiser is testing.** *Learn and Be Curious* (*"never done learning and always seek to improve themselves"*) tests learning velocity under real constraints. Walk through:
-    - What made the domain unfamiliar (e.g., kernel networking, GPU memory layout, mobile JNI, or double-entry accounting).
-    - How you compressed a 3-month learning curve into 3 days by reading source code, setting up a fast feedback benchmark, and interviewing domain experts.
-    - How you documented what you learned so the next engineer on your team ramped in 30 minutes.
+    **What it tests.** Amazon's Leadership Principle **Learn and Be Curious**. In plain words: you keep learning, you work to improve yourself, and you explore new areas. The interviewer checks how you learn something unfamiliar under real time pressure, and how you knew you understood it well enough to ship. At mid level you should also leave notes that speed up the next person.
 
+    **How to shape the answer.**
+
+    - **Situation and task.** Say why the area was unfamiliar, why you took it on and the deadline.
+    - **Action.** Say how you learned: reading source code, building a quick test, asking an expert specific questions.
+    - **Result.** Give the fix or feature with a number.
+    - **Learning.** Say what you wrote down for the team.
+
+    **A strong answer sounds like this.** "I am a web frontend engineer. Our mobile app crashed on older phones inside a native image library that nobody on the team knew, and no mobile engineer was free for two weeks. I took it. I spent the first day reading the library's source and building a test that reproduced the crash in 30 seconds. I asked a mobile engineer on another team three specific questions about memory. The cause was large photos being decoded at full size. I added downscaling before decoding, and crashes fell from 1.8 percent of sessions to 0.2 percent. I wrote a two-page guide to that library."
+
+    **Watch out for.** A topic that was only slightly new, learning described as "I read the docs", and shipping a change you could not explain.
+  followUps:
+    - q: How did you know you understood it well enough to ship?
+      level: Mid
+      a: |-
+        Give your checks: a test that reproduced the problem, a review by someone who knew the area, and a staged rollout with a metric to watch. Say what you were still unsure about and how you limited that risk.
+    - q: What was the hardest part to learn, and how did you get past it?
+      level: Mid
+      a: |-
+        Name one concept that confused you and the step that made it clear: a small experiment, a diagram or a precise question to an expert. This shows how you learn, which is what the interviewer is grading.
+    - q: What have you learned on your own recently, and why?
+      level: Mid
+      a: |-
+        Give something from the last few months, why you chose it and where you have used it. Keep it specific and modest. Curiosity that appears only when a deadline forces it is a weaker signal.
 - id: lp-earths-best-employer-fixing-toxic-toil
   q: Tell me about a time you noticed your team's operational load, on-call rotation, or developer experience was hurting morale, and what mechanism you built to fix it.
   level: Senior
   category: amazon-leadership-principles
   subcategory: people-curiosity-responsibility
-  companies:
-    - Amazon
+  signals:
+    - lp-best-employer
   topics:
     - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
   a: |-
-    **What the Bar Raiser is testing.** *Strive to be Earth's Best Employer* tests whether you treat engineer burnout and alert fatigue as **engineering systems problems** that can be measured and solved (via Pareto analysis of pager alerts, SLO burn-rate windows, and automated runbooks) rather than offering empty pep talks.
+    **What it tests.** The Leadership Principle **Strive to be Earth's Best Employer**. In plain words: leaders make the workplace safer, more productive and fairer, and care whether their people are growing. The interviewer wants to see that you treated tiredness and alert noise as a problem you can measure and fix. At senior level a lasting practice is expected.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say how you noticed the harm to morale and how you measured the load, such as alerts per week or night calls.
+    - **Action.** Give your analysis and the practice you built. Say how you got time for it.
+    - **Result.** Give before and after numbers and a sign that people felt it.
+    - **Learning.** Say what keeps the load from returning.
+
+    **A strong answer sounds like this.** "Two engineers asked to leave our on-call rotation in the same month, so I counted the alerts. We had 46 a week, 19 at night, and seven alert rules caused 70 percent of them. Most needed no action. I asked my manager for two engineers for three weeks. We rewrote those seven rules to fire only when users were affected and automated the two most common fixes. I also started a 20 minute weekly review that removes any alert nobody acted on. Alerts fell to 11 a week, with three at night. Both engineers stayed, and the review still runs without me."
+
+    **Watch out for.** Pep talks or thank-you messages as the fix, and a single cleanup with nothing to stop the load returning.
+  followUps:
+    - q: How did you get time for this when the roadmap was full?
+      level: Senior
+      a: |-
+        Show the case you made: hours lost per week, the risk of people leaving and the cost of a missed real alert. Say what was delayed and who agreed. Asking for time with numbers is part of the leadership being tested.
+    - q: How do you know the improvement lasted?
+      level: Senior
+      a: |-
+        Give numbers from six months later and name the practice that holds them there, such as a weekly review or a limit on alerts per shift. Say who owns it now. A fix that depends on your attention is not finished.
+    - q: How did you find out how people really felt?
+      level: Senior
+      a: |-
+        Describe more than one source: one to one conversations, an anonymous survey, and behaviour such as shift swaps or people leaving the rotation. Say what surprised you. The interviewer checks that you asked and did not assume.
+- id: lp-customer-obsession-different-from-request
+  q: Tell me about a time you delivered something different from what the customer asked for.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  signals:
+    - lp-customer-obsession
+    - customer-focus
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What it tests.** Customer Obsession. The principle asks you to start from what the customer needs and work back to the solution, and to keep earning their trust. Here the interviewer checks that you understood the need behind a request, and that you told the customer before you changed anything. At junior level the hard part is showing that you asked first and did not guess.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who the customer was and what they asked for, in their words.
+    - **Action.** Say what you asked to find the real need, what you proposed, and how you got their agreement.
+    - **Result.** Say what they got and how you know it served them better.
+    - **Learning.** Say what you now ask before you start on a request.
+
+    **A strong answer sounds like this.** "In my internship the support team asked me for an export button on the orders page. I asked two agents what they did with the file. They opened it only to find orders stuck for more than 3 days. I showed them a sketch of a 'stuck orders' filter, and the team lead agreed to try it. I built it in 4 days. Their morning check went from about 25 minutes to 5. I still added the export a sprint later, because the finance team needed it."
+
+    **Watch out for.** Changing the request without telling the customer, a story where the customer was simply wrong, and no evidence that your version served them better.
+  followUps:
+    - q: How did the customer react when you proposed something else?
+      level: Junior
+      a: |-
+        Say what they said, including any doubt. Then say how you settled it: a sketch, a small trial, or a promise to build the original if yours failed. The interviewer wants to hear that the customer agreed before you built anything different.
+    - q: Who was the real customer here?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Name the person who feels the result. That may be someone other than the person who filed the request. If an internal team asked on behalf of end users, say so, and say how you checked what those end users needed.
+- id: lp-customer-obsession-unreasonable-request
+  q: Tell me about a time a customer asked for something you thought was unreasonable. What did you do?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  signals:
+    - lp-customer-obsession
+    - customer-focus
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+    - /behavioral/competencies/cross-functional-collaboration
+  a: |-
+    **What it tests.** Customer Obsession. The principle asks you to treat the customer's problem as your starting point, even when the request itself is hard to meet. The interviewer listens for whether you found the need behind the demand, and whether you could refuse the method and still solve the problem. At mid level it gets hard when the request conflicts with other customers or with your team's plan.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the request and why it looked unreasonable.
+    - **Action.** Say how you found the real goal and what options you offered.
+    - **Result.** Say what the customer got and when, with a number. Say what you declined.
+    - **Learning.** Say what you changed so the request does not come back.
+
+    **A strong answer sounds like this.** "A partner team that used our reporting API asked for direct access to our database so they could run any query. That would have exposed other customers' data. I sat with their analyst for an hour and listed the 9 queries they needed. Six were possible with two new filters, which I shipped in a week. I wrote a nightly export for the other three. We refused the database access and explained why. Their report time fell from 2 days to about 3 hours. One query still needs a manual step, and they know the reason."
+
+    **Watch out for.** Describing the customer as foolish, saying yes to everything and calling it customer focus, and a refusal with nothing offered in its place.
+  followUps:
+    - q: What did the customer say when you refused part of the request?
+      level: Mid
+      a: |-
+        Report their reaction honestly, including any frustration. Then say what you did next: the reason you gave, the option you offered, and when you checked back. The interviewer wants to see that the relationship survived the refusal.
+    - q: Would you have handled it differently for your largest customer?
+      level: Mid
+      a: |-
+        Take a position. A good answer keeps the same limits on safety and on other customers' data, and changes only the effort you spend on finding another way. Say who you would involve, such as your manager or the account owner, and at what point.
+- id: lp-customer-obsession-above-and-beyond
+  q: Tell me about a time you went well beyond what was expected of you for a customer.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  signals:
+    - lp-customer-obsession
+    - ownership
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What it tests.** Customer Obsession. The principle asks you to care about the customer's result more than about the edge of your task. The interviewer checks that the extra effort met a real need, and that you can say what it cost. At senior level a late night for one customer is a weak story. A stronger one also removes the cause.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who the customer was and what "expected" would have looked like.
+    - **Action.** Say what you did beyond that, and what you delayed to do it.
+    - **Result.** Give the effect on the customer as a number, and what you changed so that it lasts.
+    - **Learning.** Say where you now draw the line on extra work.
+
+    **A strong answer sounds like this.** "After a release, our mobile app crashed on launch for about 2 percent of users on older phones. The expected fix was a rollback, which I did within an hour. I then found that 1,400 of those users had lost saved drafts. Nobody had asked us to recover them. Another engineer and I spent 3 days on a recovery tool and restored drafts for 1,150 users. I delayed a planned feature by a week and told the product manager first. We added old-device tests to the release checklist, and that kind of crash has not returned in 8 months."
+
+    **Watch out for.** Heroics with no customer result, extra work that nobody needed, and hiding what the effort cost the team.
+  followUps:
+    - q: What would you do differently?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Name one specific thing, such as catching the problem before release or telling the customer sooner. Give the cost of that gap. The interviewer wants a real fault in a story you are proud of, and proof that your process changed.
+    - q: How did you know the extra effort was worth it?
+      level: Senior
+      a: |-
+        Give the comparison you made at the time: the number of customers affected and the harm to them, against the days spent and the work delayed. If you would make a different trade today, say so and explain why.
+    - q: What unintended effect could your fix have had on those customers?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Think past the benefit. A recovery tool can bring back something a user deleted on purpose, for example. Name one such risk, say whether you checked for it, and what guard you added. The interviewer wants to see that you think about harm as well as help.
+- id: lp-ownership-handing-over-your-work
+  q: Tell me about a time you handed over work you owned to someone else. How did you make sure it went well?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  signals:
+    - lp-ownership
+    - communication
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What it tests.** Ownership. The principle asks you to act for the long-term good of the whole company and never to treat a problem as someone else's job. A handover shows whether you cared about the work after it left your hands. At junior level the test is simple and hard to fake: could the next person run it without calling you.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you owned, why it moved, and who took it.
+    - **Action.** Say what you wrote down, what you showed them in person, and which open problems you listed.
+    - **Result.** Say how the new owner did in the first weeks, with a number.
+    - **Learning.** Say what was missing from your notes and what you add now.
+
+    **A strong answer sounds like this.** "At the end of my 12-week internship I handed a data-cleaning job to a full-time engineer. I wrote a 2-page guide: how to run it, the 3 known failure cases and the one bug I had not fixed. We ran it together twice in my last week. Her first question was where the input files came from, which I had left out, so I added a section. She sent me 2 questions in the first month and shipped her first change in week two. I now write the guide while I build."
+
+    **Watch out for.** "I sent them the repository link" as the whole handover, hiding known bugs, and no check on the new owner afterward.
+  followUps:
+    - q: What was the new owner's first question, and what does that tell you about your documentation?
+      level: Junior
+      a: |-
+        Answer honestly. The first question shows the largest gap in your notes. Name it, say how you fixed the document, and say what you now include from the start. Claiming there were no questions at all is hard to believe.
+    - q: Who owns that work today, and is it still running?
+      level: Junior
+      a: |-
+        Say what you know and how you know it. If you checked in after a month, say so. If the work was later retired or rewritten, say that plainly. The interviewer is checking that your interest did not stop on your last day.
+- id: lp-ownership-production-break-on-your-watch
+  q: Tell me about a time something you were responsible for broke in production. How did you handle it?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  signals:
+    - lp-ownership
+    - failure
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+    - /behavioral/competencies/production-incidents-and-mistakes
+  a: |-
+    **What it tests.** Ownership. The principle asks you to stay responsible for an outcome from start to finish, including the parts that go wrong. The interviewer listens for who noticed, what you did in the first minutes, and whether you stayed until the cause was removed. At mid level it gets hard when the fault crosses into another team's system.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what broke, who was affected and for how long. Say how it was detected.
+    - **Action.** Give your steps in order: stop the harm first, then find the cause. Say who you told and when.
+    - **Result.** Give the time to recover, the size of the impact, and what you changed.
+    - **Learning.** Name the gap in detection or testing that let it through.
+
+    **A strong answer sounds like this.** "A config change I deployed made our checkout service reject about 8 percent of orders for 40 minutes. A support agent told us, which was the first problem: we had no alert on the error rate. I rolled back within 10 minutes of hearing and posted updates every 15 minutes in the incident channel. The cause was a missing default for a new setting. I added a validation step to the deploy and an alert at a 1 percent error rate. I wrote the review myself and gave support the list of 310 failed orders."
+
+    **Watch out for.** Saying "we" throughout, stopping the story at the rollback, and blaming the reviewer or the tooling.
+  followUps:
+    - q: How was it detected, and how did you mitigate it?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give the exact signal and the minutes: who saw what, and when. Then give the first action that reduced harm, such as a rollback or a feature switch. If a customer found it before your monitoring did, say so and say what alert you added.
+    - q: What would have caught this before it reached production?
+      level: Mid
+      a: |-
+        Name one concrete check: a test, a staged rollout or a config validation. Say whether it exists now and who built it. Avoid a general promise to be more careful. The interviewer wants a mechanism that works when you are away.
+- id: lp-ownership-took-the-lead-on-a-project
+  q: Tell me about a time you took the lead on a project. What did you do that a team member would not have done?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  signals:
+    - lp-ownership
+    - delivery
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What it tests.** Ownership. The principle asks you to behave like an owner of the whole result: think long term, and take on what falls between teams. The interviewer wants the difference between leading and taking part. At senior level they look for decisions you made for other people, risks you carried, and what you did when the project was in trouble.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the project was, how many people it involved, and how you came to lead it.
+    - **Action.** Give two or three decisions only the lead could make, such as scope or what to stop.
+    - **Result.** Give the outcome with numbers, including what slipped.
+    - **Learning.** Say what you would set up earlier next time.
+
+    **A strong answer sounds like this.** "We had to move 140 data pipelines off an old scheduler before its support ended. Nobody owned the move, so I asked my manager for it. I split the pipelines into 3 groups by risk and wrote the migration guide. I got 2 other teams to move their own jobs by pairing with each of them for a day. I chose to switch off 12 low-value pipelines, with their owners' agreement. We finished 9 days late, because I had underestimated one team's testing needs. No data was lost. I now ask each team for a test plan in week one."
+
+    **Watch out for.** A list of tasks you did alone, no decision that affected other people, and a perfect outcome with nothing that slipped.
+  followUps:
+    - q: What did you decide not to do, and who disagreed?
+      level: Senior
+      a: |-
+        Name one thing you cut or delayed and the person who wanted it. Say how you explained the choice and whether they accepted it. Leading shows most clearly in what you refused, so have one clear example ready.
+    - q: What would have happened if you had not taken it on?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Give a concrete estimate and the evidence behind it: a deadline that would have passed, or work that two teams would have done twice. Do not claim the project would have failed completely unless you can show it.
+- id: lp-invent-simplify-automated-team-process
+  q: Tell me about a time you automated a task to save your team time.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-invent-and-simplify
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What it tests.** Invent and Simplify. The principle asks you to look for better and simpler ways of working. The interviewer checks that you saw the waste yourself, measured it, and built something other people kept using. At junior level the hard part is proving the time saved with a number.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the manual task was, who did it, how often, and how long it took.
+    - **Action.** Say what you built, how long you spent on it, and how you got the team to trust it.
+    - **Result.** Give the time saved, and say whether people still use it.
+    - **Learning.** Say what you would do to make it easier to maintain.
+
+    **A strong answer sounds like this.** "Before every release, someone on our frontend team spent about 90 minutes checking 30 pages by hand for layout breaks. I was three months into the job and had done it twice. I wrote a script that took a screenshot of each page and compared it with the last release. It took me 3 working days. The first version flagged too many false changes, so I added a 2 percent tolerance. The check now takes about 15 minutes of reading a report. The team has used it for 11 releases, and it caught a broken menu in the second one."
+
+    **Watch out for.** Automating something that ran twice a year, no before and after numbers, and a tool that only you can run.
+  followUps:
+    - q: How did you decide it was worth automating?
+      level: Junior
+      a: |-
+        Do the sum aloud: minutes per run, runs per month and people affected, against the days needed to build it. Mention any errors the manual way caused. The interviewer wants to see that you compared cost and benefit before you started.
+    - q: Who maintains it now?
+      level: Junior
+      a: |-
+        Name the owner and where the code and instructions live. If it broke after you built it, say what happened and who fixed it. A small tool that the team owns is a better answer than a clever one that depends on you.
+- id: lp-invent-simplify-genai-for-team-work
+  q: How have you used generative AI to improve your own work or your team's work? Give me one specific example.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-invent-and-simplify
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What it tests.** Invent and Simplify. The principle asks you to keep finding simpler and better ways to work. The interviewer wants one real case with a measured gain, and proof that you checked the output. At mid level it gets hard when they ask where the tool made things worse.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the task, how long it took before, and why you tried an AI tool on it.
+    - **Action.** Say exactly how you used the tool and how you checked what it produced.
+    - **Result.** Give the gain as a number, and one case where the tool was wrong.
+    - **Learning.** Say which tasks you now give it and which you keep.
+
+    **A strong answer sounds like this.** "Our team writes unit tests for data transforms, and it was slow work. I began asking an AI assistant to draft tests from the function and three sample rows. I read every test and ran it against a copy of the function with a planted bug. If the test still passed, I threw it away. Over 6 weeks my test-writing time dropped by about a third. It also hurt once: a generated test asserted the wrong rounding rule and I merged it. A reviewer caught it. I shared the planted-bug check, and four of our seven engineers use it now."
+
+    **Watch out for.** General praise for AI with no example, no account of how you verified the output, and no care about what data you gave to an outside tool.
+  followUps:
+    - q: When did an AI tool make you slower or introduce a bug, and what did you change?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give one real case with its cost in hours or in a bug that shipped. Then give the rule you added, such as a check for generated tests or a kind of change you no longer give to the tool. Saying it never happened is hard to believe.
+    - q: How would you measure whether AI tools make the team faster without lowering quality?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Pick two measures and track them together. Use one for speed, such as time from first commit to merge, and one for quality, such as bugs found after release or rework asked for in review. Compare the same team before and after for at least a month.
+- id: lp-invent-simplify-improve-a-feature-you-ran
+  q: Pick a product or feature you know well. If you ran it, what would you improve?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-invent-and-simplify
+    - customer-focus
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What it tests.** Invent and Simplify. The principle asks you to keep looking for new ideas and for ways to make things simpler. The interviewer tests how many good ideas you have, and whether any of them remove something. Expect to hear "what else" several times. At senior level the hard part is ranking ideas by customer value and saying how you would test them.
+
+    **How to shape the answer.**
+
+    - **Start with the customer.** Name the product, who uses it, and the one problem you would fix first.
+    - **Give ideas in order.** Offer three or four, ranked, with a reason for the order.
+    - **Include a removal.** Name one thing you would take out or simplify.
+    - **Say what you would check.** Give the data or small test you would want before you commit.
+
+    **A strong answer sounds like this.** "I would pick the paging tool my last team used for on-call. First, I would group alerts by cause. In one bad week we got 212 pages, and 160 traced to 3 causes. Second, I would remove the custom severity levels. We had 7 and people used 2. Third, I would add a required one-line field: what to do first. Before any of this, I would read 3 months of pages to confirm the pattern. If you ask what else, I would let the engineer on call silence a known alert for 2 hours."
+
+    **Watch out for.** Only additions and nothing removed, running out of ideas after two, and ideas with no user named.
+  followUps:
+    - q: What else?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Have a second list ready, and expect the question more than once. Give each new idea in one sentence and say who it helps. When you truly run out, say so and say which idea you would do first. Do not pad the list with weak ideas.
+    - q: What would you remove or simplify?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Name a feature, option or step that few people use and that adds cost. Say how you would confirm the low use, who would object, and how you would retire it safely. Removing something well shows more judgment than adding one more feature.
+- id: lp-think-big-ambitious-goal-you-set
+  q: Tell me about an ambitious goal you set for yourself. Did you reach it?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-think-big
+    - delivery
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What it tests.** Think Big. The principle asks you to set a direction that is larger than the safe option and to look for ways to reach it. At junior level nobody expects a company strategy. The interviewer wants a goal above what was asked, a reason why it was a stretch, and a plan with steps. A goal you partly missed is fine if you learned from it.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the normal expectation and the larger goal you set. Say why the larger one mattered.
+    - **Action.** Give the plan: the steps, and what you had to learn.
+    - **Result.** Say how far you got, with a number. Be exact about any shortfall.
+    - **Learning.** Say how you size goals now.
+
+    **A strong answer sounds like this.** "The brief for my final-year project was a prototype that recommended courses to students. I set a goal of 200 real students using it before the deadline, because a demo on fake data would teach me little. I split it into 3 steps: a working version by week 6, a pilot with one class of 40, then a wider launch. The pilot showed that login was too slow, and fixing it cost me 2 weeks. I ended with 126 users, short of 200. Their feedback changed my ranking logic twice, which test data would never have done."
+
+    **Watch out for.** A goal that was simply your assigned task, a big goal with no plan, and calling a missed goal a success.
+  followUps:
+    - q: Why was that goal ambitious for you at the time?
+      level: Junior
+      a: |-
+        Compare it with what was expected and with what you had done before. Use a number if you can: twice the users, half the time, or a skill you did not yet have. The interviewer is checking that the stretch was real.
+    - q: What did you give up to chase the larger goal?
+      level: Junior
+      a: |-
+        Name the cost: features you left out, polish you skipped, or time taken from other courses or tasks. Say whether you would make the same trade again. Big goals always cost something, and the interviewer wants to see that you noticed.
+- id: lp-think-big-pushed-team-to-take-a-risk
+  q: Tell me about a time you pushed your team to take a bigger risk than they were comfortable with.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-think-big
+    - influence
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What it tests.** Think Big. The principle asks you to propose bold directions and bring other people along. The interviewer checks that the risk was real, that you understood what could go wrong, and that you limited the damage if it did. At mid level the hard part is persuading people who had good reasons to be careful.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the safe plan was, what you proposed, and what was at stake.
+    - **Action.** Say how you made the case, what objections you heard, and what limits you put on the risk.
+    - **Result.** Give the outcome with a number, good or bad.
+    - **Learning.** Say how you now judge when a larger bet is worth it.
+
+    **A strong answer sounds like this.** "Our mobile team planned to patch a slow checkout screen for the fourth time in a year. I proposed rebuilding it in 6 weeks, which meant pausing two planned features. The lead worried that we would miss the holiday period. I offered a rule: if the new screen was not in testing by week 4, we would stop and patch. I also kept the old screen behind a switch. We reached testing in week 4 and shipped in week 7, one week late. Checkout time fell from 9 seconds to 5, and completed orders rose by about 3 percent."
+
+    **Watch out for.** A risk with no downside described, forcing the decision through over objections, and taking sole credit for a shared bet.
+  followUps:
+    - q: What would you have done if it had failed?
+      level: Mid
+      a: |-
+        Describe the fallback you had agreed in advance: the stop point, the switch back, and who would decide. Then say what you would have told the team. A bold plan with no exit sounds careless to the interviewer.
+    - q: Who was hardest to convince, and what changed their mind?
+      level: Mid
+      a: |-
+        Name the role and state their concern fairly. Say what evidence or limit answered it. If they never fully agreed and you went ahead with their consent, say that. The interviewer wants to hear that you listened.
+- id: lp-think-big-long-term-plan-you-proposed
+  q: Tell me about a long-term plan or vision you proposed. How did you get it started?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  signals:
+    - lp-think-big
+    - strategy
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+    - /behavioral/leveling-and-tracks/staff-and-principal-behavioral
+  a: |-
+    **What it tests.** Think Big. The principle asks you to describe a future that is clearly better than today and to get people moving toward it. The interviewer wants a plan that reached beyond your own team and the next quarter, and proof that you took the first step yourself. At senior level the hard part is how you won support without authority and kept the plan alive when priorities changed.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Describe today's state, the future you proposed, and why the gap mattered.
+    - **Action.** Say who you took it to and what first step you delivered.
+    - **Result.** Say how far it has gone, with numbers, and what is still open.
+    - **Learning.** Say how you would make the case differently.
+
+    **A strong answer sounds like this.** "Each of our 5 ML teams trained and served models in its own way, and a new model took about 10 weeks to reach production. I wrote a 6-page proposal for one shared path, with a target of 3 weeks. Two directors liked it and gave no staff. So I moved my own team's 2 models first and published the result: 10 weeks down to 4. That won us 3 engineers for two quarters. Eighteen months later, 4 of the 5 teams use it. The fifth has special hardware needs, and I have not solved that yet."
+
+    **Watch out for.** A vision with no first step, a plan that is only a longer backlog, and claiming the full result when adoption is partial.
+  followUps:
+    - q: How did you get support from people who did not report to you?
+      level: Senior
+      a: |-
+        Name the people and what each one cared about. Say what you showed them: a small result, a cost figure or a customer problem. Say what you gave up to get agreement. Support won with a working example is the strongest answer.
+    - q: What part of the plan turned out to be wrong?
+      level: Senior
+      a: |-
+        Give one assumption that failed and when you found out. Say how you changed the plan and how you told the people who had backed it. A long-term plan that never changed sounds like one that was never tested.
+- id: lp-are-right-a-lot-goal-wrong-midway
+  q: Tell me about a project where you found out partway through that the goal was wrong. What did you do?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  signals:
+    - lp-are-right-a-lot
+    - ambiguity
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+    - /behavioral/competencies/ambiguity-and-shifting-priorities
+  a: |-
+    **What it tests.** Are Right, A Lot. The principle asks for good judgment: check your beliefs against evidence and against people who see things differently, and change your mind when the facts change. The interviewer listens for what told you the goal was wrong and how fast you raised it. At junior level the hard part is speaking up with evidence when someone more senior set the goal.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the original goal, who set it, and how far along you were.
+    - **Action.** Say what evidence showed the problem, who you took it to, and what options you offered.
+    - **Result.** Say what changed and what it cost in time.
+    - **Learning.** Say what you now check before you start.
+
+    **A strong answer sounds like this.** "I was asked to make our signup form load in under 1 second. In week two I opened the funnel data to measure my progress. Load time was fine. The real loss was at the phone number field, where 22 percent of people left. I wrote half a page with the numbers and showed my lead the same day. I offered two options: finish the speed work in 3 more days, or switch. She chose to switch. Making the phone field optional cut the loss to 9 percent. About a week of my speed work went unused."
+
+    **Watch out for.** Quietly changing the goal on your own, carrying on because it was the assignment, and a feeling with no evidence behind it.
+  followUps:
+    - q: What would you have done if your manager had told you to carry on as planned?
+      level: Junior
+      a: |-
+        Say you would ask what they know that you do not, and then do the work well if the answer holds. Add how you would keep the evidence visible, such as a short note with the numbers and a date to look at them again.
+    - q: Could you have found this out earlier?
+      level: Junior
+      a: |-
+        The honest answer is usually yes. Name the check you skipped, such as reading the data before you started or asking how success would be measured. Then say that you do it now, with one example from a later task.
+- id: lp-are-right-a-lot-judgment-call-was-wrong
+  q: Tell me about a time your judgment was wrong. How did you find out, and what did you do?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies:
+    - Amazon
+  signals:
+    - lp-are-right-a-lot
+    - failure
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+  a: |-
+    **What it tests.** Are Right, A Lot. The principle asks you to have sound judgment, and that depends on noticing quickly when you are wrong. The interviewer watches how you reason and how you react to evidence against you. At mid level it gets hard in the follow-ups: why the call looked right, and how long you took to admit it.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the decision and why you chose as you did.
+    - **Action.** Say what signal showed you were wrong and what you did next.
+    - **Result.** Give the cost of the wrong call and the outcome after you corrected it.
+    - **Learning.** Name the specific check you added to how you decide.
+
+    **A strong answer sounds like this.** "I chose to rebuild a slow nightly job as a streaming pipeline. I judged from two complaints that the analysts wanted fresh data. Three weeks in, I asked five analysts how they would use it. Four said they looked at the numbers once each morning. The real problem was that the job finished at 10 am, after their meeting. I told my manager that my call was wrong. I stopped the streaming work and fixed two slow joins, so the job now ends by 6 am. I lost three weeks. Now I talk to five users before I size a solution."
+
+    **Watch out for.** A mistake so small that it cost nothing, blaming information you could have asked for, and a lesson stated as "be more careful".
+  followUps:
+    - q: Why did you make that call in the first place?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give your reasoning as it was then, without defending it. Name the evidence you had and the assumption you did not test. The interviewer is judging how you think, so a clear account of a wrong call scores better than a vague one.
+    - q: What signal showed you that you were wrong?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Name the exact data point or conversation, and the date. Say whether you went looking for it or it found you. Looking for evidence against your own plan is the habit this principle rewards.
+    - q: How long did it take you to admit it and change course?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give the real time in days. If you delayed, say why: the work already done, pride, or hope that things would improve. Then say who you told first and what you said. A fast and plain admission is the signal.
+- id: lp-are-right-a-lot-design-you-defended
+  q: Tell me about a time a colleague disagreed with your design. How did you know your design was the right one?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies:
+    - Amazon
+  signals:
+    - lp-are-right-a-lot
+    - conflict
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Are Right, A Lot. The principle asks you to test your views against other views and against evidence before you trust them. The trap in this prompt is the word "know". The interviewer wants to hear how you checked, and whether you considered that your colleague was right. At senior level, "I had more experience" fails. A test you both agreed on in advance passes.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Describe both designs fairly, and say what each of you was trying to protect.
+    - **Action.** Say how you turned the disagreement into a question that data could answer.
+    - **Result.** Give the result of the test, the decision, and what you took from their design.
+    - **Learning.** Say how you settle design disputes now.
+
+    **A strong answer sounds like this.** "I designed a queue between our order service and our billing service. A colleague wanted a direct call, because it was simpler to debug. I believed the queue was right and could not prove it. We agreed on one question: what happens when billing is down for 10 minutes. We replayed a day of real traffic against both designs with a forced outage. The direct call failed 1,900 orders and the queue failed none. Her review also showed that my design hid stuck messages, so I added the dashboard she suggested. We presented the result together."
+
+    **Watch out for.** Winning by rank or by persistence, giving a weak version of the colleague's view, and certainty with no test behind it.
+  followUps:
+    - q: How did you establish that your colleague was wrong?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Be careful with the framing. Say what test or data settled the specific point, and what they were right about. If nothing objective settled it and someone senior chose, say so. Claiming the other person was simply wrong is the trap.
+    - q: Tell me about a time the other person turned out to be right.
+      level: Senior
+      a: |-
+        Have a second, short story ready. Say what you believed, what showed you otherwise, and how fast you changed. The interviewer is checking that your record includes losses, since nobody's judgment is right every time.
+- id: lp-learn-be-curious-new-technology-for-a-task
+  q: Tell me about a time you had to learn a new technology quickly to finish a task.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  signals:
+    - lp-learn-and-be-curious
+    - growth
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What it tests.** Learn and Be Curious. The principle asks you to keep learning and to explore what you do not yet know. The interviewer wants your method: where you started, how you practised, and how you checked that you understood enough to ship. At junior level the common weakness is stopping at "I read the documentation".
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the technology, why the task needed it, and how much time you had.
+    - **Action.** Give your learning steps in order: sources, a practice build, and who you asked.
+    - **Result.** Say what you shipped and how it performed. Give one thing you got wrong while learning.
+    - **Learning.** Say what you would do faster next time.
+
+    **A strong answer sounds like this.** "In my first month I got a ticket to add caching to a slow product API. I had never used a cache server, and I had 2 weeks. I spent 2 days on the official tutorial and built a small demo that cached one endpoint. Then I asked a senior engineer to review my plan for 30 minutes. She pointed out that I had no rule for removing stale prices. I added a 5-minute expiry and a test for it. Response time went from 800 milliseconds to 120. Now I ask for a design review before I write the real code."
+
+    **Watch out for.** A list of courses with nothing shipped, claiming you mastered the tool in a weekend, and no mention of anyone you asked.
+  followUps:
+    - q: How did you know you understood it well enough to ship?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Name your checks: tests for the failure cases, a review by someone who knew the tool, and a small rollout first. Say what you still did not understand and how you limited that risk. Confidence with no check behind it is the wrong answer.
+    - q: What did you get wrong while you were learning it?
+      level: Junior
+      a: |-
+        Give one concrete mistake and how you found it, such as a wrong setting caught in review. Then say what it taught you about the tool. An account with no mistakes in it sounds like shallow learning.
+- id: lp-learn-be-curious-risk-that-did-not-pay-off
+  q: Tell me about a time you took a risk and it did not work out. What did you learn?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  signals:
+    - lp-learn-and-be-curious
+    - failure
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+    - /behavioral/competencies/production-incidents-and-mistakes
+  a: |-
+    **What it tests.** Learn and Be Curious. The principle asks you to treat every result, good or bad, as something to learn from, and to keep trying new things. The interviewer wants a risk you chose, a real failure, and a change in how you work. At mid level it gets hard when they ask what you would do with the same choice today.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the risk was and why you took it.
+    - **Action.** Say when you saw it failing and how you limited the damage.
+    - **Result.** State the failure plainly, with its cost.
+    - **Learning.** Give one specific change in your practice, and one time you have applied it since.
+
+    **A strong answer sounds like this.** "I pushed to move our web app's forms to a validation library I had only tried in a side project. I expected to halve our form code. I converted 6 of 22 forms in two weeks. Then we found it did not support our date picker, and screen reader users lost error messages on 2 forms. I reverted those 2 the same day and told the team I had misjudged it. We dropped the plan. It cost about 3 weeks. Now I test any new library on our 3 hardest screens first. Last quarter that check rejected a charting library in 2 days."
+
+    **Watch out for.** A "failure" that was really a success, a risk that someone else chose, and a lesson you cannot show you have used.
+  followUps:
+    - q: What did you learn from it?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give one lesson that changed a habit, and one later case where you used it. Keep it specific to how you work. "Communicate more" or "plan better" is too general to count as a lesson.
+    - q: Knowing what you know now, would you take that risk again?
+      level: Mid
+      a: |-
+        Take a position. If yes, say what you would do to make failure cheaper. If no, say which signal should have stopped you. The interviewer wants proof that one failure did not make you avoid all risk.
+- id: lp-learn-be-curious-taught-yourself-recently
+  q: What have you taught yourself recently, and why did you choose it?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  signals:
+    - lp-learn-and-be-curious
+    - growth
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What it tests.** Learn and Be Curious. The principle asks you to stay a learner however senior you are. The interviewer wants something recent, chosen by you, and learned to a depth you can prove. At senior level the hard part is the reason: a strong one connects to a problem you saw coming, and the learning changes other people's work too.
+
+    **How to shape the answer.**
+
+    - **Name it and date it.** Say what you learned and when. Pick something from the last 6 months.
+    - **Give the reason.** Say what problem made you choose it.
+    - **Show the depth.** Say how you learned it and what you built with it.
+    - **Say what it changed.** Give the effect on your team's work, and what you still do not know.
+
+    **A strong answer sounds like this.** "Over the last 4 months I taught myself basic time-series forecasting. I run capacity planning for our platform, and we sized clusters by adding 30 percent to last year's peak. I suspected we were overpaying. I worked through 8 chapters of a textbook and rebuilt the forecast for one service. My first model was worse than the old rule, because I had ignored weekly cycles. The second cut spare capacity on that service by about 12 percent. I ran two sessions for the team, and three engineers now own forecasts for their services. I still cannot explain confidence intervals well."
+
+    **Watch out for.** Something you learned years ago, a course with nothing built from it, and a topic chosen only for fashion.
+  followUps:
+    - q: How do you keep up with changes in technology?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Give your actual routine with numbers: what you read, how often, and how you decide what to ignore. Then give one thing you picked up this way and used at work. A long list of sources with no result is weak.
+    - q: What is the area where you most need to improve?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Name a real gap that matters for the role, with a recent example of what it cost you. Then say what you are doing about it and how you measure progress. Avoid a strength dressed up as a weakness.
+- id: lp-hire-develop-helped-a-teammate-learn
+  q: Tell me about a time you taught a teammate something or helped them get better at their work.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  signals:
+    - lp-hire-and-develop-the-best
+    - mentoring
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+  a: |-
+    **What it tests.** Hire and Develop the Best. The principle asks everyone to raise the level of the people around them. You do not need to be a manager to answer this. The interviewer wants one person, one skill, and proof that they could do it without you afterward. At junior level the hard part is showing that you did not simply do the work for them.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who the person was, what they struggled with, and how you noticed.
+    - **Action.** Say how you taught: what you explained and what you let them try.
+    - **Result.** Say what they could do alone afterward, with an example.
+    - **Learning.** Say what you learned about teaching.
+
+    **A strong answer sounds like this.** "A new intern joined our team a month after me and was stuck on our test setup for two days. I had fought the same setup, so I offered an hour. I did not fix it for him. I asked him to share his screen and read the error aloud, and I pointed to where the config lived. He fixed it in 40 minutes. We then wrote a one-page setup note together, and he added two steps I had missed. A week later he helped the next intern with it. Her setup took 2 hours. Mine had taken two days."
+
+    **Watch out for.** Taking over the keyboard and calling it teaching, a group training with no single person in it, and no evidence that the person improved.
+  followUps:
+    - q: How did you know they had really learned it?
+      level: Junior
+      a: |-
+        Give the evidence: they did the task alone later, explained it to someone else, or caught a mistake of yours. Say when you checked. If they still needed help, say what you tried next.
+    - q: What did you learn from teaching them?
+      level: Junior
+      a: |-
+        Name one thing, such as a gap in your own understanding that their question exposed, or that asking questions works better than giving answers. Tie it to what you did the next time you helped someone.
+- id: lp-hire-develop-got-a-group-working-together
+  q: Tell me about a time you got a group to work well together on a project. What did you do?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-hire-and-develop-the-best
+    - influence
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+    - /behavioral/competencies/influence-without-authority
+  a: |-
+    **What it tests.** Hire and Develop the Best. The principle asks you to bring out the best in the people you work with and to help them grow, with or without a manager title. The interviewer wants to hear what was stopping the group, what you did, and how individual people did better. At mid level it gets hard when the group includes people senior to you or from other teams.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who was in the group and what was getting in the way.
+    - **Action.** Say what you changed, and what you did for one person in particular.
+    - **Result.** Give the outcome and one sign that the group worked better.
+    - **Learning.** Say what you would do sooner.
+
+    **A strong answer sounds like this.** "Five of us from three teams had 8 weeks to build a fraud model. After two weeks we had three separate notebooks and no shared data set, and two people had stopped coming to the sync. I asked each person privately what they wanted from the project. One wanted to learn feature engineering and had been given only cleanup work. I proposed one shared data set and swapped two tasks so that she owned the features. We delivered in week 9, one week late. The model caught 6 percent more fraud than the old rules, and she presented the feature work."
+
+    **Watch out for.** A team social event as the answer, no reason why the group was struggling, and no named action of yours.
+  followUps:
+    - q: Was anyone not doing their share, and what did you do about it?
+      level: Mid
+      a: |-
+        Say what you saw, and that you spoke to the person first, in private. Say what you learned, since the cause is often unclear tasks or other deadlines. Say what changed. Going to their manager first is a weak answer.
+    - q: What did each person get out of the project?
+      level: Mid
+      a: |-
+        Pick two people and say what each one learned or was recognised for. This shows that you thought about their growth as well as the deadline, which is the part of the principle this prompt tests.
+- id: lp-hire-develop-hire-who-did-not-work-out
+  q: Tell me about a hire who did not work out. How did you handle the low performance?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  signals:
+    - lp-hire-and-develop-the-best
+    - people-management
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+    - /behavioral/leveling-and-tracks/engineering-manager-behavioral
+  a: |-
+    **What it tests.** Hire and Develop the Best. The principle asks leaders to raise the standard with every hire, to spot strong people, and to take coaching seriously. It checks whether you can see your own hiring mistake, and whether you act on low performance early and fairly. The hard part is being honest about a decision that went badly while showing respect for the person.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what role you hired for, what you saw in the interview, and when the problems started.
+    - **Action.** Say what feedback you gave and when, and what support and time you offered.
+    - **Result.** Say how it ended and what it cost the team.
+    - **Learning.** Say what you changed in how you hire.
+
+    **A strong answer sounds like this.** "I hired a senior engineer for my team of 7 after a strong design interview. I had skipped the coding round because we were in a hurry. Within 6 weeks his changes needed heavy rework, and two reviews turned tense. I told him directly in week 7, with three examples. We agreed a 60-day plan with weekly check-ins and a pairing partner. His communication improved and his code quality stayed below our bar. He moved to a support engineering role that suited him better. The team lost about a quarter of one person's output. I no longer skip a round."
+
+    **Watch out for.** Blaming the recruiter or the candidate, waiting months before giving clear feedback, and describing the person with contempt.
+  followUps:
+    - q: What did you miss in the interview?
+      level: Senior
+      a: |-
+        Name the specific signal you skipped or misread, and why: time pressure, a strong first impression, or a missing interview round. Then give the change you made to the process. The interviewer wants a hiring lesson you can state in one sentence.
+    - q: How do you manage your strongest people differently?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Say what you give them: harder problems, more freedom, and honest feedback about their next level. Give one example of a stretch task you set and how it went. Leaving top performers alone because they cause no trouble is the mistake to avoid.
+    - q: Have you ever had to manage someone out of the company?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Answer yes or no first. If yes, give the timeline: when you first raised it, the support you offered, and the final decision. Show that the outcome did not surprise the person. If no, describe the closest case and what you would do.
+- id: lp-highest-standards-should-have-done-more
+  q: Tell me about a time you finished a piece of work and felt you should have done more.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  signals:
+    - lp-highest-standards
+    - growth
+  topics:
+    - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+  a: |-
+    **What it tests.** Insist on the Highest Standards. The principle asks you to hold a bar that other people may find too high, and to fix problems so that they stay fixed. This prompt checks whether your own standard is higher than "it passed review". At junior level the interviewer wants to hear that you noticed the gap yourself, said so, and closed it.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the work was and what "done" meant to the team.
+    - **Action.** Say what was missing, when you noticed, and what you did about it.
+    - **Result.** Say what the gap cost or could have cost, and what you fixed.
+    - **Learning.** Say what you now check before you call work finished.
+
+    **A strong answer sounds like this.** "In my first job I built the photo upload screen in our mobile app. It passed review and worked in the demo. I had tested only small images. A week after release I saw in the logs that uploads over 5 megabytes failed with a blank error, about 40 times a day. Nobody had reported it. I told my lead that I should have tested large files. I fixed it in a day with a size check and a clear message, and I added three large-file cases to our tests. Now I write down the worst inputs before I start coding."
+
+    **Watch out for.** A false shortfall such as "I worked too hard", a gap that someone else found, and regret with no action.
+  followUps:
+    - q: Why did you not do it at the time?
+      level: Junior
+      a: |-
+        Give the honest reason: time pressure, not knowing the risk, or wanting to close the ticket. Avoid blaming the deadline alone. Then say what would make you choose differently now, such as a checklist or asking for one more day.
+    - q: How do you decide when work is good enough to stop?
+      level: Junior
+      a: |-
+        Give your rule. For example: it meets the stated need, the main failure cases are tested, and someone else can maintain it. Say that you list known gaps in writing when you stop, so the team can choose with full information.
+- id: lp-highest-standards-checking-ai-output
+  q: How do you make sure that what an AI tool generates for you is correct before you use it?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  signals:
+    - lp-highest-standards
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+  a: |-
+    **What it tests.** Insist on the Highest Standards. The principle asks you to keep the quality bar high for everything you deliver, whoever or whatever produced the first draft. The interviewer wants a method you really follow, with an example of an error you caught. At mid level it gets hard when they ask where you stopped using the tool.
+
+    **How to shape the answer.**
+
+    - **State your rule.** Say that you own the output as if you wrote it.
+    - **Give your checks.** List two or three, such as reading every line and writing the tests yourself.
+    - **Give an example.** Describe one error you caught or missed, and its cost.
+    - **Say where you draw the line.** Name tasks you keep from the tool and data you never paste into it.
+
+    **A strong answer sounds like this.** "I treat generated code as a draft from a stranger. I read every line, and I write the tests myself so that the tool does not mark its own work. For SQL, I run the query on a small table where I know the right answer. Last month an assistant wrote me a join that looked fine and doubled revenue for customers with two addresses. My 20-row test table caught it in a minute. I do not use these tools for access control changes, and I never paste customer records or credentials into an outside tool."
+
+    **Watch out for.** "I review it carefully" with no method, trusting output because it runs, and no limits on what you share.
+  followUps:
+    - q: Which tasks have you stopped giving to AI tools, and why?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Name one or two, each with the incident or reason behind it. For example, security-sensitive code after a subtle flaw, or long refactors where review took longer than writing. This shows that your trust is based on results.
+    - q: What would you never paste into an external AI tool?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        List the categories: customer data, credentials and keys, unreleased plans, and code your employer restricts. Say that you follow your company's policy and ask when unsure. Mention how you still get help, for example by replacing real values with made-up ones.
+- id: lp-highest-standards-challenged-status-quo
+  q: Tell me about a time you refused to accept the way something had always been done.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  signals:
+    - lp-highest-standards
+    - influence
+  topics:
+    - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+  a: |-
+    **What it tests.** Insist on the Highest Standards. The principle asks you to keep raising the bar and to stop known defects from passing down the line. The interviewer wants a standard that everyone had accepted, your evidence that it was too low, and a lasting change. At senior level the change must reach beyond your own work to how a team or several teams operate.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Describe the accepted practice, how long it had stood, and what it was costing.
+    - **Action.** Say what evidence you gathered, who you had to persuade, and what you changed.
+    - **Result.** Give the before and after numbers, and say whether the new standard held.
+    - **Learning.** Say what the resistance taught you.
+
+    **A strong answer sounds like this.** "Our web teams had always fixed accessibility bugs after release, when a customer complained. We had 64 open, and the list grew by about 5 a month. I audited our 10 most used pages and showed that 7 could not be completed by keyboard alone. I proposed that no page ships with a keyboard or contrast failure, added an automated check to the build, and ran two short workshops. Two teams objected to the extra time, so we agreed a 6-week grace period. After 5 months the open list was 19, and new bugs fell to about 1 a month."
+
+    **Watch out for.** Complaining about a practice without changing it, a standard that only you follow, and no account of the people who disagreed.
+  followUps:
+    - q: How did you respond to people who said the old way was good enough?
+      level: Senior
+      a: |-
+        State their reason fairly. It is often speed or cost. Say what evidence you showed and where you gave way, such as a grace period. The interviewer wants a high bar that people accepted, since a bar forced on a team rarely lasts.
+    - q: How do you know the higher standard is still in place today?
+      level: Senior
+      a: |-
+        Point to a mechanism: an automated check, a review step, or a number that someone reports each month. Say who owns it. A standard that depends on you reminding people has not really changed anything.
+- id: lp-bias-for-action-started-without-being-asked
+  q: Tell me about something you started on your own, before your manager asked for it or approved it.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-bias-for-action
+    - ownership
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+  a: |-
+    **What it tests.** Bias for Action. The principle asks people to move when a step is cheap to undo, and to keep long study for the steps that are hard to reverse. The interviewer listens for how you judged that it was safe to start, and when you told someone. At junior level a small, well-chosen action is enough.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you noticed, why it could not wait, and why nobody had picked it up.
+    - **Action.** Say how you knew the work was small and easy to undo, what you did, and when you told your manager.
+    - **Result.** Give the effect as a number, even a small one.
+    - **Learning.** Say where your limit is: what you would still ask about first.
+
+    **A strong answer sounds like this.** "In my internship, the setup guide for our mobile app was out of date. It cost me a day and a half, and nobody owned it. I judged that fixing a document was low risk, so I rewrote it over two afternoons while I waited on code reviews, and tested it on a clean laptop. Then I showed my mentor. The next two people to join had the app building in about three hours. I would still ask first before touching anything that ships to users."
+
+    **Watch out for.** A story where you skipped a rule or a review to go faster, an action with no risk and no result, and never telling anyone what you had done.
+  followUps:
+    - q: In what situation would it have been wrong to start without asking your manager?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Show that you have a rule. Name the cases where you ask first: work that is hard to undo, that touches customers or production data, that costs money, or that changes another person's plan. Give one real example where you stopped and asked.
+    - q: How did you know the work was worth your time?
+      level: Junior
+      a: |-
+        Give the cost of the problem in plain numbers: who lost time, and how much. Then say what your assigned task was and that it did not slip. The interviewer wants to hear that you weighed the two, and did not simply pick the more interesting job.
+    - q: What did your manager say when you told them?
+      level: Junior
+      a: |-
+        Tell it as it happened, including any correction you got. If they asked you to raise it earlier next time, say so, and say what you do now. An honest account shows that you kept them informed and that you take direction well.
+- id: lp-bias-for-action-production-problem-acted-fast
+  q: Tell me about a time something broke in production and you had to act before you knew the full cause.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-bias-for-action
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+    - /behavioral/competencies/production-incidents-and-mistakes
+  a: |-
+    **What it tests.** Bias for Action. The principle values speed, and it accepts a measured risk when the step can be reversed. The interviewer wants the timeline: when you saw the problem, what you chose between, and whether you waited for permission. At mid level the hard part is showing that the fast choice was reasoned.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the problem, who was affected, and the time you first saw it.
+    - **Action.** Name your options, the one you picked, and why it was safe to undo. Say who you told.
+    - **Result.** Give the time to recover and the harm avoided.
+    - **Learning.** Say what would make you faster next time.
+
+    **A strong answer sounds like this.** "I was on call when checkout errors rose from under 1 percent to 9 percent. A config change had gone out 20 minutes earlier, but I could not prove it was the cause. I could keep reading logs, or roll the change back. A rollback took four minutes and could be reapplied, so I did it and posted in the incident channel as I started. Errors were back to normal in six minutes. We found the cause, a timeout value, the next morning. I lost ten minutes at the start before I looked at recent changes. That is now my first check."
+
+    **Watch out for.** Waiting to be told what to do, a fast action you could not have undone, and dropping the search for the cause once the alarm stopped.
+  followUps:
+    - q: What stopped you from acting earlier?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Do not defend the delay. Give the timeline in minutes: when the first signal came, when you acted, and what you did in between. If some of that time was wasted, say which part, and name the check or alert you added so the next person starts sooner.
+    - q: Did you get anyone's approval before you acted?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Say plainly whether you did. If you acted alone, explain why that was within your role: the step was reversible, the on-call guide allowed it, and you told people at the same time. If you waited, say what the wait cost and whether you would wait again.
+    - q: What decided it between your two options?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Compare them on three points: how long each would take, what each could break, and how easily each could be undone. Then say which point decided it. The interviewer wants a short piece of reasoning that you could repeat under pressure, with no hindsight added.
+- id: lp-bias-for-action-calculated-risk-for-speed
+  q: Tell me about a time you chose to move fast and accept a known risk. How did you limit the damage in case you were wrong?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-bias-for-action
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+  a: |-
+    **What it tests.** Bias for Action. The principle says that waiting has a cost, and it accepts a risk that you have sized and can back out of. The interviewer checks that the risk was calculated: what could go wrong, how likely it was, and what you put in place. At senior level the risk should touch other teams, and you should have told them.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what moving early would gain and what waiting would cost.
+    - **Action.** Name the risk, how you sized it, the limits you set and your way back. Say who you informed.
+    - **Result.** Say what happened, including anything that went wrong.
+    - **Learning.** Say what you would size better next time.
+
+    **A strong answer sounds like this.** "Our ranking model needed three more weeks of offline tests, and our seasonal peak was ten days away. I proposed a launch to 5 percent of traffic, with an automatic switch back to the old model if clicks per session fell by 2 percent. I sent a one-page risk note to the two teams that read our output. The model raised clicks by 3 percent. One thing went wrong: a partner team's report double counted for two days, because I had not asked how they read our logs. I now ask every consumer that before a partial launch."
+
+    **Watch out for.** A risk where nothing could go wrong, a risk taken for teams who were never told, and a result that came from luck with no limits set.
+  followUps:
+    - q: Looking back, how did you check that it was the right call?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Separate the decision from the result. Say what you knew at the time, what you measured afterwards, and whether you would make the same call again with the same information. A good outcome does not prove a good decision, and a strong candidate says so.
+    - q: What would have made you stop and wait?
+      level: Senior
+      a: |-
+        Name the conditions: a step that could not be undone, harm to customers' money or data, or a cost of failure larger than the cost of delay. Give your real limits from the story. This shows that you have a boundary and that speed is a choice you make case by case.
+    - q: Who disagreed with taking the risk, and what did you do about it?
+      level: Senior
+      a: |-
+        Give their objection fairly and say what you changed because of it, such as a smaller rollout or an extra alarm. If nobody objected, say who you asked. A risk that was never challenged was probably never shared.
+- id: lp-deliver-results-tight-deadline-dropped-scope
+  q: Tell me about a time the deadline was fixed and the work did not fit. What did you leave out, and how did you decide?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-deliver-results
+    - prioritisation
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+    - /behavioral/competencies/tight-deadlines-and-tech-debt
+  a: |-
+    **What it tests.** Deliver Results. The principle asks people to put their effort into the few things that decide the outcome, and to finish those on time at the right quality. The interviewer wants exactly what you cut, who agreed, and proof that the shipped part worked. At junior level the test is whether you raised the problem early or hid it.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the deadline and the day you saw that the work would not fit.
+    - **Action.** List what you kept and what you dropped, how you chose, and who you asked.
+    - **Result.** Say what shipped on the date, with a number, and what happened to the dropped parts.
+    - **Learning.** Say what you would do on day one next time.
+
+    **A strong answer sounds like this.** "In my first job I had eight days to build a returns form for our web shop before a sale. On day three I saw that the full form needed about twelve days. I listed its five parts and asked my lead and the product manager which ones the sale needed. We kept the form, validation and the confirmation email, and dropped photo upload and saved drafts. I shipped on day eight, with tests, and 340 customers used the form that week. Photo upload followed two weeks later. I should have made that list on day one."
+
+    **Watch out for.** Saying you worked nights and finished everything, cutting tests or review, and dropping work without telling the person who needed the date.
+  followUps:
+    - q: Who pushed back on what you dropped?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Name the person and their reason, and say how it was settled. If nobody objected, say who you asked and what they agreed to. The interviewer is checking that the cut was a shared decision made in the open, and that you did not quietly ship less.
+    - q: If you had the same deadline today, what would you do differently, and why?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Pick one concrete thing, such as estimating earlier or cutting a different part first, and give the reason. Avoid "nothing" and avoid a long list. One clear change with its cause shows that you looked back at the work honestly.
+    - q: When you saw the date was in danger, who did you tell, and how?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Say who you told, on which day, and in what form. A short written note with the new plan is a good answer. The point to make is that the people relying on you heard it from you first, with options, while there was still time to choose.
+- id: lp-deliver-results-missed-deadline-or-commitment
+  q: Tell me about a commitment you made and did not meet on time. What happened?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-deliver-results
+    - failure
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+    - /behavioral/competencies/tight-deadlines-and-tech-debt
+  a: |-
+    **What it tests.** Deliver Results, seen from the failure side. The principle asks people to meet their commitments and to recover when things go wrong. The interviewer checks that the miss was real and partly yours, when you first knew, and what you did for the person waiting. At mid level an honest early warning counts for more than a good excuse.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you promised, to whom, and by when.
+    - **Action.** Say when you first saw the risk, what your own error was, and what you did for the people affected.
+    - **Result.** Give the size of the miss and how the work ended.
+    - **Learning.** Name the habit you changed.
+
+    **A strong answer sounds like this.** "I promised our finance team a new revenue pipeline by the end of the quarter, and I delivered it nine days late. I had estimated four weeks without checking the source data. In week three I found that one system sent refunds in a different currency format. I told the finance lead that day, gave her a new date, and sent a manual extract so her quarter close was not blocked. The pipeline has now run for five months without a correction. I now spend the first two days of any estimate profiling the source data, and I give a range."
+
+    **Watch out for.** A miss caused only by other people, a miss so small it cost nothing, and a lesson such as "communicate better" with no changed habit.
+  followUps:
+    - q: Go back to the first sign of trouble. What would you do differently at that point?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Go back to the exact day. Say what signal you had, what you did with it, and what you would do now: raise it that day, give a range, or cut scope. The interviewer wants the earliest point where a different action would have changed the result.
+    - q: The person waiting on that date was let down. How did you win back their confidence?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Describe actions over time. For example, you gave them something usable at once, set a new date and met it, then sent short updates until the work was stable. Finish with evidence that the trust came back, such as the next request they brought to you.
+- id: lp-deliver-results-chose-between-commitments
+  q: Tell me about a time you had several important things to deliver and could not do them all. Which did you pick, and why?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies: [Amazon]
+  signals:
+    - lp-deliver-results
+    - prioritisation
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+    - /behavioral/competencies/tight-deadlines-and-tech-debt
+  a: |-
+    **What it tests.** Deliver Results. The principle is about outcomes, so the interviewer wants to hear how you worked out which work mattered most to the business, and how you treated the people whose work lost. At senior level the choice should cover a team or several teams, and you should be able to defend the thing you dropped.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the commitments, who wanted each one, and your real capacity.
+    - **Action.** Give the rule you ranked them by, the choice, and how you told the people who lost.
+    - **Result.** Say what was delivered, with numbers, and what the delay cost.
+    - **Learning.** Say how you now spot the clash earlier.
+
+    **A strong answer sounds like this.** "I was tech lead of a six-person mobile team with three commitments in one quarter: a new sign-up flow, a payment library upgrade with a hard cut-off date, and crash fixes. We had capacity for about two. I ranked them by the cost of delay. A late upgrade would have blocked all payments. Crashes hit 2 percent of sessions. Sign-up was worth the most but had no date. I moved it to the next quarter and told the product director, with the numbers. We met the cut-off with eight days spare and cut crashes to 0.6 percent. Sign-up shipped five weeks late."
+
+    **Watch out for.** Claiming you delivered all of them, a choice your manager made while you watched, and no word on what the dropped work cost.
+  followUps:
+    - q: After it shipped, what told you it was doing its job?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Name the measure you set before launch and the number you saw after it. Include one input measure, such as the crash rate, and one outcome, such as completed payments. Shipping on the date is output. The interviewer is asking whether the result reached users.
+    - q: Who was unhappy with the choice, and how did you handle them?
+      level: Senior
+      a: |-
+        Name the person and what they lost. Say that you told them directly, early, and with your reasoning, and what you offered, such as a firm later date. Then say how the relationship stands now. Avoid a story in which everyone simply agreed.
+    - q: What would have changed your ranking?
+      level: Senior
+      a: |-
+        Give the one or two facts that would have reversed it, for example a date on the sign-up work or a lower crash rate. This shows that the ranking came from a rule that you can state, and that you would apply the same rule again.
+- id: lp-dive-deep-dug-to-root-cause
+  q: Tell me about a problem where the first explanation was wrong and you had to keep digging to find the real cause.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies: [Amazon]
+  signals:
+    - lp-dive-deep
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+    - /behavioral/foundations/handling-follow-up-probes
+  a: |-
+    **What it tests.** Dive Deep. The principle asks people to stay close to the details, to check things themselves, and to keep going until the explanation fits every fact. The interviewer will ask several questions in a row about your steps, so only a story you worked through yourself will hold. At junior level a small bug is fine if you can explain each guess you tested.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the symptom, how often it happened, and what people did about it.
+    - **Action.** Give your guesses in order, and the evidence that ruled each one in or out.
+    - **Result.** State the cause, the fix, and how you know the fix worked.
+    - **Learning.** Say what you now check first.
+
+    **A strong answer sounds like this.** "In my internship, a nightly job that sent reminder emails failed about one night in five. The team's habit was to run it again by hand. I asked to look into it. My first guess was a mail server timeout, but the logs showed that the job died before it sent anything. I then compared failed nights with good ones. Every failure followed a day with more than 10,000 new users, and the job loaded all of them into memory. I changed it to read in batches of 500. It has not failed in the three months since."
+
+    **Watch out for.** Stopping at the symptom ("we restarted it"), saying "we" for every step, and a story you cannot explain two levels down.
+  followUps:
+    - q: What was your first theory, and what showed you it was wrong?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Name the theory, the exact thing you looked at, and what it showed. For example, the log line that proved the job stopped before any email went out. A wrong first guess does not hurt you. The interviewer is checking that you tested it with evidence before moving on.
+    - q: How did you prove that you had found the real cause?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Describe a test that could have proved you wrong. You reproduced the failure on purpose, applied the fix, and saw it pass under the same load. Then give the time it has stayed fixed. "It stopped happening" alone is weak, because rare failures also stop by chance.
+    - q: Why had nobody found it before you?
+      level: Junior
+      a: |-
+        Answer without blaming anyone. Usually the workaround was cheap and everyone was busy. Say that, then say what made you look: the count of failures, or the hours lost each month. This shows you can judge when a small problem deserves real attention.
+- id: lp-dive-deep-hardest-problem-solved
+  q: Which technical problem have you found hardest to solve? Walk me through how you got to the answer.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies: [Amazon]
+  signals:
+    - lp-dive-deep
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+    - /behavioral/competencies/project-deep-dive-walkthrough
+  a: |-
+    **What it tests.** Dive Deep. The principle expects people to know their work at every level of detail, and to question a number that does not match what they see. The interviewer wants a problem that was hard for a reason you can name, and will check which ideas were yours. At mid level the weak answer describes a tool that was installed, with no reasoning behind it.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the problem in one sentence and why the obvious fixes had failed.
+    - **Action.** Say how you found the real difficulty, the options you weighed, and why you chose one.
+    - **Result.** Give the before and after numbers.
+    - **Learning.** Say what you would try first next time.
+
+    **A strong answer sounds like this.** "Our dashboard froze for up to four seconds when users filtered a table of 20,000 rows. Two earlier attempts had added caching, with no effect. I recorded a performance trace and found that the filter took 80 milliseconds. The time went on drawing all 20,000 rows again at each key press. I wrote a small layer that draws only the 40 rows on screen, and I delayed filtering until typing paused. The freeze fell from four seconds to under 200 milliseconds. I wrote the layer myself because the library we tried broke our keyboard navigation."
+
+    **Watch out for.** A problem that was hard only because it was large, a list of technologies with no reasoning, and no reason for rejecting the other options.
+  followUps:
+    - q: Did you design that solution yourself, or did you pick an existing tool?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Be exact about what was yours. If you chose an existing tool, say why it fitted and what you had to adapt. If you built something, say why the existing options failed. Both can be good answers. Taking credit for a design you only installed is the mistake.
+    - q: Where exactly was the time going, and how did you measure it?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Name the measuring method and the number it gave you, such as a trace that showed 80 milliseconds in the filter and almost four seconds in drawing. Expect a further question on each detail. Keep answering from what you measured, and say so when you do not know.
+    - q: What did you try that did not work?
+      level: Mid
+      a: |-
+        Give one or two failed attempts and what each one taught you. A straight line from problem to answer sounds rehearsed. Real work on a hard problem has dead ends, and the way you learned from them is part of what is being judged.
+- id: lp-dive-deep-ai-generated-result-was-wrong
+  q: Tell me about a time an AI tool gave you a result that was wrong. How did you find out, and what did you do next?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies: [Amazon]
+  signals:
+    - lp-dive-deep
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+  a: |-
+    **What it tests.** Dive Deep. The principle asks people to check the details themselves and to doubt an answer that looks right when the evidence disagrees. With AI-written code and analysis, that means you verify before you trust. The interviewer wants your checking method. At senior level they also want to hear what you changed for the team.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you asked the tool to do and what was at stake.
+    - **Action.** Say how you checked the output, what the error was, and why the usual checks missed it.
+    - **Result.** Give the size of the error you caught, and the fix.
+    - **Learning.** State the rule you or your team follow now.
+
+    **A strong answer sounds like this.** "I used an AI assistant to write a migration that merged duplicate customer records. The code read well and passed its own tests. Before I ran it, I checked it against 200 records I had merged by hand. It got 11 wrong: it treated two people at one address as one customer. The same tool had written the tests, with the same wrong assumption. I rewrote the matching rule and the check passed with no errors. Then I proposed a team rule: AI-written code that changes data needs a test set written by a person. It caught two more errors that quarter."
+
+    **Watch out for.** Blaming the tool, a story where a reviewer or customer found the error first, and saying you no longer use AI tools.
+  followUps:
+    - q: Suppose a teammate merges code written by an AI tool and it causes an incident. What do you do?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Fix the incident first. Then treat it like any other defect: the author owns the code, whoever or whatever wrote it. Look for the missing check, such as a review step or a test, and add it for the whole team. Do not single out the person or ban the tool.
+    - q: How do you decide how much checking an AI result needs?
+      level: Senior
+      a: |-
+        Tie the effort to the cost of being wrong and to how easily the result can be undone. A draft email needs a read. Code that changes customer data needs independent tests. Give your own two or three levels with an example of each.
+    - q: What made you doubt the output in the first place?
+      level: Senior
+      a: |-
+        Name the signal: the tests came from the same source as the code, the result was too clean, or it touched data that could not be restored. If your check was routine and not a suspicion, say so. A habit of checking is a stronger answer than a lucky feeling.
+- id: lp-have-backbone-went-along-while-disagreeing
+  q: Tell me about a time your team chose an option you had argued against. What did you do after the decision?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-have-backbone
+    - conflict
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+  a: |-
+    **What it tests.** Have Backbone; Disagree and Commit. The principle has two halves: say clearly when you disagree, and once the decision is made, back it fully. The interviewer checks both: that you spoke up with a reason, and that you then did the work properly. At junior level the usual failure is silence in the meeting and complaint afterwards.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the decision, your view, and what was at stake.
+    - **Action.** Say where you raised your view, what the team decided, and what you did to make their choice succeed.
+    - **Result.** Say how it turned out, including where the team was right.
+    - **Learning.** Say what you took from committing.
+
+    **A strong answer sounds like this.** "In my first year, my team chose to build our new app screens with a shared cross-platform kit. I thought native screens would feel faster on older phones. I said so in the design review and showed a scroll test from a four-year-old phone. The team listened and still chose the shared kit, because we had three engineers for two platforms. I said I would back it, and I built the first two screens that way. To cover my worry, I added a frame-rate check to our tests. We shipped six weeks sooner than the native plan, and my check caught one slow list."
+
+    **Watch out for.** Never voicing the disagreement, going along and then doing the work half-heartedly, and a story whose point is that you were right all along.
+  followUps:
+    - q: Suppose the option you committed to had failed. What would you have done?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Say that you would have brought the new evidence to the team and helped fix it, with no "I told you so". Committing means that the result is yours too. Then name the sign you were watching for, such as the frame rate on old phones.
+    - q: How did the team know you were fully behind the decision?
+      level: Junior
+      a: |-
+        Point to what you did, because words are cheap here. You took a real share of the work, you did it to your normal standard, and you did not reopen the argument in later meetings. Give one example of each from the story.
+    - q: Would you raise the disagreement differently now?
+      level: Junior
+      a: |-
+        Name one improvement, such as bringing data sooner or talking to the decision owner before the meeting. If you think you handled it well, say what made it work. The interviewer wants to see that you have thought about how to disagree, and not only about the outcome.
+- id: lp-have-backbone-disagreed-with-peer-technical
+  q: Tell me about a technical choice where you and a teammate wanted different things. What did you do, and how did it end?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-have-backbone
+    - conflict
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+    - /behavioral/competencies/technical-conflict-and-alignment
+  a: |-
+    **What it tests.** Have Backbone; Disagree and Commit. The principle asks people to challenge a decision they think is wrong, with respect and evidence, even when agreeing would be more comfortable. The interviewer listens for whether you held your view for a reason, understood the other view, and accepted the outcome. At mid level the follow-ups get hard: they change the conditions and ask again.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State both positions fairly, and what depended on the choice.
+    - **Action.** Say what you did to test the two views, and how the decision was made.
+    - **Result.** Give the decision, the numbers, and what you did after it.
+    - **Learning.** Say what you do now when you disagree.
+
+    **A strong answer sounds like this.** "A teammate wanted to rebuild our feature tables every night. I wanted hourly updates, because the fraud model read them and stale features cost us catches. He said hourly jobs would double our on-call load, which was a fair point. I proposed a two-week test of both, and we agreed the measure first: fraud caught per 1,000 orders. Hourly caught 4 percent more and paged us three times. We took the result to our lead together. She chose hourly for the five fraud tables only. I had wanted all 40. I accepted that and wrote the alerts for the five."
+
+    **Watch out for.** A teammate who was simply wrong, going to a manager before talking to the person, and "we compromised" with no detail on who decided.
+  followUps:
+    - q: Would you have acted differently if your teammate had outranked you and would not talk about it?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Say that the first step stays the same. You state your view once, clearly, in writing and with evidence. Then you ask who decides. If it went against you, you would commit. Seniority changes who decides. It does not remove your duty to speak.
+    - q: What did you change in your own view because of your teammate?
+      level: Mid
+      a: |-
+        Name the part of their argument that was right and what you did with it. In the sample, the on-call cost was real and it shaped the test. A candidate who took nothing from the other side sounds like someone who argues to win.
+    - q: What would you have done if you still believed the final decision was wrong?
+      level: Mid
+      a: |-
+        Separate two cases. If it is a matter of judgment, you commit, do the work well, and agree on a measure that would reopen the question. If it would harm customers or break a rule, you raise it once more with the decision owner, in the open.
+- id: lp-have-backbone-pushed-back-on-stakeholder
+  q: Tell me about a time a stakeholder asked for something you believed was wrong, and you said so.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-have-backbone
+    - influence
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+    - /behavioral/competencies/cross-functional-collaboration
+  a: |-
+    **What it tests.** Have Backbone; Disagree and Commit. The principle asks people to hold a position they believe in, even against someone with more power, and to refuse to give way only to keep the peace. The interviewer wants the evidence you brought, what you offered in its place, and what you did once the decision was made. At senior level the stakeholder should have real authority.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the stakeholder wanted, why, and what you believed was wrong with it.
+    - **Action.** Give your evidence, the alternative you offered, and how the decision was reached.
+    - **Result.** Give the outcome and what the pushback cost you.
+    - **Learning.** Say what you do earlier now.
+
+    **A strong answer sounds like this.** "Our sales director wanted a custom export for one large customer in two weeks. It needed direct read access to our main database. I told him I would not support that design: one heavy query could slow checkout for every customer, and I showed him an incident from the year before that had done exactly that. I offered a nightly file from the reporting copy, ready in three weeks. He was unhappy and took it to my director, who backed the safer design. The customer accepted the nightly file. It cost me some goodwill with sales, so I now join their planning call each month."
+
+    **Watch out for.** Saying no with no alternative, a story where the stakeholder is the villain, and no account of what the pushback cost.
+  followUps:
+    - q: Once the decision was final, what did you do?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Describe what you did next. If you won, say how you repaired the relationship and delivered what you had promised. If you lost, say how you supported the decision in front of your team. The interviewer is checking that the argument ended when the decision was made.
+    - q: What would you have done if your director had sided with the stakeholder?
+      level: Senior
+      a: |-
+        Say that you would have built it, and built it as safely as the decision allowed, for example with query limits and an alarm. You would also have written down the risk and the agreed owner. Committing does not mean staying silent about a risk that is still there.
+    - q: What did you give up to reach an agreement?
+      level: Senior
+      a: |-
+        Name a real concession, such as extra work for your team or a faster date than you wanted. Then name the one point you would not move on, and why. This shows you can tell a principle from a preference.
+- id: lp-earn-trust-took-on-more-than-you-could-deliver
+  q: Tell me about a time you took on more than you could deliver.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-earn-trust
+    - failure
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+  a: |-
+    **What it tests.** Earn Trust. The principle asks people to keep their word and to be open about their own shortcomings, even when that is uncomfortable. The interviewer wants to hear when you noticed, and how fast you told the people affected. At junior level taking on too much is common and forgivable. Hiding it is what counts against you.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** List what you agreed to, and why you said yes.
+    - **Action.** Say when you saw the problem, who you told, and what you offered them.
+    - **Result.** Say what was delivered, what you handed back, and what it cost other people.
+    - **Learning.** Give the check you now make before you agree to something.
+
+    **A strong answer sounds like this.** "In my final year I agreed to build the data loader for a group project, lead its report, and help another team with their model, all in three weeks. After one week I had finished a third of the loader and nothing else. I told both teams that Monday what I could finish, and by when. I kept the loader and the report. I handed back the model work with my notes, so that team lost only two days. We submitted on time. Now, before I say yes, I write down the hours I have that week and what already fills them."
+
+    **Watch out for.** A hidden boast such as "I care too much", finishing everything by not sleeping, and telling people only at the deadline.
+  followUps:
+    - q: How do you decide what to say yes to now?
+      level: Junior
+      a: |-
+        Give a simple method that you really use. For example, you check your hours for the week, you ask when the work is needed, and you answer the next day when you are unsure. Add a recent case where you said "not this week" and offered a later date.
+    - q: How did the people you let down react, and what did you do about it?
+      level: Junior
+      a: |-
+        Tell it honestly. If someone was annoyed, say so, and say what you did to reduce their loss, such as handing over notes or helping for an hour later. The interviewer wants to see that you stayed with the problem after you had admitted it.
+- id: lp-earn-trust-hardest-critical-feedback
+  q: Tell me about the hardest critical feedback you have received. What did you change, and how do you know the change worked?
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-earn-trust
+    - feedback
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+    - /behavioral/competencies/feedback-and-difficult-conversations
+  a: |-
+    **What it tests.** Earn Trust. The principle asks people to listen closely, to be openly critical of their own work, and to resist defending themselves when the criticism is fair. The interviewer wants real feedback about a real fault, and proof that your behaviour changed. At mid level the follow-ups test whether the change lasted.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the feedback as it was said, and say who gave it.
+    - **Action.** Say how you checked it, what you changed, and how you measured the change.
+    - **Result.** Give the evidence, and say what is still not fixed.
+    - **Learning.** Say how you ask for feedback now.
+
+    **A strong answer sounds like this.** "My lead told me that people had stopped asking me for design reviews. I would leave 30 comments on a document and never say which three mattered. It was hard to hear, because I thought being thorough was my strength. I asked two colleagues, and both agreed with him. Now I give at most five comments, ranked, and I say first what is good. To check, I counted review requests: four in the quarter before, eleven in the quarter after. One colleague still finds me blunt in meetings, and I am working on that."
+
+    **Watch out for.** Feedback that is praise in disguise, arguing in the interview that the feedback was unfair, and no check that the change lasted.
+  followUps:
+    - q: Suppose some of that feedback had been wrong. What would you have done?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Say that you would act on the accurate part first. Then you would go back with a specific example and ask what the person saw, without arguing the whole thing. Even wrong feedback tells you how your work looks to others, and that is worth knowing.
+    - q: How would you notice if you slipped back into the old habit?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Name a signal you can watch, such as fewer review requests, long comment threads, or a colleague you have asked to tell you. Say how often you check. This shows that the change is a habit you maintain, and not a one-time fix after a bad review.
+    - q: What would you do differently if you received that feedback again?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Pick one thing about how you received it. Perhaps you defended yourself for the first ten minutes, or waited a week before asking others. Say what you would do now: listen, ask for one example, and thank the person. Keep it short and specific.
+- id: lp-earn-trust-sceptical-team-or-stakeholder
+  q: Tell me about a team or stakeholder who did not trust you or your team at the start. How did you change that?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies: [Amazon]
+  signals:
+    - lp-earn-trust
+    - influence
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+    - /behavioral/competencies/influence-without-authority
+  a: |-
+    **What it tests.** Earn Trust. The principle says that trust comes from listening, speaking plainly, admitting your own team's faults, and doing what you said you would do. The interviewer wants to hear why the doubt existed and the specific acts that changed it. At senior level the story should involve a group, and the doubt should have been partly deserved.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who doubted you, why, and what depended on their trust.
+    - **Action.** Say what you asked them, what you admitted, and the small promises you made and kept.
+    - **Result.** Give evidence of the change, and what is still open.
+    - **Learning.** Say what you now do first with a new partner.
+
+    **A strong answer sounds like this.** "I took over a platform team that had missed three migration dates. The payments team had stopped using our deploy tooling and built their own. I asked their lead for the full list of what had gone wrong. There were seven items, and five were fair. I shared the list with my team, said openly which ones were ours, and promised two fixes in four weeks. We delivered both in three. I sent a status note every Friday, bad weeks included. After four months they moved two of their six services back to our tooling. The other four are still on their own."
+
+    **Watch out for.** Trust won by charm or one big win, blaming the previous owner, and promising too much to win them over.
+  followUps:
+    - q: Another team owes you work that your plan depends on. How do you make sure it arrives?
+      level: Senior
+      a: |-
+        Describe a method that keeps the relationship intact. You agree a date and an owner in writing, check progress at fixed points, and raise a slip with them first. You go to their manager only after that, and you tell them before you do.
+    - q: What did you do when you had bad news for them?
+      level: Senior
+      a: |-
+        Give a real case. You told them early, in person or in a direct message, with the new date and what you were doing about it. Say that you did not wait for the weekly note. Trust grows fastest when bad news arrives from you before they find it.
+    - q: Were they right to doubt you at the start?
+      level: Senior
+      a: |-
+        Answer yes where it is true, and be specific about which complaints were fair. Then say which were not, and how you handled those without a fight. Defending your team on every point would undo the story you have just told.
+- id: lp-frugality-solved-with-what-you-had
+  q: Tell me about a time you solved a problem with what you already had, when the easy answer was to spend money or ask for more.
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies: [Amazon]
+  signals:
+    - lp-frugality
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What it tests.** Frugality. The principle asks people to get more done with less. It treats a tight budget as a push towards better ideas, and it gives no credit for a bigger team or a bigger bill. The interviewer wants the two options, what each cost, and what you gave up. At junior level a small saving is enough if you have the numbers.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the need and the expensive option, with its cost.
+    - **Action.** Say what you used in its place and how long it took you.
+    - **Result.** Give the saving, and what the cheaper option did worse.
+    - **Learning.** Say when you would pay for the expensive option.
+
+    **A strong answer sounds like this.** "As an intern I had to test our app on low-end phones. The plan was a cloud device service at about 400 dollars a month. I found six old test phones in a drawer. I spent one day connecting them to a spare laptop, with a script that installed each build and ran our 30 smoke tests. It was slower, about 25 minutes a run, and it covered six models where the service covered fifty. It still caught two crashes on old phones in the first month. The team kept it and paid for the service only before big releases."
+
+    **Watch out for.** Spending a week of your time to save a small fee, a saving with no numbers, and hiding what the cheap option did worse.
+  followUps:
+    - q: How much did you save, and how did you work that out?
+      level: Junior
+      companies: [Amazon]
+      a: |-
+        Give the sum in plain steps: the price avoided, minus your own time and any new running cost. In the sample that is the monthly fee against one day of work and a spare laptop. Expect to defend each number, so use ones you can explain.
+    - q: When is spending the money the right choice?
+      level: Junior
+      a: |-
+        Show that being frugal is different from being cheap. Spending is right when the cheap route costs more in engineer time, adds risk for customers, or will not last as the need grows. Give one case where you chose to pay, and why.
+- id: lp-frugality-delivered-with-limited-resources
+  q: Tell me about a time you had to deliver with fewer people, less budget or less time than the work needed.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies: [Amazon]
+  signals:
+    - lp-frugality
+    - delivery
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What it tests.** Frugality. The principle holds that limits make people resourceful, and it asks them to find a way inside the limit before they ask for more. The interviewer listens for what you did differently because of the limit, and what you chose to leave unbuilt. At mid level "we worked harder" is the weak answer. A cheaper design is the strong one.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the work needed and what you had.
+    - **Action.** Say what you changed in the design or the scope because of the limit.
+    - **Result.** Give the outcome and the known gaps.
+    - **Learning.** Say what the limit taught you about the first plan.
+
+    **A strong answer sounds like this.** "My team was asked to add search to our help centre. The plan assumed a dedicated search cluster and two engineers for a quarter. Then one engineer moved teams and the cluster budget was refused. I checked the data: 1,800 articles, with about ten edits a week. That was small enough for the full-text search in the database we already ran. I built it alone in five weeks. It handles spelling mistakes badly, and I told the product manager that before launch. Searches that ended in a support ticket fell from 31 percent to 24 percent."
+
+    **Watch out for.** Complaining about the limit, hiding what the cheaper version cannot do, and long hours in place of a different approach.
+  followUps:
+    - q: Did anyone argue for the more expensive approach, and how did you settle it?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Give their case fairly. The larger design may have been better in the long run. Say what evidence settled it, such as the data size, and what would make you return to their option. A settled argument with a stated trigger sounds better than a won argument.
+    - q: What did the limit force you to leave out?
+      level: Mid
+      a: |-
+        List the gaps plainly and say who agreed to accept them. Then say which gap you would close first if you had another month. Being open about what the cheap version cannot do is part of the answer the interviewer is looking for.
+    - q: At what point would you have asked for more resources?
+      level: Mid
+      a: |-
+        Name the condition, for example ten times the data or a requirement the simple design could not meet. Say that you would have brought numbers and options with the request. Working inside a limit is good. Hiding a real need to look frugal is a failure.
+- id: lp-frugality-cost-saving-or-waste-removed
+  q: Tell me about a time you found money or effort being wasted and put a stop to it.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies: [Amazon]
+  signals:
+    - lp-frugality
+    - ownership
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What it tests.** Frugality. The principle asks people to treat the company's money as carefully as their own, and to spend only where it helps customers. The interviewer wants to know how you found the waste, how you measured it, and how you got other people to change. At senior level the saving should outlast you, so describe the mechanism.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you noticed and why nobody owned it.
+    - **Action.** Say how you broke the cost down, and how you got each owner to act.
+    - **Result.** Give the saving as a number, and say what keeps it in place.
+    - **Learning.** Say what you watch for now.
+
+    **A strong answer sounds like this.** "Our data platform bill had grown 40 percent in a year while usage grew 10 percent. I broke the bill down by team and job. Three things made up most of it: test clusters left running at weekends, 60 nightly jobs that nobody read, and logs kept for two years. With the four team leads, I agreed automatic shutdown after two idle hours, the removal of 41 jobs once their owners had confirmed, and log retention of 90 days. The monthly bill fell by 28 percent. I added a cost line to each team's weekly report, and it has stayed flat for three quarters."
+
+    **Watch out for.** A saving that hurt reliability or customers, a clean-up with nothing to stop the waste returning, and taking all the credit for a shared effort.
+  followUps:
+    - q: What did the saving cost in risk or in people's time?
+      level: Senior
+      a: |-
+        Be honest about the price. Perhaps two engineers spent three weeks on it, or shorter log retention made one later investigation harder. Give the numbers for both sides. A saving with no stated cost sounds unexamined, and the interviewer will keep asking until you give one.
+    - q: How did you get other teams to act when cost was not their priority?
+      level: Senior
+      a: |-
+        Say what you made easy for them. You brought each lead their own numbers, proposed safe defaults, and did the first change yourself. Then say what made it stick, such as a cost line in a report they already read each week.
+- id: lp-best-employer-supported-struggling-teammate
+  q: Tell me about a time you noticed a teammate was having a hard time. What did you do?
+  level: Junior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-best-employer
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+  a: |-
+    **What it tests.** Strive to be Earth's Best Employer. The principle asks people to lead with empathy and to care whether the people around them are doing well and growing. It applies most directly to managers, and anyone on a team can show it. The interviewer listens for whether you noticed without being told, and whether your help suited the person. At junior level a small act is enough.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you noticed and why you thought something was wrong.
+    - **Action.** Say how you approached the person, what they needed, and what you did.
+    - **Result.** Say what changed for them and for the team.
+    - **Learning.** Say what you look out for now.
+
+    **A strong answer sounds like this.** "A new graduate joined my team two months after I did. In his third week I noticed he had stopped asking questions in our channel, and his first task had been open for nine days. I asked him to lunch. He told me he could not get the project to build and felt it was too late to admit it. I had hit the same problem. We fixed his setup in 40 minutes, and I paired with him for an hour a day that week. He finished the task in four days. I also told our lead that the setup guide was failing people, without naming him."
+
+    **Watch out for.** Making yourself the hero, sharing the person's private difficulty with others, and doing their work for them.
+  followUps:
+    - q: How did you know your help was wanted?
+      level: Junior
+      a: |-
+        Say that you asked and did not assume. You offered something specific and small, such as an hour of pairing, and made it easy to refuse. Mention how the person responded. Help that is pushed on someone can make them feel watched.
+    - q: What would you have done if they had said they were fine?
+      level: Junior
+      a: |-
+        Say that you would respect the answer, leave the offer open, and check again in a few days. If the signs continued and the work was at risk, you would mention the pattern to your lead, without guessing at private reasons.
+    - q: Did you tell your manager? Why, or why not?
+      level: Junior
+      a: |-
+        Give your reasoning. A broken setup guide is the team's problem, so you raised it without his name. A personal matter is his to share. If he had been close to failing, you would have encouraged him to speak to the manager himself first.
+- id: lp-best-employer-made-team-better-place-to-work
+  q: Tell me about a change you made, without being asked, that made your team fairer or easier to work in for other people.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-best-employer
+    - ownership
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+  a: |-
+    **What it tests.** Strive to be Earth's Best Employer. The principle asks people to make work safer, fairer and more productive for others. The interviewer wants a specific problem for specific people, an action you took without being asked, and a sign that it lasted. At mid level you have no authority, so the hard part is getting the team to adopt the change.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say who was affected, how you found out, and what it cost them.
+    - **Action.** Say what you proposed and how you made the case.
+    - **Result.** Give evidence that it helped the people it was meant for.
+    - **Learning.** Say what you would notice sooner.
+
+    **A strong answer sounds like this.** "Three of the nine people on our team worked six hours ahead of the rest. Our planning meeting ran at 8 in their evening, and decisions were often made after they had left. One of them told me she had stopped proposing ideas. I raised it at our retrospective with a count: none of the 14 design decisions in two months had been made while they were present. I proposed that every decision is written up first, with 24 hours for comments, and that the meeting time alternates. The team tried it for a month and kept it. Next quarter, those three wrote five of our twelve design proposals."
+
+    **Watch out for.** A social event as the whole answer, a change that mainly helped you, and no evidence that anyone was better off.
+  followUps:
+    - q: Who resisted the change, and why?
+      level: Mid
+      a: |-
+        Give the objection fairly. For example, written decisions felt slow to people who were used to deciding in the room. Say what you did about it: a one-month trial and a short template. Resistance that you understood and answered is more convincing than a change everyone loved.
+    - q: How do you know it helped the people it was meant to help?
+      level: Mid
+      a: |-
+        Use evidence that comes from them. Give a number, such as proposals written or meetings attended, and something one of them said. If you did not ask them directly, say that you should have, and say what you would ask.
+- id: lp-best-employer-morale-during-stressful-delivery
+  q: Tell me about a delivery that put your team under heavy pressure. What did you do to look after the people?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies: [Amazon]
+  signals:
+    - lp-best-employer
+    - people-management
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+    - /behavioral/leveling-and-tracks/engineering-manager-behavioral
+  a: |-
+    **What it tests.** Strive to be Earth's Best Employer. The principle asks leaders to look after the people doing the work while still delivering. That means removing needless pressure and checking that people finish more capable than they started. The interviewer wants specific actions and their cost, and will ask what happened to the people afterwards. It is a question for leads and managers.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the delivery, the pressure, and the signs that the team was under strain.
+    - **Action.** Say what you removed, what you protected, and how you kept people growing.
+    - **Result.** Give the delivery outcome and what happened to the people, losses included.
+    - **Learning.** Say what you would do earlier.
+
+    **A strong answer sounds like this.** "I led eight engineers through a five-month billing migration with a fixed regulatory date. In month three, two people told me they were working most weekends. I cut two reports from the scope after agreeing it with finance, which removed about three weeks of work. I stopped releases after 4 on Fridays. And I gave each engineer one part to own and present to leadership. We made the date with four days spare. One engineer still left a month later and named the project as a reason. Two others were promoted that year for the work they had owned."
+
+    **Watch out for.** Free food and thank-you notes as the whole answer, hiding bad news to keep spirits up, and not knowing how each person was doing.
+  followUps:
+    - q: Who on the team came out of that project able to do more than before?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Name people by role and say what each can do now that they could not do before, such as leading a design or presenting to directors. Say what you did to make that happen. If someone did not grow, say so and say why.
+    - q: When the project ended, was the team in a state to take on the next one?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Describe what followed the project and who took it on. For example, an engineer who owned one part of the migration led the next one. If the team needed rest first, say that you planned for it. The interviewer is checking that you did not use up the team to hit one date.
+    - q: What did protecting the team cost the delivery?
+      level: Senior
+      a: |-
+        Give the trade plainly: the scope you cut, the days you gave up, and who agreed. Then say why it was worth it, with the outcome. If you think you protected too little, as with the engineer who left, say what you would change.
+- id: lp-broad-responsibility-wider-impact-of-decision
+  q: Tell me about a time you changed a design or a decision because of its effect on people the original plan had not considered.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-broad-responsibility
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/broad-responsibility-at-scale
+  a: |-
+    **What it tests.** Success and Scale Bring Broad Responsibility. The principle says that work at a large company reaches people far beyond its customers, so people should look for side effects and act on them. The interviewer wants to hear who the plan had missed, and what you changed. A mid-level engineer can answer with one design choice.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what you were building and who the plan covered.
+    - **Action.** Say who was missing from the plan, how you found out, and what you proposed.
+    - **Result.** Give what changed, what it cost, and what you cannot prove.
+    - **Learning.** Say what you now ask at design time.
+
+    **A strong answer sounds like this.** "I was building a feature that sent delivery drivers a sound alert for each new job. The spec covered the customer and the driver. In testing I rode with a driver for one shift and saw him reach for his phone in traffic 14 times in an hour. No requirement covered road safety. I proposed holding alerts while the phone moved faster than 10 kilometres an hour, and reading them aloud once the driver stopped. The product manager worried about slower job acceptance, so we tested it. Acceptance time rose by nine seconds, and we shipped it. I have no accident data, so I cannot claim it prevented any."
+
+    **Watch out for.** Claiming more than you can show, raising a concern and doing nothing, and a wider group that is only another internal team.
+  followUps:
+    - q: What effects did you consider that had nothing to do with money?
+      level: Mid
+      a: |-
+        List them by group: safety for drivers and other road users, privacy, access for people with disabilities, and load on support staff. Say how you learned about each one. Watching real use, as in the ride-along, is stronger evidence than guessing at a desk.
+    - q: What did it cost the business, and who agreed to pay that cost?
+      level: Mid
+      a: |-
+        Give the number, such as nine seconds on acceptance time, and name who accepted it. Say that you brought the cost into the open yourself. A side effect that you fixed by hiding its price from the product owner would be a weak story.
+    - q: What would you have done if the product manager had said no?
+      level: Mid
+      a: |-
+        Say that you would ask what evidence would change the decision, and offer a small test. If the risk was to someone's safety, you would raise it once more, in writing, with the next owner. Then you would accept a decision made with the facts on the table.
+- id: lp-broad-responsibility-business-vs-wider-harm
+  q: Tell me about a time when what was good for the business conflicted with what was good for users, society or the environment. What did you do?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-broad-responsibility
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/broad-responsibility-at-scale
+  a: |-
+    **What it tests.** Success and Scale Bring Broad Responsibility. The principle asks people to do right by customers, employees, partners and the wider world, even when a metric rewards something else. The interviewer wants a real conflict with a real cost, your position, and how you got the organisation to accept it. At senior level, raising the concern is the minimum. You are expected to change the decision.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** State the business gain and the harm, each with a number.
+    - **Action.** Say how you found the harm, what you proposed, and who objected.
+    - **Result.** Give the decision and what it cost the business.
+    - **Learning.** Say what now gives the next launch the same check.
+
+    **A strong answer sounds like this.** "Our recommendation model raised watch time by 6 percent in a test. When I read results by hand, I saw that it pushed late-night viewing for users under 18: sessions after midnight rose 19 percent in that group. The launch review looked only at watch time. I wrote a two-page note and proposed a cap on recommendations after 11 at night for those accounts. The product lead objected, because the cap cost about a third of the gain. I asked for late-night viewing by minors to become a launch measure, and our director agreed. We shipped with the cap and a 4 percent gain."
+
+    **Watch out for.** A conflict that cost the business nothing, a lecture on values with no action, and passing the decision upward.
+  followUps:
+    - q: How did you put a number on the harm?
+      level: Senior
+      a: |-
+        Explain the measure and its limits. You may have used a stand-in, such as sessions after midnight, because the real harm, lost sleep, cannot be seen in the data. Say that openly. A rough number with stated limits moved the decision where a general worry would have failed.
+    - q: What would you have done if the director had refused the cap?
+      level: Senior
+      a: |-
+        Give your next steps: ask what evidence was missing, propose a smaller test, and record your objection in the launch review. Then say where your own line is. Most decisions you commit to. A few you would refuse to put your name on.
+    - q: How did you make sure later launches got the same check?
+      level: Senior
+      a: |-
+        Describe the mechanism: a required measure in the launch template, with an owner and a limit. Say whether it has been used since and what it caught. A check that depends on you reading results by hand each time will not last.
+- id: lp-broad-responsibility-beyond-the-usage-goal
+  q: Imagine you are asked to grow usage of a product you work on. Before you ship a change that does it, what would you check apart from the usage number?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  signals:
+    - lp-broad-responsibility
+    - judgment
+  topics:
+    - /behavioral/amazon-leadership-principles/broad-responsibility-at-scale
+  a: |-
+    **What it tests.** Success and Scale Bring Broad Responsibility. The principle asks people to think about second-order effects: who else the product touches, and whether more usage is good for them. This is a hypothetical, so the interviewer listens for a method and for specific effects. At senior level you should name a measure and the point at which you would stop.
+
+    **How to shape the answer.**
+
+    - **Your position first.** Say that usage is one measure among several.
+    - **Who is affected.** List the groups: heavy users, vulnerable users, non-customers and support staff.
+    - **What you would measure.** Give one guard measure for each real risk, with a limit set in advance.
+    - **What you would do.** Say what you would change or refuse to ship if a limit was crossed.
+
+    **A strong answer sounds like this.** "I would start by asking whose usage goes up, and whether that helps them. On the budgeting app I work on, the fastest way to raise daily opens is more notifications. So next to daily opens I would track three guard measures: the share of users who turn notifications off, uninstalls in the first 30 days, and support contacts that mention stress or debt. I would set limits before the test: opt-outs above 8 percent would stop the launch. If usage rose while users saved less money, I would call the change a failure."
+
+    **Watch out for.** Naming only more business measures, a vague promise to "consider ethics", and no point at which you would refuse to ship.
+  followUps:
+    - q: Which effects would you look for that never show up in revenue?
+      level: Senior
+      a: |-
+        Give a short list tied to the product: wellbeing of heavy users, effects on children or other vulnerable groups, privacy, fairness between user groups, and the load on support staff. For each, say how you would detect it. Specific effects with a way to see them are what the interviewer wants.
+    - q: If the change grew usage and also hurt some users, would you ship it?
+      level: Senior
+      a: |-
+        Say no, then make it concrete. Say which harm would stop you, how you would show it to the decision maker, and what you would offer in its place. Add that harmful growth tends to reverse later, in opt-outs, complaints and lost trust.
+    - q: Tell me about a time you did this on real work.
+      level: Senior
+      a: |-
+        Have one short true story ready, with the guard measure you added and what it showed. If you have never done it, say so, and describe the nearest case, such as stopping a test because complaints rose. Do not invent one.

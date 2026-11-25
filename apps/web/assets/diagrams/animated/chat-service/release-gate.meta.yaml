@@ -1,0 +1,23 @@
+title: The release gate and the FP8 precision gates
+alt: >-
+  A gate diagram in two steps. Step 1: a grey model release fans out to nine checks and on to a red Block box marked
+  sycophancy. Eight checks pass in lime: a pairwise win rate of 51.2 percent on 3,000 conversations, not lower than the
+  current model within 1.8 points; no slice more than 3 points down, the worst being long chats at minus 1.1; compaction
+  probes at 96.4 percent of 2,000 facts at turn 50 against 95; router recall 0.81 and a false-positive rate of 1.9
+  percent against 0.75 and 3 percent; 0 planted memories in 2,000 poisoning attempts; the red-team set with 0.06 percent
+  false stops against 0.1; 0 of 3,000 cross-user leak probes with a clean deletion audit; and a fast-turn p95 of 454
+  milliseconds on the load replay against 600. One fails in red: the behaviour evals, with sycophancy 2.6 points worse,
+  which blocks the release on its own. A note says measured values are illustrative. Step 2: one-off precision
+  gates before FP8 serves any traffic: three grey arms on the same weights, BF16 KV with BF16 math as the reference,
+  FP8 KV with BF16 math to test storage, and FP8 KV with FP8 math to test the math, feed a comparison against the
+  reference: win rate and long chats over 30,000 tokens not lower, and next-token agreement above a gold-set
+  threshold. If both pass, a green box serves FP8 on 14,520 GPUs, the plan; if storage fails, KV is stored in BF16 on
+  14,592 GPUs with a KV store of 16.1 petabytes a region; if the math fails, BF16 attention needs 16,896 GPUs. A note
+  says the degradation ladder covers the gap at peak until the extra GPUs and drives arrive.
+caption: >-
+  A behaviour eval blocks a release whatever its win rate; separately, FP8 KV storage and FP8 attention math must each
+  pass their own gate before they serve, or the fleet is 14,592 GPUs (BF16 KV) or 16,896 (BF16 attention), not 14,520.
+  Measured values are illustrative.
+tags: [genai, chat-service, evaluation, release-gate, case-study]
+source: original
+created: 2026-11-23

@@ -1,0 +1,250 @@
+---
+title: Drift Detection
+description: Data, concept, and output drift for ML and LLM systems, PSI, embeddings monitoring, thresholds, and remediation.
+icon: trending-up
+updated: 2026-11-15
+---
+
+An LLM system can get worse with no deploy at all: customers ask new things, the help centre changes, or the provider moves the model under a name you call.
+
+- Interviewers ask about drift to see whether you can name what moved, pick a statistic that notices it, and say what happens after the alert.
+
+## Overview
+
+- **Drift** means the world moved while your system stood still. An LLM system has four places to drift: the **inputs**, the **outputs**, the **provider's model** and the **knowledge** (policies, index).
+- **PSI** (population stability index) sums how far each bin's share moved: `PSI = Σ (actual − expected) × ln(actual ÷ expected)`. Brightpost's intent mix gives **0.276**, past the usual **0.25** alert line (rule of thumb, not a test).
+- **Embeddings** catch what counts miss: a new cluster of questions pulls the centre of the cloud away from the baseline.
+- A **silent model update** moves an alias with no deploy of yours. **Pin versions** and run the **200-ticket golden set weekly**: a 12-case drop against a ±4.5 noise band is an alert.
+- An alert is not a fix. The flow ends with **refreshing the evaluation set** and the baseline, so the same drift cannot hide again.
+
+## Mental model
+
+- A ship's navigator plots a course at the start of the voyage.
+- Over days the current pushes the ship sideways a little each hour.
+- No single hour looks wrong, but the navigator checks a star fix every watch, compares it with the plotted course, and corrects when the gap passes a mark.
+- Drift detection is the star fix: a regular, same-way measurement against a fixed reference, with an agreed gap that means "turn the wheel".
+- And the navigator also asks why: wind, current, or a broken rudder, because each needs a different correction.
+
+## Core concepts
+
+1. **Covariate (input) drift.** The distribution of inputs moves: new slang, new topics, another language mix, a campaign that brings a different crowd.
+2. **Concept drift.** The right answer for the same input changes: a policy changes, a price changes, a season changes what "late" means.
+3. **Output drift.** What the system produces changes: length, refusal rate, format, score. It can come from the inputs, a prompt edit or a model change.
+4. **Provider drift.** The model behind a name changes. A pinned version is a fixed snapshot; an alias is a pointer the provider can move.
+5. **Knowledge drift.** The index or tool behaviour goes stale: an article is out of date, a tool API changes a field.
+6. **Reference window (baseline).** The period you compare against: fixed (the quarter after launch) or rolling (the previous 4 weeks). A fixed baseline notices slow drift; a rolling one does not.
+7. **Statistic.** A number that says how far the current window is from the baseline: PSI on a scalar or categorical feature, a distance between embedding centroids, a two-sample test.
+8. **Threshold and persistence.** The value that raises an alert, and how many windows in a row it must hold. Both are tuned on your own history.
+9. **Remediation.** The action: refresh data, re-index, recalibrate, roll back a prompt or model, raise human review. See [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning).
+10. **Evaluation refresh.** Adding the drifted cases to the golden set, so offline tests protect the new reality. See [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets).
+
+- Drift detection is monitoring of the data and the model.
+- Judging quality on live traffic is on [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation); wiring alerts is on [Alerting & Dashboards](/ai-system-design/genai-system-design/alerting-dashboards).
+
+## Architecture
+
+Four things can drift, and each needs its own detector.
+
+<AnimatedDiagram
+  spec="animated/llmops/drift-types"
+  stepper
+  caption="Inputs, outputs, the provider's model and the knowledge drift for different reasons and need different detectors. Examples other than the intent shares are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Four things can move">
+    Customers change what they ask, the assistant's answers change shape, the vendor updates the model behind a name, and the policies or index change.
+  </StepCard>
+  <StepCard n={2} title="What each looks like at Brightpost">
+    Gift-card questions rise from 5 % to 21 % of tickets; the average answer grows from 250 to an illustrative 330 tokens; an alias moves and the pass rate falls from 90 % to 84 % (illustrative); a returns window is cut and the index still quotes the old one.
+  </StepCard>
+  <StepCard n={3} title="How you notice each one">
+    PSI and embedding distance for inputs; length, refusal rate and judge scores for outputs; a weekly golden-set run, with the model version stored in every trace, for the provider; stale-article and grounding checks for the knowledge.
+  </StepCard>
+</StepCards>
+
+## Technical mechanics
+
+### From a window to a refreshed evaluation set
+
+<AnimatedDiagram
+  spec="animated/llmops/drift-detect-flow"
+  stepper
+  caption="A drift check compares a window with a baseline, computes a statistic, raises an alert past a threshold and ends by refreshing the evaluation set. The intent shares are illustrative; the PSI is computed."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Window, statistic, alert, refresh">
+    Compare this week with the baseline using fixed bins, compute one number per feature, alert when it passes the threshold in two windows running, and finish by adding the new cases to the golden set and re-baselining.
+  </StepCard>
+  <StepCard n={2} title="PSI on the intent mix, term by term">
+    Each bin adds `(this week − baseline) × ln(this week ÷ baseline)`. The "other" bin, which is gift cards, goes from 5 % to 21 % and contributes (0.21 − 0.05) × ln(4.2) = 0.16 × 1.435 = **0.2296**, 83 % of the total. The other four bins add up to 0.046.
+  </StepCard>
+  <StepCard n={3} title="0.276 is past the alert line">
+    The usual reading (credit-scoring practice, attributed to Lewis): under 0.10, no substantial change; 0.10 to 0.25, a small change to watch; 0.25 or more, a substantial change. 0.276 is in the top band.
+  </StepCard>
+</StepCards>
+
+**The caveats:**
+
+- PSI depends on the bins: change them and your history is no longer comparable, so fix them once.
+- A bin that is empty in one window makes PSI infinite, so add a small floor.
+- The 0.10 and 0.25 lines are conventions from scorecards, not statistical tests; they ignore sample size and the number of bins, so calibrate them on past incidents and the false-alarm rate you can tolerate (as of November 2026).
+- PSI also says nothing about which customers moved: slice it by feature, language and segment.
+
+For text, PSI needs a scalar to bin: the intent label, the language, the token length, the retrieval score, the judge score. Free text itself goes through embeddings.
+
+### Embedding drift
+
+<AnimatedDiagram
+  spec="animated/llmops/drift-embedding-shift"
+  stepper
+  caption="Last quarter's questions form one cluster. This month's include a new cluster of gift-card questions, which pulls the centre of the cloud away. The 2-D points are illustrative; the real space has 1,536 dimensions."
+/>
+
+**How to read it:**
+
+- Embed a sample of questions each week and compare with the baseline sample.
+- Simple statistics work: the distance between the two centroids (here 126 px, 1.9 times the baseline's radius), the share of new points farther from the baseline centre than any baseline point (7 of 14), or the overlap of nearest neighbours between the windows.
+- A two-sample test on a pretrained model's low-dimensional representation was the most effective of the shift detectors in the study by Rabanser et al. (2019), which is the usual recipe.
+- Embedding statistics are sensitive and blunt: they tell you something moved, not what; sample some of the new points and read them.
+
+### The provider moved the model
+
+<AnimatedDiagram
+  spec="animated/llmops/silent-model-update"
+  stepper
+  caption="Two deployments run the golden set every week. In week 7 the provider repoints the alias and its score falls by 12 cases; the pinned version does not move. Pass counts are illustrative."
+/>
+
+**The numbers:**
+
+- The golden set has 200 tickets. The noise band from five repeated runs is 180 ± 4.5 cases (see [Automated Regression Testing](/ai-system-design/genai-system-design/automated-regression-testing)).
+- The alias falls from 180 to about 168: a drop of 12 cases, 6 points, outside the band, so the first weekly run after the move raises the alert.
+- The pinned deployment shows the previous behaviour is still available, which makes it a control: the difference between the two lines is the provider's change.
+
+**What the provider promises:**
+
+- Anthropic's documentation says a model ID identifies a pinned version whose weights do not change for the life of the ID, while the convenience aliases for earlier models resolve to the most recent dated snapshot.
+- It also says the serving infrastructure around fixed weights (router, safety classifiers, sampling logic) can change, so small behaviour differences can appear even on a pinned ID (as of November 2026).
+- Other providers have their own alias policies; read them.
+- A study of GPT-3.5 and GPT-4 found large behaviour changes between March and June 2023 versions on tasks such as telling primes from composites, with accuracy for one model falling from 84 % to 51 % (Chen, Zaharia and Zou, 2023).
+- So: pin versions in production, store the model version in every trace, and treat a move as a release with an evaluation behind it.
+- The release side is on [Rollback & Blue-Green Deployment](/ai-system-design/genai-system-design/rollback-blue-green-deployment) and [Model Registry & Governance](/ai-system-design/genai-system-design/model-registry-governance).
+
+### Judges and tools drift too
+
+- Three drifts do not touch the product model. A **judge model** upgrade shifts scores with no change in the product: keep a human-labelled set, re-measure agreement after any judge change, and never compare scores across judge versions.
+- A **tool or API** changes a field and the assistant starts passing the wrong argument: contract tests and a trace alert on tool errors.
+- A **retrieval corpus** goes stale: track the age of cited articles and the grounding score.
+
+### Worked example: Brightpost finds gift cards
+
+1. **Baseline.** After launch, Brightpost stores its intent mix, a sample of question embeddings, and the golden-set pass count (180 of 200). Bins are fixed.
+2. **Weekly window.** Every Monday the job computes PSI on the intent mix, the centroid distance on 2,000 sampled questions, and the output length and refusal rate.
+3. **Signal.** In week 9 PSI is 0.276: "other" has gone from 5 % to 21 %, and the embedding centroid moved by 1.9 radii. The rule needs two windows, and week 10 confirms it.
+4. **Diagnosis.** A person reads 30 of the new questions: gift cards, launched by marketing. The model version is unchanged (it is in every trace); the output length is stable. Input drift, not provider drift.
+5. **Remediation.** The team writes two help articles, re-indexes, adds 25 labelled gift-card tickets to the golden set, and runs the regression suite. The online pass rate on gift cards recovers (see [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation)).
+6. **Reset.** The baseline is re-based to the new mix with a note in the log; the PSI alert is quiet again, and next time it will fire earlier.
+
+<Callout tone="red" title="What breaks">
+  The team points production at the alias "latest" so it always gets the newest model. One Thursday the provider moves it. Refund answers get 12 cases worse on the golden set, but nobody runs the set on a schedule and the model version is not in the traces. The drop is found after a week of complaints, and no one can say which day it started. Pin a version, store it in every trace, and run the set weekly.
+</Callout>
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| PSI on scalar or label features | Simple; easy to explain; one number | Depends on bins; no localisation | Intent mix, language, length, scores |
+| Embedding distance | Catches changes in meaning | Blunt; needs reading to explain | Free-text questions and documents |
+| Fixed baseline | Notices slow drift | Alarms after intended change | Stable products |
+| Rolling baseline | Fewer stale alarms | Hides slow drift | Fast-moving topics, with a fixed baseline too |
+| Pinned model version | Behaviour changes only when you choose | You must migrate before retirement | Production traffic |
+| Alias to the latest model | No migration work | Silent behaviour change | Prototypes only |
+| Weekly golden-set run | Direct measure of quality | Cost per run; lag up to a week | Always, as the check on provider drift |
+
+## Production systems
+
+- **PSI in credit scoring.** PSI and its 0.10 and 0.25 bands come from scorecard monitoring, attributed to Lewis, and a 2023 critical review of population stability testing notes the bands ignore sample size and the number of bins (Yurdakul and Naranjo, and Du Pisanie and Visagie, discussed there; checked November 2026).
+- **Dataset-shift detection study.** Rabanser, Günnemann and Lipton (2019) compared detectors across many shifts and found a two-sample test on classifier-reduced features the strongest.
+- **Behaviour changes in hosted LLMs.** Chen, Zaharia and Zou (2023) measured GPT-3.5 and GPT-4 versions from March and June 2023 on seven tasks and found substantial changes in accuracy, willingness to answer, and formatting.
+- **Pinned model IDs.** Anthropic documents that each model ID is a pinned version, aliases for earlier models point to the latest dated snapshot, and serving infrastructure can still cause small differences (Anthropic docs, November 2026).
+
+## Failure modes & pitfalls
+
+- **Changing bins.** Re-binning invalidates every past PSI value and threshold.
+- **Alerting on one window.** Seasonality and noise cause false alarms; require persistence, and compare with the same weekday.
+- **Using the latest alias.** The provider moves it, you notice later.
+- **No model version in the trace.** You cannot tell a provider change from an input change.
+- **Detect and stop.** An alert with no owner, no runbook and no evaluation refresh finds the same drift again.
+- **Moving the judge with the product.** A judge upgrade makes the scores incomparable.
+
+## Interview framework
+
+1. Name what can drift: inputs, outputs, the provider's model, the knowledge.
+2. Pick a detector for each: PSI on label and scalar features, embedding distance for text, a weekly golden-set run for the model, grounding checks for the index.
+3. Compute an example: define the bins, the formula, the number and the threshold with its caveat.
+4. Describe the flow: window, statistic, persistence, alert, diagnosis (which kind of drift), remediation.
+5. Close the loop: refresh the golden set and the baseline, pin versions, and add the failure as a regression case.
+
+**What interviewers listen for:** a distinction between input, concept and provider drift; a computed statistic with honest caveats; versions pinned and logged; and a refresh step after the alert.
+
+**Red flags:** "retrain when PSI is high" with no diagnosis, an alias in production, one fixed threshold for every feature, and no baseline.
+
+## Further reading
+
+- [A critical review of existing and new population stability testing procedures in credit risk scoring (arXiv 2303.01227)](https://arxiv.org/abs/2303.01227)
+- [Failing Loudly: An Empirical Study of Methods for Detecting Dataset Shift (Rabanser, Günnemann and Lipton, 2019)](https://arxiv.org/abs/1810.11953)
+- [How is ChatGPT's behavior changing over time? (Chen, Zaharia and Zou, 2023)](https://arxiv.org/abs/2307.09009)
+- [Anthropic: Model IDs and versioning (docs)](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)
+- Related pages: [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning) · [Alerting & Dashboards](/ai-system-design/genai-system-design/alerting-dashboards) · [Online Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation) · [Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Name the kinds of drift in an LLM application and how each shows up." category="Concepts" level="Junior">
+    - Input drift is a change in what users ask: new topics, languages or phrasing.
+    - Concept drift is a change in the right answer for the same input, such as a new policy.
+    - Output drift is a change in what the system produces: length, refusal rate, format or scores.
+    - LLM systems add provider drift, when the model behind a name changes, and knowledge drift, when the index or a tool goes stale.
+    - Each shows up in a different place: question statistics, answer statistics, a golden-set run and grounding checks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you distinguish data drift from a bad model deployment using only monitoring signals?" category="Failure modes" level="Mid">
+    - Line up the timelines. A jump in errors right at a deploy, with stable input statistics, points to the release.
+    - A gradual rise in embedding distance or PSI with unchanged code points to the population.
+    - Check the versioned artefacts in the traces (prompt, model, index build), compare a canary slice with the control, and run the golden set against the old and new version: if the old version also gets worse on fresh traffic, the environment moved; if only the new one does, suspect the change.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the strengths and weaknesses of PSI for monitoring LLM inputs, scores or ranker outputs?" category="Concepts" level="Mid">
+    - PSI is easy to compute and explain, and it works as a coarse alarm for how far a binned distribution has moved.
+    - Its weaknesses are that it depends on the bins, does not say which segment moved, ignores sample size, and its usual bands of 0.10 and 0.25 are conventions from credit scoring, not tests.
+    - For text it needs a scalar such as the intent label, language, length or judge score, so pair it with embedding statistics and a read of sample questions.
+  </InterviewQuestion>
+  <InterviewQuestion question="The intent mix moved from 5 % to 21 % in one bin, and the other four bins shifted by a point or two. Is that drift worth an alert?" category="Concepts" level="Mid">
+    - Compute it: the big bin contributes (0.21 − 0.05) × ln(4.2) = 0.16 × 1.435 = 0.23, and the other four add about 0.046, so PSI is about 0.28, over the usual 0.25 line.
+    - I would still require persistence over two windows and read a sample of the new questions to see whether it is a real new topic or a labelling change.
+    - If it holds, add those cases to the golden set and the help centre, and re-baseline.
+    - The number says something moved; people decide what.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational steps follow a sustained high-severity drift alert?" category="Architecture" level="Senior">
+    - Page the owner with the dashboards linked, and raise human review on the affected segment.
+    - Diagnose which kind of drift it is: check model and prompt versions in the traces, read sample requests, and run the golden set.
+    - Mitigate fast if customers are harmed, with a fallback model, a prompt rollback or routing to a person.
+    - Then fix the cause (refresh data, re-index, adapt the prompt, retrain), add the failing cases to the evaluation set, re-baseline, and record the incident by suspected drift type so the runbook improves.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why pin a model version in production instead of using a provider alias?" category="Trade-offs" level="Mid">
+    - An alias is a pointer the provider can repoint, so your behaviour can change with no deploy on your side, and you find out from complaints.
+    - A pinned version changes only when you move it, after running your own evaluation, and gives you a control to compare with.
+    - The costs are migration work before the version is retired and missing improvements until you move.
+    - Also store the model version in every trace, and remember that infrastructure around fixed weights can still change small behaviours.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you detect embedding drift in a RAG system's incoming questions?" category="Architecture" level="Senior">
+    - Embed a sample of questions each week with the same model and compare with a fixed baseline sample: the distance between centroids, the share of new points farther from the baseline centre than the baseline's own radius, and nearest-neighbour overlap.
+    - For sharper detection, reduce dimensions with a trained model and run a two-sample test.
+    - Embedding statistics are sensitive but do not say why, so cluster the outliers and read a sample.
+    - Fix the embedding model version: changing it makes every comparison meaningless.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your judge model is upgraded and quality scores jump by three points with no product change. What do you do?" category="Failure modes" level="Senior">
+    - Treat it as measurement drift, not product improvement.
+    - Re-score a human-labelled set with the old and new judge and compare agreement and kappa, then re-score a sample of last month's traces with both to see the offset.
+    - Do not compare scores across judge versions: re-baseline with the new judge, annotate the dashboard at the change date, and pin the judge version like any other model.
+    - Keep the human labels as the anchor for future judge changes.
+  </InterviewQuestion>
+</InterviewQuestions>

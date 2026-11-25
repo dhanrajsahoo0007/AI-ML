@@ -1,0 +1,15 @@
+title: Fail open, then a local share of the limit
+alt: >-
+  A sequence diagram in three steps with four lanes: an orange client using key k42, a teal gateway, a violet counter
+  store and a teal API service. Step 1: the client calls GET orders; the gateway runs the token-bucket script in the
+  store, which answers allow with 57 tokens left; the gateway forwards the request, gets 200 and returns it with the
+  rate-limit headers. Step 2: the store does not answer within 5 milliseconds, drawn as a red timeout; the gateway
+  fails open, counts a limiter error, forwards the request anyway and returns 200. Step 3: errors stay above half for
+  10 seconds, so the gateway's breaker opens; it stops calling the store, enforces a local share of 100 divided by 20
+  gateways, 5 requests a second, answers 429 past it, and probes the store every 5 seconds.
+caption: >-
+  A slow counter store never slows the API: time out after 5 ms and allow; if the store stays down, each gateway
+  enforces its own share of the limit.
+tags: [case-studies, rate-limiter, fail-open, circuit-breaker]
+source: original
+created: 2026-11-17

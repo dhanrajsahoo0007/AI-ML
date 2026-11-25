@@ -1,0 +1,17 @@
+title: Home timeline high-level architecture
+alt: >-
+  An architecture diagram in eight steps across six zones: clients, edge, timeline core, application services, async
+  pipeline and storage. Step 1: a reader opens the timeline through the API gateway; the timeline service reads who
+  they follow from the graph store and asks the post service for the recent posts of 200 accounts, drawn red because
+  it breaks under load. Step 2: changes in the post store flow into a post log; the fan-out service, the solid accent
+  node, reads followers from the graph store and appends each new post id to their lists in the timeline cache, and the
+  timeline service reads one list. Step 3: posts by very large accounts are merged in at read time. Step 4: a post
+  cache sits in front of the post store. Step 5: a missing timeline is rebuilt by the fan-out service. Step 6: an indexer
+  reads the log into an in-memory search index, and the search service queries its shards. Step 7: a ranker
+  scores the candidates. Step 8: a like counter reads likes from the log and writes counts to the post store.
+caption: >-
+  Home timeline: fan out post ids on write, merge big accounts on read, hydrate from a post cache, and feed search and
+  counts from the same log.
+tags: [case-studies, twitter, architecture, fan-out, feeds]
+source: original
+created: 2026-11-17

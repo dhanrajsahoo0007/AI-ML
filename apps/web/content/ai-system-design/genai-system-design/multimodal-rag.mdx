@@ -1,0 +1,203 @@
+---
+title: "Multimodal RAG"
+description: "Retrieval over PDFs, tables, charts, images, audio and video, not only plain text."
+icon: eye
+---
+
+Real documents combine screenshots, wiring diagrams, tables, charts, and video alongside text. Multimodal RAG indexes each modality into a searchable form and passes the raw evidence to a model that can read it.
+
+## Overview
+
+- A text-only pipeline drops everything that is not text. A screenshot of the sign-in screen is invisible until you give it **words or a vector**.
+- Three ways to index an image: a **caption** written by a vision model, **OCR** text, or an **image embedding** in a space shared with text.
+- **Multimodal embeddings** (CLIP and its successors) put pictures and text in one space, so a typed question can retrieve a picture directly.
+- **Page-image retrieval** (ColPali) skips parsing: it embeds each page as an image and matches the question against patches of the page.
+- Tables become rows that keep their header; audio and video become **timestamped transcripts**. The answer cites the page, the region or the timestamp so a person can check it.
+
+## Mental model
+
+- **Pointing at visual evidence:** Ask a colleague "where is the backup code button?" and they will point at the screenshot rather than quote a paragraph; a text search engine cannot point because it never saw the screenshot.
+- **Two routes to searchability:** Either describe every picture in words so a text engine can find the words, or teach the engine to compare a question with a picture directly.
+- **Seeing the original:** Multimodal RAG uses one or both indexing routes, then hands the picture itself to a vision-language model that can look at it.
+
+## Core concepts
+
+- In [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), Brightpost has **1,200 articles** (3,600 text chunks).
+- Here we add screenshots and tables: say 900 articles carry one screenshot each (illustrative).
+
+### Parsing complex documents: layout, tables and figures
+
+- **Typed page regions:** A layout-aware parser reads a page as typed regions—title, paragraph, list, table, figure, caption, header, and footer (see [Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking)).
+- **Preserving figure context:** Instead of dropping figures, the parser keeps each figure as its own element with its heading, alt text, and position before turning it into an index entry.
+
+<AnimatedDiagram
+  spec="animated/rag/multimodal-ingest"
+  stepper
+  caption="A screenshot is invisible to a text index until you give it words or a vector; the three ways differ in what they keep."
+/>
+
+<StepCards>
+  <StepCard n={1} title="One help-centre page with three kinds of content">
+    "Recover two-factor access" has a sentence of text, a table of recovery options and a screenshot of the sign-in screen. A text-only parser keeps the sentence, flattens the table into one line and drops the screenshot.
+  </StepCard>
+  <StepCard n={2} title="The parser splits the page by type">
+    The text becomes a chunk that keeps the title as context. Each table row becomes its own element and keeps the header, so "ID check: 2 days" still says what 2 days measures. The screenshot becomes an image element that keeps its heading and alt text. The gap: nothing yet makes the image searchable.
+  </StepCard>
+  <StepCard n={3} title="Way 1: a vision model writes a caption">
+    A vision-language model looks at the screenshot and writes one or two sentences about it. The caption is embedded like any other chunk, so it lands in the existing text index with no new infrastructure. It keeps only what the captioner chose to mention.
+  </StepCard>
+  <StepCard n={4} title="Way 2: OCR reads the words on the screen">
+    OCR (optical character recognition) reads the visible words: "Sign in", "Email", "Password", "Use a backup code". They go into the keyword index, so a search for the exact button label finds the image. OCR is cheap, but it keeps words without layout or meaning.
+  </StepCard>
+  <StepCard n={5} title="Way 3: embed the picture itself">
+    An image embedder turns the picture into one vector in a space it shares with text. Nothing is lost to a caption, and a question can match the picture directly. The cost: this vector only compares with text embedded by the same model's text encoder (next section).
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- **Captioning calls:** Captioning 900 screenshots requires 900 vision-model calls once at ingestion (illustrative).
+- **Token overhead:** At about 40 tokens per caption, that adds 36,000 tokens to embed—under 3% of the 1,440,000 tokens the text chunks already cost.
+
+<Callout tone="red" title="What breaks">
+  A caption describes what the captioner noticed. "A sign-in screen" without the button label means the question "where is the backup code button?" never matches. Fix: prompt the captioner for the visible labels and the purpose of the screen, store OCR text beside the caption, and spot-check a sample of captions.
+</Callout>
+
+### Multimodal embeddings
+
+- **Dual-encoder alignment:** A multimodal embedding model trains an image encoder and a text encoder together so a picture and its sentence land close together.
+- **Contrastive training (CLIP):** CLIP (Radford et al., 2021) trained on 400 million internet image-text pairs to predict which caption matches which image in a batch, pulling matching pairs together and pushing others apart.
+- **Shared similarity space:** Both modalities map into one space where text and images are compared by cosine similarity (see [Embeddings & Representation Space](/ai-system-design/genai-system-design/embeddings-and-representation-space)).
+
+<AnimatedDiagram
+  spec="animated/rag/shared-embedding-space"
+  stepper
+  caption="Because pictures and text share one space, a typed question can retrieve a screenshot with no caption in between."
+/>
+
+**How to read it:**
+
+- **Step 1 (Training signal):** Diagonal cells are matching picture-caption pairs pulled together; every other cell is pushed apart.
+- **Step 2 (Text clusters):** The help centre's text chunks cluster by topic in the shared space.
+- **Step 3 (Adding images):** The sign-in screenshot lands among sign-in articles, and the parcel tracker lands among delivery articles.
+- **Step 4 (Cross-modal query):** Embedding "Where is the backup code button?" with the text encoder places it nearest to both the sign-in screenshot and the chunk "Lost phone: use a backup code", so retrieval returns both.
+
+**The numbers:**
+
+- **Index growth:** At one vector per image, 900 screenshots add 900 vectors to the 3,600 chunk vectors.
+- **Model constraints:** Google's `multimodalembedding@001` returns 1,408 dimensions by default and reads at most 32 tokens of text, suiting questions and captions rather than 400-token chunks.
+
+<Callout tone="red" title="What breaks">
+  Vectors from different models do not share a space. An image vector from a CLIP-style model cannot be compared with Brightpost's 1,536-dimension text vectors. Fix: embed the question twice, once per model, search each index, and fuse the two lists (see [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking)); or embed everything with one multimodal model whose text side handles long passages.
+</Callout>
+
+### Page-image retrieval
+
+- **Bypassing brittle PDF parsing:** Complex PDF parsing is slow and brittle (columns merge, tables break, charts vanish); page-image retrieval skips extraction altogether.
+- **Patch-level late interaction:** ColPali (Faysse et al., 2024) feeds each rendered page to a vision-language model that outputs one vector per image patch, matching query tokens against patches with ColBERT-style late interaction (see [Embedding Models & Selection](/ai-system-design/genai-system-design/embedding-models-and-selection)).
+- **Quality vs storage trade-off:** ColPali beats text-extraction pipelines on the ViDoRe benchmark while being simpler and faster, at the cost of storing many vectors per page instead of a few per chunk.
+
+### Captioning versus native multimodal retrieval
+
+- **Captioning to text:** Converts every non-text item into text to keep one text index, one embedding model, and one retrieval path; it is easy to debug and works with keyword search.
+- **Native multimodal retrieval:** Preserves visual signal (layout, colour, shapes, and uncaptioned details) but requires a second model/index or a unified multimodal embedder.
+- **Hybrid middle path:** Use captions and OCR for search, then pass the original image to a vision-language model at answer time so the generator sees the real picture.
+
+## Architecture
+
+The pipeline is the one from [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals), with each stage widened.
+
+1. **Parse** with a layout-aware parser. Emit typed elements: text, table rows, images, page renders, audio and video segments, each with source, page or timestamp, and region.
+2. **Represent** each element: text and captions through the text embedder; OCR text into the keyword index; images through the multimodal embedder; whole pages through a page-image model if layout matters.
+3. **Retrieve** from each index in parallel and fuse the lists with reciprocal rank fusion, then rerank the top candidates.
+4. **Generate** with a vision-language model that receives the retrieved text and the retrieved images themselves, not only their captions (see [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models)).
+5. **Cite** each claim with its element: article and section, page and region, or timestamp.
+
+## Technical mechanics
+
+### Tables and charts
+
+- **Row-level context:** Keep each table row with its header or serialize it as a sentence ("Backup code: takes about 2 minutes") so it stands alone, while keeping the whole table as a parent for cross-row comparisons.
+- **Structured SQL routing:** Large numeric tables belong in a database where queries are answered with SQL (see [Text-to-SQL & Structured Data](/ai-system-design/genai-system-design/text-to-sql-and-structured-data)).
+- **Chart indexing:** Vision models can describe a chart's trend but misread exact bar or line values; index the caption, axis labels, and description—or index the underlying data table when available.
+
+### Audio and video retrieval
+
+- **Timestamped transcription:** An ASR model such as Whisper (Radford et al., 2022; trained on 680,000 hours of audio) produces a timestamped transcript that is chunked by time (30–60 seconds, illustrative) or speaker turn with start and end times preserved.
+- **Video keyframes:** Add sampled keyframes or scene changes, embedded as images or captioned and aligned with the transcript.
+- **Combined retrieval:** A query like "how do I add a backup phone?" retrieves both the transcript chunk ("video 4, 01:42 to 02:15") and the on-screen frame at that moment (see [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts)).
+
+### Citing visual evidence
+
+- **Modality-specific locators:** Cite article and section for text, page number and bounding box for PDFs (for UI highlighting), thumbnail for images, and a timestamp playback link for audio or video.
+- **Ingest-time capture:** Store all locators at ingestion because they cannot be recovered at answer time.
+- **Cite the source, not the caption:** When retrieval matches a caption, cite the original image rather than the generated caption, which could be wrong.
+
+## Trade-offs
+
+| Approach | Strength | Cost | Use when |
+| --- | --- | --- | --- |
+| Caption with a vision model | One text index; readable; works with BM25 | One vision call per image; loses what it omits | Screenshots and photos with a clear subject |
+| OCR text | Cheap; exact labels and codes | No layout or meaning | Screens, forms, scanned text |
+| Multimodal embedding (CLIP-style) | Matches pictures directly | Second model and index; short text input | Image-heavy corpora, visual search |
+| Page-image retrieval (ColPali) | No parsing; keeps layout | Many vectors per page | PDFs with complex layouts, charts, slides |
+| Transcribe audio and video | Reuses the text pipeline | ASR errors; loses tone and visuals | Calls, meetings, tutorials |
+
+## Production systems
+
+- Google Vertex AI's multimodal embedding model puts image, text and video embeddings in one space with the same dimensions, so images can be searched with text; the default is 1,408 dimensions and text input is capped at 32 tokens.
+- ColPali's authors released their models and the ViDoRe benchmark of page-level retrieval tasks across domains and languages, which makes page-image retrieval testable on your own documents.
+- Whisper is widely used to turn meeting recordings and support calls into timestamped transcripts that a text RAG pipeline can index.
+
+## Failure modes & pitfalls
+
+- Dropping images and tables at parsing, then wondering why "where is the button?" questions fail.
+- Comparing vectors from two different embedding models as if they shared a space.
+- Indexing captions and citing the caption, so a captioning mistake becomes a confident wrong answer.
+- Sending only captions to the generator when a vision-language model could read the picture.
+- Losing page numbers, regions and timestamps at ingestion, so answers cannot point at their evidence.
+
+## Interview framework
+
+1. Ask which modalities matter and how questions refer to them: by words, by layout, or by what something looks like.
+2. Start with the cheapest path: layout-aware parsing, captions plus OCR for images, rows with headers for tables, transcripts for audio.
+3. Add a multimodal embedding index or page-image retrieval only where evaluation shows text-only retrieval misses.
+4. Fuse the indexes, rerank, and pass the original images to a vision-language model for the answer.
+5. Cite pages, regions and timestamps, and evaluate per modality.
+
+**What interviewers listen for:** knowing that each modality needs its own route into the index, and that vectors from different models are not comparable.
+
+**Red flags:** "a multimodal model will handle it" with no plan for parsing, citations or evaluation.
+
+## Further reading
+
+- [Learning Transferable Visual Models From Natural Language Supervision, CLIP (Radford et al., 2021)](https://arxiv.org/abs/2103.00020)
+- [ColPali: Efficient Document Retrieval with Vision Language Models (Faysse et al., 2024)](https://arxiv.org/abs/2407.01449)
+- [Robust Speech Recognition via Large-Scale Weak Supervision, Whisper (Radford et al., 2022)](https://arxiv.org/abs/2212.04356)
+- [Get multimodal embeddings (Google Cloud Vertex AI documentation)](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+- [Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking) and [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you make screenshots and diagrams in a documentation set searchable for a RAG assistant?" category="Architecture" level="Mid">
+    - **Preserve at parse time:** Use a layout-aware parser that emits each image as its own element with its heading, alt text, and location.
+    - **Create searchable representations:** Generate a VLM caption for the dense text index, run OCR to put visible UI labels into the keyword index, or embed the image in a shared multimodal vector space.
+    - **Iterative rollout:** Start with caption plus OCR to reuse the text pipeline, measure recall on visual questions, and add an image-embedding index only if misses justify it.
+    - **Generate and cite:** Pass the original image to a vision-language model at answer time and cite the image itself, not the caption.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does a CLIP-style model learn, and how does that enable text-to-image retrieval?" category="Concepts" level="Junior">
+    - **Contrastive training:** It trains an image encoder and a text encoder jointly on image-caption pairs to predict which caption in a batch belongs to which image.
+    - **Shared embedding space:** Matching pairs are pulled together and mismatched pairs pushed apart, mapping both modalities into one shared vector space.
+    - **Direct similarity search:** A text query embedded with the text encoder is compared directly against image vectors via cosine similarity to retrieve the nearest images.
+    - **Same-model constraint:** Only vectors from the same model are comparable, so queries must use that model's text encoder.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose page-image retrieval such as ColPali over parsing PDFs into text?" category="Trade-offs" level="Senior">
+    - **Complex visual layouts:** Choose ColPali when layout carries meaning and parsing is brittle—scanned pages, slide decks, multi-column reports, and pages dense with tables and charts.
+    - **Late-interaction mechanism:** ColPali embeds each page image into patch vectors and scores them against query tokens with late interaction, avoiding parser failures and simplifying indexing.
+    - **Trade-offs and costs:** It requires much more vector storage per page, a VLM generator that reads page images, and patch-to-region mapping for fine citations; for clean HTML or Markdown, text chunking remains cheaper and easier to debug.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you index meeting recordings so an assistant can answer questions about them and cite the source?" category="Implementation" level="Mid">
+    - **Transcribe and chunk:** Run speech recognition with timestamps and speaker labels, chunk by time window or speaker turn, and attach the recording ID with start and end times to every chunk.
+    - **Add visual keyframes:** For screen recordings, extract keyframes, caption or embed them as images, and align them with the transcript chunks.
+    - **Cite and harden:** Cite the recording with a deep-linked playback timestamp, and add a glossary prompt or custom vocabulary if ASR errors on names and product terms hurt recall.
+  </InterviewQuestion>
+</InterviewQuestions>

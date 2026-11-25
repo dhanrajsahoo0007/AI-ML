@@ -12,24 +12,8 @@ const PAGES = [
   { name: "article", url: "/ai-system-design/genai-system-design/advanced-rag" },
 ];
 
-// Known serious/critical violations, by URL and axe rule id. Every entry needs a TODO saying what to fix; delete it
-// when fixed. A rule that isn't listed fails the test, and a listed rule that no longer fires is reported so the
-// entry can be removed.
-// Recorded 2026-11-07 on `development` (6089df0); the components are in src/ (not owned by the test stream).
-const KNOWN_VIOLATIONS: Record<string, { rule: string; todo: string }[]> = {
-  "/interviews": [
-    {
-      rule: "color-contrast",
-      todo: "topic chip counts (`.opacity-60` span inside each chip, ~50 nodes, light theme) fall below 4.5:1; use text-muted-foreground instead of opacity",
-    },
-  ],
-  "/companies": [
-    {
-      rule: "color-contrast",
-      todo: "company logo fallback initials (`text-[7px]` badge) and the filter chip counts (`.opacity-60`) fall below 4.5:1 in both themes; raise contrast and size",
-    },
-  ],
-};
+// Known serious/critical violations, by URL and axe rule id. Keep empty when clean.
+const KNOWN_VIOLATIONS: Record<string, { rule: string; todo: string }[]> = {};
 
 for (const scheme of ["light", "dark"] as const) {
   test.describe(`${scheme} theme`, () => {

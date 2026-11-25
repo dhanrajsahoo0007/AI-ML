@@ -34,7 +34,7 @@ const spec: DiagramSpec = {
       icon: "phone",
       x: 115,
       y: 140,
-      w: 160,
+      w: 166,
       h: 64,
     },
     { id: "paris", label: "Paris reader", sub: "resolver in France", icon: "phone", x: 115, y: 340, w: 160, h: 64 },

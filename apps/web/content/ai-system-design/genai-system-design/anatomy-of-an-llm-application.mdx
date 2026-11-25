@@ -1,0 +1,291 @@
+---
+title: "Anatomy of an LLM Application"
+description: "A map of every layer in a production LLM system, from data and retrieval to serving, evaluation and safety, and how the layers fit together."
+icon: layers
+---
+
+Most of an LLM application is not the model. This page follows one customer request through every layer around it, says what each layer does, costs and breaks, and links each layer to its groups in this section. Read it first, then use it as the map.
+
+## Overview
+
+- An LLM application is an ordinary distributed system with one slow, costly and non-deterministic call in the middle: the model.
+- Seven layers: the **gateway** lets the request in; **prompt and context** decide what the model reads; **retrieval** adds facts it was never trained on; **model and serving** turn the prompt into tokens; **tools and agents** turn its requests into actions; **guardrails** check what goes in and out; **evaluation and observability** record every step and grade a sample.
+- Every layer except the model is code you can test and version, and most production bugs live there.
+- The model usually dominates time and money, so the cheap layers around it are where you add checks.
+
+<KeyIdea>An LLM application is the model plus six layers of ordinary software around it; design those layers, because they decide what the model sees, what it may do and whether you can tell when it went wrong.</KeyIdea>
+
+Follow one request through all seven layers first.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  stepper
+  caption="Seven layers, one request: the model only picks the next step, and every other box is ordinary software you design, test and pay for."
+/>
+
+**How to read it**, one card per step. The request is the agents track's Brightpost refund: Customer 1847 writes "My kettle arrived cracked. It's order 4471. Can I get my money back?".
+
+<StepCards>
+  <StepCard n={1} title="Gateway: the request comes in">
+    The message reaches the gateway, which checks that customer 1847 is signed in and under 20 messages a minute, then hands it to the harness, Brightpost's chat service. Nothing has read the message yet.
+  </StepCard>
+  <StepCard n={2} title="Prompt and context: the harness builds the prompt">
+    The harness assembles the system prompt, the conversation so far and four tool definitions: everything the model will know. It does not yet know the refund rule.
+  </StepCard>
+  <StepCard n={3} title="Retrieval: the help centre adds the facts">
+    The help-centre index holds 3,600 chunks; a search returns the top 5 into the context. Brightpost exposes this search as the `search_help` tool, so the model asks for it when needed. Nothing is decided yet.
+  </StepCard>
+  <StepCard n={4} title="Model and serving: the model picks the next step">
+    A prompt of about 2,200 tokens goes to the model on its inference engine. It answers with a tool call or with words, and never runs anything itself.
+  </StepCard>
+  <StepCard n={5} title="Tools and agents: the harness runs the calls">
+    The harness runs four tool calls over five model calls. The refund of £42 is over the £30 limit, so `create_refund` waits for the support agent. The reply is ready, but nobody has checked it.
+  </StepCard>
+  <StepCard n={6} title="Guardrails: check the way in and the way out">
+    The message and the reply pass checks for injected instructions, personal data and policy; the reply returns through the gateway. Nobody yet knows whether it was right.
+  </StepCard>
+  <StepCard n={7} title="Evaluation and observability: record and grade">
+    Every span goes to the trace store, and a model judge grades 5 % of requests off the customer's path. Failures found here become the next test cases.
+  </StepCard>
+</StepCards>
+
+**The numbers:** one request takes 5 model calls and 4 tool calls; the prompt is 200 instruction tokens + 5 chunks × 400 + 15 question tokens = 2,215, about 2,200.
+
+## Mental model
+
+- Think of the model as a brilliant contractor who forgets everything between visits and cannot open a door. Each visit, you hand them a briefing (the prompt), documents (retrieval) and a list of things they may ask you to do (tools); they write back an answer or a request.
+- Everything else is your firm: reception (gateway), the briefing writer (prompt and context), the archive (retrieval), the staff who act and ask a manager before large refunds (tools and approval), compliance (guardrails) and records (traces and evaluation).
+- A bad answer is rarely the contractor's fault alone: check the briefing, the archive and the requests you let through first.
+
+## Core concepts
+
+### The request path, end to end
+
+The synchronous path is everything the customer waits for; the asynchronous path is everything after the reply: logging, grading and dashboards.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["customer", "gateway", "harness"]}
+  caption="The gateway is the only way in: identity and limits are settled before any token is spent."
+/>
+
+**How to read it:** the bright boxes are the entry: customer, gateway and harness. The gateway knows who is calling and how often, so per-customer limits, quotas and routing live there. The same component often holds the provider keys, token budgets and fallbacks too ([LLM Gateway](/ai-system-design/genai-system-design/llm-gateway), [Rate Limiting & Throttling](/ai-system-design/genai-system-design/rate-limiting-throttling)).
+
+**The harness** is the code that runs the loop: it builds prompts, calls the model, executes tool calls, keeps the run's state and decides when to stop or wait for a person ([Harness Engineering](/ai-system-design/genai-system-design/harness-engineering)).
+
+### The data and knowledge layer
+
+Brightpost's refund rules were never in the model's training data, so they must reach it through the prompt.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["index", "context"]}
+  caption="Retrieval feeds the context, not the model: what the index returns is all the model can know about the help centre."
+/>
+
+**How to read it:** the index and the prompt light up. An ingestion pipeline built the index ahead of time: 1,200 help articles, cut into 3,600 chunks of 400 tokens, embedded and stored ([RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)). At request time a search returns the top 5 chunks into the context. Retrieval with a fixed model and an external index is the method of Lewis et al. (2020), who call the index "non-parametric memory".
+
+The layer spans seven groups, from [Document Processing & Chunking](/ai-system-design/genai-system-design/document-processing-chunking) to [RAG Evaluation](/ai-system-design/genai-system-design/rag-evaluation). Access rules belong here too: the index returns only chunks this customer may read.
+
+### The model and serving layer
+
+The model maps tokens to tokens; serving runs it for thousands of customers at once.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["context", "model"]}
+  caption="The model reads one prompt and returns one decision; batching, caching and GPUs are the serving layer's problem, not the prompt's."
+/>
+
+**How to read it:** the prompt and the model are bright. You either call a hosted API or run an inference engine on your own GPUs. Either way the engine batches many requests per GPU step and keeps a KV cache of the prompt; vLLM's paged KV cache raised throughput 2 to 4 times over earlier systems at the same latency (Kwon et al., 2023). Start at [Choosing a Model](/ai-system-design/genai-system-design/choosing-a-model) and [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference); how the model itself works starts at [Transformer Architecture](/ai-system-design/genai-system-design/transformer-architecture).
+
+### The orchestration layer: prompts, tools and memory
+
+Orchestration decides what the model reads, what it may do and what it remembers between calls.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["context", "harness", "tools", "agent"]}
+  caption="The model asks; the harness acts. A person approves the one action that moves money over the limit."
+/>
+
+**How to read it:** the prompt, the harness, the tools and the support agent are bright. The model returns a tool call such as `create_refund(4471, 42.00)`; the harness checks it, runs it and sends the result back, and the loop repeats until the model answers without a tool call. Interleaving reasoning with actions this way is the ReAct pattern (Yao et al., 2022).
+
+Its groups cover prompts ([Prompting Techniques](/ai-system-design/genai-system-design/prompt-engineering-types)), context ([Context Engineering](/ai-system-design/genai-system-design/context-engineering)), where order matters because models use facts at the start or end of a long input better than facts in the middle (Liu et al., 2023), tools ([Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp)), memory ([Agent Memory](/ai-system-design/genai-system-design/agent-memory)) and approvals ([Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)).
+
+## Architecture
+
+The stepper above is the architecture. Three properties of it matter in a design discussion.
+
+- **The harness is the hub.** Every arrow goes through it, so timeouts, retries, budgets and the stop condition live there.
+- **Two clocks.** Ingestion, evaluation, fine-tuning and dashboards run on their own schedule; only the request path runs while the customer waits. Moving work off that path is the cheapest latency fix.
+- **Trust boundaries.** The customer's text, retrieved chunks and tool results are all untrusted input to the model. The model's output is untrusted input to the tools. Each boundary needs a check.
+
+A plain RAG chatbot is the same picture without tools or approval: retrieve, call the model once, reply. Anthropic calls this block the augmented LLM, and separates workflows, which follow "predefined code paths", from agents that direct their own tool use (Anthropic, December 2024). Add a layer only when a requirement needs it.
+
+## Technical mechanics
+
+### Where the time and the money go
+
+Before optimising anything, add up what each layer costs one request.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-request-budget"
+  caption="The model is 88 % of the time and 99 % of the money; every other layer is cheap per request, which is why it is where you add checks (illustrative numbers)."
+/>
+
+**How to read it:** each row is one layer of the stepper in the same colour. The left bars are milliseconds the customer waits; the right bars are dollars per request. Only two rows have visible money: the model's five calls and the judge that grades a sample. The gateway, the tools and the guardrails run on servers paid by the month, so they cost nothing extra per request.
+
+**The numbers:** time 6 + 10 + 35 + 7,500 + 900 + 30 + 0 = 8,481 ms, and 7,500 ÷ 8,481 = 88 % is the model; money 5 × \$0.0069 + 0.05 × \$0.00885 = \$0.0349, and the model is 99 % of it.
+
+Cutting model calls is the biggest lever on both columns: one 1.5 s call saved is worth more than every other layer together. Prompt caching cuts the bill for the repeated prefix; on Anthropic's API a cache read costs 0.1 times the base input price for most models ([Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)). A 30 ms guardrail is affordable, so never drop a check to save time ([Cost and Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization)).
+
+<Callout tone="red" title="What breaks">
+  The budget hides the slowest part: the approval at 10:20 waits on a person for minutes, and a synchronous chat cannot hold a connection that long. Fix: save the run's state, end the turn with "your refund is waiting for approval", and resume the run when the approval arrives, then confirm by email.
+</Callout>
+
+### Evaluation, observability and feedback loops
+
+A model call that returns 200 OK can still be wrong; only recording and grading shows it.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["harness", "traces", "evals"]}
+  caption="Every span goes to the trace store; grading a 5 % sample costs nothing on the customer's path."
+/>
+
+**How to read it:** the harness, the trace store and the evals are bright. A trace holds one span per step: model calls with prompt, tokens and latency, retrievals with chunk ids, tool calls with arguments and results. OpenTelemetry's GenAI semantic conventions define spans, metrics and events for model calls, agents and MCP, so traces from different tools can share one schema ([Tracing & Logging](/ai-system-design/genai-system-design/tracing-logging)).
+
+**The numbers:** a model judge grades 5 % of requests at \$0.00885 a grade (2,450 tokens in at \$3 per million, 100 out at \$15 per million), which averages \$0.0004 per request.
+
+Offline, a golden set of real tickets gates every prompt or model change ([LLM Evaluation Fundamentals](/ai-system-design/genai-system-design/llm-evaluation-fundamentals)); online, a judge scores a live sample ([Online / Production Evaluation](/ai-system-design/genai-system-design/online-production-evaluation)). GPT-4 as a judge agreed with human preferences over 80 % of the time, but showed position, verbosity and self-enhancement biases (Zheng et al., 2023). Failed traces become new test cases ([Continuous Improvement Pipeline](/ai-system-design/genai-system-design/continuous-improvement-pipeline)).
+
+### Safety and governance across the layers
+
+Safety is not one box. Each layer has a check that only it can do.
+
+<AnimatedDiagram
+  spec="animated/llm/anatomy-stack"
+  highlight={["gateway", "guard", "tools", "agent"]}
+  caption="Identity at the gateway, content checks at the guardrails, permissions at the tools and a person for big refunds: four checks, four layers."
+/>
+
+**How to read it:** the gateway, the guardrails, the tools and the support agent are bright. The gateway knows the customer and caps their rate. The guardrails classify the input and the output; Llama Guard, for example, classifies both prompts and responses against a policy (Inan et al., 2023). The tools act only for the signed-in customer, and the approval stops any refund over £30.
+
+<Callout tone="red" title="What breaks">
+  Indirect prompt injection: an attacker hides instructions in content the application later retrieves, such as a pasted note or a product review, and the model follows them (Greshake et al., 2023). An input classifier alone misses it because the text arrives through retrieval or a tool result. Fix: treat retrieved text as data, scope every tool to the signed-in customer so a request for a stranger's order fails, and keep a person on irreversible actions.
+</Callout>
+
+Governance covers what is logged ([Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)), who may change prompts and models ([Access Control & RBAC](/ai-system-design/genai-system-design/access-control-rbac)), and the audit trail ([Compliance & Audit Logging](/ai-system-design/genai-system-design/compliance-audit-logging)). The OWASP Top 10 for LLM Applications (2025) lists prompt injection first; excessive agency and unbounded consumption are on it too.
+
+### Where each topic in this section fits
+
+| Layer | Groups in this section | Read first |
+| --- | --- | --- |
+| Gateway | Traffic & Gateway, Cost & Capacity | [LLM Gateway](/ai-system-design/genai-system-design/llm-gateway) |
+| Prompt and context | Prompt Engineering, Context Engineering | [Context Engineering](/ai-system-design/genai-system-design/context-engineering) |
+| Retrieval | RAG Foundations, Chunking, Embeddings, Vector Databases, Retrieval, Types of RAG, RAG Evaluation | [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) |
+| Model and serving | Transformer & Core Mechanics, Modern Architectures, Training & Decoding, Inference Engine & GPUs, Deployment, Adapting a Model | [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference) |
+| Tools and agents | Agent Foundations, Harness, Loop & Flow, Agent Memory, Multi-Agent, Running Agents in Production | [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures) |
+| Guardrails | Guardrails & Model Risks, Privacy, Access & Compliance | [Guardrails and Safety](/ai-system-design/genai-system-design/guardrails-and-safety) |
+| Evaluation and observability | Evaluation Methods, Evaluation in Production, Observability, Release Pipelines | [LLMOps and Observability](/ai-system-design/genai-system-design/llmops-observability) |
+
+Vision, speech and robotics change the inputs and outputs, not the layers ([Multimodal and Voice AI](/ai-system-design/genai-system-design/multimodal-and-voice-ai)). For the order to study them in, see the [GenAI Interview Roadmap](/ai-system-design/genai-system-design/genai-interview-roadmap).
+
+## Trade-offs
+
+Each layer has one big decision, and each choice moves cost, latency or risk elsewhere.
+
+<Compare caption="The main decision at each layer, and what each choice costs.">
+
+| Decision | Option A | Option B | Choose A when |
+| --- | --- | --- | --- |
+| Model hosting | Hosted API: no GPUs to run, newest models | Self-hosted engine: data stays in, cost falls at high volume | Volume is low or uneven, or you need the strongest model |
+| Knowledge | Retrieval: fresh, citable, per-user access | Fine-tuning: style and format built in, shorter prompts | Facts change or must be cited ([Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning)) |
+| Control flow | Workflow: fixed steps, predictable cost | Agent: the model picks steps, handles new cases | The steps are known in advance |
+| Output checks | Blocking: nothing unsafe reaches the user | Asynchronous: no added latency, catches problems later | A bad output is costly or irreversible |
+| Model choice | One large model: simplest, best quality | Routing: small model for easy steps, a tenth of the price | Traffic is small or quality dominates cost |
+
+</Compare>
+
+## Production systems
+
+- **Gateways:** proxies such as LiteLLM or Portkey hold provider keys, budgets, retries and fallbacks.
+- **Inference engines:** vLLM and similar engines batch requests continuously and page the KV cache ([LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine)).
+- **Harnesses:** coding and support agents differ in tools and approvals, not in the loop ([Coding Agents](/ai-system-design/genai-system-design/coding-agents)).
+- **Guardrail models:** classifiers such as Llama Guard run as a separate small model on the input and the output.
+
+## Failure modes & pitfalls
+
+- **Blaming the model first.** Most wrong answers trace back to a missing chunk, a stale index or an untested prompt change. Read the trace before changing models.
+- **Serial model calls.** Cap the steps, run independent calls in parallel and stream the final answer ([Streaming Responses & Time to First Token](/ai-system-design/genai-system-design/streaming-and-time-to-first-token)).
+- **Unbounded loops.** Set a step limit and a per-request token budget in the harness.
+- **Tools with too much power.** A refund tool that accepts any order id turns one injected sentence into a stranger's refund ([Agent Security & Sandboxing](/ai-system-design/genai-system-design/agent-security-and-sandboxing)).
+- **No traces.** Without spans you cannot tell a retrieval miss from a model mistake.
+- **Untested prompt changes.** A prompt is code; ship it through a regression gate ([CI/CD/CT for Prompts & Pipelines](/ai-system-design/genai-system-design/cicd-ct-pipelines)).
+
+## Interview framework
+
+When asked to "design an LLM application", walk the layers in request order and say one decision per layer.
+
+1. **Scope:** users, traffic, latency target, whether it only answers or also acts, and what a wrong answer costs.
+2. **Draw the path:** customer, gateway, harness, model; add retrieval for private facts and tools if it must act.
+3. **Context:** what goes into the window, in what order, how big.
+4. **Model and serving:** API or self-hosted, one model or routing, streaming.
+5. **Guardrails:** input and output checks, tool permissions, approvals.
+6. **Evaluation:** a golden set before launch, traces and a graded sample after.
+7. **Budget:** milliseconds and dollars per request by layer, and the biggest lever.
+
+**What interviewers listen for:** a harness with an explicit stop condition, checks at the trust boundaries, a way to measure quality, and numbers for latency and cost.
+
+**Red flags:** a design that is a model box and an arrow, "we will fine-tune" as the answer to missing facts, and no answer to "how would you know it got worse?".
+
+## Further reading
+
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401)
+- [ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2022)](https://arxiv.org/abs/2210.03629)
+- [Building effective agents (Anthropic, 19 December 2024)](https://www.anthropic.com/engineering/building-effective-agents): augmented LLM, workflows and agents.
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., 2023)](https://arxiv.org/abs/2309.06180)
+- [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
+- [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations (Inan et al., 2023)](https://arxiv.org/abs/2312.06674)
+- [Not what you've signed up for: Indirect Prompt Injection (Greshake et al., 2023)](https://arxiv.org/abs/2302.12173)
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al., 2023)](https://arxiv.org/abs/2306.05685)
+- [Prompt caching (Anthropic docs, checked November 2026)](https://platform.claude.com/docs/en/build-with-claude/prompt-caching): cache read 0.1×, five-minute write 1.25×, one-hour write 2× the base input price.
+- [OpenTelemetry GenAI semantic conventions (checked November 2026)](https://github.com/open-telemetry/semantic-conventions-genai)
+- [OWASP Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Walk me through the layers of a production LLM application." category="Architecture" level="Junior">
+    - A request enters through a gateway that checks identity, rate limits and routing, then reaches the application code (the harness).
+    - The harness builds the prompt from instructions, history and retrieved documents, calls the model, and runs any tool calls the model asks for.
+    - Guardrails check the input and the output, and every step is traced so a sample can be graded and failures turned into tests.
+    - Only the model call is a neural network; the rest is ordinary software you can test and version.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does the latency of an LLM request usually go, and how would you reduce it?" category="Trade-offs" level="Mid">
+    - Usually the model calls dominate: in an agent with five serial calls of 1.5 s each, that is 7.5 s of an 8.5 s request, while the gateway, retrieval and checks add tens of milliseconds.
+    - The biggest levers are fewer model calls (merge steps, use a workflow where the steps are known), parallel calls where steps are independent, a smaller model for easy steps, and prompt caching for the shared prefix.
+    - Streaming does not shorten the total but makes the first token arrive sooner, which is what users feel.
+    - Measure with traces before optimising, because the slow layer is not always the one you expect.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is the harness, not the model, responsible for running tools?" category="Concepts" level="Junior">
+    - The model only produces text; a tool call is a structured request that the application must parse, check and execute.
+    - Keeping execution in the harness means permissions, limits, retries and approvals are enforced by code you control, not by a prompt the model might ignore.
+    - It also gives one place to record every action for the trace and the audit log.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your support assistant gave a wrong refund policy. How do you find which layer failed?" category="Failure modes" level="Mid">
+    - Open the trace for that request and walk it in order: what the gateway passed, what the prompt contained, which chunks retrieval returned, what the model was asked and what it answered.
+    - If the right policy chunk is missing, it is a retrieval or ingestion problem (a stale index, bad chunking, a missed keyword); if it is present and ignored, it is the prompt or the model.
+    - If a tool returned wrong data, it is the tool. Add the case to the golden set so the fix is tested from then on.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where would you put guardrails in an agent that can issue refunds?" category="Safety" level="Senior">
+    - At several layers, because each catches something different: rate limits and identity at the gateway, input and output classifiers around the model, and permission checks inside each tool.
+    - Retrieved text and tool results are untrusted input, so indirect prompt injection must be stopped by scoping tools to the signed-in customer rather than by a classifier alone.
+    - Irreversible or large actions, such as refunds above a limit, wait for a person, with the run's state saved so the agent resumes after approval.
+    - Every check and decision is logged for audit.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you know an LLM application got worse after a change?" category="Evaluation" level="Senior">
+    - Before release, run a golden set of real cases with reference answers through the changed system and compare scores with the current version; block the release on a regression.
+    - After release, trace every request and have a model judge grade a sample, calibrated against human labels, and watch the pass rate, latency and cost per request on dashboards.
+    - Treat prompts, retrieval settings and model versions as versioned artefacts so any change can be compared and rolled back.
+  </InterviewQuestion>
+</InterviewQuestions>

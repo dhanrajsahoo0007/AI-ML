@@ -41,11 +41,10 @@ export function Callout({
       className="my-8 rounded-xl border-l-4 p-4 sm:p-5"
       style={{ background: `var(--dg-${tone}-soft)`, borderColor: `var(--dg-${tone})` }}
     >
-      <div
-        className={cn("flex items-center gap-2 font-display font-semibold [&_svg]:size-4")}
-        style={{ color: `var(--dg-${tone})` }}
-      >
-        {icon && resolveIcon(icon)}
+      {/* The title is ink: the tone colours (3.5:1 on their soft fills) are below the 4.5:1 text minimum. The tone
+          still shows in the left border and the icon. */}
+      <div className={cn("flex items-center gap-2 font-display font-semibold text-ink [&_svg]:size-4")}>
+        {icon && <span style={{ color: `var(--dg-${tone})` }}>{resolveIcon(icon)}</span>}
         {title}
       </div>
       <div className="mt-2 text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-2">{children}</div>

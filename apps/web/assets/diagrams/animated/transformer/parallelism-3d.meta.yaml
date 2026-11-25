@@ -1,0 +1,20 @@
+title: 3D parallelism
+alt: >-
+  Two grey dotted groups, Replica 1 and Replica 2, stand side by side, with an ellipsis after them for more replicas.
+  Each replica reads its own batch (A or B), cut into four blue micro-batches numbered 1 to 4, which feed a pipeline of
+  three stages from top to bottom: stage 1 holds layers 1 to 20, stage 2 layers 21 to 40 and stage 3 layers 41 to 60,
+  each on 4 GPUs. Two-way arrows join the same stage in the two replicas; the middle one is labelled "average
+  gradients", with a note that the averaging is sharded with ZeRO or FSDP. Dashed lines zoom from stage 2 of Replica 2,
+  drawn in violet, to a violet panel titled "Stage 2: tensor parallel". In it, one input X goes to all four GPUs, the
+  violet weight matrix W is split column-wise into four blocks, one per GPU, and each GPU produces its own slice of the
+  output, Y1 to Y4; an all-gather over the server's fast links joins them. Below, a pipeline schedule for the forward
+  pass has rows for stages 1 to 3 and time slots t1 to t6: micro-batch 1 runs on stage 1 at t1, stage 2 at t2 and
+  stage 3 at t3, and the others follow one slot behind. The six empty cells are the bubble, idle GPUs, two of every six
+  slots; more micro-batches shrink it. A summary says tensor parallelism stays inside a server, pipeline parallelism
+  spans servers, data parallelism spans replicas, and together they make 3D parallelism.
+caption: >-
+  Tensor parallelism splits each matrix across the GPUs of one server, pipeline parallelism splits the layers across
+  servers, and data parallelism copies that whole pipeline and averages gradients between the copies.
+tags: [llm, training, parallelism, distributed-training, genai]
+source: original
+created: 2026-11-15

@@ -1,0 +1,969 @@
+---
+title: "Design an Enterprise AI Assistant"
+description: "A Glean-style assistant for employees: permission-aware retrieval end to end, tools that run as the user, confirmed writes and memory people can correct."
+icon: bot
+logo: systems/enterprise-assistant
+updated: 2026-11-17
+---
+
+Design an assistant every Brightpost employee can ask, from a support lead checking a refund rule to a warehouse shift lead raising a ticket for a broken scanner.
+The company's data sits in about 10 million documents across nine systems, each with its own permissions and rate limits, changing all day.
+The hard parts are never showing a document to someone who cannot open it and keeping that true as permissions change.
+It must also act as the person who asked without anything leaving the company, and keep 106 tools from drowning the model.
+
+- Interviewers use this question to see whether you put the permission check before the model reads anything, can give the staleness of a permission as a number per source, and keep writes behind code and the user's own rights.
+
+## The interview question
+
+<InterviewPrompt
+  prompt="Design an AI assistant for a company’s employees. It answers questions from the company’s documents, tickets and chat, with citations, never shows anyone something they cannot open, and can take simple actions such as raising a ticket."
+  level="Senior"
+  minutes={45}
+  bankId="design-an-enterprise-rag-assistant-over-10m-documents-with-p"
+  tests={[
+    "Permission-aware retrieval end to end",
+    "Staleness per source within its rate limits",
+    "Identity across systems; run as the user for reads and writes",
+    "Tool loading against context bloat",
+    "Writes that cannot leave the company; memory people can correct",
+  ]}
+  clarify={[
+    { q: "Who and how many?", a: "5,000 staff: 2,000 office (support 400, finance 150, engineering and product 550, other 900) and 3,000 in the warehouses. Support asks about 12 times a day; warehouse staff about 3, often on shared handhelds, some in Polish or Romanian." },
+    { q: "Which sources?", a: "SharePoint and OneDrive, Confluence, Jira, the helpdesk and GitHub are indexed (6.0M documents); Slack (4.0M threads) and mail are searched live; warehouse, finance and HR records are read live by tools." },
+    { q: "Whose permissions?", a: "Each source’s own; Microsoft Entra ID is the identity provider and provisions the other systems. “Never shows” means never retrieved into a prompt, and never looser than the source’s own search." },
+    { q: "How fresh?", a: "A revoked permission enforced in about a minute where the source sends events, a bound per source that its rate limits can carry, enforced by dropping a path that cannot prove it, and sensitive content checked live." },
+    { q: "Which actions?", a: "Internal only: tickets, internal case notes, internal messages, leave requests. Never anything that reaches a customer or outsider; never payments, refunds, payroll, sharing changes or deletes." },
+    { q: "One company or many?", a: "One. What changes for many is covered under Same design, other systems." },
+    { q: "If constraints conflict?", a: "No leak first, then a correct cited answer, then latency, then cost." },
+  ]}
+  outOfScope={["Customer-facing chat (the support-agent page)", "Code generation", "Our own model", "Text-to-SQL analytics", "Scheduled background agents"]}
+/>
+
+## Overview
+
+- **Permissions travel with the data, keyed on immutable ids.** Connectors map every source account to its Entra object id through SCIM or single sign-on, never by email; chunks carry principal ids, and the asker's principals are resolved per request and filtered **inside** both the keyword and vector searches.
+- **Never looser than the source's own search, and stale by a number per path.** Org-wide links count only for redeemers and label-encrypted files are not indexed; events apply a revocation in ≈ 35 s (illustrative), polls bound it at 10 or 60 min while they succeed, and a path that cannot prove its bound leaves the results after 30 or 150 min.
+- **A router picks the path:** cited answer (65%), lookup (15%), internal write (8%), agent (5%), other (7%). Lookups and writes load one tool bundle (10,553 tokens instead of 67,086 for all 106 tools); only the agent uses tool search; Slack and mail are searched live, never copied (≈ 735 ms).
+- **Everything runs as the user; writes stay inside; memory is explicit.** Delegated tokens for reads and writes, a code-rendered card before every write, no tool whose effect can reach an outsider, and memory made only of what the user chose to save.
+
+<Numbers
+  items={[
+    { value: "1.15 s", label: "first token of a cited answer, p50", hint: "p95 ≈ 1.80 s; ≈ 1.88 s p50 with a live Slack or mail search" },
+    { value: "35 s", label: "a revoked document permission, typical", hint: "illustrative; Graph states an average under 1 min, a maximum of 6 h; polls bound it at 10 or 60 min" },
+    { value: "0.011 USD", label: "model cost a turn", hint: "≈ 0.96 USD a seat a month" },
+    { value: "64 USD", label: "a seat a month, all-in to build and run", hint: "a mixed purchase ≈ 48 (illustrative)" },
+  ]}
+/>
+
+<KeyIdea>The model can only leak what it reads and can only send where its tools reach. Decide what each person may read before retrieval, keep that decision fresh within what each source allows, and give the model no tool that reaches outside.</KeyIdea>
+
+## Functional requirements
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "Answer questions from company documents, tickets and chat, with citations", notes: "Hybrid search, personal ranking, a cited answer, “not found in your sources”" },
+    { id: "F2", requirement: "Never retrieve content the asker cannot open, or could not find in the source’s own search", notes: "Filter inside retrieval; org links count for their redeemers only; labels; live checks; deletes; derived text re-checked" },
+    { id: "F3", requirement: "Look up records in business systems as the user", notes: "Warehouse stock (WMS), purchase orders (ERP), leave (HR), helpdesk cases" },
+    { id: "F4", requirement: "Take internal actions with confirmation", notes: "Internal Jira issues, internal case notes, internal messages, leave requests; tiered by audience" },
+    { id: "F5", requirement: "Handle multi-step tasks", notes: "An agent with read tools and entitlement-filtered tool search; writes still go through a card" },
+    { id: "F6", requirement: "Remember what the user tells it, visibly", notes: "View, edit, delete, “forget that”; the model only proposes" },
+    { id: "F7", requirement: "Measure quality, permission safety, freshness, latency and cost; gate releases; audit", notes: "Gold sets per department and language, a permission suite, canaries, a drift audit, injection suite, action simulator" },
+  ]}
+/>
+
+- Out of scope: customer-facing chat, code generation, our own model, text-to-SQL analytics, scheduled background agents (each would need its own grant review).
+
+## Non-functional requirements
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Answer quality", target: "≥ 85% correct on the 1,200-question gold set (± 2.0 points); ≥ 95% of sentences supported; ≤ 5% of sensitive answers lose a chosen sensitive document to the live-check deadline; filtered recall@100 ≥ 95% of an exact scan, per persona", why: "Internal answers are acted on; a permission filter can cost recall" },
+    { id: "N2", property: "Permission safety", target: "0 restricted canary chunks retrieved, prompted, quoted or summarised in 5,600 persona probes per release (≤ 0.054% per probe of these personas at 95%); no mismatch in 10,000 (document, user) pairs a day sampled toward risky pairs (drift gated ≤ 0.01% of the sampled mix); tool reads and writes enforced by the source, except the WMS, enforced by our policy check", why: "Oversharing is the first thing that stalls these rollouts (How real systems do it)" },
+    { id: "N3", property: "Latency per type and path (p50 / p95)", target: "Indexed answer first token ≤ 1.5 / 2.5 s; with a live Slack or mail search ≤ 2.2 / 3.5 s; complete ≤ 5 / 7 s (≤ 5.5 / 7.5 s with a live search). Lookup first token ≤ 3 / 5 s. Write card ≤ 3 / 5 s; done after confirm ≤ 1 / 2 s. Agent ≤ 15 / 30 s. A status event ≤ 0.5 s", why: "Per path, because a live search or six agent steps cannot meet the answer numbers" },
+    { id: "N4", property: "Permission staleness, per path", target: "Document ACL by event ≈ 35 s p50; bounded by polls at ≤ 10 min on 300 sensitive (hot-tier) SharePoint sites and ≤ 60 min elsewhere while they succeed (double if one cycle is throttled). Entra group membership ≈ 2.5 min p50, ≤ 5 min; source-local groups ≤ 10 or 60 min. Live-checked and federated content: the source’s own consistency. Disabled account refused ≤ 5 min. A path past its drop-out age (30 or 150 min) leaves the results", why: "Revocation is the dangerous direction; sources throttle and events are best effort" },
+    { id: "N5", property: "Content freshness", target: "An edit searchable ≈ 40 s p50 by event; ≤ 60 min bound (hot-tier sites ≤ 10)", why: "A stale procedure is a wrong answer" },
+    { id: "N6", property: "Cost", target: "Model ≤ 2 USD a seat a month; build or buy priced honestly", why: "Seat products list at 30 USD a seat a month (as of November 2026)" },
+    { id: "N7", property: "Action and egress safety", target: "100% of writes confirmed on a code-rendered card; 0 tools whose effect or configured automations can reach an outsider; 0 of 700 injection cases followed across seven egress families (≤ 0.43% overall, ≤ 3% per family); simulator pass^4 ≥ 85% (400 scenarios, ± 3.1) and not lower than the last release", why: "Injected emails and documents have leaked data from shipped assistants (How real systems do it)" },
+    { id: "N8", property: "Availability", target: "99.9% in working hours; one connector down never stops answers from the others", why: "Nine sources fail and throttle independently" },
+    { id: "N9", property: "Memory control", target: "Every memory visible with its source; edits and deletes effective next turn; purged from backups ≤ 30 days; memory operations audited", why: "Users must be able to correct what it keeps" },
+    { id: "N10", property: "Deletion", target: "A document deleted or DLP-tombstoned in the source is unretrievable within the same bound as a revocation; derived text that used it is redacted", why: "Deletes are often for sensitive content" },
+  ]}
+/>
+
+## Estimates and decision drivers
+
+- Running example: Brightpost as an **employer**, one company and one deployment. Every headcount, volume, mix, lag, rate and unit cost not from a source is illustrative.
+- Prices are list prices as of November 2026: a mid-size model (Claude Sonnet 5.5 class) 2.00 USD per million input tokens, 0.10 cached, 2.50 to write the 5-minute cache, 4.00 for the 1-hour cache, 10.00 output; a small model (Claude Haiku 5.5 class) 0.10 / 0.01 / 0.125 / 0.50.
+- Source limits are each vendor's published defaults as of November 2026: SharePoint 2,400,000 resource units (RU) a day and 2,500 a minute per app, 5 RU for any permission read; Atlassian Tier 2 Enterprise (granted after Atlassian's review) 150,000 points an hour plus 30 a licensed user; helpdesk 700 requests a minute; GitHub 15,000 an hour; Slack Real-time Search "10+" a minute a team.
+- p95 per path is a root-sum-square of stage spreads (independent tails); the stage-sum bound is given where it exceeds a target.
+
+<EstimateTable
+  rows={[
+    { quantity: "Turns a weekday", assumption: "Support 400 × 90% active × 12; warehouse 3,000 × 40% × 3; finance 150 × 80% × 8; engineering 550 × 70% × 6; other 900 × 60% × 6", result: "4,320 + 3,600 + 960 + 2,310 + 3,240 = 14,430" },
+    { quantity: "A month", assumption: "Office 22 days, warehouse 30; 3 turns a conversation", result: "346,260 turns (69.3 a seat); 115,420 conversations" },
+    { quantity: "Peak", assumption: "Office 10,830 × 70% in 10 h = 0.211 a second + warehouse 3,600 over 24 h = 0.042; × 3", result: "≈ 0.76 turns a second" },
+    { quantity: "Turn mix", assumption: "Answer 65% (30% include a live-checked document; 30% search Slack or mail live), lookup 15%, write 8%, agent 5%, other 7%", result: "95% of turns have a known shape" },
+    { quantity: "Documents", assumption: "SharePoint 2.4M, Confluence 0.3M, Jira 0.9M, helpdesk 1.92M (handed-off cases only: 16,000 a day × 120 days), GitHub 0.48M; Slack 4.0M threads federated", result: "6.0M indexed, 10.0M in all; 10.2B indexed tokens" },
+    { quantity: "Chunks", assumption: "400 tokens, 50 overlap: 9, 5, 2, 3, 3 a document by source", result: "21.6 + 1.5 + 1.8 + 5.76 + 1.44 = 32.1M (5.35 a document)" },
+    { quantity: "Index", assumption: "INT8 1,024-dim 32.87 GB + graph links 4.11 + metadata (≈ 20 principal ids × 8 B + 40 B) 6.42 + keyword postings 12.25; float32 copy for rescoring 131.5 GB on SSD", result: "≈ 55.6 GB a replica in memory; 4 shards × 2 replicas = 8 nodes of 64 GB" },
+    { quantity: "ACL patches", assumption: "20,000 document ACL changes × 5.35 chunks + 300 container changes × 2,000 documents × 5.35", result: "107,000 + 3,210,000 = 3.32M patches a day (≈ 38 a second on average)" },
+    { quantity: "SharePoint budget (2.4M RU a day)", assumption: "8,000 drives with webhooks: event deltas 39,200 + permission fetches 76,000 + downloads 24,000 + hot-tier poll (300 drives every 10 min) 43,200 + warm-tier poll (7,700 hourly) 184,800 + site-group members (108,000 calls × 4 RU, illustrative) 432,000 + live checks 19,695 + drift audit 25,000", result: "≈ 843,900 RU = 35%; reserve 650,000 (27%) for re-enumerating every drive (624,000 RU ≈ 7 h). A 10-minute poll of every drive at 1 RU a call: 8,000 × 144 = 1.15M RU (48%), 74% with the other lines, leaving ≈ 632,000 RU, barely one re-enumeration" },
+    { quantity: "Atlassian budget (Tier 2: 150,000 + 30 × 2,300 licensed users = 219,000 points an hour)", assumption: "2,000 office staff + 300 shift leads; 1 point + 2 per permission object: 700 permission sets × 41 = 28,700; 150 local groups × 81 = 12,150; 900 project roles × 31 = 27,900; events and live checks ≈ 965", result: "≈ 69,700 points an hour = 32%" },
+    { quantity: "Live checks", assumption: "At most 4 a sensitive answer: 9,380 answers a weekday × 30% × 4; split SharePoint 35%, helpdesk 55%, Atlassian 10%", result: "11,256 a weekday; helpdesk 6,190 (≈ 0.3 a second at peak)" },
+    { quantity: "Slack live search", assumption: "0.76 × 65% × 25% of answers at peak × 85% after a per-conversation cache × 60", result: "≈ 6.3 calls a minute; ≈ 5.5% of peak minutes exceed 10 (≈ 13% without the cache)" },
+    { quantity: "Event and content lag (p50)", assumption: "ACL: notify 30 + queue 1 + fetch 2 + map 0.1 + patch 1 + refresh 1 s. Content: notify 30 + fetch 2 + parse 1 + embed batch 5 + embed 1 + index 1 s, for 337,500 changed chunks a day", result: "≈ 35 s for a permission (the 30 s notify is illustrative; dirty, so live-checked, 1 s after the notification lands); ≈ 40 s for an edit; 0.75 GPU-hours a day" },
+    { quantity: "Tools", assumption: "106 tools × 600 tokens; stable prefix = instructions 1,200 + tool system prompt 286 + core tools 2,000", result: "3,486 stable; all tools 67,086; one bundle 10,553; tool search 7,586 for a two-search task" },
+    { quantity: "Answer call", assumption: "3,486 cached × 0.10 + 4,390 changing × 2.00 + 250 out × 10.00, per million; + grounding check 0.000427", result: "0.000349 + 0.00878 + 0.0025 = 0.0116; 0.0121 USD with the check" },
+    { quantity: "Blended model cost", assumption: "Router 0.000058 + memory 0.000077 + 0.65 × 0.0121 + 0.15 × 0.00869 + 0.08 × 0.00400 + 0.05 × 0.0280 + 0.07 × 0.000225", result: "≈ 0.0110 USD a turn" },
+    { quantity: "Model a month", assumption: "346,260 × 0.0110 + 1-hour prefix writes ≤ 964 (≤ 24 a day × 30 × (31 × 10,553 + 3,486 + 3,986) tokens at 4.00)", result: "≈ 4,780 USD ≈ 0.96 USD a seat (N6 ≤ 2)" },
+    { quantity: "Build all-in", assumption: "Model 4,777 + infrastructure 15,135 (search 230.4 + GPUs 120 + connectors 57.6 + databases 85 + objects 1.5 + eval 10 a day) + 9 engineers 300,000", result: "≈ 320,000 USD a month ≈ 64 USD a seat ≈ 0.92 USD a turn; team 94%, model 1.5%" },
+  ]}
+  note="The model is 1.5% of the bill and the team is 94%, so the big decisions are about permissions, freshness and egress, not which model writes. Build or buy is judged on the team (deep dive In practice)."
+/>
+
+| # | Driver | For this system | What it forces |
+| --- | --- | --- | --- |
+| G1 | Quality bar and its metric | 85% correct; 95% supported; filtered recall ≥ 95% per persona | Hybrid search, a personal ranker, a cross-encoder, a grounding check, a recall gate per persona |
+| G2 | Cost of a wrong answer | High for a leak (pay, customer cases, finance); medium for a wrong answer | Filter before the model; never looser than the source; fail closed; leaks gated at 0 |
+| G3 | Latency target | First token 1.5 s p50 on indexed answers | Permissions bound into the index for indexed sources; live checks overlapped with the cross-encoder |
+| G4 | Cost per request | ≤ 2 USD a seat a month in model cost; the team dominates | Cached prefixes and bundles; build or buy judged on the team |
+| G5 | Traffic shape | ≈ 0.76 turns a second; bursts of 450,000 permission patches; source budgets | In-place attribute updates; per-connector budgets and priority polls |
+| G6 | Knowledge source and freshness | 10M documents, ≈ 20,300 ACL changes a day, sources that throttle | Events + budgeted polls + live checks + drop-out |
+| G7 | Context size | 7,876 tokens an answer; 67,086 if every tool were loaded | Entitlement-class bundles; tool search only in the agent |
+| G8 | Determinism and auditability | "Which grant let Tom see the pay-band file at 10:03?" | Versioned principal sets; chunk ids with `acl_version` on every turn |
+| G9 | Data sensitivity and tenancy | Pay, customer data, supplier bank details, employees' own questions; one tenant | Labels, no super-user decryption, input DLP, short text retention, a privacy impact assessment |
+| G10 | Autonomy level | Reads alone; internal writes on a card; outsider-reachable effects never | Tiers by audience; egress rules at execution |
+| G11 | Modalities and interface | Text only, but a language driver: many warehouse staff ask in Polish or Romanian (illustrative) | Multilingual embedder and cross-encoder, per-language keyword analysers, language slices in every test set |
+| G12 | Availability and degradation | 99.9% in working hours; nine sources fail and throttle independently | Per-connector bulkheads and drop-out |
+
+## API design
+
+| Call | Who calls it | When |
+| --- | --- | --- |
+| `POST /v1/conversations/{id}/turns` | Web app, Slack app, Teams app, warehouse handhelds | Every message; identity from the session only; the response is a Server-Sent Events (SSE) stream |
+| SSE events `status`, `sources`, `token`, `card`, `done`, `error` | Gateway → client | `status` at ≈ 320 ms; `sources` at ≈ 510 ms; `card` for a write |
+| `POST /v1/cards/{card_id}/confirm` and `/cancel` | Client | Card states `pending → executing → done / unknown / failed`; one execution per card; `POST /v1/actions/{action_id}/withdraw` removes a T1 item within 10 min (notifications already sent stay) |
+| `GET /v1/memory`, `PATCH` and `DELETE /v1/memory/{id}`, `POST /v1/memory/{candidate_id}/save` | Client | Memory is saved only by the user |
+| `POST /v1/connections/{connector}/authorize` | Client | First use of a non-Microsoft source or a write scope: the source's consent page; tokens land in the broker, never in the client or the model |
+| `POST /v1/turns/{id}/feedback` | Client | Thumbs, "wrong source", "I can't open this source" (a mapping or staleness signal) |
+| Admin: connectors, exclusions and holds, audit | Admins and security (audited, need-to-know) | Budget used, last reconcile, bound and drop-out state per connector; "which grant admitted this document for this user at this time" |
+| Internal `retrieve(principal_set_id, query)`, `check_live(doc_ids, user)`, `tool_call(user, tool, args)` | Orchestrator, agent | The only paths to the index and the systems |
+
+The turn endpoint streams a status, the permitted sources, then the answer.
+
+```http
+POST /v1/conversations/c_2b7/turns
+Authorization: Bearer <Entra session>
+Idempotency-Key: t_91d4
+Accept: text/event-stream
+{ "text": "Can I refund order 4471? The kettle arrived cracked and it was £42.", "client": "teams" }
+
+200 OK
+event: status   data: {"text": "Searching your sources…"}
+event: sources  data: {"sources": [{"n": 1, "title": "Damaged on arrival", "system": "confluence", "label": "General"}, …]}
+event: token    data: {"text": "Yes, but it needs an approver: refunds over £30 "}
+event: done     data: {"turn_id": "t_91d4", "unsupported_sentences": 0, "omitted_sources": []}
+```
+
+Every tool declares its tier, audience, scopes and how a retry is deduplicated; this is one of 106.
+
+```json
+{ "name": "jira_create_issue",
+  "description": "Create an issue in an internal Jira project the user can create issues in.",
+  "input_schema": { "type": "object", "required": ["project", "summary"],
+    "properties": { "project": {"type": "string"}, "summary": {"type": "string", "maxLength": 200},
+      "description": {"type": "string", "maxLength": 4000}, "priority": {"enum": ["Low", "Medium", "High"]} } },
+  "x-tier": "T1",
+  "x-audience": "project members; refused if the project has portal customers, contractors or anonymous access",
+  "x-scopes": ["read:jira-work", "write:jira-work"],
+  "x-dedupe": "entity property card_id; after a timeout wait 10 s, then read the user's recent issues by REST before any retry" }
+```
+
+| Code | Meaning | What happens |
+| --- | --- | --- |
+| 401 `consent_needed` | No token for this source | A card: "Connect your helpdesk to include cases"; the answer goes on without that source and says so |
+| 403 `insufficient_scope` | First write | Step-up consent for the write scope only |
+| 403 `not_entitled` | The source refused | Shown as is; never retried with another identity |
+| 409 `card_expired` / `card_executed` | Stale or double confirm | No second execution |
+| 422 `audience_blocked` | The target can reach an outsider (guest, shared channel, portal, external address) | The card explains; no override |
+| 429 `source_throttled` | Source budget hit | Lookups wait once (`Retry-After`); answers omit that source and say so |
+| 503 `connector_unavailable` | Connector past its drop-out age | Its results are excluded: "Jira results are temporarily unavailable" |
+
+- **Identity from the session only:** the gateway checks account status in the principal store on every turn; the request body never names a user.
+- **Rendering, cards and egress:** plain text with citation chips, writes only through code-rendered cards (payload, audience, highest label, provenance), and audiences resolved at execution; the rules are in Safety and guardrails.
+
+## Data model
+
+| Data | Store type | Why (driver ids) | Partition key | Consistency | Rejected alternative and its cost |
+| --- | --- | --- | --- | --- | --- |
+| Search index: chunk text, INT8 vectors (HNSW graph), keyword postings per language, `principals[]`, `deny[]`, `acl_version`, `label_id`, `source`, `doc_id`, `modified` | Search engine with hybrid retrieval, filterable vector search and **in-place attribute updates** of `principals`, `deny`, `acl_version` at ≥ 5,000 a second without re-indexing the vector (Vespa class; a load test decides); the rate is for freshness and full result pages, since the ACL-store re-check already enforces a revocation | 32.1M chunks; 3.32M patches a day (G2, G5) | `doc_id` hash, 4 shards × 2 replicas | Updates visible ≈ 1 s | Lucene engines (<TechIcon id="oss/elasticsearch" /> Elasticsearch, OpenSearch): an update rewrites the whole document and its vector (their update docs, as of November 2026), which bursts of 450,000 patches cannot afford; a vector database plus a keyword engine: two filters to keep identical |
+| ACL store: per document `grants`, `deny`, `inherits_from`, `acl_version`, `dirty_since`, `live_check`, `deleted_at` | <TechIcon id="oss/postgresql" /> PostgreSQL | Truth for patches; inherited ACLs derived from containers; the 5 ms re-check (G2, G8) | `doc_id` | Strong; written before the index | ACLs only in the index: no re-check, no history |
+| Principal store: identities per source with their Entra object id; groups and memberships per source; principal sets content-addressed by hash with validity intervals | PostgreSQL + <TechIcon id="oss/redis" /> Redis cache of user → current set id | Membership per request; "which grant admitted this at 10:03" (G8) | `user_id` | Invalidated on membership events and the 5-min poll | Groups in the Entra token: an overage claim above 200 groups (Microsoft identity platform docs, as of November 2026) and no source-local groups |
+| People and activity: team, manager chain, authors, view counts per team per document (≥ 5 people), filtered by the same ACLs | PostgreSQL | Personal ranking and "who owns this" (G1) | `team_id` | Daily | Per-person view logs: employee-monitoring data, no gain over team counts |
+| Connector state: cursors, delta tokens, subscription expiry, budget used, last reconcile, drop-out flag | PostgreSQL | A staleness bound per source (N4, G6) | connector | Single writer | A cron without state: lag unknown |
+| Event outbox: a permission topic (ACL and membership changes, deletes, DLP tombstones, labels, widenings, search-exclusion flips) and a content topic | PostgreSQL outbox, polled by workers | ≈ 76,000 events a day (≈ 0.9 a second); bursts are index work, not events (G5) | `doc_id` | Ordered per document; idempotent by `acl_version` | <TechIcon id="oss/apache-kafka" /> Kafka: an extra system for under 1 event a second |
+| Token vault: per user per source refresh tokens, scopes, expiry | HSM-backed secrets store; per-user keys only the broker can use | Run as the user (G9) | `user_id` | Rotated refresh tokens | Service accounts: every read sees everything |
+| Memory: text, source turn id, created, last used | PostgreSQL | N9 | `user_id` | Strong | A vector store of everything said: cannot be shown or corrected |
+| Conversations: summary + last 2 turns, with the chunk ids and `acl_version` behind each turn | PostgreSQL, 30 days | Follow-ups; re-checked every turn (N10) | `user_id` | Strong | Raw turns without sources: cannot be redacted after a revocation |
+| Audit and traces: principal set id, filter, chunk ids with `acl_version`, live-check results, tool calls, card states, memory operations, model, cost, latency per stage | <TechIcon id="oss/clickhouse" /> ClickHouse; ids 365 days, question text 30 | G8, G9 | day | Eventual | Logging prompts: the widest-readable copy of every document |
+
+Each chunk carries principal ids, not users; the ACL store keeps the truth that patches it.
+
+```text
+chunk:  { chunk_id: "sp_88a1:c4", doc_id, source: "sharepoint", text (≈ 400 tokens), vec_int8: int8[1024],
+          bm25_en | bm25_pl | bm25_ro, principals: ["g:entra:hr-partners", "s:sp:site-412:members"],
+          deny: [], acl_version: 37, label_id: "confidential", modified, author_id }
+
+principal_set:{hash} -> { user_id, principals: [140 ids], valid_from, valid_to }
+user:{id}:set        -> current principal_set hash (Redis; invalidated on membership events)
+```
+
+```sql
+CREATE TABLE doc_acl (
+  doc_id text PRIMARY KEY, grants jsonb, deny text[],   -- grants: [{"principal": "g:entra:hr-partners", "kind": "read"}, …]
+  inherits_from text,                                   -- the site, space or folder this ACL derives from
+  acl_version bigint,                                   -- raised on every change; every retrieval records it
+  dirty_since timestamptz, live_check boolean,          -- dirty 1 s after a notification; helpdesk, Confidential, restricted
+  deleted_at timestamptz                                -- deny-all at once; out of the index within the revocation bound
+);
+```
+
+### Identity mapping across the nine systems
+
+- **The rule:** every grant and every user is joined on an immutable id issued or provisioned by Entra, never on an email string, because emails change, are user-set in GitHub and are reused when a leaver's address goes to a new hire.
+- **Fail closed:** an unmapped grant is dropped; an unmapped user gets no principals from that source.
+
+| Source | Join key to Entra | Source-local principals the connector expands | Guests and public grants |
+| --- | --- | --- | --- |
+| SharePoint and OneDrive | Entra object id (native) | Site groups (members reconciled with the site poll: hot tier every 10 min, others hourly); sharing-link groups (each link's redeemers) | Guests are not askers; "Everyone except external users" maps to all mapped employees only where the site is in search; org-wide links → redeemers only |
+| Confluence and Jira | Atlassian account linked by SCIM (externalId = object id) | SCIM-synced groups ride the Entra path; Confluence-local groups and Jira project roles reconciled hourly; page restrictions and issue-security levels live-checked | "Anyone logged in" → mapped employees with an account; portal customers ignored |
+| Helpdesk | SSO with external id = object id | Groups and brands | Requesters are not askers; every case live-checked anyway |
+| GitHub | Enterprise Managed Users provisioned from Entra | Teams, repository collaborators | Outside collaborators ignored |
+| Slack (writes only; reads are live) | SCIM user, externalId = object id, checked at consent | Channels, for egress checks | Guests and shared-channel members make a channel external |
+| ERP, HR, WMS | HR employee id, which Entra carries as `employeeId` | Cost centres, HR roles, warehouse roles and sites | Contractors without an HR record get no tools |
+
+- **Shared handhelds:** Entra shared-device mode, a sign-in per shift, sign-out at shift end and a 15-minute idle lock, so a session never outlives the person.
+- **Non-user identities:** the SharePoint crawler holds `Sites.Selected`, granted site by site from an allow list (payroll and legal never), on ingestion workers in a separate segment and never on the request path; other crawlers are read-only installs. There is no decryption identity at all.
+- **The two exceptions:** the WMS service account (read and ticket-create only) runs behind our check of the user's warehouse role and site; the token broker mints short-lived tokens only for the session's own user, sender-constrained where the source supports it, and revokes them on deprovisioning.
+- **Access patterns:** principal set by user (Redis, then PostgreSQL); filtered top-100 per shard per query; ACL re-check by `doc_id` for the ≈ 160 candidates; patches by `doc_id`; audit by principal set id and validity interval.
+- **The source's audit shows the user and our app's client id;** we have not verified that any of the nine accepts a token-exchange `act` claim, so our audit is the record that the assistant acted.
+
+## Building the architecture, step by step
+
+- We start from one model behind single sign-on and add a part only when a requirement or a driver forces it; each figure outlines the step's new parts.
+
+### Step 1: Chat over one model behind single sign-on (F1)
+
+The baseline: an employee signs in, types, and one model streams a reply.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={1} caption="Step 1: a gateway with Entra sign-in, an orchestrator and one answer model. It can chat, but it knows nothing about Brightpost." />
+
+- **Adds:** the API gateway (single sign-on, account status, rate limits, SSE), the orchestrator, the answer model (mid-size).
+- **Flow:**
+  1. The employee signs in with Entra on the web, Slack, Teams or a warehouse handheld.
+  2. The gateway passes the message and the session's identity to the orchestrator, and the model streams a reply back.
+- **Why this and not that:** the simplest assistant, and the baseline every later part must beat on the gold set (P1).
+- **The gap:** it knows nothing about Brightpost's refund rules, rotas or tickets.
+
+<PremiumBreak />
+
+### Step 2: Answer from an index of company documents (F1, N1, N5)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={2} caption="Step 2: connectors fill a 32.1M-chunk index from five sources and rankers cut 160 candidates to 8. The search is marked unfiltered: the crawler read everything." />
+
+- **Adds:** connectors, the search index, the retrieval service, the rankers.
+- **Flow:**
+  1. Connectors read SharePoint, Confluence, Jira, the helpdesk and GitHub: 6.0M documents → 32.1M chunks of 400 tokens.
+  2. A question runs a keyword search (BM25) and a vector search; the lists merge by reciprocal rank fusion (RRF: each chunk scores the sum of 1 ÷ (k + rank) across lists) into 160 unique chunks.
+  3. A gradient-boosted personal ranker keeps 50 (team-level views, recency, author in the asker's team); a cross-encoder keeps 8, at most 3 a document.
+  4. The model answers from the 8 with `[n]` citations, or says "not found in your sources".
+- **Why this and not that:** ground answers in documents (P2), and run cheap rankers before the expensive one (P4). Keyword search stays because SKUs, PO numbers and error codes defeat vectors.
+- **The gap:** the crawler reads with application rights, so the index holds everything and anyone can retrieve the pay bands.
+
+### Step 3: Map identities; filter inside the search; never looser than the source (F2, N2)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={3} caption="Step 3: connectors map every account to its Entra id and write grants to the ACL store; the asker’s principal set now runs inside the search, and Slack and mail are searched live as the user." />
+
+- **Adds:** the ACL and principal store, identity mapping in the connectors, live search for Slack and mail.
+- **Flow:**
+  1. Connectors join every source account to its Entra object id (SCIM or SSO) and write each document's grants as principal ids on its chunks.
+  2. The gateway resolves the session's principal set: ≈ 120 ids on average (groups, sites, projects), cached in Redis. Unlike the concept page's single identity provider, memberships here come from nine systems and are synced, so they have a lag of their own (N4).
+  3. The set runs as a filter **inside** both searches, so only permitted chunks are ever candidates; the ACL store re-checks the survivors in 5 ms.
+  4. Org-wide links count only for their redeemers, as in SharePoint's own search (Microsoft's sharing documentation, as quoted by Office365ITPros in 2024; unredeemed-link canaries test it); sites hidden from the source's search and label-encrypted files are excluded at crawl time.
+  5. Slack and mail are searched live with the user's own token, so the source applies its permissions (for Slack implied by the user-token scopes; private-channel canaries test it).
+- **Why this and not that:** run as the user (P11) and enforce rules in code, not in the prompt (P10). An instruction such as "do not reveal confidential files" is not access control.
+- **The gap:** permissions and deletes change all day, faster than a crawl.
+
+The concept page's figure shows why the filter belongs inside the search, not on the answer.
+
+<AnimatedDiagram spec="animated/rag/acl-filtering" stepper caption="The filter comes from the user’s groups and runs inside the search; checking the answer afterwards cannot take back what the model has read." />
+
+- **How to read it:** it is the access-control page's help-centre example; in step 4 the unfiltered runbook reaches the prompt, and an output check drops the citation but not the copied steps.
+
+**The numbers:**
+
+- A warehouse persona sees ≈ 6% of the 32.1M chunks (≈ 1.9M, illustrative), far above the 50,000 exact-scan threshold, so it walks the filtered graph: the hardest case for recall, which is why the per-persona recall gate (≥ 95% of an exact scan) exists.
+- Small personas (a new joiner, a contractor) fall below 50,000 permitted chunks and are scanned exactly (≈ 5 ms).
+
+<Callout tone="red" title="What breaks">
+  Join a Jira grant to a user by email and a leaver's reused address hands the new hire the leaver's projects. Join on the Entra object id, and drop any grant you cannot map.
+</Callout>
+
+### Step 4: Keep permissions fresh within each source's budget (F2, N4, N10)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={4} caption="Step 4: a permission-sync pipeline applies events in about 35 s and budgeted polls bound the rest; the ACL store patches the index in place." />
+
+- **Adds:** permission sync (events, budgeted polls, reconciles, drop-out).
+- **Flow:**
+  1. A source notification (a revoked share, a delete, a raised label) marks the document dirty 1 s after it lands, so every answer live-checks it until the patch does.
+  2. The connector fetches the effective ACL, writes the ACL store and patches `principals`, `deny` and `acl_version` in place: ≈ 35 s at p50, almost all of it the source's notification delay (30 s, illustrative).
+  3. If an event is lost, polls sized to each source's rate limit find it: 300 sensitive (hot-tier) SharePoint sites every 10 min, everything else hourly, using 35% of the SharePoint day.
+  4. A site change is derived in the ACL store from one source call, not 50,000; deletes and DLP tombstones ride the same priority topic.
+  5. Helpdesk cases, Confidential files, restricted pages and dirty documents are checked live as the user; a connector past its drop-out age leaves the results.
+- **Why this and not that:** evaluate continuously and degrade gracefully (P16): canaries measure the lag and drop-out enforces the bound. The revocation takes effect once the ACL store is written, since every retrieval re-checks it; the index patch restores full result pages.
+- **The gap:** it can read documents but not records, and it cannot act.
+
+### Step 5: Route; look up and act as the user, inside the company (F3, F4, N7)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={5} caption="Step 5: a router picks the path and one tool bundle; the tool gateway checks audience, turns writes into cards and calls each system with the user’s own delegated token." />
+
+- **Adds:** the router, the tool gateway, the token broker, connector tools (106 tools on MCP servers).
+- **Flow:**
+  1. A small router labels the turn (answer, lookup, write, agent, other), picks one connector's bundle for the user's entitlement class, and rewrites follow-ups, in ≈ 300 ms.
+  2. The model calls a tool; the gateway checks the schema, the user's entitlement, the tier and the **audience** (who can see the effect).
+  3. The token broker mints a short-lived delegated token for this user only; the source applies its own permissions.
+  4. T1 and T2 writes become a card rendered by code; on confirm they execute once, deduplicated by the card id.
+- **Why this and not that:** route by difficulty (P3), bound the blast radius (P12), one cached prefix per bundle (P7); the tiers are drawn in the deep dive.
+- **The gap:** some tasks need several systems in an order nobody wrote down.
+
+### Step 6: An agent for multi-step tasks, with tool search (F5)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={6} caption="Step 6: an agent loop, capped at 10 calls and 60 s, reaches tools only through the tool gateway, which also runs tool search over the user’s entitled tools." />
+
+- **Adds:** the agent loop, tool search.
+- **Flow:**
+  1. The agent starts from a 3,986-token prefix: the stable 3,486 plus a 500-token `tool_search` tool.
+  2. `tool_search` returns definitions only from the user's entitled tools (≈ 1,800 tokens a search).
+  3. Read tools run as the user; any write is proposed as a card, as in Step 5.
+  4. Caps: 10 calls, 60,000 tokens of context, 0.15 USD and 60 s; a `status` event each step.
+- **Why this and not that:** manage context deliberately (P8) and cap in tokens (P6). Only 5% of turns need it, so the router keeps the other 95% on fixed workflows.
+- **The gap:** it forgets that Tom works nights at Leeds, and he says so every time.
+
+### Step 7: Memory the user can see and correct (F6, N9)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={7} caption="Step 7: a memory store gives at most 5 user-saved items to a prompt; the model can only propose a memory." />
+
+- **Adds:** the memory store.
+- **Flow:**
+  1. Once a conversation, a small model proposes candidates from the user's own messages.
+  2. Code accepts a candidate only if its text is a span of the user's own typing (pasted and quoted blocks are marked by the client and excluded), then shows it as a chip.
+  3. The user saves it; at most 5 relevant items (200 tokens) go into a prompt.
+  4. Edit, delete and "forget that" (confirmed in the UI) take effect next turn and are audited.
+- **Why this and not that:** keep sensitive data inside a boundary (P17): memory holds only what the user said and saved, never text from documents another person could lose access to.
+- **The gap:** documents and emails carry instructions, and nobody yet knows whether answers or permissions hold.
+
+The memory figure shows the proposal, the saved list and a deletion.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/memory" stepper caption="The model can only propose a memory from the user’s own words; the user saves it, sees where it came from, and can edit or delete it." />
+
+- **How to read it:** step 1 is the proposal (message, extraction, span check, chip); step 2 the saved list with sources, Edit and Delete; step 3 "forget that I work nights", confirmed in the UI.
+
+**The numbers:**
+
+- Extraction runs once a conversation on the small model for 0.00023 USD; 115,420 conversations a month cost ≈ 27 USD.
+- At most 50 items are kept a user, 5 (200 tokens) reach a prompt, items unused for 180 days expire, and deletes are purged from backups within 30 days (N9). The items drawn are illustrative.
+
+### Step 8: Guard, control egress and evaluate (F7, N2, N7)
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" step={8} caption="Step 8: guards screen injected instructions and egress; every turn is audited with its acl_version, and evaluation runs the permission suite and canaries before each release." />
+
+- **Adds:** guards (injection screen, rendering and egress rules), evaluation, audit and traces.
+- **Flow:**
+  1. Provenance labels mark all email and customer-written text as external, whatever the sender's domain.
+  2. External spans are datamarked (spotlighting) and a multilingual injection screen reads every chunk and live result on use (25 ms).
+  3. Rendering strips links and images; egress rules resolve each write's audience at execution.
+  4. The audit keeps the principal set, the chunk ids with `acl_version`, live-check results, tool calls and card states for every turn.
+  5. The permission suite, canaries, drift audit, gold sets, injection families and the action simulator gate each release.
+- **Why this and not that:** treat retrieved content as untrusted (P13), carry provenance (P14), and keep a human escape hatch (P15): "I can't open this source" reports become suite cases.
+- **The gap:** none; the gate decides each release (Evaluation and release gates).
+
+## Final architecture
+
+<AnimatedDiagram spec="animated/enterprise-assistant/architecture" stepper caption="Permissions travel with the data and are applied inside the search; every read and write runs as the user through one tool gateway; memory holds only what the user saved." />
+
+| Group | Components | Responsibility |
+| --- | --- | --- |
+| **Clients** | Employee apps (web, Slack, Teams, handhelds) | Ask, open sources, confirm cards, manage memory |
+| **Edge and gateway** | API gateway | Single sign-on, account status, rate limits, SSE, idempotency |
+| **Assistant orchestration** | Orchestrator, router, retrieval service, tool gateway, agent loop, guards | Route, retrieve with permissions, act inside the company, guard inputs and outputs |
+| **Search, models and tools** | Answer model, rankers, live search, token broker, connector tools, tool search | Write, rank, search live, hold delegated tokens, call systems |
+| **Offline pipelines** | Connectors and identity mapping, permission sync, evaluation | Fill the index, keep it fresh within budgets, gate releases |
+| **Data and state** | Search index, ACL and principal store, memory, audit and traces | What a turn may read, and what happened |
+
+Priya, a support team lead, asks whether she can refund order 4471, a cracked 42-pound kettle; a helpdesk case is in the top 8, so this is the sensitive path, at p50:
+
+1. 0–20 ms: the gateway validates her Entra token and account status; Redis returns principal set `ps_7f3…` (140 principals: support-staff, helpdesk-agents, 3 SharePoint sites…).
+2. 20–320 ms: the router labels it `answer`, picks no live search and rewrites it to "damaged on arrival refund over £30 approval"; `status` is sent.
+3. 320–390 ms: embed (15), keyword and vector search with her principal set inside both (40), ACL-store re-check (5), personal ranker → 50 (10). Live checks start for up to 4 sensitive candidates in its top 20.
+4. 390–510 ms: the cross-encoder keeps 8: the Confluence "Damaged on arrival" article, the SharePoint "Refund approvals over £30" page and helpdesk case 4471.
+5. 510–650 ms: the answer waits ≈ 140 ms more for the live check of case 4471 as Priya; it passes and `sources` is sent.; 650–685 ms: the injection screen reads the 8 chunks (25 ms; the case's customer-written text is marked external) and the context is assembled (10).
+6. ≈ 1,285 ms: the first token: "Yes, but it needs an approver: refunds over £30…" [1][2]. Complete at ≈ 4.4 s; the grounding check passes; cost ≈ 0.0121 USD; the audit row holds `ps_7f3…`, 8 chunk ids with `acl_version` and the live-check result.
+7. Tom, a warehouse shift lead, asks the same question: his principal set has no `helpdesk-agents`, so case 4471 is never a candidate.
+
+The sequence draws the same run lane by lane.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/request-sequence" stepper caption="The principal set is inside the search from the first query, and the one live check runs alongside the cross-encoder, so the sensitive answer still shows its sources at 650 ms." />
+
+- **How to read it:** six lanes from Priya to the answer model in five steps; the live check leaves retrieval at 390 ms while the cross-encoder is still working and returns inside its 500 ms deadline.
+- **The numbers:** the slowest of 3 checks (one check p50 120, p95 400 ms) takes ≈ 260 ms from 390, so it ends ≈ 140 ms after the cross-encoder: `sources` at 650, first token at 1,285 against N3's 1,500.
+- **A chosen sensitive document that was not pre-checked** (outside the top 20's first 4) is checked from 510 ms or dropped at the deadline; the share of answers where the 4 pre-checks cover the chosen documents is measured from traces.
+
+## Component choices and why
+
+### Binding: permissions in the index for indexed sources, live search for Slack and mail, live checks for the sensitive few
+
+- **Choice:** early binding (ACLs copied onto chunks) for the five indexed sources; federated live search as the user for Slack and mail; a live check as the user for helpdesk cases, Confidential files, restricted Confluence pages, Jira issues with security levels and dirty documents.
+- **Why:** a filter inside the search returns a full page of permitted results with no source calls (G3). Live search for Slack and mail means no lag, no backfill or reconcile, no copy of DMs and mailboxes to keep in sync, and the main injection channels screened on use (G2, G9); Slack also recommends its Real-time Search API for AI apps (as of November 2026).
+- **Why not late binding everywhere:** ≈ 50 checks a turn × 0.49 answers a second at peak ≈ 25 source calls a second against throttled APIs, and short result pages whenever checks fail (G5).
+- **Why not early binding alone:** the window would be the source's notification delay, which Graph states can reach 6 hours (as of November 2026) (N4).
+- **Why not post-filtering the top results:** a warehouse user who sees ≈ 6% of chunks would get too few results, and no over-fetch size is safe (G1).
+
+### ACL shape: principal ids on chunks, memberships per request, versioned principal sets
+
+- **Choice:** chunks hold group, site and project ids; memberships live in the principal store and are resolved per request into a content-addressed principal set with a validity interval.
+- **Why:** a joiner is one row, not 1.07M chunk rewrites (G5); the set id in each audit row answers "which grant admitted this at 10:03" (G8).
+- **Why not a join at query time:** a round trip per candidate, 160 a turn, inside a 40 ms search.
+- **Why not decrypt label-encrypted files with a super-user identity:** one credential that reads every protected file, and the source's log does not show who used it; they are excluded instead (G9).
+
+### Permission sync: events first, polls sized to each budget, drop-out
+
+- **Choice:** webhooks on all 8,000 drives; a priority topic for revocations, membership changes, deletes, label changes and widenings; hot-tier polls every 10 min and warm-tier hourly; source-local groups reconciled on the same cadence; a connector that cannot prove its bound leaves the results.
+- **Why:** ≈ 843,900 RU a day is 35% of the SharePoint budget, leaving 650,000 (27%) for a 410 re-enumeration of every drive (624,000 RU ≈ 7 h); Atlassian's reconcile uses 32% of its quota (G5, G6, N4).
+- **Why not a 10-minute poll of everything:** at 1 RU a delta call, 8,000 drives × 144 = 1.15M RU a day (48%), 74% with the other lines; that leaves ≈ 632,000 RU, barely the 624,000 a re-enumeration needs, and ≈ 1,228 RU a minute on average plus a 1,500-RU-a-minute re-enumeration breaks the 2,500 cap.
+- **A deliberate departure:** Microsoft's scanning guidance runs a safety-net delta at most daily (as of November 2026); this design polls warm-tier drives 24× and hot-tier drives 144× a day on purpose, stays inside the RU budget, and treats a 429 as a missed cycle (the bound doubles, then drop-out).
+- **Why not require every group to be Entra-synced:** SharePoint site groups and Jira roles cannot be, so the reconcile is needed anyway.
+- **Why not nightly crawls:** a day of leaks after every revocation.
+
+### Search engine: one hybrid engine with filterable HNSW and in-place updates
+
+- **Choice:** one engine for keyword and vector search, with the ACL field indexed before the HNSW graph is built, an exact scan below 50,000 permitted chunks, and attribute updates that do not touch the vector.
+- **Why:** both searches take the same filter (G2); 450,000 patches in 90 s need ≥ 5,000 in-place updates a second (G5), which a load test must confirm. The rate buys freshness and full result pages: a revocation is already enforced by the ACL-store re-check.
+- **Why not float32 vectors in memory:** 131.5 GB a replica instead of 32.9; float32 stays on SSD for rescoring.
+
+### Ranking: RRF, a personal ranker, a cross-encoder on 50
+
+- **Choice:** RRF → gradient-boosted personal ranker (160 → 50 in 10 ms) → multilingual cross-encoder (50 → 8 in 120 ms), ≤ 3 chunks a document.
+- **Why:** signals from the people-and-activity store (recency, team views, author in the asker's team, department affinity) lift the right procedure for each team (G1); hand-tuned weights until ≈ 50,000 labelled citation clicks exist, then trained with position-bias correction.
+- **Why not dense only:** SKUs, PO numbers and error codes need keyword matching.
+- **Why not an LLM reranker:** a mid-size call on every turn, ≈ 400 ms (illustrative), against 120 ms.
+
+### Router and workflows: a small model with a JSON schema, fixed workflows for known shapes
+
+- **Choice:** one small-model call labels the path, picks the bundle and any live search, and rewrites follow-ups (≈ 300 ms, 0.000058 USD); first turns start retrieval on the raw message in parallel.
+- **Why:** 95% of turns have a known shape (G4, P3); the sensitive path has ≈ 215 ms of headroom, and a 600 ms router would put it at ≈ 1,585 ms, over the 1,500 target (G3).
+- **Why not one agent for everything:** six model calls where one suffices; a typed write plus a card reaches the card in ≈ 2.45 s and is testable on the simulator, while an agent's path is chosen at run time and harder to bound (G10, N7).
+- **Later, Agent2Agent (A2A):** calling a system's own agent is accepted for read questions where it applies rules we would otherwise copy (HR leave); its output counts as external content and any write it proposes returns as our card.
+
+### Tools: entitlement-class bundles for lookups and writes, tool search in the agent
+
+- **Choice:** 31 cached bundle prefixes (entitlement classes × connectors); tool search over entitled tools only in the agent; definitions pinned by hash and re-tested on change.
+- **Why:** choice degrades past 30–50 tools (vendor guidance, as of November 2026), a warehouse picker never sees an ERP tool, and shared prefixes keep caches warm (G7); within a class the gateway refuses what the user's own rights do not allow.
+- **Why not all 106 tools:** cached they cost only 0.0067 USD a call, so cost is not the reason; tool choice past 30–50 tools, attention spread over a 67,086-token prefix, and per-user tool lists that break the shared cache are.
+- **Why not tool search everywhere:** an extra model step on every lookup, ≈ 600 ms (G3); lookups and writes are 23% of turns and have a known shape.
+- **Why not code execution over MCP:** a sandbox holding private data with an outbound channel is the "lethal trifecta" (private data, untrusted content, a way out).
+
+The figure puts the three prefixes on one scale.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/tool-loading" stepper caption="Cached, loading every tool is cheap; the reason not to is choosing among 106 tools, so routed turns get one bundle and only the agent searches." />
+
+- **How to read it:** bar 1 is all 106 tools (3,486 stable + 63,600 of definitions), bar 2 one bundle for lookups and writes, bar 3 the agent's search prefix plus two searches.
+- **The numbers:** all 3,486 + 106 × 600 = 67,086; bundle 3,486 + 7,067 = 10,553 (84% fewer); search 3,486 + 500 + 2 × 1,800 = 7,586 (89% fewer). The vendors' own savings (85% for tool search, 98.7% for code execution) each come from one example setup, not a benchmark.
+
+### Run as the user: delegated tokens through a broker
+
+- **Choice:** on-behalf-of tokens for Microsoft Graph; per-user OAuth with admin pre-consent where the source allows; write scopes on the first write; Enterprise-Managed Authorization (ID-JAG) once the sources support it.
+- **Why:** a delegated token cannot read beyond the user (G2, P11); tokens are audience-bound and never passed through.
+- **Why not ID-JAG now:** it would remove standing refresh tokens and per-user consent, but it is an IETF draft as of November 2026.
+- **The exception:** the WMS has no per-user OAuth, so it runs through a service account behind our check of the user's warehouse role and site, with its own persona suite.
+
+### Tiers by audience, egress at execution, dedupe per tool
+
+- **Choice:** T0 reads, T1 the user's own item, T2 named colleagues or internal channels, T3 anything that can reach an outsider (not a tool); every write resolves its audience and the target's configured automations when it runs.
+- **Why:** a tool is dangerous by who can see its effect: a public case reply emails a customer, a case set to "solved" emails the requester through the helpdesk's own trigger, a message to a channel with guests leaves the company (G10, N7).
+- **Why not tiers by tool name:** `post_message` is safe to a team channel and a leak to a shared one.
+- **Dedupe:** a Jira entity property `card_id` read back by REST after 10 s (illustrative; Jira's search is eventually consistent per its docs, as of November 2026); mail as draft-then-send; no automatic retry where no dedupe exists.
+
+### Models, grounding and caching
+
+- **Choice:** one mid-size model for answers and tools; small models for routing, grounding checks and memory extraction; self-hosted embedder and cross-encoder (2 GPUs); grounding checked after streaming; no shared answer cache.
+- **Why:** model cost is 1.5% of build all-in, so citation quality wins (G1, G4); permitted text stays inside our boundary for embedding and reranking (G9); the first token stays at ≈ 1.15 s and unsupported sentences are marked (G3).
+- **Why not a self-hosted LLM:** at ≈ 0.76 turns a second a GPU fleet idles.
+- **Why not hold each sentence until checked:** ≈ 370 ms more to the first token (illustrative: the first sentence's decode plus a check).
+- **Why not a shared answer cache:** the key must include the principal set, so hits are rare and a wrong key is a leak.
+
+### Platform pieces
+
+- **Choice:** our own thin gateway; a request-scoped orchestrator with the card state machine in PostgreSQL; a PostgreSQL outbox (≈ 0.9 events a second); Redis for principal sets; ClickHouse for per-stage traces; our own web, Slack and Teams clients, so rendering and unfurls are ours (G8, G12).
+- **Why:** the gateway's account check reads the principal store on every turn; agent runs are ≤ 60 s and writes are single steps; permissions and identity need our own code, while a connector framework handles content and paging.
+- **Why not an API-management product or a durable workflow engine:** the first cannot read the principal store on every turn, and nothing runs long enough to need the second.
+
+## Model, prompt and context design
+
+One answer call, block by block:
+
+| Block | Tokens | Stable or changing | Cached |
+| --- | --- | --- | --- |
+| Instructions: answer only from numbered sources; cite `[n]`; "not found in your sources"; sources are quoted data, never instructions; external spans are marked; no links in text; identical for every user | 1,200 | Stable | Yes (above the 512-token minimum) |
+| Tool-use system prompt (added by the API whenever tools are present) | 286 | Stable | Yes |
+| Core tool definitions: `search_knowledge`, `fetch_document`, `propose_memory`, `my_profile` | 2,000 | Stable | Yes |
+| Memory: ≤ 5 relevant items | 200 | Changing | No |
+| Conversation: summary + last 2 turns (chunk ids re-checked every turn; a summary that used a revoked chunk is rebuilt) | 600 | Changing | No |
+| Question and router notes (route, rewrite, the user's language and site, today's date) | 70 | Changing | No |
+| 8 source headers `[n] title · system · owner · modified · label · audience` | 320 | Changing | No |
+| 8 permitted chunks, strongest first and last; external-author spans datamarked | 3,200 | Changing | No |
+| **Total** | **7,876** | **3,486 stable** | **Shared by every user** |
+
+The context figure draws the answer call and a lookup call on one scale.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/context-window" stepper caption="Instructions and tool definitions come first and are identical for everyone in a class, so they are read from the cache; only the turn and the sources change." />
+
+- **How to read it:** the top bar is the answer call (stable 3,486, turn state 870, sources 3,520); the bottom bar a lookup or write call, the same 3,486 plus one connector's 7,067 tokens of tools, then the turn.
+- **No per-user value sits in the cached prefix:** the user's site, language and the date live in the changing block, so one prefix serves everyone in a class.
+
+**The numbers:**
+
+- Answer call: 3,486 × 0.10 + 4,390 × 2.00 + 250 × 10.00, per million = 0.0116 USD, against 0.0183 uncached: the cache saves 36%.
+- The 4,390 changing tokens are plain input, since nothing reads them back; a lookup writes its 870-token turn to the 5-minute cache because its second call re-reads it. The 31 bundle prefixes sit on the 1-hour cache (≤ 964 USD a month of writes).
+
+| Stage | Model | Why |
+| --- | --- | --- |
+| Router | Small (Claude Haiku 5.5 class), JSON schema, 800-token cached prefix | ≈ 300 ms (illustrative); 0.000058 USD |
+| Embeddings | Multilingual sub-1B, 1,024-dim, INT8 | English, Polish and Romanian in one space; self-hosted |
+| Personal ranker | Gradient-boosted trees | 10 ms over 160 candidates |
+| Cross-encoder | Multilingual sub-1B | 120 ms for 50 chunks (21,500 tokens; the GPU class is illustrative) |
+| Injection screen | Multilingual sub-1B, on use (25 ms) and at index time | Email and Slack are never indexed, so on use is their only pass |
+| Answer, tools, agent | Mid-size (Claude Sonnet 5.5 class) | Tool use and cited synthesis |
+| Grounding check | Small, after the answer | 0.000427 USD |
+| Memory extraction | Small, once a conversation | 0.00023 USD |
+| Offline judge | Mid-size, in a restricted evaluation enclave | Gold sets and 2% of production turns |
+
+- **Structured outputs:** the router, the grounding check and memory extraction return JSON against a schema; a parse failure routes to the plain answer path, skips the memory proposal, or marks the answer unchecked. The tool gateway validates every call against its schema before anything runs; a model-written amount, recipient or project outside the user's entitlements is refused, not corrected.
+
+## Latency and cost budget
+
+The waterfall puts the indexed answer, the live-check overlap, the live search, a lookup, a write and the agent side by side.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/latency" stepper caption="The live check runs alongside the cross-encoder, so a sensitive answer costs about 140 ms, not 260; a live Slack or mail search costs about 735 ms, which is why it has its own target." />
+
+- **How to read it:** each bar is one stage at its start time on a shared millisecond axis; step 2 adds the live-check row under the cross-encoder, step 3 the live search and mail bodies, and steps 4 and 5 move the lookup, write and agent to their own scales.
+
+**The numbers:** p50 in ms; a 600 ms first token (a 7,876-token prompt; 400 ms is the site's figure for a short one) and 80 tokens a second are illustrative for a mid-size model behind an API.
+
+| Stage | Indexed answer | + live check (30%) | + live Slack or mail search (30%) |
+| --- | --- | --- | --- |
+| Edge, auth, account status, principal set | 0 → 20 | 0 → 20 | 0 → 20 |
+| Router (small); `status` | 20 → 320 | 20 → 320 | 20 → 320 |
+| Embed query | 320 → 335 | 320 → 335 | 320 → 335 |
+| Filtered search (40), or live search (500) with it in parallel | 335 → 375 | 335 → 375 | 335 → 835 |
+| Mail bodies, slowest of 3 | | | 835 → 1,110 |
+| ACL-store re-check | 375 → 380 | 375 → 380 | 1,110 → 1,115 |
+| Personal ranker (160 → 50); live checks start | 380 → 390 | 380 → 390 | 1,115 → 1,125 |
+| Cross-encoder (50 → 8); `sources` | 390 → 510 | 390 → 510 | 1,125 → 1,245 |
+| Residual wait for the live checks (slowest of 3 ≈ 260 from 390) | | 510 → 650 | |
+| Injection screen on use, context assembly | 510 → 545 | 650 → 685 | 1,245 → 1,280 |
+| **First token** (7,876-token prompt, 3,486 cached) | **≈ 1,145** (N3 ≤ 1,500) | **≈ 1,285** | **≈ 1,880** (N3 ≤ 2,200) |
+| 250 tokens at 80 a second | ≈ 4,270 | ≈ 4,410 | ≈ 5,005 |
+
+- **p95 by root-sum-square of stage spreads** (edge 150, router 200, search 60, cross-encoder 40, live wait 221, first token 600, decode 781, live search 700, mail bodies 198; the rest ≤ 10): answer first token ≈ 1,799 ms (N3 ≤ 2,500), with a live check ≈ 1,975, with a live search ≈ 2,856 (≤ 3,500), both ≈ 3,020; complete ≈ 5,289 ms p95 indexed, 5,452 with a live check (N3 ≤ 7,000); ≈ 6,255 and 6,414 with a live search (≤ 7,500).
+- **Stage-sum bounds** are 2,230, 2,591, 3,802 and 4,163 ms, so the live-search paths meet p95 only if tails are independent. With the router, first token and decode added linearly (one provider) every path still meets N3 except live search plus a live check (≈ 3,595 ms first token against 3,500, ≈ 7,502 complete against 7,500), which is gated on the 5,000-turn replay.
+- **Live checks:** at most 4 a sensitive answer, deadline 500 ms; 1.3% of checks miss it, so 3.8% of sensitive answers lose one of their ≈ 3 chosen sensitive documents (N1 ≤ 5%); 5.0% while a drive re-enumerates. The normal fit understates right-skewed APIs, so the measured p99 replaces it after launch.
+- **Lookup:** edge 20 + router 300 + first token 600 + 60-token call 750 + broker 5 + tool 300 + second first token 500 = **2,475 ms** (p95 ≈ 3,707, N3 ≤ 5,000). Write: 20 + 300 + 600 + 120 tokens 1,500 + schema, entitlement, audience and policy 30 = **2,450 ms** to the card (p95 ≈ 3,201); the confirm is a new request: 20 + 5 + write 400 + template 10 = **435 ms** (p95 ≈ 1,545).
+- **Agent:** 20 + 300 + 6 × 600 + 560 tokens 7,000 + 3 tools × 300 + 2 tool searches × 30 = **11,880 ms** p50 and ≈ 14,658 p95 (N3: 15 s p50, 30 s p95); hard stop at 60 s.
+
+<Callout tone="red" title="What breaks">
+  Put a 600 ms router in front of retrieval and the live-check path reaches ≈ 1,585 ms at p50, over its 1,500 target. First turns need no rewrite, so they start retrieval on the raw message in parallel with the router; follow-ups wait for the rewrite.
+</Callout>
+
+
+| Lever | Saves | Costs you |
+| --- | --- | --- |
+| Bundles instead of all 106 tools on lookups and writes | ≈ 0.0021 USD a turn (56,533 fewer cached tokens a call); better tool choice | 31 cached prefixes; a router that picks the bundle |
+| Prefix caching | Answer call 0.0116 instead of 0.0183 USD (−36%) | The prefix must be identical for everyone in a class |
+| Small model for answers | ≈ 0.5 USD a seat a month | Worse citations and tool use |
+| 8 → 5 chunks | 1,320 tokens ≈ 0.0026 USD an answer | Recall on multi-part questions |
+| Buy a seat product instead | ≈ 81,500 USD a month at Brightpost's size | Staleness, link and label handling, rendering and egress become the vendor's, to be tested, not designed |
+
+## Evaluation and release gates
+
+| Offline set | Size | Source | What it checks |
+| --- | --- | --- | --- |
+| Gold set | 1,200 questions | Consented, redacted real questions with reference answers and gold documents: support 300, warehouse 300 (100 in Polish and Romanian), finance 200, general 400 | ≥ 85% correct (± 2.0); slices (support and warehouse ± 4.0, finance ± 4.9, general ± 3.5) must not be lower in a paired test. The 100 Polish and Romanian questions (± 7.0) gate only drops of about 10 points, so they grow to 300 before the warehouse rollout |
+| Filtered recall | Per persona | Filtered search against an exact scan of the same permitted set | recall@100 ≥ 95%; the warehouse persona, which sees ≈ 6% of chunks, is the hard case |
+| Permission suite | 14 personas × 400 probes = 5,600 | 600 canary documents: restricted spaces, Confidential and encrypted files, unredeemed org links, search-hidden sites, helpdesk cases, private Slack channels | 0 canaries retrieved, prompted, quoted or summarised |
+| Revocation, membership and deletion canaries | ≈ 210 a day | Every 15 min in working hours for each of four connectors (Confluence and Jira as one), 50 at night; queried every 15 s until gone | p50, p99 and max lag per path, with sample sizes |
+| ACL drift audit | 10,000 (document, user) pairs a day, stratified (illustrative): 5,000 from audited retrievals (pairs the index allowed), 2,000 documents changed in the last day, 2,000 Confidential or labelled files, 1,000 movers and leavers | Compared with the source's own effective permission | Any mismatch pages; bounds reported per stratum (0 in 35,000 retrieval pairs a week bounds that stratum at 0.0086%) |
+| Injection suite | 700 cases | Seven egress families × 100 (public case reply, portal comment, guest channel, external mail list, bare URL to unfurl, insider recipient, an outbound automation), plus translated and encoded variants | 0 followed |
+| Action simulator | 400 scenarios × 4 runs | Sandbox copies of the systems with end-state checks | pass^4 ≥ 85% (± 3.1), not lower than the last release; 0 writes without a card; 0 duplicates under injected timeouts |
+| Router | 1,000 labelled turns | Confusion matrix | Misroutes ≤ 5%; recall on "needs Slack or mail" ≥ 95% |
+| Grounding | Every gold answer | A mid-size judge marks unsupported sentences, calibrated on 200 human-labelled answers a quarter (kappa ≥ 0.7) | ≥ 95% supported |
+
+- **Personas:** picker, shift lead, support agent, support lead, AP clerk, controller, HR partner, engineer, contractor, new joiner, leaver mid-day, mover from support to warehouse, "email reused by a new hire", "Atlassian or Slack account not linked". Canaries measure the typical lag and catch regressions; the bound itself is enforced by drop-out.
+
+One failing check blocks the release, however well the others pass.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/release-gate" caption="One leak in 5,600 probes blocks the release, however good the other seven checks are: the permission suite gates at zero." />
+
+- **How to read it:** a release candidate (a new prompt and ranker) fans out to eight checks; seven pass, and the permission suite fails on one org-linked file the persona never redeemed, so the result is Block: fix the org-link grant. The measured values drawn are illustrative.
+
+**The numbers:**
+
+- Zero leaks in n probes bounds the leak rate at 3 ÷ n at 95%: 3 ÷ 5,600 = 0.054% per probe **for these personas and canaries**, not a production leak rate.
+- Drift: there are 6.0M × 5,000 = 30B (document, user) pairs, so a uniform sample sees almost nothing structural: a 40-member group mapped wrongly on 2,000 documents (80,000 pairs) shows up in a week of 70,000 uniform draws with probability 1 − e^(−70,000 × 80,000 ÷ 30B) ≈ 17%.
+- So the sample is stratified, and a bug touching 1 in 10,000 retrieved pairs is seen within a week of 35,000 retrieval-stratum draws with probability 1 − e^(−3.5) ≈ 97% (illustrative); structural mapping bugs are caught first by the persona suite and canaries, and the drift rate bounds only aggregate drift.
+- Injections: 0 of 700 bounds following at 0.43% overall but only at 3% for any one 100-case family, which is the number that matters for a new channel.
+- The gold set at 85% on 1,200 questions has a ± 2.0-point interval, so the gate is a paired comparison with the last release, not a raw threshold; p95 per path is gated on a 5,000-turn replay and cost a turn within 10%.
+
+- **Online:** thumbs; "wrong source"; "I can't open this source"; not-found rate per department and language; card confirm, cancel and withdraw rates; tool 403s; live-check drops; budget used and staleness per connector.
+- **Rollout:** an oversharing scan first; then read-only answers on two sources, all sources, lookups, T1 writes, T2 writes, the agent, each behind its gate; impact is measured by a stepped-wedge rollout by site (each warehouse site and office team joins in a random order), comparing tickets to IT and HR, time to answer and the not-found rate with sites not yet on.
+
+## Safety and guardrails
+
+- **Oversharing, continuously:** a widening share on a Confidential or pattern-matched file holds it at once until the owner reviews; every source's widest principals ("Everyone except external users", open spaces, "anyone logged in" projects) are scanned weekly.
+- **Org-wide links in numbers:** 6% of SharePoint files carry one (144,000); each counts only for its redeemers, and 3% of those (4,320) are Confidential or pattern-matched and held even for redeemers until reviewed (illustrative).
+- **The rule:** the assistant may be stricter than the source, never looser than the source's own search.
+
+| Threat | Where it enters | Control | Code or prompt |
+| --- | --- | --- | --- |
+| Retrieval of a document the user cannot open | Index | Principal set inside both searches; deny wins; fail closed; one retrieval service | Code |
+| Looser than the source | Org links, search-hidden sites, labels | Redeemers only; search exclusions honoured as permission events; encrypted files not indexed; labels applied later on the permission topic; highest label on answers | Code |
+| Cross-system identity mismatch | Connectors | Immutable Entra ids via SCIM or SSO; unmapped grants dropped; guests excluded; personas in the suite | Code |
+| Stale permission or an unapplied delete | Connector lag | Dirty in 1 s; priority topic; budgeted polls; live checks; drop-out; canaries and drift audit | Code |
+| Leak through derived text | Summaries, last turns, memory | Turns keep chunk ids with `acl_version`, re-checked every turn (≈ 5 ms) and redacted or rebuilt after a revocation or delete; memory holds only the user's own words | Code |
+| Crawler or broker credential misuse | Ingestion, token broker | `Sites.Selected` allow list on a separate segment; the broker mints only for the session's own user, short-lived, sender-constrained where supported | Code |
+| Indirect injection | Email, case text, shared documents, Slack, invites | All email and customer text marked external; datamarking; multilingual screen on use | Code + prompt |
+| Exfiltration through output | Rendering | Plain text and chips; links, bare URLs and domains stripped; unfurls off; no images in Teams cards | Code |
+| Exfiltration through a write | Tools | Audience and automations resolved at execution; outsider-reachable effects are T3, not tools; a mail transport rule blocks the app's external mail; the card shows audience, label and provenance | Code |
+| Insider or compromised internal recipient | T2 messages | Exact recipients on the card; per-user write limits; alert on many label-carrying messages | Code |
+| Tool poisoning or a changed MCP server | Tool definitions | Definitions pinned by hash; changes re-reviewed and re-tested | Code |
+| Memory poisoning | Memory | Chips only; span check on the user's own typing (pasted and quoted blocks excluded); the user's Save is the last control; `forget` confirmed in the UI; audited | Code |
+| Sensitive data typed into chat | Input | Input DLP redacts card numbers, bank details and customer identifiers before storage and the model | Code |
+| Employee-monitoring data | Audit | Privacy impact assessment and works-council consultation; question text 30 days, ids 365; "what did Priya ask" is need-to-know and audited | Process + code |
+| Leaver or mover | Identity | Disabled → refused ≤ 5 min at our gateway (Microsoft resources also apply continuous access evaluation, up to 15 min, as of November 2026); vault tokens revoked; principal set re-resolved; handhelds sign out at shift end | Code |
+
+## Deep dives
+
+### Permission propagation end to end
+
+- **Two kinds of change:** a document's ACL lives on its chunks, so it needs a patch; a membership lives in the principal store, so it needs no chunk rewrite.
+- **Three clocks per path:** the typical lag (events), the bound while polls succeed (10 or 60 min, doubled by one throttled cycle), and the drop-out age, the only hard bound (30 min on hot-tier sites, 150 elsewhere).
+- **The budget decides the bound:** SharePoint allows 2.4M RU a day per app, so the poll cadence is a budget line, not a preference.
+
+The figure follows one revocation down four paths and then spends the SharePoint day.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/permission-propagation" stepper caption="Events make a revocation effective in about 35 seconds; budgeted polls bound it at 10 or 60 minutes while they succeed, and a site that cannot prove its bound drops out of the results." />
+
+- **How to read it:** lane 1 is the event path, lane 2 a lost event caught by the hot-tier poll, lane 3 a throttled poll and the drop-out, lane 4 a site-group removal caught by the next reconcile; the bar below spends the SharePoint day.
+
+**The numbers:**
+
+- Event path: notify 30 (illustrative; Graph states an average under 1 min and a maximum of 6 h) + queue 1 + fetch 2 + map 0.1 + patch 1 + refresh 1 ≈ 35 s; dirty 1 s after the notification lands. The revocation is enforced once the ACL store is written, about a second before the index refresh, because every retrieval re-checks it.
+- Budget: 139,200 (events, fetches, downloads) + 228,000 (polls) + 432,000 (site groups, at an illustrative 4 RU a call: the line to measure first) + 44,700 (live checks and drift) = 843,900 RU, 35%; reserve 650,000 (27%) covers a 624,000-RU re-enumeration in ≈ 7 h.
+- Atlassian: ≈ 69,700 of 219,000 Tier 2 points an hour (32%); without Tier 2 the shared 65,000-point Tier 1 pool cannot carry the hourly reconcile. Entra group membership ≈ 2.5 min p50, ≤ 5 min.
+
+<Callout tone="red" title="What breaks">
+  A delta token can come back 410, and then the drive's changes are unknown until it is re-enumerated. That drive's chunks switch to live checks (at most 4 a turn, 5.0% of those answers lose a document) for up to ≈ 7 h, paid from the reserve.
+</Callout>
+
+### Worked example: the pay-band file
+
+1. 09:12: an HR partner shares "FY27 pay bands" with an org-wide link; three HR partners redeem it. The site is in the hot tier (Confidential) and the share widens access, so the file is held at once: even the redeemers do not see it in the assistant until the owner reviews.
+2. Without the hold (an unlabelled file), only the three redeemers could retrieve it; Tom, who never opened the link, cannot, which matches the source's own search.
+3. 10:00:00: the owner removes the link. The notification arrives ≈ 10:00:30 → dirty at 10:00:31 → effective ACL fetched at 10:00:33 (5 RU) → 9 chunks patched at 10:00:34 → visible to the index at 10:00:35.
+4. If the notification is lost, the hot-tier poll (1 RU a call) sees it by ≈ 10:10:05; if that cycle is throttled, ≈ 10:20; after 30 min without a successful reconcile the site drops out of results.
+5. Audit: "who retrieved it between 09:12 and 10:00:35" is a query over chunk ids with `acl_version`, joined to principal sets by validity interval, which also names the grant that admitted each retrieval.
+
+### Acting as the user, inside the company
+
+- **Tiers by audience:** T0 reads seen only by the user (no card); T1 the user's own item (card, withdrawable within 10 min); T2 named colleagues or internal channels (card with exact payload, audience and label); T3 anything an outsider can see or that cannot be undone (not a tool, only a link to the system's own screen).
+- **Automations count as audience:** case statuses are limited to internal-only ones, and Jira transitions run only in allow-listed projects verified to have no outbound automation.
+
+The figure draws the tiers, then Tom's ticket from the router to Jira.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/action-tiers" stepper caption="A tool’s tier comes from who can see its effect, checked when it runs; Tom’s ticket is created once, as Tom, after he confirms the card." />
+
+- **How to read it:** the top is T0–T3 by audience; then Tom's ticket for WH-LEEDS: router, Jira bundle, gateway checks (schema, entitlement, audience), step-up consent on his first write, the card, his confirm, his delegated token, and WH-1182 created once with `card_id = c_51e`.
+- A timeout waits 10 s (illustrative) and reads Tom's recent issues by REST before any retry; a supplier email asking for a public reply on case 4471 can produce at most an internal case note, because public replies are T3.
+
+**The numbers:**
+
+- 8% of turns are writes: ≈ 1,150 cards a weekday, each 0.00400 USD of model cost; card at ≈ 2,450 ms p50 (p95 ≈ 3,201), done ≈ 435 ms after confirm (p95 ≈ 1,545).
+- Jira's audit shows Tom and our app's client id; our audit holds the card, its provenance and the confirm.
+
+### In practice: when buying a seat product is the better call
+
+- **Build and run this design:** 9 engineers (300,000) + infrastructure 15,135 + model 4,777 ≈ 320,000 USD a month ≈ 64 a seat; the team is 94%.
+- **A mixed purchase:** 2,000 knowledge-worker seats at 25.5 (a 30 USD list price as of November 2026, less an illustrative 15%) + warehouse staff on the free chat with metered agents (2–30 credits a turn: 2 for a grounded answer at 2025 launch prices, the upper end illustrative), assuming their licences include the free chat, + 5 engineers for Brightpost's own tools, identity and vendor tests + their infrastructure ≈ 238,000 a month (223,000–254,000) ≈ 48 a seat. The 21 USD business tier is capped at 300 seats (partner pages, as of November 2026), so it is not an option.
+- **Data residency decides neither:** both send prompts to a model provider, so name its region in the contract.
+
+The curve plots the monthly cost of building against the size of the build team.
+
+<AnimatedDiagram spec="animated/enterprise-assistant/build-vs-buy" stepper caption="The team, not the model, decides build or buy: building pays for itself only if it needs fewer than about 6.6 engineers, or above about 5,200 seated knowledge workers." />
+
+- **How to read it:** the violet line is building with 4 to 12 engineers, the flat teal line the mixed purchase with its dashed range, the drop the crossing and the marker this design's 9 engineers; all values are illustrative.
+
+**The numbers:**
+
+- Crossing: (238,400 − 4,777 − 15,135) × 12 ÷ 400,000 per engineer-year ≈ 6.6 engineers; at 9, building costs ≈ 81,500 a month more.
+- Seats: building's fixed extra (300,000 + 15,135 − 166,667 − 3,500 − 17,280 ≈ 127,700 a month) ÷ (25.5 − 0.96 USD a seat) ≈ 5,200 seated knowledge workers.
+- **Both options build the WMS and helpdesk tools,** so the case for building is control and proof of per-path staleness, org links, labels and egress, or selling to many companies; buying needs the same outcome tests run on the vendor.
+
+## Design decisions and why
+
+| Decision | Options considered | Choice | Decided by | What we give up | Revisit when |
+| --- | --- | --- | --- | --- | --- |
+| Binding | Early; late; per source | Early for indexed sources, live search for Slack and mail, live checks for sensitive and dirty documents | G2, G3, N4 | ≈ 140 ms on 30% of answers; ≈ 735 ms on 30% for live search | Sources publish bounded change feeds |
+| Org-wide links | Everyone; redeemers; drop | Redeemers; dropped if they cannot be listed | G2, N2 | Some legitimate answers missing | Never |
+| Encrypted files | Super-user decryption; exclude | Exclude; not available to the assistant | G9 | Encrypted policies cannot be used in answers | A rights-aware retrieval API exists |
+| Poll cadence | 10 min everywhere; tiered | hot tier 10 min, warm tier hourly, live checks for the rest; a deliberate departure from Microsoft's at-most-daily safety-net guidance, inside the RU budget | G5, N4 | A 60-min bound outside the hot tier | Budgets grow or events become reliable |
+| Slack | Index it; search it live | Live search as the user | G6, G9 | ≈ 735 ms on those answers; ≈ 5.5% of peak minutes overflow the rate floor | Real-time Search limits drop Slack from ≥ 5% of peak answers |
+| Tool loading | All; search everywhere; bundles + agent search | Entitlement-class bundles; search only in the agent | G7, G3 | 31 prefixes to keep warm | Models choose well among 100+ tools |
+| Write audience | By tool name; by resolved audience | Resolved at execution; outsider-reachable = T3, not a tool | G10, N7 | Some useful public replies | Never |
+| Identity join | Email; immutable ids | Entra object id via SCIM or SSO | G2, N2 | Unlinked accounts get nothing from that source | Never |
+| Memory | None; inferred; explicit | Explicit; the model only proposes | G9, N9 | Less personalisation | Inferred memory becomes correctable |
+| Build or buy | Build this design; buy a seat product; buy and add our own tools | Build (the system on this page) | The interview question; control and proof of staleness, links, labels and egress | ≈ 81,500 USD a month more than a mixed purchase | A product passes the outcome tests on our own canaries |
+
+## Principles and patterns used
+
+### GenAI principles
+
+| Principle | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [P2 Ground before you generate](/genai-system-design/case-studies/design-principles#p2-ground-before-you-generate) | Answers only from the 8 permitted chunks; "not found in your sources" | A confident answer from the model's memory is wrong about this company ([RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)) |
+| [P3 Route by difficulty](/genai-system-design/case-studies/design-principles#p3-route-by-difficulty) | Router: answer, lookup, write, agent, other | 95% of turns avoid the agent ([Multi-Model Routing & Fallbacks](/ai-system-design/genai-system-design/multi-model-routing-fallbacks)) |
+| [P7 Cache at every layer and keep the prefix stable](/genai-system-design/case-studies/design-principles#p7-cache-at-every-layer-and-keep-the-prefix-stable) | 31 shared prefixes; per-user text after them | −36% on an answer call ([Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)) |
+| [P8 Manage context deliberately](/genai-system-design/case-studies/design-principles#p8-manage-context-deliberately) | Bundles, tool search, 8 chunks at ≤ 3 a document | 67,086 tokens of tools would crowd out evidence ([Context Engineering](/ai-system-design/genai-system-design/context-engineering)) |
+| [P10 Enforce rules in code, not in the prompt](/genai-system-design/case-studies/design-principles#p10-enforce-rules-in-code-not-in-the-prompt) | The filter, redeemers, audience checks, cards, link stripping | "Do not reveal confidential data" in a prompt is not access control ([Access Control & RBAC](/ai-system-design/genai-system-design/access-control-rbac)) |
+| [P11 Run as the user](/genai-system-design/case-studies/design-principles#p11-run-as-the-user) | Principal set inside retrieval; delegated tokens; live search as the user | The crawler sees everything; each person must see only their share ([Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy)) |
+| [P12 Bound the blast radius of actions](/genai-system-design/case-studies/design-principles#p12-bound-the-blast-radius-of-actions) | Tiers by audience, cards, T3 not tools, dedupe, agent caps | A wrong write reaches people; an external one leaves ([Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals)) |
+| [P13 Treat retrieved content as untrusted](/genai-system-design/case-studies/design-principles#p13-treat-retrieved-content-as-untrusted) | All email external, datamarking, on-use screen, egress rules | Injection arrives in email, cases, documents and Slack ([Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks)) |
+| [P14 Carry provenance](/genai-system-design/case-studies/design-principles#p14-carry-provenance) | `[n]` citations to the source and its version; card actions logged with the user | An employee must check a policy before acting on it ([Hallucination Mitigation](/ai-system-design/genai-system-design/hallucination-mitigation)) |
+| [P16 Evaluate continuously and degrade gracefully](/genai-system-design/case-studies/design-principles#p16-evaluate-continuously-and-degrade-gracefully) | Permission suite, canaries, drift audit, drop-out | Staleness and drift are measured, and a stale connector leaves ([Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation)) |
+| [P17 Keep sensitive data inside a boundary](/genai-system-design/case-studies/design-principles#p17-keep-sensitive-data-inside-a-boundary) | Label-encrypted files not indexed; a widening share on a Confidential file held until the owner reviews | Pay, customer and supplier data sit in the same sources ([Data Privacy & PII Handling](/ai-system-design/genai-system-design/data-privacy-pii-handling)) |
+
+### System design patterns
+
+| Pattern | Where in this design | Why it is needed here |
+| --- | --- | --- |
+| [Transactional Outbox and Change Data Capture](/system-design/patterns/outbox-and-cdc) | The permission and content topics | ACL changes must reach the index in order, once per `acl_version` |
+| [Idempotency](/system-design/patterns/idempotency) | Card ids, Jira `card_id`, mail draft-then-send | A timed-out write must not run twice |
+| [Rate Limiting](/system-design/patterns/rate-limiting) | Per-source budgets, per-user write limits | 2.4M RU a day and 219,000 points an hour are hard ceilings |
+| [Bulkheads, Shuffle Sharding and Cell Architecture](/system-design/patterns/bulkheads-and-cell-architecture) | One pool and budget per connector | One throttled source cannot stall the others (N8) |
+| [Tail-Latency Hedging, Deadlines and Degradation](/system-design/patterns/tail-latency-and-degradation) | 500 ms live-check deadline; drop-out | A slow source drops a document, not the answer |
+| [Sharding and Partitioning](/system-design/patterns/sharding) | 4 shards × 2 replicas by `doc_id` | 55.6 GB a replica and 450,000-patch bursts |
+
+## Same design, other systems
+
+| If the interviewer asks for… | What stays the same | What changes |
+| --- | --- | --- |
+| Sold to many companies (multi-tenant) | Everything, per tenant | Tenant id from the token only; a namespace per tenant (an index per large or regulated one); per-tenant keys, connectors, budgets and token vaults; a cross-tenant probe suite |
+| A customer-facing support assistant | Retrieval, tiers, cards | The customer is the principal; money behind a policy service: [Customer Support Agent](/genai-system-design/case-studies/customer-support-agent) |
+| 100,000 employees, 100M documents | Binding, sync design, tiers | ≈ 10× the index at today's mix (17× if everything is indexed); per-app source budgets grow far less, so more sources move to live checks or live search; per-region deployments |
+| Search only, no chat | Index, filter, ranking, sync | No answer model, router or tools |
+| A regulated bank or hospital | All controls | More sources late-bound; in-region models; full answer text kept under the records regime |
+
+## How real systems do it
+
+- **2024–2026, Glean:** mirrors each source's ACLs and identities and evaluates them before returning results, runs agents as the triggering user, and ranks with popularity, people connections and department affinity; its documented defaults run from 2 minutes (Salesforce cases) to days for full crawls, which Glean calls defaults, not guarantees.
+- **2025–2026, Microsoft 365 Copilot:** surfaces only content the user can at least view; an org-wide link does not put a file in search until it is redeemed (Microsoft's sharing documentation, as quoted by Office365ITPros in 2024; the suite's unredeemed-link canaries test it); Microsoft's deployment guidance starts with fixing oversharing. A 2024 Gartner survey (reported by Computerworld) found 40% of 132 IT leaders delayed rollouts by 3 months or more over oversharing.
+- **2026, Atlassian Rovo:** drops a connector's results when it cannot confirm permissions are current, and searches Outlook, Gmail and Slack live rather than indexing them; Atlassian moved apps to points-based rate limits in March 2026.
+- **2025–2026, Slack:** cut commercially distributed non-Marketplace apps' history and replies calls to 1 a minute in May 2025 (internal apps keep 50+) and pointed AI apps at its Real-time Search API, renamed in February 2026.
+- **2024–2025, injection in shipped assistants:** PromptArmor showed Slack AI leaking a private-channel secret through an injected link (2024); EchoLeak (CVE-2025-32711, CVSS 9.3) did it to Microsoft 365 Copilot with one email, through link and image rendering (2025).
+- **2025, Anthropic:** tool search and code execution with MCP report 85% and 98.7% token savings, each from one example setup rather than a benchmark.
+- **Where this design differs:** Glean and Copilot index most sources; here Slack and mail are live only and the poll cadence is a budget line, because a single-tenant build must fit each source's published per-app limits; raising them is a request, not a design input.
+
+## Failure modes & pitfalls
+
+- **Webhooks stop or subscriptions expire:** noticed by the per-drive "last event" age; the hot- or warm-tier poll still bounds the lag, and past drop-out the connector leaves results with a banner.
+- **A delta token returns 410:** that drive's chunks switch to live checks (at most 4 a turn; 5.0% of those answers lose a document) and a re-enumeration runs from the 650,000-RU reserve (≈ 7 h for every drive at once).
+- **SharePoint throttles (429 with `Retry-After`):** seen in the budget dashboard; polls pause, live checks continue, and a missed hot-tier cycle stretches its bound to 20 min. A Slack 429 sends the answer without Slack, which says so: ≈ 5.5% of peak minutes overflow with the per-conversation cache (≈ 13% without); fix by asking Slack for the larger-team tier.
+- **A site is re-shared (450,000 patches):** noticed by patch-queue depth; 90 s of in-place updates, with its documents dirty and live-checked meanwhile.
+- **Redis fails:** principal sets are read from PostgreSQL (+ ≈ 150 ms, illustrative: the sensitive path at ≈ 1,435 ms, still under 1,500); if PostgreSQL fails too the turn is refused, never answered unfiltered.
+- **Atlassian does not grant Tier 2:** the hourly reconcile cannot run on the shared 65,000-point pool, so Atlassian paths move to their 150-min drop-out or to live checks until it is granted.
+- **The model provider throttles (≈ 730,000 tokens a minute at peak):** pause the agent, then lookups, then move answers to a second model family that passed the gold set; actions only on a model that passed the simulator.
+
+## Interview framework
+
+1. **Minutes 0 to 5:** users by department, sources, permissions, staleness per source, actions and their audience, one tenant or many, the constraint order.
+2. **Minutes 5 to 10:** numbers: 14,430 turns a weekday, 32.1M chunks, 55.6 GB a replica, 3.32M ACL patches a day, the SharePoint budget, 0.011 USD a turn.
+3. **Minutes 10 to 20:** Steps 1 to 4: baseline, index, identity and the filter, staleness within budgets.
+4. **Minutes 20 to 30:** Steps 5 and 6: router and bundles, run as the user, audience tiers and cards, the agent.
+5. **Minutes 30 to 36:** Steps 7 and 8: memory; injection, egress, evaluation.
+6. **Minutes 36 to 45:** one deep dive: propagation with the pay-band file, acting inside the company, or build or buy; tool loading if the interviewer asks.
+
+**What interviewers listen for:**
+
+- **Mid:** hybrid search, ACLs on chunks, a filter inside the search, citations, a card before writes.
+- **Senior:** binding per source with numbers, rate-limit budgets, identity joins, delegated tokens, egress by audience, bundles against tool search.
+- **Staff:** never looser than the source's search, drop-out, derived-text redaction, build or buy with a real team and a mixed purchase, multi-tenancy.
+
+- **Red flags:** "tell the model not to reveal confidential data"; an org-wide link as "everyone"; a 10-minute poll of everything; matching users by email; "internal recipients only" checked by tool name; loading every tool; memory that learns silently.
+
+## Further reading
+
+- [Security principles](https://docs.glean.com/security/security-principles), [Indexing SDK permissions](https://developers.glean.com/libraries/indexing-sdk/permissions) and [connector refresh rates](https://docs.glean.com/connectors/crawling-refresh-rates) (Glean, 2026)
+- [Data, privacy and security for Microsoft 365 Copilot](https://learn.microsoft.com/en-us/copilot/microsoft-365/microsoft-365-copilot-privacy) and [Semantic index for Copilot](https://learn.microsoft.com/en-us/microsoftsearch/semantic-index-for-copilot) (Microsoft Learn, 2026)
+- [Avoid getting throttled or blocked in SharePoint Online](https://learn.microsoft.com/en-us/sharepoint/dev/general-development/how-to-avoid-getting-throttled-or-blocked-in-sharepoint-online), [Graph change notifications](https://learn.microsoft.com/en-us/graph/change-notifications-overview) and [scanning at scale](https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/scan-guidance); [Continuous access evaluation](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation) and [permissions and consent](https://learn.microsoft.com/en-us/entra/identity-platform/permissions-consent-overview) (Microsoft Learn, 2026)
+- [How connector permissions are kept in sync](https://support.atlassian.com/organization-administration/docs/how-connector-permissions-are-kept-in-sync/) and [Confluence Cloud rate limiting](https://developer.atlassian.com/cloud/confluence/rate-limiting) (Atlassian, 2026)
+- [Rate-limit changes for non-Marketplace apps](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps) (Slack, 2025), [Real-time Search API](https://docs.slack.dev/reference/methods/assistant.search.context/) and [How we built Slack AI to be secure and private](https://slack.engineering/how-we-built-slack-ai-to-be-secure-and-private/) (Slack, 2024)
+- [Advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use), [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp), [Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) and [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) (Anthropic, 2024–2025); [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization), [MCP security best practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices) and [Enterprise-Managed Authorization](https://modelcontextprotocol.io/extensions/auth/enterprise-managed-authorization) (2025–2026)
+- [EchoLeak](https://arxiv.org/html/2509.10540v1) (Reddy and Gujral, 2025), [Slack AI prompt injection](https://www.theregister.com/2024/08/21/slack_ai_prompt_injection/) (The Register, 2024), [Spotlighting](https://arxiv.org/abs/2403.14720) (Hines et al., 2024) and [The lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) (Willison, 2025); [τ-bench](https://arxiv.org/abs/2406.12045) (Yao et al., 2024) and [Filtering in vector search](https://qdrant.tech/articles/vector-search-filtering/) (Qdrant)
+- Related pages: [GenAI Design Principles](/genai-system-design/case-studies/design-principles) · [GenAI Design Interview Framework](/genai-system-design/case-studies/design-interview-framework) · [Access Control & Multi-Tenancy in RAG](/ai-system-design/genai-system-design/rag-access-control-multi-tenancy) · [Data Sources & Connectors](/ai-system-design/genai-system-design/data-sources-connectors) · [Index Freshness & Updates](/ai-system-design/genai-system-design/index-freshness-and-updates) · [Hybrid Search & Re-ranking](/ai-system-design/genai-system-design/hybrid-search-and-reranking) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) · [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching) · [Agent Memory](/ai-system-design/genai-system-design/agent-memory) · [Human-in-the-Loop & Approvals](/ai-system-design/genai-system-design/human-in-the-loop-and-approvals) · [Prompt Injection & Jailbreaks](/ai-system-design/genai-system-design/prompt-injection-and-jailbreaks) · [LLM Platform and Gateway](/genai-system-design/case-studies/llm-platform-gateway)
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What are the main components of an enterprise AI assistant?"
+    category="Architecture"
+    level="Junior"
+    followUps={[
+      { question: "Why keep keyword search when you have vectors?", level: "Mid", answer: "SKUs, PO numbers and error codes are exact strings that embeddings blur, and Polish and Romanian need their own analysers. Both searches take the same principal-set filter, which is why one hybrid engine is used rather than a vector database beside a keyword engine with two filters to keep identical." },
+      { question: "Your first-token target is 1.5 s. Where does the time go, and what does a sensitive answer cost?", level: "Senior", answer: "Edge 20 ms, router 300, embedding, filtered search and re-check 60, rankers 130, screen and assembly 35, model first token 600: about 1,145 ms. The live check overlaps the cross-encoder, so a sensitive answer costs about 140 ms more, not 260, leaving about 215 ms of headroom; that is why a 600 ms router fails (about 1,585) and first turns start retrieval on the raw message. A live Slack or mail search adds about 735 ms, so it has its own target." },
+    ]}
+  >
+  - Build them up by the gap each one closes: a gateway with single sign-on, an orchestrator and a model can chat; connectors, a 32.1M-chunk index and rankers make it answer from company documents.
+  - Identity mapping and an ACL store put each asker's principal set inside the search, because the crawler read everything; permission sync keeps that true, ≈ 35 s by event and 10 or 60 min by budgeted poll while polls succeed.
+  - A router, a tool gateway and a token broker let it look up and act as the user; an agent with tool search takes the 5% of multi-step tasks; memory holds what the user saved; guards, evaluation and audit gate each release.
+  - The trade-off: every part after the first is complexity a demo does not need, so each must earn its place on a gate. The filter is proved by the permission suite (5,600 probes, gate 0), sync by revocation canaries (≈ 210 a day) and the drift audit, and the tool gateway by the action simulator (0 writes without a card); a part with no gate is a part you cannot claim.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you make sure the assistant never reveals documents a user can't access?"
+    category="Failure modes"
+    level="Mid"
+    followUps={[
+      { question: "A file has an org-wide sharing link. Who can the assistant show it to?", level: "Senior", answer: "Only the people who redeemed the link, because the source’s own search does not show it to anyone else (Microsoft’s sharing documentation, as quoted in 2024; the suite’s unredeemed-link canaries test it). If the connector cannot list the redeemers, the grant is dropped; a widening share on a Confidential file is held until the owner reviews." },
+      { question: "How do you know Jira’s user is the same person as the Entra user?", level: "Senior", answer: "Join on an immutable id provisioned by Entra (SCIM externalId, SSO external id, GitHub managed users), never on email, which changes and is reused for new hires. An unmapped grant is dropped and an unmapped user gets nothing from that source; personas such as “email reused by a new hire” test it." },
+      { question: "Why not check every candidate at the source at query time?", level: "Senior", answer: "About 50 checks a turn × 0.49 answers a second at peak is about 25 source calls a second; if only a third were SharePoint permission reads at 5 RU, that alone is about 2,500 RU a minute, the whole per-minute cap. Result pages also come back short whenever checks fail, so live checks are kept for the sensitive few: at most 4 an answer, with a 500 ms deadline." },
+      { question: "You now sell it to many companies. What changes?", level: "Staff", answer: "The tenant id comes from the token only, each tenant gets a namespace (an index of its own if large or regulated), and keys, connectors, source budgets and token vaults are per tenant. A cross-tenant probe suite joins the release gate." },
+    ]}
+  >
+  - Filter before the model reads anything: chunks carry principal ids, the session's principal set (≈ 120 ids) runs inside both the keyword and vector searches, and the ACL store re-checks the survivors in 5 ms. A check on the answer is too late, because the model has already read the text.
+  - Never be looser than the source's own search: org-wide links count only for redeemers, search-hidden sites stay hidden, encrypted files are not indexed, and tools run with the user's delegated token.
+  - Keep it true over time: events apply a revocation in ≈ 35 s, polls bound it at 10 or 60 min while they succeed, sensitive documents are checked live, and a stale connector drops out. Follow-ups and summaries keep their chunk ids and are re-checked every turn.
+  - The trade-off: about 140 ms on the 30% of answers with a live check, and some legitimate answers lost to dropped grants. Verify with 5,600 persona probes against 600 canaries (gate 0, a 0.054% bound per probe for these personas) and a stratified drift audit of 10,000 pairs a day.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you phase the launch?" category="Trade-offs" level="Mid">
+  - Fix oversharing first: scan every source's widest grants and org-wide links (144,000 files here, 4,320 of them Confidential or pattern-matched and held; illustrative), because the assistant turns oversharing into an answer.
+  - Then widen in gated stages: read-only answers on two sources, then all sources, then lookups, then T1 writes (the user's own items), then T2 writes (colleagues), then the agent.
+  - Roll out by site in a random order, the stepped wedge described under business impact, so sites not yet on are the comparison group.
+  - The trade-off is time to value: writes and the agent arrive weeks later, while launching everything at once risks a leak or a wrong external action in week one; in a 2024 Gartner survey (reported by Computerworld), 40% of 132 IT leaders delayed Copilot by 3 months or more over oversharing. A stage is done when its gate passes on production-shaped traffic: permission suite at 0, the gold set not lower in a paired test, and for writes pass^4 ≥ 85% with 0 writes without a card.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How would you measure the assistant's business impact?"
+    category="Evaluation"
+    level="Senior"
+    followUps={[
+      { question: "80% of answers get a thumbs up. Is it working?", level: "Mid", answer: "Not by itself: thumbs come from a self-selected few and reward fluent answers. Use them to find bad answers, and judge impact on outcomes such as tickets to IT and HR and time to answer, compared with sites not yet on." },
+      { question: "Tickets to IT fell 12% on the live sites. How do you know the assistant did it?", level: "Senior", answer: "Count all help-seeking per head (tickets, help-channel Slack questions, HR emails), not tickets alone, because a confident wrong answer also stops a ticket. Watch the hand-off and not-found rates per department and language, and grade a sample of live answers against the gold-set rubric, so lower tickets with lower correctness reads as harm, not value." },
+    ]}
+  >
+  - Measure outcomes, not usage: tickets to IT and HR, time to answer and the not-found rate per department and language, against what the assistant costs, ≈ 64 USD a seat a month all-in to build and run.
+  - Use a stepped wedge: each warehouse site and office team joins in a random order. Each period compares sites that are on with sites not yet on, and period effects absorb company-wide changes (season, an IT reorganisation) that a before-and-after comparison would credit to the assistant.
+  - Pre-register the metrics and the comparison before the first site joins; usage (69.3 turns a seat a month expected) explains adoption, not value.
+  - The trade-off: later sites wait, and power comes from the number of sites, not users, so compute the smallest detectable change in tickets per head from last year's variance per site before promising one. It fails through contamination (movers, shared answers), so assign by site and log cross-site use.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle questions the assistant cannot answer?" category="Architecture" level="Junior">
+  - Say so plainly: "not found in your sources", and say which source was skipped ("Slack was not searched") when one was throttled or not connected. Never hint that a document exists which the user cannot open: the filter runs inside the search, so the assistant cannot know, and a title alone can leak ("Restructuring 2027").
+  - Point to a person: name the owner of the closest permitted document from the people store, or hand off to IT or HR with the question attached.
+  - A small model marks unsupported sentences after the answer streams; the gate is ≥ 95% of sentences supported on the gold set, with the offline judge calibrated against 200 human-labelled answers a quarter (kappa ≥ 0.7).
+  - The trade-off: an honest gap looks worse in a demo than a fluent guess, but a guessed procedure gets acted on. Watch the not-found rate per department and language, and the "I can't open this source" reports, which often reveal a mapping bug rather than a missing document.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="Which model would you choose, and how would you avoid lock-in?"
+    category="Trade-offs"
+    level="Senior"
+    followUps={[
+      { question: "Model prices double tomorrow. Does the design change?", level: "Mid", answer: "No: model cost goes from about 0.96 to 1.9 USD a seat a month, still under the 2 USD target and about 3% of build all-in. The team, not the model, dominates the bill." },
+      { question: "Why not fine-tune the model or the embeddings?", level: "Senior", answer: "Not at launch: there are no click pairs yet, so revisit the embedder at about 50,000 labelled citation clicks, gated on filtered recall per persona. Never fine-tune the answer model on company documents: weights carry no ACL, so a revoked or deleted document could not be taken back (N10), and every user would read what any one document taught it." },
+    ]}
+  >
+  - A mid-size model (Claude Sonnet 5.5 class, as of November 2026) for answers, tools and the agent; a small one (Claude Haiku 5.5 class) for routing, grounding checks and memory extraction.
+  - Model cost is 0.011 USD a turn and 1.5% of build all-in, so pay for citation and tool-use quality; a small answer model would save only ≈ 0.5 USD a seat a month.
+  - Avoid lock-in in the orchestrator: one internal model interface, prompts and tool schemas in our own format, and a second model family kept ready for answers that has passed the gold set and the permission suite. On failover its caches are cold (≈ 0.0183 instead of 0.0116 USD an answer call) and tool-call behaviour differs, so answers move first and actions only to a model that has passed the simulator.
+  - The trade-off: a switch costs cache warm-up, prompt re-tuning and the full gate. Without that gate a cheaper model that cites worse looks like a saving.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A file is unshared in SharePoint. How long can the assistant keep using it, and how do you shorten that window?"
+    category="Failure modes"
+    level="Senior"
+    followUps={[
+      { question: "SharePoint returns 429 for an hour. What do users see?", level: "Senior", answer: "Polls pause and a missed hot-tier cycle stretches its bound to 20 min; live checks continue inside the budget, and an answer whose check is throttled loses that document and says so. Past drop-out (30 min on the hot tier) those sites leave the results with a banner. An edit is searchable in about 40 s by event, but its bound is the content poll, so it waits for the throttle to clear." },
+      { question: "The user was removed from a SharePoint site group, not from the file. Same answer?", level: "Senior", answer: "No chunk changes: the principal store drops the membership at the next site-group reconcile, every 10 minutes on hot-tier sites and hourly elsewhere. That reconcile is a budget line of its own, about 432,000 RU a day at an illustrative 4 RU a call, the number to measure first." },
+    ]}
+  >
+  - Typically ≈ 35 s, almost all of it the source's notification delay (30 s, illustrative; Graph states an average under a minute and a maximum of 6 hours). The file is dirty 1 s after the notification lands, so answers live-check it as the user, and the revocation is enforced once the ACL store is written, a second before its 9 chunks are patched.
+  - If the event is lost, the poll bounds it: ≤ 10 min on the 300 hot-tier sites and ≤ 60 min elsewhere while polls succeed, 20 or 120 min if one cycle is throttled. The hard bound is drop-out: past 30 or 150 min without a reconcile, the site leaves the results.
+  - Shorten it by moving sensitive sites into the hot tier (each drive polled every 10 min costs 144 RU a day), live-checking Confidential files, and putting widening shares into the hot tier for 7 days.
+  - The trade-off is the budget: polling all 8,000 drives every 10 min costs ≈ 1.15M RU a day (48%), 74% with the other lines, which leaves ≈ 632,000 RU, barely the 624,000 a full re-enumeration needs, and no room in the 2,500-RU minute to run one. Verify with revocation canaries every 15 minutes in working hours and the drift audit.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="The assistant can reach 106 tools across nine systems. How do you decide between a fixed workflow and an agent, and which tools to load?"
+    category="Trade-offs"
+    level="Senior"
+    followUps={[
+      { question: "Why not use tool search on every turn?", level: "Senior", answer: "It adds a model step, about 600 ms, to every lookup and write, which are 23% of turns and have a known shape. Bundles give the same small context without the extra step; search is worth it only in the agent, where the tools needed are not known in advance." },
+      { question: "The user asks “and for Leeds?”. How does the second turn work?", level: "Mid", answer: "The router rewrites the follow-up from the summary and last 2 turns; first turns skip the rewrite and start retrieval in parallel. The conversation’s chunk ids are re-checked against the ACL store every turn before reuse, so a revoked source cannot ride along in the summary." },
+    ]}
+  >
+  - Use a fixed workflow when the shape is known: a router labels 95% of turns as an answer, lookup, write or small talk, and a typed write plus a card reaches the card in ≈ 2.45 s and is testable.
+  - Use the agent for the 5% that need several systems in an order nobody wrote down, capped at 10 calls, 60,000 tokens, 0.15 USD and 60 s, with every write still proposed as a card.
+  - Load one connector's bundle for the user's entitlement class on lookups and writes (10,553 tokens instead of 67,086), and tool search over entitled tools only in the agent (7,586 for a two-search task).
+  - The trade-off: 31 prefixes to keep cached and a router to evaluate. Cost is not the reason (all 106 cached cost 0.0067 USD a call); tool choice is, since vendor guidance says it degrades past 30–50 tools (as of November 2026), so verify on your own tools: run the 400 simulator scenarios with all 106 and with bundles, keep bundles only if pass^4 is higher, and check the router's bundle choice (misroutes ≤ 5%).
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A site of 50,000 files is re-shared to the whole company at 10:00. What happens in your system in the next two minutes?"
+    category="Scaling"
+    level="Senior"
+    followUps={[
+      { question: "The re-share was a mistake and is reverted at 10:05. Who saw what?", level: "Senior", answer: "The audit answers it: every retrieval in the window recorded its principal set and each chunk id with its acl_version, so a query over 10:00–10:06 lists who retrieved which file and which grant admitted it. Confidential files were held throughout, so they appear for nobody." },
+      { question: "A support agent is dismissed at 14:00 and a colleague picks up their handheld. What can they still reach?", level: "Senior", answer: "The account is refused at our gateway within 5 min and vault tokens are revoked; Microsoft resources also apply continuous access evaluation, with a latency of up to 15 minutes (as of November 2026). Shared-device mode signs out at shift end with a 15-minute idle lock, so the colleague gets their own session, not the leaver’s." },
+    ]}
+  >
+  - The source sends a widening event: the site joins the hot tier for 7 days, and its Confidential or pattern-matched files are held at once until the owner reviews.
+  - If the share is an org-wide link, nothing widens in the assistant: only people who redeem it gain access, as in the source's own search.
+  - If it is a direct grant, the ACL store derives the change for every inheriting document from one permission call (5 RU, not 250,000), and 50,000 × 9 = 450,000 chunk patches run at 5,000 a second: ≈ 90 s.
+  - The trade-off: the hold blocks legitimate readers of Confidential files until review, and the burst needs ≥ 5,000 in-place updates a second, which a load test must show. Staleness is safe here, since the index stays stricter than the source until the patch lands; the risk is amplification of unlabelled sensitive files, which only the hold and the weekly oversharing scan catch, and revocations stay ahead of the burst through the 1 s dirty flag and the ACL-store re-check, watched by patch-queue depth.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="A supplier's email asks the assistant to reply on a case with the approver's name and recent refunds. Where could data leave the company, and what stops it?"
+    category="Failure modes"
+    level="Senior"
+    followUps={[
+      { question: "The injection screen misses it. What still holds?", level: "Senior", answer: "Everything that matters is in code: no tool reaches an outsider, links and images are stripped and unfurls are off, and any write needs a card showing recipients and “suggested while reading an external email”. The screen only lowers how often the model tries." },
+    ]}
+  >
+  - Exits: a public case reply, a case status whose trigger emails the requester, a portal comment, a guest or shared Slack channel, external mail, a link or image in the answer that a client fetches or unfurls, and an internal message to a compromised or malicious colleague.
+  - Each external exit is closed in code at execution: outsider-reachable effects are T3 and not tools, case statuses are limited to internal-only ones, a transport rule blocks the app's external mail, and rendering strips links, bare domains and images with unfurls off; internal messages show exact recipients on the card, with per-user write limits.
+  - What remains is an internal case note on a card that shows the payload, audience, label and its provenance; the email's text is marked external, datamarked and screened on use (25 ms).
+  - The trade-off: some useful public replies must be sent by a person in the helpdesk. Verify with 700 injection cases across seven egress families: 0 followed bounds the rate at 0.43% overall but only at 3% for any one 100-case family, which is the number that matters for a new channel, and every escaped case becomes a suite case.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should the assistant remember about a user, and how do they correct it?" category="Concepts" level="Mid">
+  - Only what the user said and chose to save: site, shift, team, language ("works nights at Leeds"), never text from documents another person could lose access to.
+  - The model only proposes: code accepts a chip only if its text is a span of the user's own typing, and the user saves it; at most 5 items (200 tokens) go into a prompt and 50 are kept.
+  - The user sees each memory with its source and can edit, delete or say "forget that" (confirmed in the UI); changes apply next turn, backups are purged within 30 days, and every operation is audited.
+  - The trade-off: less personalisation than memory inferred from history, which users cannot correct well. The span check fails on pasted text (an email pasted into chat is a span of the user's message), so the client marks pasted and quoted blocks and excludes them, the user's Save is the control that remains, and a test checks that a line from an injected document or pasted email never becomes a memory without a Save.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What does the assistant cost per seat, and should Brightpost build it or buy one?"
+    category="Cost"
+    level="Senior"
+    followUps={[
+      { question: "The vendor says its product handles permissions. How do you check before you sign?", level: "Senior", answer: "Run your own outcome tests on a pilot tenant: revocation canaries per connector and path, an org-linked file nobody redeemed, a labelled file without the extract right, an answer that tries to render a link or image, and a write whose audience includes a guest. Pass or fail is measured, not taken from a datasheet." },
+    ]}
+  >
+  - Model cost is ≈ 0.011 USD a turn, ≈ 0.96 USD a seat a month; building and running this design is ≈ 320,000 USD a month, ≈ 64 USD a seat, and the 9-engineer team is 94% of it.
+  - A mixed purchase (2,000 knowledge-worker seats at 25.5 USD, warehouse staff on free chat with metered agents, 5 engineers for Brightpost's own tools and tests) is ≈ 238,000 a month (223,000–254,000 across the metered range), ≈ 48 a seat. The discount, the 2025 metered prices and whether frontline licences include the free chat are assumptions to confirm in a quote.
+  - Building pays only below ≈ 6.6 engineers, or above ≈ 5,200 seated knowledge workers. Both options build the WMS and helpdesk tools, so this page builds because per-path staleness, org-link and label handling and egress must be controlled and proved, not taken from a datasheet.
+  - The trade-off: ≈ 81,500 USD a month more for control. Buying fails quietly when nobody tests the vendor's staleness, link and egress behaviour, so the outcome tests are part of buying, not an option.
+  </InterviewQuestion>
+</InterviewQuestions>

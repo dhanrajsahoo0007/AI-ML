@@ -1,0 +1,333 @@
+---
+title: Structured Output Generation
+description: Force LLM responses into machine-parseable shapes using schema-aware decoding, tool interfaces, and validation loops so downstream systems stay dependable.
+updated: 2026-11-16
+---
+
+Downstream automation breaks when a model returns free-form prose instead of predictable records.
+
+- Production systems combine grammar-constrained decoding, typed schemas, and bounded repair loops so application code only consumes validated payloads.
+- Every figure on this page follows one extraction from Brightpost's support agent (see [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures)): customer 1847 writes _"My kettle arrived cracked. It's order 4471. Can I get my money back?"_, and the refunds workflow needs the record `{order_id, item, issue, wants}`.
+
+## Overview
+
+- **Three enforcement layers:** Enforce structure at the **decoder** (logit masking / constrained grammar), the **API interface** (tool calling / strict JSON schema mode), and the **application boundary** (Pydantic / Zod validation).
+- **Syntax vs semantics:** Constrained decoding guarantees valid JSON syntax and schema keys, but cannot guarantee business rules (valid order IDs, positive refund amounts, cross-field constraints).
+- **Bounded repair loop:** Follow **generate → parse → validate → repair**, feeding compact validation errors back to the model for at most 1–2 retries before falling back.
+- **Schema design:** Separate free-text reasoning fields from strict machine fields (`enum`, numeric bounds, ISO timestamps) and keep nesting shallow to minimize token overhead and latency.
+- **Two guarantees still have holes:** A refusal or a response cut off at the token limit can break the schema even in strict mode, so check the stop reason before you parse.
+
+## Mental model
+
+- **Paper form vs blank sheet:** Asking a model for prose is handing someone a blank sheet of paper; asking for structured output is handing them a web form with dropdowns, required fields, and validation rules.
+- **Constrained decoding as input masks:** Grammar-based logit masking disables every token that would break the JSON schema at the current character position, making syntax errors impossible during generation.
+- **Application validator as the clerk:** Even when every box on the form is filled with the right data type, the receiving service still verifies that the order number exists and the total matches the line items.
+
+## Core concepts
+
+1. **Prompt-only JSON instructions:** Asking the model in the prompt to "respond only in JSON" requires no special API support, but fails on edge cases (markdown fences, trailing commas, unescaped quotes, conversational preambles).
+2. **JSON mode:** Provider flag (`response_format: { type: "json_object" }` in OpenAI's Chat Completions API; `text.format` in its Responses API) that guarantees valid JSON syntax, but does not enforce which keys or types appear in the object.
+3. **Strict schema / constrained decoding:** Compiles a JSON Schema into a context-free grammar or finite-state automaton and masks invalid token logits at every decoding step so the output always conforms to the schema. Claude calls this **JSON outputs** (`output_config.format`); OpenAI calls it **Structured Outputs** (`json_schema` with `"strict": true`).
+4. **Function and tool calling:** Exposes the target schema as a callable tool definition; models post-trained on tool use reliably populate arguments and allow mixing prose with structured calls. A tool's `input_schema` is the same JSON Schema, and `"strict": true` on the tool applies the same grammar to the arguments (see [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp)).
+5. **Runtime validation (Pydantic / Zod):** Parses the raw JSON string into a strongly typed object and checks semantic invariants (value ranges, regex patterns, cross-field rules) before business logic executes.
+6. **Error-guided repair:** When validation fails, the harness sends the validation error list (missing keys, type mismatches) back to the model or a smaller repair model to fix only the broken fields.
+
+## Architecture
+
+A production structured-output pipeline pairs decoder-level schema enforcement with application-level semantic validation and a bounded retry loop:
+
+- **Step 1 — Schema compilation:** Convert the application's Pydantic or Zod model into a strict JSON Schema (all fields required or explicitly nullable, `additionalProperties: false`).
+- **Step 2 — Constrained generation:** Send the prompt and compiled schema to the model endpoint (or local engine such as vLLM / SGLang with XGrammar or Outlines).
+- **Step 3 — Parse and semantic check:** Parse the JSON payload and run domain validators (database foreign-key checks, numeric bounds, cross-field invariants).
+- **Step 4 — Compact repair or fallback:** On semantic failure, append the specific validation error messages and retry once; if the retry fails or the response was truncated (`finish_reason: "length"`), route to a deterministic fallback or human review queue.
+
+This is the schema for the Brightpost extraction. Every later figure and code block uses it:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "order_id": { "type": "string", "pattern": "^[0-9]{4}$" },
+    "item": { "type": "string" },
+    "issue": { "type": "string", "enum": ["damaged", "missing", "late", "wrong_item"] },
+    "wants": { "type": "string", "enum": ["refund", "replacement", "information"] }
+  },
+  "required": ["order_id", "item", "issue", "wants"],
+  "additionalProperties": false
+}
+```
+
+- `pattern` is a regular expression; both Claude and OpenAI accept simple ones like this (as of November 2026).
+- `enum` turns the customer's own words ("cracked", "money back") into values the refunds workflow knows.
+- Listing every field in `required` and setting `additionalProperties: false` is what strict modes demand.
+
+## Technical mechanics
+
+### Grammar-constrained decoding and logit masking
+
+- **Token mask construction:** A grammar engine (Outlines, XGrammar, Guidance, LM Format Enforcer) tracks the parser state after each emitted token and computes the set of vocabulary tokens that keep the partial string valid.
+- **Zero-probability masking:** Before sampling, the engine sets the logit of every disallowed token to $-\infty$, so the model samples only from schema-valid continuations.
+- **First-token precompilation:** Compiling a complex JSON Schema into a token-level state machine takes tens of milliseconds to a few seconds on first use; production engines cache the compiled grammar by schema hash.
+- **Tokenizer boundary traps:** A single sub-word token can span a quote and a colon (`":`), so the grammar engine must map character-level regexes across multi-byte sub-word boundaries.
+
+Here is the mask at work on the kettle message, one decision point per row.
+
+<AnimatedDiagram
+  spec="animated/agents/constrained-decoding"
+  stepper
+  minWidth={620}
+  caption="At every position the mask leaves only tokens that keep the object valid, so “cracked” can never reach your code; it cannot tell whether order 4471 is real. Masked candidates are illustrative."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Before the first token: only { is allowed">
+    The schema wants an object, so the only token the mask keeps is an opening brace. A preamble ("Sure, here is…") or a
+    markdown fence cannot start, which removes the most common prompt-only failure.
+  </StepCard>
+  <StepCard n={2} title="order_id: digits only">
+    The key, its quotes and the colon are forced: the mask leaves one choice each. Inside the value, `^[0-9]{4}$` keeps
+    the ten digit tokens, and the model writes 4471.
+  </StepCard>
+  <StepCard n={3} title="item: free text, few limits">
+    A plain string accepts almost any token until the closing quote. The mask cannot make "kettle" right; it can only
+    make it a string.
+  </StepCard>
+  <StepCard n={4} title="issue: the enum removes the customer's word">
+    Without a mask the likeliest next word is "cracked", the customer's own word, which is not in the enum. The mask
+    sets its logit to minus infinity and the model writes "damaged", the closest value it is allowed.
+  </StepCard>
+  <StepCard n={5} title="wants: the last value closes the object">
+    "money back" is removed the same way; the model writes "refund", and the only token left after it is the closing
+    brace. The record is valid by construction. Whether order 4471 exists is still your code's job.
+  </StepCard>
+</StepCards>
+
+**The numbers:**
+
+- The cost of a mask is CPU time per token. The llguidance README quotes about 50 µs per token for a 128,000-token vocabulary (about 1.5 ms when the full mask must be computed); XGrammar's paper reports up to a 100× speed-up over earlier engines and near-zero end-to-end overhead.
+- Against Brightpost's decode rate of 4.4 ms per token (from [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation)), 50 µs is 0.05 ÷ 4.4 ≈ 1.1 % extra per token.
+- The record is about 30 output tokens (illustrative), so even the 1.5 ms worst case on every token would add 30 × 1.5 = 45 ms; in practice most steps hit the fast path.
+- Compilation is paid once per schema: Claude caches a compiled grammar for 24 hours from its last use, and changing only a `name` or `description` does not invalidate it.
+
+<Callout tone="red" title="What breaks">
+  A customer writes "my kettle is broken, can I get a refund?" with no order number. `order_id` is required and must be
+  four digits, so the mask forces the model to write four digits anyway: the schema has made a hallucination mandatory.
+  Make fields that may be absent nullable (`"type": ["string", "null"]`) and check for `null` in code.
+</Callout>
+
+### Validation and bounded repair loops
+
+- **Distinguish truncation from bad values:** Check `stop_reason` / `finish_reason` before retrying; if the output hit `max_tokens`, retrying with the same token cap will fail again.
+- **Structured error feedback:** Format Pydantic/Zod errors as path + expected type + actual value (for example, `items[0].amount: expected number <= 30, got 42.5`) rather than re-sending the entire prompt from scratch.
+- **Cap retry depth:** Limit repair attempts to 1 or 2 turns; persistent failures indicate an ambiguous schema or an impossible constraint that retries only amplify in cost and latency.
+
+Not every model, provider or self-hosted engine offers strict mode, and no strict mode checks business rules. This is the loop around the same extraction on a provider without strict mode.
+
+<AnimatedDiagram
+  spec="animated/agents/validate-and-repair"
+  stepper
+  minWidth={620}
+  caption="The validator's message is the retry prompt, the rule check asks a system the schema cannot see, and the cap ends the loop at 3 attempts."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The message and the schema go to the model">
+    With no strict mode, the schema travels in the prompt as an instruction, so nothing at decode time enforces it.
+  </StepCard>
+  <StepCard n={2} title="Attempt 1 returns; stop_reason says it is complete">
+    The service checks the stop reason first. `end_turn` means the output is whole and worth validating; `max_tokens`
+    would mean "raise the limit", not "repair".
+  </StepCard>
+  <StepCard n={3} title="The schema check fails and names the field">
+    Attempt 1 copied the customer's words: `"wants": "money back"`. The validator returns the path, the bad value and
+    the allowed values.
+  </StepCard>
+  <StepCard n={4} title="The error goes back; attempt 2 returns">
+    The retry prompt holds the draft and the error, not the whole task again. Attempt 2 writes `"wants": "refund"`.
+  </StepCard>
+  <StepCard n={5} title="The schema passes; the rule check asks get_order">
+    A rule the schema cannot express: order 4471 must exist and belong to customer 1847. The service calls `get_order`
+    and compares the owner.
+  </StepCard>
+  <StepCard n={6} title="The record goes on to the refunds workflow">
+    Only a record that passed both checks reaches code with side effects.
+  </StepCard>
+  <StepCard n={7} title="The cap: after 2 failed retries, a person">
+    If attempt 3 had failed too, the ticket would go to the support queue with the drafts and errors attached. This run
+    did not need it.
+  </StepCard>
+</StepCards>
+
+The retry in step 4 is an ordinary user message that carries the draft and the validator's error:
+
+```json
+{
+  "role": "user",
+  "content": "Your JSON failed validation.\nDraft: {\"order_id\": \"4471\", \"item\": \"kettle\", \"issue\": \"damaged\", \"wants\": \"money back\"}\nError: wants: \"money back\" is not one of refund, replacement, information\nReturn the corrected JSON only."
+}
+```
+
+**The numbers (illustrative, 1.5 s per model call and 0.3 s per tool call, as on the agents pages):**
+
+- This run: 2 attempts × 1.5 s + one `get_order` check of 0.3 s = **3.3 s**, against 1.5 + 0.3 = 1.8 s with no repair.
+- The cap: 2 retries allow 3 attempts, so the worst case is 3 × 1.5 = **4.5 s** before the support queue takes over.
+- With strict mode the schema step cannot fail on `wants`, so the run drops to 1.8 s; the rule check stays.
+
+<Callout tone="red" title="What breaks">
+  The rule check finds that the order belongs to a different customer (a pasted note asked about order 5122). The loop
+  sends the error back and the model, trying to help, changes the order number until the check passes. A rule failure
+  that the customer's message cannot fix is a **block**, not a repair: hand it to a person.
+</Callout>
+
+### Designing schemas that models fill accurately
+
+- **Field ordering matters:** Because autoregressive models condition on earlier tokens, place reasoning or summary fields **before** final classification or decision fields if you are not using a reasoning model.
+- **Mind each provider's ordering rules:** OpenAI writes keys in schema order; Claude writes required properties first, then optional ones, each in schema order. With a reasoning model, the thinking happens before the JSON (Claude's grammar does not apply to thinking), so a separate reasoning field is usually unnecessary; Claude's docs warn that a field asking for step-by-step reasoning can trigger a refusal and suggest a short explanation field instead.
+- **Prefer flat structures and enums:** Deeply nested objects and unions (`anyOf` / `oneOf`) increase grammar compilation time and error rates; use flat keys and explicit string enums.
+- **Make optionality explicit:** Strict schema modes require every property to be listed in `required`, using union types (`["string", "null"]`) for fields that may be absent.
+- **Know the supported subset:** As of November 2026, Claude rejects `minimum`, `maximum`, `minLength` and `maxLength` (its Python and TypeScript SDKs strip them and check them in code) and limits a request to 20 strict tools, 24 optional parameters and 16 union-typed parameters; OpenAI accepts numeric bounds and limits a schema to 5,000 properties, 10 levels of nesting and 1,000 enum values.
+
+### Worked example: the kettle message with Claude JSON outputs
+
+This follows the constrained-decoding figure on the Claude Messages API (as of November 2026). The request adds `output_config.format` with the schema from [Architecture](#architecture):
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Extract the order details from: My kettle arrived cracked. It's order 4471. Can I get my money back?"
+    }
+  ],
+  "output_config": {
+    "format": {
+      "type": "json_schema",
+      "schema": { "type": "object", "properties": { "order_id": { "type": "string", "pattern": "^[0-9]{4}$" } } }
+    }
+  }
+}
+```
+
+(The schema is cut to one field here to fit; the real request sends all four.) The response is a text block whose text is the record:
+
+```json
+{
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"order_id\": \"4471\", \"item\": \"kettle\", \"issue\": \"damaged\", \"wants\": \"refund\"}"
+    }
+  ]
+}
+```
+
+| Step | What happens                                                                       | Why                                                                 |
+| ---- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 1    | The API compiles the schema into a grammar (first request only; cached 24 hours)   | Compilation is per schema, not per request                          |
+| 2    | Decoding writes `{`, then 4471, kettle, "damaged", "refund" (figure rows 1–5)      | The mask removes "cracked" and "money back"                         |
+| 3    | The service checks `stop_reason` is `end_turn`                                     | `max_tokens` or `refusal` can break the schema                      |
+| 4    | `json.loads` and the Pydantic model parse it                                       | Enum casing is not guaranteed by Claude; compare case-insensitively |
+| 5    | `get_order(4471)` confirms the order and its owner, customer 1847                  | The schema cannot know which orders exist                           |
+| 6    | The record goes to the refunds workflow; £42 is over £30, so it waits for approval | Policy lives in code, not in the schema                             |
+
+The same request on OpenAI's Responses API puts the schema under `text.format` with `"type": "json_schema"` and `"strict": true`; with tools instead, both providers take `"strict": true` on the tool definition.
+
+## Trade-offs
+
+| Approach                                  | Syntactic Guarantee                  | Semantic Guarantee               | Latency & Cost                                         | Portability                                        |
+| ----------------------------------------- | ------------------------------------ | -------------------------------- | ------------------------------------------------------ | -------------------------------------------------- |
+| Prompt-only JSON                          | None (prone to prose wrappers)       | None                             | Lowest single-pass cost; high retry rate               | Works on every model                               |
+| Basic JSON mode                           | Valid JSON object only               | None (keys may drift)            | Low overhead                                           | Widely supported                                   |
+| Strict JSON Schema / Constrained decoding | 100% schema-compliant syntax & types | Type-level only                  | Grammar compile overhead (cached); zero syntax retries | Provider-specific subsets or self-hosted engine    |
+| Tool / Function calling                   | High (strict when enabled)           | Type-level only                  | Extra prompt tokens for tool definitions               | Standard across major APIs                         |
+| Post-hoc validation + repair loop         | Enforced after parse                 | Full domain & cross-field checks | Adds 1–2 round-trips on failure                        | Framework-agnostic (Instructor, Marvin, LangChain) |
+
+- "100%" holds only for complete responses: a refusal or a cut-off response can still break the schema, so keep the parse and the stop-reason check.
+- OpenAI's launch post (6 August 2024) reported 100 % on its complex-schema eval with Structured Outputs, against under 40 % for `gpt-4-0613` without it. That is the provider's own eval of syntax, not of correct values.
+
+## Production systems
+
+As of November 2026:
+
+- **OpenAI Structured Outputs:** Enforces strict JSON Schema compliance via constrained decoding (`strict: true`), requiring `additionalProperties: false` and explicit required lists. It is set with `text.format` in the Responses API or `response_format` in Chat Completions; a refusal comes back as a separate `refusal` item, not as JSON.
+- **Anthropic Tool Use & Strict Schemas:** Uses tool definitions and grammar constraints to return typed JSON inputs inside `tool_use` content blocks. **JSON outputs** (`output_config.format`) constrain the reply itself, and the docs describe both features as constrained decoding with compiled grammars; the older `output_format` parameter is deprecated.
+- **vLLM & SGLang (XGrammar / Outlines):** Self-hosted inference engines that compile JSON schemas, regexes, and EBNF grammars into fast token masks with sub-millisecond per-step overhead. vLLM's `structured_outputs` request field takes `json`, `regex`, `choice` or `grammar`, and its `auto` backend picks between XGrammar and llguidance.
+- **llguidance (Guidance):** A Rust grammar engine; its README says OpenAI's Structured Outputs uses it for JSON Schema, and vLLM, SGLang and llama.cpp integrate it.
+- **Instructor & Pydantic:** Popular application wrapper that pairs provider schema modes with Pydantic validators and automatic error-fed retries.
+- **Used in our case studies:** [Document Extraction Pipeline](/genai-system-design/case-studies/document-extraction-pipeline) · [Clinical Knowledge-Graph Assistant](/genai-system-design/case-studies/kg-healthcare-case-study) · [Yield Root-Cause Assistant on a Fab Knowledge Graph](/genai-system-design/case-studies/kg-semiconductor-case-study) · [Content Moderation System](/genai-system-design/case-studies/content-moderation-system)
+
+## Failure modes & pitfalls
+
+- **Silent truncation on `max_tokens`:** A response cut off mid-object fails JSON parsing; always check `finish_reason` / `stop_reason` before blaming the parser.
+- **Assuming valid JSON means valid data:** Schema enforcement does not stop a model from inventing a plausible-looking UUID or putting a negative price in a `number` field.
+- **Required fields that force invention:** A required, patterned field with no source in the input makes the model write something that matches the pattern. Make it nullable.
+- **Putting classification before reasoning:** In non-reasoning models, forcing the boolean verdict as the first JSON key locks in a hasty guess before the model writes the explanation.
+- **Format pressure on reasoning:** Tam et al. (2024) measured lower reasoning scores under strict format restrictions; let the model reason first (thinking or a separate call) and constrain only the final record.
+- **Unbounded repair loops:** Retrying 5 times on a broken schema multiplies tail latency and token spend without fixing the underlying prompt ambiguity.
+- **Unsupported JSON Schema keywords:** Many provider grammar engines reject recursive schemas, complex lookahead regexes, or unconstrained dictionaries.
+
+## Interview framework
+
+1. **Separate syntax from semantics:** State clearly that constrained decoding solves syntax and types, while application validators (Pydantic/Zod) solve domain rules.
+2. **Walk the request path:** Compile schema → constrained generation / tool call → parse → domain validation → bounded error-fed repair → safe fallback.
+3. **Explain constrained decoding mechanics:** Describe how a finite-state machine masks invalid token logits to $-\infty$ at each decoding step and why grammar compilation is cached.
+4. **Call out schema design levers:** Flat structure, explicit enums, `null` unions instead of omitted keys, and ordering explanation fields before decision fields.
+5. **Define operational metrics:** Track first-pass validation rate, retry rate, truncation rate (`max_tokens`), and fallback escalation rate.
+
+**What interviewers listen for:** Distinction between syntactic grammar masking and semantic domain validation, awareness of `max_tokens` truncation, and bounded retry budgets.
+
+**Red flags:** Relying on regex stripping of markdown code fences in production, or claiming JSON mode prevents hallucinated field values.
+
+## Further reading
+
+- [Structured outputs (Claude API documentation)](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+- [Strict tool use (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)
+- [Structured Outputs guide (OpenAI API documentation)](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [Introducing Structured Outputs in the API (OpenAI, 2024)](https://openai.com/index/introducing-structured-outputs-in-the-api/)
+- [Structured outputs (vLLM documentation)](https://docs.vllm.ai/en/latest/features/structured_outputs.html)
+- [llguidance: fast grammar-constrained decoding (Guidance, repository)](https://github.com/guidance-ai/llguidance)
+- [Efficient Guided Generation for Large Language Models — Outlines (Willard & Louf, 2023)](https://arxiv.org/abs/2307.09702)
+- [XGrammar: Flexible and Efficient Structured Generation Engine for LLMs (Dong et al., 2024)](https://arxiv.org/abs/2411.15100)
+- [Let Me Speak Freely? Format Restrictions and LLM Performance (Tam et al., 2024)](https://arxiv.org/abs/2408.02442)
+- Related pages: [Decoding & Sampling](/ai-system-design/genai-system-design/decoding-and-sampling) · [Tool Use & Function Calling](/ai-system-design/genai-system-design/tool-use-and-mcp) · [Guardrails & Output Validation](/ai-system-design/genai-system-design/guardrails-output-validation) · [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Outline a robust retry flow when structured output fails validation." category="Implementation" level="Mid">
+    - **Check truncation first:** Inspect `finish_reason` / `stop_reason` before parsing; if the response hit `max_tokens`, increase the token budget or shorten the output schema rather than issuing a repair prompt.
+    - **Run typed validation:** Parse the JSON completion into a Pydantic or Zod schema and collect structured field-level errors (field path, expected constraint, received value).
+    - **Issue a compact repair prompt:** Send the invalid JSON alongside the exact validation error summary for at most 1–2 retries so the model fixes only the failing fields.
+    - **Fail safe and log:** If retries still fail, route to a deterministic fallback or human review queue and log the schema hash and raw failure for offline regression testing.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why might JSON mode still produce logically invalid outputs?" category="Reliability" level="Junior">
+    - **Syntax vs schema:** Basic JSON mode only guarantees that the string parses as valid JSON; it does not enforce required keys, field names, or value types.
+    - **Type vs domain semantics:** Even strict schema-constrained decoding cannot verify cross-field invariants (e.g., `start_date < end_date`) or external ground truth (e.g., whether an order ID exists in Postgres).
+    - **Defense in depth:** Always pair decoder-level schema constraints with application-layer validators and business-rule checks before executing side effects.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose between function calling and a plain JSON schema prompt?" category="Design" level="Mid">
+    - **Use function/tool calling** when the model must decide *which* action to take among several tools, or mix a natural-language user reply with a structured action payload.
+    - **Use strict JSON Schema response format** when every request performs a single deterministic data-extraction, classification, or transformation task with no tool routing.
+    - **Benchmark both on your target model:** Compare first-pass validation rate, prompt token overhead from tool definitions, and portability across your primary and fallback providers.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does constrained decoding work, and what does it cost?" category="Concepts" level="Mid">
+    - The engine compiles the JSON Schema into a grammar (a finite-state machine for regular parts, a stack for nesting) once per schema, and caches it.
+    - At each decoding step it computes which vocabulary tokens keep the partial output valid and sets the logits of all others to minus infinity before sampling, so only valid continuations can be drawn.
+    - The costs are compilation on the first request (Claude caches a grammar for 24 hours from last use) and CPU time per token for the mask: llguidance quotes about 50 µs for a 128,000-token vocabulary, around 1 % of a 4.4 ms decode step.
+    - It does not make values correct: an enum can stop "cracked", but nothing in the grammar knows whether order 4471 exists.
+  </InterviewQuestion>
+  <InterviewQuestion question="Strict mode is on, yet some extracted records are wrong or invented. What do you check?" category="Failure modes" level="Senior">
+    - Look for required fields that have no source in the input: a required, patterned `order_id` forces the model to write four digits even when the customer gave none. Make such fields nullable.
+    - Check the stop reason on the failures: refusals and `max_tokens` cut-offs can break the schema even in strict mode.
+    - Measure field-level accuracy against a labelled set, not the schema pass rate, which strict mode pins at 100 %.
+    - Check enums the customer's words map onto badly, and on Claude compare enum values case-insensitively, since casing is not guaranteed.
+    - Add rule checks against the system of record, such as `get_order` confirming the order and its owner.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does field order in an output schema matter, and how does reasoning fit in?" category="Design" level="Senior">
+    - Yes for models that do not think before answering: each token conditions on the ones before, so a decision field written first commits before any explanation exists. Put a short explanation field before the decision.
+    - Providers order keys differently: OpenAI follows schema order, while Claude writes required properties first and optional ones after, so mark the fields whose order matters as required.
+    - With a reasoning model the thinking comes before the JSON and is not constrained by the grammar, so a reasoning field adds little; Claude's docs also warn that a field asking for step-by-step reasoning can trigger a refusal.
+    - Tam et al. (2024) found strict format restrictions lower reasoning scores, which argues for reasoning freely first and constraining only the final record.
+  </InterviewQuestion>
+</InterviewQuestions>

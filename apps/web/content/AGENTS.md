@@ -6,36 +6,44 @@ tables and prose tidy by hand.
 
 ## Layout
 
-| Path                                       | What                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `sections.yaml`                            | The section registry: kind, label, nav group, release state per env       |
-| `features.yaml`                            | Non-section switches (`on`/`off` per env), e.g. `mlInterviews`             |
-| `<section>/<hub>.mdx`                      | A docs hub (grid of `<ModelCategory>`/`<ModelCard>`)                       |
-| `<section>/<hub>/<slug>.mdx`               | A docs article                                                             |
-| `<section>/_index.yaml`                    | Nav index per docs section: hubs → categories → cards (sidebar, header)    |
-| `question-bank/<category>.yaml`            | Interview questions; `question-bank/taxonomy.yaml` lists the categories    |
-| `question-bank/articles.yaml`              | Article path → category/subsection for articles with interview questions  |
-| `companies/companies.yaml`                 | Company records behind company tags and `/companies`                       |
-| `dsa/`                                     | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/solutions/` (Python references), `dsa/patterns.yaml` |
-| `newsletter/<yyyy>/<slug>.mdx`             | Newsletter issues                                                          |
-| `pages/`                                   | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders      |
+| Path                            | What                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `sections.yaml`                 | The section registry: kind, label, nav group, release state per env                                                       |
+| `features.yaml`                 | Non-section switches (`on`/`off` per env), e.g. `mlInterviews`                                                            |
+| `<section>/<hub>.mdx`           | A docs hub (grid of `<ModelCategory>`/`<ModelCard>`)                                                                      |
+| `<section>/<hub>/<slug>.mdx`    | A docs article                                                                                                            |
+| `<section>/_index.yaml`         | Nav index per docs section: hubs → categories → cards (sidebar, header)                                                   |
+| `question-bank/<category>.yaml` | Interview questions; `question-bank/taxonomy.yaml` lists the categories                                                   |
+| `question-bank/articles.yaml`   | Article path → category/subsection for articles with interview questions                                                  |
+| `companies/companies.yaml`      | Company records behind company tags and `/companies`                                                                      |
+| `dsa/`                          | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/solutions/` (Python references), `dsa/patterns.yaml` |
+| `newsletter/<yyyy>/<slug>.mdx`  | Newsletter issues                                                                                                         |
+| `pages/`                        | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders                                                     |
 
-Docs sections today: `ai-system-design/` (hubs `genai-system-design` and `ml-system-design`, the latter parked
-with `hubRelease`: on in local only), `system-design/`, `behavioral/`, `cloud/`.
+Docs sections today: `ai-system-design/` (GenAI and LLM foundations: one hub, `genai-system-design`, whose reading
+order is the `groups` list in `sections.yaml`), `genai-system-design/` (one hub, `case-studies`: the eleven GenAI design
+case studies in the interview-grade format, plus "Start here" pages `design-principles`, backed by
+`src/lib/genai-principles.ts`, and `design-interview-framework`), `system-design/` (fundamentals and patterns),
+`system-design-case-studies/`, `ml-system-design/` (hubs `fundamentals` and `case-studies`), `cloud/`, `behavioral/`.
+A planned page is an outline: `status: outline`, the "Outline." callout, then the house headings with no body under
+them.
 
 ## Docs frontmatter
 
 Validated by `frontmatterSchema` in `apps/web/src/features/sections/schema.ts` (strict: unknown keys fail).
 
 ```yaml
-title: "Design Facebook Messenger"      # required
-description: "One line, ≤ 160 chars"    # required; used for <meta>; longer is a warning
-icon: message-circle                     # optional; must be a key in src/lib/icons.ts
-status: outline                          # outline | draft | published (default)
-access: free                             # free | premium; default from sections.yaml
-order: 3                                 # optional sort
-categories: [...]                        # hubs: category titles in display order
-updated: 2026-11-07                      # optional; otherwise taken from git history
+title: "Design Facebook Messenger" # required
+description: "One line, ≤ 160 chars" # required; used for <meta>; longer is a warning
+icon: message-circle # optional; must be a key in src/lib/icons.ts
+status: outline # outline | draft | published (default)
+access: free # free | premium; default from sections.yaml
+order: 3 # optional sort
+categories: [...] # hubs: category titles in display order
+updated: 2026-11-07 # optional; otherwise taken from git history
+tier: advanced # optional; pattern pages only. Must match the hub card's `tier` (absent means core)
+logo: systems/messenger # optional; case studies. An id under assets/logos; must match the hub card's `logo`
+modelledOn: [tech/oss/apache-kafka] # optional; generic case studies only: up to three logo ids shown as "Modelled on"
 ```
 
 ## Rules
@@ -71,11 +79,12 @@ Read these three before writing a `system-design/` page (all Markdown files, so 
 Rules the code enforces:
 
 - **Teaching components** (`KeyIdea`, `Term`, `Glossary`, `Compare`, `ProsCons`, `Tabs`/`Tab`, `Quiz`/`QuizItem`,
-  `DecisionTree`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
+  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `StoryBuilder`, `StoryMatrix`, `MockLoop`, `PrepChecklist`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
-- **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`
-  included. Not yet enforced by content-check, so reviewers check it.
+- **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`,
+  `SpotTheFlag`, `GuessTheLevel` and `WhichPrinciple` included. content-check enforces it for the exercises on
+  behavioral pages (an error above two); in the other sections reviewers check it.
 - **Glossary**: owned by the section with `glossary: true` in `sections.yaml`. `<Term id>` ids must exist in
   `system-design/glossary.yaml` (zod-validated by `apps/web/src/lib/glossary.ts`: kebab-case unique ids, `short` at
   most 160 characters, `related` ids must exist).
@@ -84,6 +93,9 @@ Rules the code enforces:
   for the `/interviews` library with a restricted set: `AnimatedDiagram`, `Callout`, `Compare`, `KeyIdea`, `Tabs`,
   `Tab` (`ANSWER_COMPONENTS` in `apps/web/src/lib/question-answer.ts`). Any other component or a mermaid fence fails
   content-check with the file and question id. In YAML answers only `$$...$$` is math, so prices stay plain text.
+- **Practice mode**: a question list whose questions are all in a `track: leadership` category gets a "Practice mode"
+  toggle (answer timer, self-rating, follow-up drill; `apps/web/src/components/mdx/interview-practice.client.tsx`).
+  Ratings are stored under the question `id`, so do not change the id of a published question.
 - **taxonomy.yaml**: quote every subsection `description` (and any title) that contains a comma; an unquoted comma
   ends a YAML flow-mapping value. Content-check rejects a subsection that is not exactly `{slug, title, description}`.
 

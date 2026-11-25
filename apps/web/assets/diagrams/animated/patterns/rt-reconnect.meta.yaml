@@ -1,0 +1,15 @@
+title: Reconnect with a last-seen cursor
+alt: >-
+  A sequence diagram with five lanes: an orange shopper app, teal gateways 2 and 7, a violet order event log and a teal
+  order service, in three steps. Step 1: gateway 2 pushes event 3, packed, for order 4471, then dies, and a red
+  timeout arrow shows the socket dropping; meanwhile the order service writes events 4, shipped, and 5, out for
+  delivery, to the log. Step 2: the app waits a random 0 to 5 seconds, connects to gateway 7 with "after = 3"; gateway
+  7 reads the log for order 4471 after event 3, gets events 4 and 5, sends them to the app, then sends event 6,
+  delivered, live. Step 3: an app that was away for two days connects with "after = 3", but event 3 is past the log's
+  retention, so gateway 7 asks the order service for the order's current state and sends a snapshot at event 6.
+caption: >-
+  The app reconnects with the last event it saw, and the gateway fills the gap from the log; a cursor older than the
+  log gets a snapshot instead.
+tags: [patterns, realtime, reconnect, cursor, websockets]
+source: original
+created: 2026-11-16
