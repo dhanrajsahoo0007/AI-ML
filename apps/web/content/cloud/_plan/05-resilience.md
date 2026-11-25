@@ -116,7 +116,7 @@ This hub is for a reader who can already draw a three-tier app in a cloud region
 - Needs: glyph `radar` (detector) for the detection node; `{label}` for GuardDuty, Inspector, Macie, Config, Event Threat Detection, Sentinel.
 - Questions: 5 (1J/3M/1S). "Audit log vs application log: what goes where?", "Posture or detection: which catches a public bucket, which catches a stolen key?", "Design the automated response to a leaked access key".
 - Exams: SAA 1.2 (GuardDuty, Macie), SAP (centralised logging, Security Hub, Inspector, Access Analyzer, Config rules), CLF D2 (security governance), DL trust & security (SecOps), PCA 3 (audit logs, supply chain), ACE 4 (audit logs, log sinks), AZ-900 (Defender for Cloud), AZ-305 (logging, log routing).
-- Links: operations/observability-on-the-cloud, fundamentals/accounts-and-governance, zero-trust, compliance-and-residency, compute/containers-and-registries, /system-design/case-studies/metrics-and-logging.
+- Links: operations/observability-on-the-cloud, fundamentals/accounts-and-governance, zero-trust, compliance-and-residency, compute/containers-and-registries, /system-design-case-studies/case-studies/metrics-and-logging.
 
 #### 11. compliance-and-residency — Compliance, Data Residency and Sovereignty (Intermediate, ~1,700 words)
 - Scope: What a framework (SOC 2, ISO 27001, PCI DSS, HIPAA, GDPR) actually asks of a cloud design, why the provider's certificate does not make your app compliant, and the three ways to keep data in a place: pick the region, forbid other regions by policy, and draw a perimeter so data cannot leave by API. Explains residency (where data sits) vs sovereignty (whose law and whose keys).
