@@ -20,7 +20,7 @@ const itemSchema = z
   })
   .strict();
 
-export type FileTreeItem = z.output<typeof itemSchema>;
+type FileTreeItem = z.output<typeof itemSchema>;
 
 export const fileTreeSchema = z
   .object({
@@ -84,9 +84,7 @@ export function buildTree(items: readonly FileTreeItem[]): TreeNode[] {
     at.children.push({ kind: "file", name: parts[parts.length - 1], item });
   }
   const order = (nodes: TreeNode[]): TreeNode[] => [
-    ...nodes
-      .filter((n): n is FolderNode => n.kind === "folder")
-      .map((f) => ({ ...f, children: order(f.children) })),
+    ...nodes.filter((n): n is FolderNode => n.kind === "folder").map((f) => ({ ...f, children: order(f.children) })),
     ...nodes.filter((n) => n.kind === "file"),
   ];
   return order(root.children);

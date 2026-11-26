@@ -59,7 +59,8 @@ const fence = (text: string, lang = "diff") => (
     <code className={`language-${lang}`}>{text}</code>
   </pre>
 );
-const HUNK_TEXT = " def run(self):\n-    for job in self.queue:\n+    for batch in chunks(self.queue, 50):\n+        self.send(batch)\n     return True\n";
+const HUNK_TEXT =
+  " def run(self):\n-    for job in self.queue:\n+    for batch in chunks(self.queue, 50):\n+        self.send(batch)\n     return True\n";
 
 describe("Diff", () => {
   it("finds the one fence and numbers lines from the hunk header", () => {

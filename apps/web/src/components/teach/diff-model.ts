@@ -6,7 +6,7 @@ import { z } from "zod";
 export const SEVERITIES = ["blocker", "should-fix", "nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-export const MAX_COMMENTS = 8;
+const MAX_COMMENTS = 8;
 const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 const commentSchema = z
@@ -17,7 +17,7 @@ const commentSchema = z
   })
   .strict();
 
-export type DiffComment = z.output<typeof commentSchema>;
+type DiffComment = z.output<typeof commentSchema>;
 
 export const diffSchema = z
   .object({

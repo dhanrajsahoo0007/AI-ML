@@ -24,7 +24,8 @@ Docs sections today: `ai-system-design/` (GenAI and LLM foundations: one hub, `g
 order is the `groups` list in `sections.yaml`), `genai-system-design/` (one hub, `case-studies`: the eleven GenAI design
 case studies in the interview-grade format, plus "Start here" pages `design-principles`, backed by
 `src/lib/genai-principles.ts`, and `design-interview-framework`), `system-design/` (fundamentals and patterns),
-`system-design-case-studies/`, `ml-system-design/` (hubs `fundamentals` and `case-studies`), `cloud/`, `behavioral/`.
+`system-design-case-studies/`, `ml-system-design/` (hubs `fundamentals` and `case-studies`), `cloud/`, `behavioral/`,
+`ai-assisted-coding/` (hubs `guide` and `scenarios`: real-work rounds with an AI assistant, each with a runnable repo).
 A planned page is an outline: `status: outline`, the "Outline." callout, then the house headings with no body under
 them.
 
@@ -65,6 +66,14 @@ modelledOn: [tech/oss/apache-kafka] # optional; generic case studies only: up to
 - Third-party text needs a licence: `question-bank/NOTICE.md` (Outcome School, Apache 2.0) and the attributions page.
 - Keep the writing plain: short sentences, active voice, define a term before using it; all ages read this.
 - `system-design/CASE-STUDY-FORMAT.md` is a style guide for case studies (a content asset, not product docs).
+- **Folders starting with `_` inside a section are never pages**: the docs loader reads only MDX files, so keep MDX
+  out of them. A `_plan` folder holds plans; `ai-assisted-coding/_repos/<slug>/` holds a scenario's Python repo
+  (scenario.json manifest, starter, solution and traps folders, pack-manifest.json). The starter reaches readers only
+  as a free zip in `apps/web/assets/downloads/` (`ai-coding-<slug>-starter.zip`), and
+  `apps/web/tests/unit/ai-coding-starters.test.ts` fails when the zip and the starter folder drift apart.
+- `ai-assisted-coding/` pages follow a fixed scenario format guarded by `apps/web/tests/unit/doc-headings.test.ts`
+  (`DONE` list) and, like `behavioral/`, allow no em dash and no `<InterviewQuestion>` (`NO_EM_DASH` in
+  `apps/web/scripts/content-check.ts`).
 
 ## Classic System Design authoring
 
@@ -79,7 +88,8 @@ Read these three before writing a `system-design/` page (all Markdown files, so 
 Rules the code enforces:
 
 - **Teaching components** (`KeyIdea`, `Term`, `Glossary`, `Compare`, `ProsCons`, `Tabs`/`Tab`, `Quiz`/`QuizItem`,
-  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `StoryBuilder`, `StoryMatrix`, `MockLoop`, `PrepChecklist`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
+  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `StoryBuilder`, `StoryMatrix`, `MockLoop`, `PrepChecklist`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`, `FileTree`,
+  `PromptExchange`/`Prompt`/`AiReply`, `Diff`; source
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
 - **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`,
@@ -98,6 +108,11 @@ Rules the code enforces:
   Ratings are stored under the question `id`, so do not change the id of a published question.
 - **taxonomy.yaml**: quote every subsection `description` (and any title) that contains a comma; an unquoted comma
   ends a YAML flow-mapping value. Content-check rejects a subsection that is not exactly `{slug, title, description}`.
+
+- **Code-review blocks** (server components, no client JavaScript, no copy button; props in `system-design/COMPONENTS.md`):
+  - `FileTree`: a repo tree from flat paths, a one-line note and an optional `read | edit | new | bug | test` tag per file.
+  - `PromptExchange`: one `<Prompt>` and one `<AiReply>` (any MDX inside), then a verdict `accept | fix | reject` and why.
+  - `Diff`: one `diff` code fence with a +/- gutter and `blocker | should-fix | nit` comments under their lines.
 
 ## Sections of other kinds
 
