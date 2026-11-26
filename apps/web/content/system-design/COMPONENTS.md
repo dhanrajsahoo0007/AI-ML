@@ -18,7 +18,7 @@ Contents:
 
 1. [Teaching components](#1-teaching-components): KeyIdea, Term, Glossary, Compare, ProsCons, Tabs/Tab, Quiz/QuizItem,
    DecisionTree, SpotTheFlag, GuessTheLevel, WhichPrinciple, StoryBuilder, StoryMatrix, MockLoop, PrepChecklist,
-   RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
+   RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath, FileTree, PromptExchange, Diff
 2. [Interactive widgets](#2-interactive-widgets): eleven lazy islands, at most two per page
 3. [Diagrams](#3-diagrams): the `<AnimatedDiagram>` tag, sidecars, the three spec kinds, `composeSpecs`, lint rules
 4. [Glyphs](#4-glyphs): the 77 drawn icons for diagram nodes and lanes
@@ -463,6 +463,80 @@ An ordered reading list with numbered steps and the total time.
   ]}
 />
 ```
+
+### FileTree, PromptExchange and Diff
+
+Code-review blocks for the AI-assisted coding scenario pages. Server components, no client JavaScript, no copy
+button. Each scrolls sideways inside itself on a phone.
+
+**FileTree**: a repo drawn as a tree from flat paths. Folders come first, then files; both keep the order given.
+
+- `root` (optional string, up to 60 characters): the top folder, for example `rule_engine/`.
+- `items` (required, 1 to 40): `{ path, note?, tag? }[]`. `path` is relative (no leading or trailing slash, no spaces,
+  no `.` or `..`), unique, and no path may also be a folder of another. `note` (up to 120 characters) is one line.
+  `tag` is `read`, `edit`, `new`, `bug` or `test`, shown as a small text badge.
+
+```mdx
+<FileTree
+  root="rule_engine/"
+  items={[
+    { path: "README.md", note: "The brief, parts in order", tag: "read" },
+    { path: "engine/parser.py", note: "Turns rule text into tokens", tag: "edit" },
+    { path: "engine/evaluate.py", note: "Applies the first rule that matches", tag: "bug" },
+    { path: "tests/test_part1.py", note: "Equality rules", tag: "test" },
+  ]}
+/>
+```
+
+**PromptExchange** with **Prompt** and **AiReply**: one turn with the assistant. Renders "You type", then "What came
+back", then a verdict line (label and icon, not colour alone) with the reason.
+
+- `verdict` (required): `accept`, `fix` or `reject` (shown as Accept, Fix before using, Reject).
+- `why` (required string, up to 240 characters): one sentence on the verdict.
+- `tool` (optional string, up to 40 characters): a label for the assistant, shown next to "You type".
+- Children: exactly one `<Prompt>` then one `<AiReply>`; their children are ordinary MDX (text, lists, code fences).
+
+```mdx
+<PromptExchange verdict="fix" why="It added AND and OR but evaluated them left to right, so precedence is wrong." tool="IDE assistant">
+  <Prompt>
+    In `engine/parser.py`, extend `parse()` so a rule may join conditions with `AND` and `OR`. `AND` binds tighter.
+    Keep the token format. Run `tests/test_part2.py` and show me the result.
+  </Prompt>
+  <AiReply>
+    I updated `parse()` to split on `AND` and `OR` and fold the conditions from left to right. All tests pass.
+  </AiReply>
+</PromptExchange>
+```
+
+**Diff**: one hunk of a pull request with review comments under the lines they are about. Added and removed lines get
+a tinted row and a visible `+` or `-` gutter.
+
+- `file` (required string): the file path shown in the header.
+- `hunk` (optional): a hunk header such as `@@ -40,7 +40,12 @@`; when given, old and new line numbers are shown.
+- `comments` (optional, at most 8): `{ line, severity, text }[]`. `line` is the 1-based line of the fence and must be
+  inside it; `severity` is `blocker`, `should-fix` or `nit`.
+- Children: exactly one `diff` code fence. Lines starting with `+` or `-` are changes, `@@` lines are separators.
+
+```mdx
+<Diff
+  file="batcher/processor.py"
+  hunk="@@ -40,4 +40,5 @@"
+  comments={[{ line: 3, severity: "blocker", text: "A batch that fails to start is dropped; the old path retried each job." }]}
+>
+
+~~~diff
+ def drain(self):
+-    for job in self.queue:
++    for batch in chunks(self.queue, 50):
++        self.send(batch)
+     return True
+~~~
+
+</Diff>
+```
+
+Inside `COMPONENTS.md` the example fence uses `~~~` so it does not close the outer example; on a page, a normal
+three-backtick `diff` fence works the same.
 
 ---
 

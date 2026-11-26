@@ -27,7 +27,7 @@ const STRICT = args.has("--strict");
  * Sections whose pages must not use em dashes (house style: commas, colons or full stops instead) and must not
  * carry interview questions in the page.
  */
-const NO_EM_DASH = new Set(["behavioral"]);
+const NO_EM_DASH = new Set(["behavioral", "ai-assisted-coding"]);
 /**
  * Sections where a page may hold at most two interactive exercises (content/AGENTS.md), and the tags that count.
  * Tabs, Compare, Quiz and diagrams do not count.
@@ -279,7 +279,10 @@ async function main() {
       // Interviewer prompts for these sections live in the bank YAML (tagged to the page with `topics`), so they
       // get practice mode and never carry a company tag by accident. Candidate FAQs go in a "Common questions" Quiz.
       if (NO_EM_DASH.has(section.key) && /<InterviewQuestions?[\s/>]/.test(text)) {
-        report(item.file, "<InterviewQuestion> on a behavioral page; put the prompt in content/question-bank/ instead");
+        report(
+          item.file,
+          `<InterviewQuestion> on a ${section.key} page; put the prompt in content/question-bank/ instead`
+        );
       }
       if (WIDGET_LIMIT.has(section.key)) {
         const widgets = [...text.matchAll(WIDGET_TAGS)].map((m) => m[1]);

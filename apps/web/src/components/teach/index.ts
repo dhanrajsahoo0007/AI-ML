@@ -17,3 +17,6 @@ export { EstimateTable } from "./estimate-table";
 export { Numbers } from "./numbers";
 export { PatternUses } from "./pattern-uses";
 export { LearningPath } from "./learning-path";
+export { FileTree } from "./file-tree";
+export { PromptExchange, Prompt, AiReply } from "./prompt-exchange";
+export { Diff } from "./diff";

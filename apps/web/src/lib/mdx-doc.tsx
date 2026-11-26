@@ -64,6 +64,11 @@ import {
   Numbers,
   PatternUses,
   LearningPath,
+  FileTree,
+  PromptExchange,
+  Prompt,
+  AiReply,
+  Diff,
 } from "@/components/teach";
 import { InterviewPrompt } from "@/components/case-studies/interview-prompt";
 import {
@@ -206,6 +211,12 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       Numbers,
       PatternUses,
       LearningPath,
+      // Code-review blocks for the AI-assisted coding scenarios (server components, no client JavaScript).
+      FileTree,
+      PromptExchange,
+      Prompt,
+      AiReply,
+      Diff,
       InterviewPrompt,
       // Interactive teaching widgets (plan §5.2): server wrappers that validate props, then lazy islands.
       LatencyLadder,

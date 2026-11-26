@@ -514,3 +514,105 @@ describe("GenAI System Design case studies: interview-grade format", () => {
     expect(violations).toEqual([]);
   });
 });
+
+// AI-Assisted Coding scenario pages (plan: SYSTEM-DESIGN/plans/ai-assisted-coding-plan.md §6.2, agent brief "Scenario
+// page format"). Pages join DONE as they land; every page in DONE must follow the format exactly.
+describe("AI-Assisted Coding scenarios: scenario format", () => {
+  const sectionDir = path.join(process.cwd(), "content", "ai-assisted-coding");
+  const dir = path.join(sectionDir, "scenarios");
+  const DONE: string[] = [];
+  const pages = DONE.map((slug) => ({
+    slug,
+    f: `${slug}.mdx`,
+    text: fs.readFileSync(path.join(dir, `${slug}.mdx`), "utf8"),
+  }));
+  const BEFORE = ["The round at a glance", "The codebase", "Read before you prompt"];
+  const AFTER = [
+    "Where the AI goes wrong",
+    "Reference solution",
+    "The 60-minute plan",
+    "How you are graded",
+    "Follow-ups interviewers ask",
+    "Variations",
+    "Sources",
+  ];
+  const PART = /^Part \d+: /;
+  const count = (text: string, re: RegExp) => (text.match(re) ?? []).length;
+  const section = (text: string, heading: string) => {
+    const start = text.indexOf(`\n## ${heading}\n`);
+    if (start < 0) return "";
+    const rest = text.slice(start + 1);
+    const next = rest.slice(3).search(/\n## /);
+    return next < 0 ? rest : rest.slice(0, next + 3);
+  };
+
+  it("lists only written pages: updated set, no status", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const fm = text.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+      if (!/^updated: \d{4}-\d{2}-\d{2}/m.test(fm)) violations.push(`${f}: no updated date`);
+      if (/^status:/m.test(fm)) violations.push(`${f}: still has a status`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("opens with <InterviewPrompt> and uses the H2 order of the format with 3-5 parts", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+      const firstTag = body.match(/<[A-Z][A-Za-z]*/)?.[0];
+      if (firstTag !== "<InterviewPrompt") violations.push(`${f}: first component is ${firstTag ?? "none"}`);
+      if (body.indexOf("<InterviewPrompt") > body.search(/^## /m))
+        violations.push(`${f}: <InterviewPrompt> must come before the first H2`);
+      const h2s = proseLines(text)
+        .filter(({ line }) => line.startsWith("## "))
+        .map(({ line }) => line.slice(3).trim());
+      const parts = h2s.slice(BEFORE.length, h2s.length - AFTER.length);
+      const ok =
+        JSON.stringify(h2s.slice(0, BEFORE.length)) === JSON.stringify(BEFORE) &&
+        JSON.stringify(h2s.slice(h2s.length - AFTER.length)) === JSON.stringify(AFTER) &&
+        parts.length >= 3 &&
+        parts.length <= 5 &&
+        parts.every((h) => PART.test(h));
+      if (!ok) violations.push(`${f}: H2s are ${h2s.join(" / ")}`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("puts <PremiumBreak /> after Read before you prompt and before Part 1", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const brk = text.indexOf("<PremiumBreak />");
+      const read = text.indexOf("\n## Read before you prompt\n");
+      const part1 = text.search(/\n## Part 1: /);
+      if (brk < 0 || read < 0 || part1 < 0 || !(read < brk && brk < part1))
+        violations.push(`${f}: <PremiumBreak /> is not between Read before you prompt and Part 1`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("has 3+ figures, one FileTree, one Download, and 2+ PromptExchange or 2+ Diff", () => {
+    const violations: string[] = [];
+    for (const { f, text } of pages) {
+      const figures = count(text, /<AnimatedDiagram\b/g);
+      if (figures < 3) violations.push(`${f}: ${figures} <AnimatedDiagram> (need 3+)`);
+      if (count(text, /<FileTree\b/g) !== 1) violations.push(`${f}: needs exactly one <FileTree>`);
+      if (count(text, /<Download\b/g) !== 1) violations.push(`${f}: needs exactly one <Download>`);
+      if (count(text, /<PromptExchange\b/g) < 2 && count(text, /<Diff\b/g) < 2)
+        violations.push(`${f}: needs 2+ <PromptExchange> or 2+ <Diff>`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("asks 6-8 follow-ups, has a scenario repo and uses no em dash", () => {
+    const violations: string[] = [];
+    for (const { slug, f, text } of pages) {
+      const followUps = count(section(text, "Follow-ups interviewers ask"), /^### /gm);
+      if (followUps < 6 || followUps > 8) violations.push(`${f}: ${followUps} follow-ups (need 6-8)`);
+      if (!fs.existsSync(path.join(sectionDir, "_repos", slug, "scenario.json")))
+        violations.push(`${f}: no _repos/${slug}/scenario.json`);
+      if (text.includes("—")) violations.push(`${f}: em dash`);
+    }
+    expect(violations).toEqual([]);
+  });
+});
